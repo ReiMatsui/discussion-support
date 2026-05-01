@@ -101,9 +101,7 @@ def main() -> None:
         initial_sidebar_state="expanded",
     )
     st.title("議論グラフ ビューア")
-    st.caption(
-        "Discussion Argumentation Support — 統合議論グラフのブラウズ用ビューア"
-    )
+    st.caption("Discussion Argumentation Support — 統合議論グラフのブラウズ用ビューア")
 
     settings = get_settings()
     runs_dir = settings.runs_dir
@@ -167,9 +165,7 @@ def main() -> None:
 
             search = st.text_input("テキスト検索 (部分一致)", "")
             if search:
-                df_nodes = df_nodes[
-                    df_nodes["text"].str.contains(search, case=False, na=False)
-                ]
+                df_nodes = df_nodes[df_nodes["text"].str.contains(search, case=False, na=False)]
 
             st.dataframe(df_nodes, hide_index=True, use_container_width=True)
 

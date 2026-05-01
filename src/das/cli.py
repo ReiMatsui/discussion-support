@@ -100,9 +100,7 @@ def ui(
 
 @app.command(name="visualize")
 def visualize(
-    snapshot: Path = typer.Argument(
-        ..., exists=True, dir_okay=False, help="snapshot.json"
-    ),
+    snapshot: Path = typer.Argument(..., exists=True, dir_okay=False, help="snapshot.json"),
     output: Path = typer.Option(
         Path("graph.html"),
         "--output",
@@ -243,10 +241,7 @@ async def _run_session_async(
             f"`das visualize {snapshot_path}` で後から生成できます。"
         )
 
-    summary = (
-        f"[run-session] done. nodes={n_nodes} edges={n_edges}\n"
-        f"  snapshot -> {snapshot_path}"
-    )
+    summary = f"[run-session] done. nodes={n_nodes} edges={n_edges}\n  snapshot -> {snapshot_path}"
     if html_path is not None:
         summary += f"\n  html     -> {html_path}"
     typer.echo(summary)

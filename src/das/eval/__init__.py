@@ -9,8 +9,17 @@ from das.eval.conditions import (
     ConditionFlatRAG,
     ConditionFullProposal,
     ConditionNone,
+    FlatRAGItem,
+    InfoItem,
 )
 from das.eval.controller import InfoProvider, SessionConfig, SessionRunner
+from das.eval.metrics import (
+    GraphMetrics,
+    TranscriptMetrics,
+    gini_coefficient,
+    graph_metrics,
+    transcript_metrics,
+)
 from das.eval.persona import PersonaAgent, PersonaSpec, Stance, build_persona
 from das.eval.presets import cafeteria_personas, policy_ai_lecture_personas
 
@@ -19,13 +28,20 @@ __all__ = [
     "ConditionFlatRAG",
     "ConditionFullProposal",
     "ConditionNone",
+    "FlatRAGItem",
+    "GraphMetrics",
+    "InfoItem",
     "InfoProvider",
     "PersonaAgent",
     "PersonaSpec",
     "SessionConfig",
     "SessionRunner",
     "Stance",
+    "TranscriptMetrics",
     "build_persona",
     "cafeteria_personas",
+    "gini_coefficient",
+    "graph_metrics",
     "policy_ai_lecture_personas",
+    "transcript_metrics",
 ]

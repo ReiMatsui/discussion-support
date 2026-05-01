@@ -56,9 +56,7 @@ async def test_flat_rag_returns_none_for_empty_history(tmp_path: Path) -> None:
 
 
 async def test_flat_rag_picks_top_k(tmp_path: Path) -> None:
-    (tmp_path / "doc.md").write_text(
-        "コストの話\n\n環境負荷の話\n\n別の論点", encoding="utf-8"
-    )
+    (tmp_path / "doc.md").write_text("コストの話\n\n環境負荷の話\n\n別の論点", encoding="utf-8")
     llm = _fake_llm()
     # 3 段落の embedding を順に [1,0], [0,1], [0,0] に固定
     llm.embed = AsyncMock(return_value=[[1.0, 0.0], [0.0, 1.0], [0.0, 0.0]])  # type: ignore[method-assign]
@@ -148,9 +146,7 @@ async def test_full_proposal_returns_support_attack_info(
         author="A",
         metadata={"turn_id": 1},
     )
-    doc_supporter = Node(
-        text="統計データ", node_type="premise", source="document", author="d1"
-    )
+    doc_supporter = Node(text="統計データ", node_type="premise", source="document", author="d1")
     attacker = Node(
         text="コスト懸念",
         node_type="claim",
@@ -202,9 +198,7 @@ async def test_full_proposal_does_not_reprocess_same_turn(
     from das.graph.store import NetworkXGraphStore
 
     fake_orch.store = NetworkXGraphStore()
-    monkeypatch.setattr(
-        "das.eval.conditions.Orchestrator.assemble", lambda *a, **k: fake_orch
-    )
+    monkeypatch.setattr("das.eval.conditions.Orchestrator.assemble", lambda *a, **k: fake_orch)
     await cond.setup()
 
     persona = build_persona(name="A")

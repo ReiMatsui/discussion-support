@@ -8,9 +8,7 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def _isolate_env(
-    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def _isolate_env(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
     """既定では実 OpenAI / Tavily キーをダミー値で覆い、誤って外部 API が呼ばれないようにする。
 
     ``@pytest.mark.integration`` 付きのテストでは元の環境変数を維持して

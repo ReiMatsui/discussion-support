@@ -16,16 +16,45 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 from das.agents.linking import cosine_similarity
 from das.eval.persona import PersonaSpec
+from das.graph.schema import NodeSource
 from das.graph.store import NetworkXGraphStore
 from das.llm import OpenAIClient
 from das.logging import get_logger
 from das.runtime import Orchestrator
 from das.types import Utterance
+
+
+@dataclass(frozen=True)
+class InfoItem:
+    """1 件の参考情報 (UI/分析向けの構造化表現)。
+
+    LLM 向けの prompt 文字列とは別に保持して、Streamlit UI で色分け・出典付きの
+    リッチ表示ができるようにする。
+    """
+
+    relation: Literal["support", "attack"]
+    target_text: str
+    target_speaker: str | None
+    source_text: str
+    source_kind: NodeSource
+    source_author: str | None
+    confidence: float
+    rationale: str = ""
+
+
+@dataclass(frozen=True)
+class FlatRAGItem:
+    """FlatRAG が返す 1 チャンク (UI/分析向け)。"""
+
+    doc_id: str
+    text: str
+    score: float = 0.0
 
 
 class Condition(Protocol):
@@ -35,9 +64,7 @@ class Condition(Protocol):
 
     async def setup(self, *, docs_dir: Path | None = None) -> None: ...
 
-    async def info_provider(
-        self, history: list[Utterance], persona: PersonaSpec
-    ) -> str | None: ...
+    async def info_provider(self, history: list[Utterance], persona: PersonaSpec) -> str | None: ...
 
 
 # --- None ---------------------------------------------------------------
@@ -51,9 +78,7 @@ class ConditionNone:
     async def setup(self, *, docs_dir: Path | None = None) -> None:
         return None
 
-    async def info_provider(
-        self, history: list[Utterance], persona: PersonaSpec
-    ) -> str | None:
+    async def info_provider(self, history: list[Utterance], persona: PersonaSpec) -> str | None:
         return None
 
 
@@ -82,7 +107,12 @@ class ConditionFlatRAG:
         self._top_k = top_k
         self._chunks: list[tuple[str, str]] = []
         self._embeddings: list[list[float]] = []
+        self._last_items: list[FlatRAGItem] = []
         self._log = get_logger("das.eval.condition.flat_rag")
+
+    @property
+    def last_items(self) -> list[FlatRAGItem]:
+        return list(self._last_items)
 
     async def setup(self, *, docs_dir: Path | None = None) -> None:
         if docs_dir is None or not docs_dir.exists():
@@ -104,10 +134,9 @@ class ConditionFlatRAG:
         self._embeddings = vectors
         self._log.info("flat_rag.setup", n_chunks=len(chunks))
 
-    async def info_provider(
-        self, history: list[Utterance], persona: PersonaSpec
-    ) -> str | None:
+    async def info_provider(self, history: list[Utterance], persona: PersonaSpec) -> str | None:
         if not history or not self._chunks:
+            self._last_items = []
             return None
         query = history[-1].text
         query_vec = await self._llm.embed_one(query)
@@ -116,10 +145,14 @@ class ConditionFlatRAG:
             for chunk, vec in zip(self._chunks, self._embeddings, strict=True)
         ]
         scored.sort(key=lambda pair: pair[1], reverse=True)
-        top = [chunk for chunk, _ in scored[: self._top_k]]
+        top = scored[: self._top_k]
         if not top:
+            self._last_items = []
             return None
-        return "\n\n".join(f"[{doc_id}] {text}" for doc_id, text in top)
+        self._last_items = [
+            FlatRAGItem(doc_id=chunk[0], text=chunk[1], score=score) for chunk, score in top
+        ]
+        return "\n\n".join(f"[{doc_id}] {text}" for (doc_id, text), _ in top)
 
 
 # --- FullProposal -------------------------------------------------------
@@ -144,6 +177,7 @@ class ConditionFullProposal:
         self._max_info_items = max_info_items
         self._orchestrator: Orchestrator | None = None
         self._processed_turn_ids: set[int] = set()
+        self._last_items: list[InfoItem] = []
         self._log = get_logger("das.eval.condition.full_proposal")
 
     @property
@@ -151,6 +185,12 @@ class ConditionFullProposal:
         """セットアップ後にライブビューなどから参照するためのフック。"""
 
         return self._orchestrator
+
+    @property
+    def last_items(self) -> list[InfoItem]:
+        """直近の info_provider 呼び出しで生成された InfoItem 群。"""
+
+        return list(self._last_items)
 
     async def setup(self, *, docs_dir: Path | None = None) -> None:
         store = NetworkXGraphStore()
@@ -164,9 +204,8 @@ class ConditionFullProposal:
             await self._orchestrator.ingest_documents(docs_dir)
         self._log.info("full_proposal.setup")
 
-    async def info_provider(
-        self, history: list[Utterance], persona: PersonaSpec
-    ) -> str | None:
+    async def info_provider(self, history: list[Utterance], persona: PersonaSpec) -> str | None:
+        self._last_items = []
         if not history or self._orchestrator is None:
             return None
 
@@ -182,29 +221,43 @@ class ConditionFullProposal:
         related_nodes = [
             n
             for n in store.nodes()
-            if n.source == "utterance"
-            and n.metadata.get("turn_id") == last_turn_id
+            if n.source == "utterance" and n.metadata.get("turn_id") == last_turn_id
         ]
         if not related_nodes:
             return None
 
-        infos: list[str] = []
+        items: list[InfoItem] = []
         seen: set[str] = set()
         for node in related_nodes:
             for edge in store.neighbors(node.id, direction="in"):
                 src = store.get_node(edge.src_id)
                 if src is None or src.id == node.id:
                     continue
-                tag = "[支持]" if edge.relation == "support" else "[反論]"
-                line = f"{tag} {src.text}"
-                if line in seen:
+                key = f"{edge.relation}|{src.id}|{node.id}"
+                if key in seen:
                     continue
-                seen.add(line)
-                infos.append(line)
+                seen.add(key)
+                items.append(
+                    InfoItem(
+                        relation=edge.relation,
+                        target_text=node.text,
+                        target_speaker=node.author,
+                        source_text=src.text,
+                        source_kind=src.source,
+                        source_author=src.author,
+                        confidence=edge.confidence,
+                        rationale=edge.rationale,
+                    )
+                )
 
-        if not infos:
+        items = items[: self._max_info_items]
+        self._last_items = items
+        if not items:
             return None
-        return "\n".join(infos[: self._max_info_items])
+        lines = [
+            f"[{'支持' if it.relation == 'support' else '反論'}] {it.source_text}" for it in items
+        ]
+        return "\n".join(lines)
 
 
 __all__ = [
@@ -212,4 +265,6 @@ __all__ = [
     "ConditionFlatRAG",
     "ConditionFullProposal",
     "ConditionNone",
+    "FlatRAGItem",
+    "InfoItem",
 ]

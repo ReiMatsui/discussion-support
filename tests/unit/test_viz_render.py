@@ -70,9 +70,7 @@ def populated_store() -> NetworkXGraphStore:
     return store
 
 
-def test_render_html_writes_file(
-    populated_store: NetworkXGraphStore, tmp_path: Path
-) -> None:
+def test_render_html_writes_file(populated_store: NetworkXGraphStore, tmp_path: Path) -> None:
     out = render_html(populated_store, tmp_path / "graph.html")
     assert out.exists()
     html = out.read_text(encoding="utf-8")
@@ -104,20 +102,14 @@ def test_render_html_with_empty_store(tmp_path: Path) -> None:
 # --- JSON 入出力 -------------------------------------------------------
 
 
-def test_snapshot_roundtrip_via_json(
-    populated_store: NetworkXGraphStore, tmp_path: Path
-) -> None:
+def test_snapshot_roundtrip_via_json(populated_store: NetworkXGraphStore, tmp_path: Path) -> None:
     path = tmp_path / "snap.json"
     dump_snapshot(populated_store, path)
     assert path.exists()
 
     loaded = load_snapshot(path)
-    assert {n.id for n in loaded.nodes()} == {
-        n.id for n in populated_store.nodes()
-    }
-    assert {e.id for e in loaded.edges()} == {
-        e.id for e in populated_store.edges()
-    }
+    assert {n.id for n in loaded.nodes()} == {n.id for n in populated_store.nodes()}
+    assert {e.id for e in loaded.edges()} == {e.id for e in populated_store.edges()}
 
 
 def test_load_snapshot_into_existing_store(
@@ -129,13 +121,9 @@ def test_load_snapshot_into_existing_store(
     dump_snapshot(populated_store, path)
 
     other = NetworkXGraphStore()
-    extra = Node(
-        text="別の発話", node_type="claim", source="utterance", author="Z"
-    )
+    extra = Node(text="別の発話", node_type="claim", source="utterance", author="Z")
     other.add_node(extra)
 
     load_snapshot(path, other)
     assert extra.id in {n.id for n in other.nodes()}
-    assert {n.id for n in populated_store.nodes()}.issubset(
-        {n.id for n in other.nodes()}
-    )
+    assert {n.id for n in populated_store.nodes()}.issubset({n.id for n in other.nodes()})

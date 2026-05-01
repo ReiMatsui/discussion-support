@@ -94,11 +94,7 @@ class SessionRunner:
 
         for turn_id in range(1, self._config.max_turns + 1):
             agent = agents[(turn_id - 1) % len(agents)]
-            info = (
-                await info_provider(history, agent.spec)
-                if info_provider is not None
-                else None
-            )
+            info = await info_provider(history, agent.spec) if info_provider is not None else None
             utterance = await agent.utter(
                 history,
                 self._config.topic,
