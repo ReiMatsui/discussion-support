@@ -184,6 +184,58 @@ async def test_full_proposal_returns_support_attack_info(
     fake_orch.bus.publish.assert_awaited_once()
 
 
+async def test_full_proposal_intervention_log_records_each_turn(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """info_provider 呼び出しのたびに intervention_log にエントリが追加される。"""
+
+    from das.eval.conditions import write_intervention_log
+    from das.graph.store import NetworkXGraphStore
+
+    llm = _fake_llm()
+    cond = ConditionFullProposal(llm=llm)
+
+    fake_orch = MagicMock()
+    fake_orch.bus = MagicMock()
+    fake_orch.bus.publish = AsyncMock()
+    fake_orch.bus.drain = AsyncMock()
+    fake_orch.ingest_documents = AsyncMock(return_value=[])
+    fake_orch.store = NetworkXGraphStore()
+    monkeypatch.setattr(
+        "das.eval.conditions.Orchestrator.assemble", lambda *a, **k: fake_orch
+    )
+    await cond.setup()
+
+    persona = build_persona(name="A")
+    history = [Utterance(turn_id=1, speaker="A", text="t1")]
+    await cond.info_provider(history, persona)
+    # 関連ノードが無いケースでも 1 エントリ ... ではなく、ストアが空なので related_nodes=0 で
+    # 早期 return するため log には何も入らない (現実装の振る舞い)。
+    # ここでは、ノードを追加して 2 ターン目で記録される事を確認する。
+    from das.graph.schema import Node
+
+    fake_orch.store.add_node(
+        Node(
+            text="主張",
+            node_type="claim",
+            source="utterance",
+            author="A",
+            metadata={"turn_id": 1},
+        )
+    )
+    await cond.info_provider(history, persona)
+    log = cond.intervention_log
+    assert len(log) >= 1
+    assert log[-1].persona_name == "A"
+    assert log[-1].turn_id == 1
+
+    # JSONL に書き出せる
+    out = tmp_path / "interventions.jsonl"
+    write_intervention_log(log, out)
+    assert out.exists()
+    assert out.read_text(encoding="utf-8").strip().count("\n") + 1 == len(log)
+
+
 async def test_full_proposal_does_not_reprocess_same_turn(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

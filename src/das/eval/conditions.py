@@ -15,14 +15,16 @@
 
 from __future__ import annotations
 
+import json
 import re
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Protocol
 
+from das.agents.facilitation import FacilitationAgent, InfoItem
 from das.agents.linking import cosine_similarity
 from das.eval.persona import PersonaSpec
-from das.graph.schema import NodeSource
 from das.graph.store import NetworkXGraphStore
 from das.llm import OpenAIClient
 from das.logging import get_logger
@@ -31,21 +33,24 @@ from das.types import Utterance
 
 
 @dataclass(frozen=True)
-class InfoItem:
-    """1 件の参考情報 (UI/分析向けの構造化表現)。
+class InterventionLogEntry:
+    """1 ターンに対して提示された情報の記録 (§4.3 介入の透明性)。"""
 
-    LLM 向けの prompt 文字列とは別に保持して、Streamlit UI で色分け・出典付きの
-    リッチ表示ができるようにする。
-    """
+    turn_id: int
+    persona_name: str
+    timestamp: str
+    items: list[dict] = field(default_factory=list)
 
-    relation: Literal["support", "attack"]
-    target_text: str
-    target_speaker: str | None
-    source_text: str
-    source_kind: NodeSource
-    source_author: str | None
-    confidence: float
-    rationale: str = ""
+
+def write_intervention_log(entries: list[InterventionLogEntry], path: Path) -> Path:
+    """介入ログを JSONL として書き出す。"""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        for entry in entries:
+            f.write(json.dumps(asdict(entry), ensure_ascii=False, default=str))
+            f.write("\n")
+    return path
 
 
 @dataclass(frozen=True)
@@ -170,6 +175,7 @@ class ConditionFullProposal:
         threshold: float | None = None,
         top_k: int = 5,
         max_info_items: int = 3,
+        facilitator: FacilitationAgent | None = None,
     ) -> None:
         self._llm = llm or OpenAIClient()
         self._threshold = threshold
@@ -178,7 +184,19 @@ class ConditionFullProposal:
         self._orchestrator: Orchestrator | None = None
         self._processed_turn_ids: set[int] = set()
         self._last_items: list[InfoItem] = []
+        self._intervention_log: list[InterventionLogEntry] = []
+        # ファシリテーション (中央調停) は FacilitationAgent に委譲する
+        self._facilitator = facilitator or FacilitationAgent(
+            llm=self._llm,
+            max_items=max_info_items,
+        )
         self._log = get_logger("das.eval.condition.full_proposal")
+
+    @property
+    def intervention_log(self) -> list[InterventionLogEntry]:
+        """各ターンで誰に何を提示したかの履歴 (§4.3 介入の透明性)。"""
+
+        return list(self._intervention_log)
 
     @property
     def orchestrator(self) -> Orchestrator | None:
@@ -226,32 +244,32 @@ class ConditionFullProposal:
         if not related_nodes:
             return None
 
+        # ファシリテーションエージェントが偏り検知 + ステージ判断 + 優先度付けを行う
         items: list[InfoItem] = []
         seen: set[str] = set()
         for node in related_nodes:
-            for edge in store.neighbors(node.id, direction="in"):
-                src = store.get_node(edge.src_id)
-                if src is None or src.id == node.id:
-                    continue
-                key = f"{edge.relation}|{src.id}|{node.id}"
+            for item in self._facilitator.select_for_target(node, store, history):
+                key = f"{item.relation}|{item.source_text}|{item.target_text}"
                 if key in seen:
                     continue
                 seen.add(key)
-                items.append(
-                    InfoItem(
-                        relation=edge.relation,
-                        target_text=node.text,
-                        target_speaker=node.author,
-                        source_text=src.text,
-                        source_kind=src.source,
-                        source_author=src.author,
-                        confidence=edge.confidence,
-                        rationale=edge.rationale,
-                    )
-                )
+                items.append(item)
 
+        # 優先度の高い順に上位 N を選択
+        items.sort(key=lambda it: it.priority, reverse=True)
         items = items[: self._max_info_items]
         self._last_items = items
+
+        # 介入ログに記録 (§4.3 介入の透明性のための事後追跡)
+        self._intervention_log.append(
+            InterventionLogEntry(
+                turn_id=last_turn_id,
+                persona_name=persona.name,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                items=[asdict(it) for it in items],
+            )
+        )
+
         if not items:
             return None
         lines = [
@@ -267,4 +285,6 @@ __all__ = [
     "ConditionNone",
     "FlatRAGItem",
     "InfoItem",
+    "InterventionLogEntry",
+    "write_intervention_log",
 ]

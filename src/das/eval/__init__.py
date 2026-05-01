@@ -11,6 +11,8 @@ from das.eval.conditions import (
     ConditionNone,
     FlatRAGItem,
     InfoItem,
+    InterventionLogEntry,
+    write_intervention_log,
 )
 from das.eval.controller import InfoProvider, SessionConfig, SessionRunner
 from das.eval.metrics import (
@@ -32,6 +34,7 @@ __all__ = [
     "GraphMetrics",
     "InfoItem",
     "InfoProvider",
+    "InterventionLogEntry",
     "PersonaAgent",
     "PersonaSpec",
     "SessionConfig",
@@ -44,4 +47,5 @@ __all__ = [
     "graph_metrics",
     "policy_ai_lecture_personas",
     "transcript_metrics",
+    "write_intervention_log",
 ]
