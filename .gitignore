@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+wheels/
+*.egg-info/
+*.egg
+.eggs/
+
+# Environments
+.env
+.env.local
+.venv/
+venv/
+ENV/
+
+# uv
+.uv-cache/
+
+# Test / coverage / lint caches
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.ruff_cache/
+.mypy_cache/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Project data (runs は大きくなるので除外)
+data/runs/
+*.sqlite
+*.sqlite3
+*.db
