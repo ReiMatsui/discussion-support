@@ -68,8 +68,11 @@ with st.form("eval_form"):
             format_func=lambda c: f"{CONDITION_LABELS[c]} ({c})",
         )
         until_consensus = st.checkbox("合意検出で早期終了", value=True)
-        agreement_threshold = st.slider("合意キーワードしきい値", 0.2, 0.9, 0.4, 0.05)
-        agreement_window = st.slider("合意判定の直近ターン数", 2, 8, 4)
+        agreement_threshold = st.slider(
+            "合意キーワードしきい値", 0.5, 0.95, 0.67, 0.01,
+            help="逆接「確かに〜が、」は除外済。0.67 ≒ 直近 3 ターンのうち 2/3 で純粋な合意が必要",
+        )
+        agreement_window = st.slider("合意判定の直近ターン数", 2, 8, 3)
         no_judge = st.checkbox("LLM-as-judge をスキップ", value=False)
 
     eval_id_input = st.text_input("eval_id (任意。空なら自動)", value="")
@@ -308,6 +311,86 @@ if submitted:
         st.success(
             f"✅ 完了: `{detected_eval_id}` ({eval_path}) — メインの「議論レビュー」をリロードしてください"
         )
+
+        # --- ジャッジ評価の条件横断比較 ---------------------------
+        summary_path = eval_path / "summary.json"
+        if summary_path.exists() and not no_judge:
+            st.divider()
+            st.markdown("### 評価エージェントによる条件横断比較")
+            st.caption(
+                "各条件 x 各主観指標の平均 ± 標準偏差。"
+                "値が大きいほど良い (`confidence_change` は絶対値で見るとよい)。"
+            )
+            try:
+                summary = json.loads(summary_path.read_text(encoding="utf-8"))
+                by_cond = summary.get("by_condition", {})
+                metric_pairs = [
+                    ("overall_satisfaction", "満足度"),
+                    ("information_usefulness", "情報有用性"),
+                    ("opposition_understanding", "反対理解"),
+                    ("confidence_change", "自信変化"),
+                    ("intervention_transparency", "介入透明性"),
+                ]
+                rows: list[dict] = []
+                for cond_name, payload in by_cond.items():
+                    row: dict = {"条件": CONDITION_LABELS.get(cond_name, cond_name)}
+                    for key, label in metric_pairs:
+                        mean, std = payload.get(key, [0.0, 0.0])
+                        row[label] = f"{mean:.2f} ± {std:.2f}"
+                    conv = payload.get("convergence", {})
+                    rate = conv.get("convergence_rate", 0.0)
+                    mean_turns = conv.get("mean_turns", 0.0)
+                    row["収束率"] = f"{rate * 100:.0f}%"
+                    row["平均ターン"] = f"{mean_turns:.1f}"
+                    rows.append(row)
+                if rows:
+                    import pandas as _pd
+
+                    df = _pd.DataFrame(rows).set_index("条件")
+                    st.dataframe(df, use_container_width=True)
+
+                    # bar chart (主観 5 指標)
+                    chart_rows: list[dict] = []
+                    for cond_name, payload in by_cond.items():
+                        for key, label in metric_pairs:
+                            mean, std = payload.get(key, [0.0, 0.0])
+                            chart_rows.append(
+                                {
+                                    "condition": CONDITION_LABELS.get(cond_name, cond_name),
+                                    "metric": label,
+                                    "mean": mean,
+                                    "low": mean - std,
+                                    "high": mean + std,
+                                }
+                            )
+                    import altair as _alt
+
+                    cdf = _pd.DataFrame(chart_rows)
+                    bar = (
+                        _alt.Chart(cdf)
+                        .mark_bar()
+                        .encode(
+                            x=_alt.X("condition:N", title=None, sort=None),
+                            y=_alt.Y("mean:Q", title="平均"),
+                            color=_alt.Color("condition:N", legend=None),
+                            column=_alt.Column("metric:N", title=None, sort=None),
+                            tooltip=["condition", "metric", "mean"],
+                        )
+                        .properties(width=110, height=160)
+                    )
+                    err = (
+                        _alt.Chart(cdf)
+                        .mark_errorbar()
+                        .encode(
+                            x="condition:N",
+                            y=_alt.Y("low:Q", title="平均"),
+                            y2="high:Q",
+                            column=_alt.Column("metric:N", title=None, sort=None),
+                        )
+                    )
+                    st.altair_chart(bar + err, use_container_width=False)
+            except Exception as exc:  # pragma: no cover - 防御的
+                st.warning(f"summary.json の集計表示に失敗: {exc}")
     else:
         st.error(f"❌ 失敗 (return code {rc})。下のログを確認してください。")
         log_expander.code("\n".join(log_lines[-200:]) or "(出力なし)")

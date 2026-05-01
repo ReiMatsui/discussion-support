@@ -42,6 +42,56 @@ _AGREEMENT_KEYWORDS: tuple[str, ...] = (
     "歩み寄り",
 )
 
+# 合意キーワードの直後に来ると「実は反論の前置き」と判定する逆接表現。
+# 例: 「確かにコストはあります**が、**長期的には〜」「なるほど、**しかし**〜」
+_REBUTTAL_CONJUNCTIONS: tuple[str, ...] = (
+    "が、",
+    "しかし",
+    "ただし",
+    "ただ、",
+    "でも、",
+    "けれど",
+    "けれども",
+    "ですが、",
+    "ですが",
+    "一方",
+    "もっとも",
+    "とはいえ",
+    "ものの",
+)
+
+# 合意キーワードと逆接の距離 (文字数) の上限。これ以内に逆接が現れたら
+# 「表面的な譲歩 → 反論」のパターンとみなして合意扱いしない。
+_NEGATION_PROXIMITY_CHARS = 30
+
+
+def _agreement_keyword_index(text: str) -> int:
+    """テキスト内で最も早く出てくる合意キーワードの末尾位置 (見つからなければ -1)。"""
+
+    earliest_end = -1
+    for kw in _AGREEMENT_KEYWORDS:
+        idx = text.find(kw)
+        if idx == -1:
+            continue
+        end = idx + len(kw)
+        if earliest_end == -1 or end < earliest_end:
+            earliest_end = end
+    return earliest_end
+
+
+def _has_genuine_agreement(text: str) -> bool:
+    """合意キーワードがあり、かつ直後に逆接が無いとき True。
+
+    LLM 発話では「確かに〜が、…」のような **譲歩 → 反論** パターンが超頻出する
+    ので、純粋な合意とこの「前置き型」を見分けるために逆接距離を見る。
+    """
+
+    end = _agreement_keyword_index(text)
+    if end == -1:
+        return False
+    tail = text[end : end + _NEGATION_PROXIMITY_CHARS]
+    return not any(c in tail for c in _REBUTTAL_CONJUNCTIONS)
+
 
 @dataclass(frozen=True)
 class ConsensusReport:
@@ -58,15 +108,16 @@ class ConsensusReport:
 
 
 def _explicit_agreement_score(transcript: list[Utterance], window: int) -> float:
-    """直近 ``window`` ターンの発話のうち、合意キーワードを含む割合。"""
+    """直近 ``window`` ターンのうち、**真正な合意**フレーズを含む割合。
+
+    「確かに〜が、」のような逆接の前置きは除外する。
+    """
 
     recent = transcript[-window:] if transcript else []
     if not recent:
         return 0.0
-    n_with_kw = sum(
-        1 for u in recent if any(kw in u.text for kw in _AGREEMENT_KEYWORDS)
-    )
-    return n_with_kw / len(recent)
+    n_with_genuine = sum(1 for u in recent if _has_genuine_agreement(u.text))
+    return n_with_genuine / len(recent)
 
 
 def _new_claims_in_recent_turns(
@@ -111,9 +162,9 @@ def detect_consensus(
     *,
     store: GraphStore | None = None,
     agreement_window: int = 3,
-    agreement_threshold: float = 0.6,
+    agreement_threshold: float = 0.67,
     stall_window: int = 4,
-    min_turns_before_consensus: int = 4,
+    min_turns_before_consensus: int = 6,
 ) -> ConsensusReport:
     """``transcript`` (と任意で ``store``) から合意状態を検出する。
 
@@ -166,11 +217,18 @@ def detect_consensus(
             rationales.append(f"直近 {stall_window} ターンで新規 attack なし")
             confidence = max(confidence, 0.6)
 
-    # 強いシグナルが 1 つ以上 + 補助シグナル 1 つ以上、または explicit_agreement 単独
-    consensus = "explicit_agreement" in fired or len(fired) >= 2
+    # 合意成立条件:
+    #   - explicit_agreement (逆接除外後の真正な合意キーワード) 単独 OK
+    #   - もしくは構造シグナル 2 つ以上 (no_new_attacks + new_claim_stalled)
+    # 構造シグナル 1 つ単独では成立させない (extraction 遅延などで誤検出する)。
+    has_explicit = "explicit_agreement" in fired
+    structural_count = sum(
+        1 for s in fired if s in {"new_claim_stalled", "no_new_attacks"}
+    )
+    consensus = has_explicit or structural_count >= 2
 
     primary: ConsensusSignal = "none"
-    if "explicit_agreement" in fired:
+    if has_explicit:
         primary = "explicit_agreement"
     elif fired:
         primary = fired[0]

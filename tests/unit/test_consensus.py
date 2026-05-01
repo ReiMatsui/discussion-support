@@ -186,6 +186,62 @@ def test_consensus_report_no_match_under_threshold() -> None:
     assert report.consensus_reached is False
 
 
+def test_negation_after_agreement_keyword_is_filtered() -> None:
+    """「確かに〜が、」「なるほど、しかし」は合意と扱わない (LLM 譲歩前置きパターン)。"""
+
+    transcript = _utterances(
+        ["A", "B", "C", "A", "B", "C"],
+        [
+            "プラ容器を廃止すべき",
+            "コスト懸念がある",
+            "折衷案も",
+            "確かに環境配慮は重要だが、コストが問題だ",
+            "なるほど、しかし学生負担が大きい",
+            "その通り、ただし現実的でない",
+        ],
+    )
+    report = detect_consensus(transcript)
+    assert report.consensus_reached is False
+    assert report.signal != "explicit_agreement"
+
+
+def test_genuine_agreement_without_negation_still_detected() -> None:
+    """逆接が無ければ通常通り検出される。"""
+
+    transcript = _utterances(
+        ["A", "B", "C", "A", "B", "C"],
+        [
+            "プラ容器を廃止すべき",
+            "コスト懸念がある",
+            "折衷案も",
+            "なるほど、納得です",
+            "賛成、歩み寄りましょう",
+            "その通りだと思います",
+        ],
+    )
+    report = detect_consensus(transcript)
+    assert report.consensus_reached is True
+    assert report.signal == "explicit_agreement"
+
+
+def test_min_turns_default_blocks_too_early() -> None:
+    """既定の min_turns=6 で 5 ターン未満は合意成立しない。"""
+
+    transcript = _utterances(
+        ["A", "B", "C", "A", "B"],
+        [
+            "なるほど",
+            "賛成です",
+            "その通り",
+            "納得",
+            "合意",
+        ],
+    )
+    report = detect_consensus(transcript)  # 既定 min_turns_before_consensus=6
+    assert report.consensus_reached is False
+    assert "ターン数が不足" in report.rationale
+
+
 def test_consensus_high_threshold_no_false_positive() -> None:
     transcript = _utterances(
         ["A", "B", "C", "A", "B"],

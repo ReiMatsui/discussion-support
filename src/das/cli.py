@@ -153,12 +153,13 @@ def eval_cmd(
         3, "--agreement-window", help="合意キーワード判定の直近ターン数"
     ),
     agreement_threshold: float = typer.Option(
-        0.6,
+        0.67,
         "--agreement-threshold",
-        help="合意キーワード割合のしきい値 (0..1)",
+        help="合意キーワード割合のしきい値 (0..1)。"
+        "逆接「確かに〜が、」は事前に除外される",
     ),
     min_turns_before_consensus: int = typer.Option(
-        4,
+        6,
         "--min-turns-before-consensus",
         help="合意判定を始める最小ターン数 (序盤の誤検出を避ける)",
     ),
