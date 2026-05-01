@@ -79,8 +79,8 @@ def ui(
     try:
         from das.ui import streamlit_app
     except ImportError as exc:  # pragma: no cover
-        typer.echo(f"streamlit が未インストールです: {exc}")
-        typer.echo("`uv sync --extra ui` を実行してください。")
+        typer.echo(f"UI 依存が未インストールです: {exc}")
+        typer.echo("`uv sync --extra ui` (もしくは `uv sync --all-extras`) を実行してください。")
         raise typer.Exit(1) from exc
 
     app_path = Path(streamlit_app.__file__)
@@ -224,18 +224,32 @@ async def _run_session_async(
     typer.echo(f"[run-session] running {len(utterances)} utterances...")
     await orch.run_session(utterances)
 
-    from das.viz import dump_snapshot, render_html
+    from das.viz import dump_snapshot
 
+    # snapshot は最優先で保存 (HTML より先に書き出して結果を守る)
     snapshot_path = dump_snapshot(store, run_dir / "snapshot.json")
-    html_path = render_html(store, run_dir / "graph.html")
-
     n_nodes = len(list(store.nodes()))
     n_edges = len(list(store.edges()))
-    typer.echo(
+
+    html_path: Path | None = None
+    try:
+        from das.viz import render_html
+
+        html_path = render_html(store, run_dir / "graph.html")
+    except ImportError as exc:
+        typer.echo(
+            f"[run-session] HTML 生成をスキップ (viz extras 未インストール: {exc}).\n"
+            f"             `uv sync --extra viz` で有効化、または "
+            f"`das visualize {snapshot_path}` で後から生成できます。"
+        )
+
+    summary = (
         f"[run-session] done. nodes={n_nodes} edges={n_edges}\n"
-        f"  snapshot -> {snapshot_path}\n"
-        f"  html     -> {html_path}"
+        f"  snapshot -> {snapshot_path}"
     )
+    if html_path is not None:
+        summary += f"\n  html     -> {html_path}"
+    typer.echo(summary)
 
 
 if __name__ == "__main__":
