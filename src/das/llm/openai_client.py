@@ -65,6 +65,12 @@ class OpenAIClient:
 
         return self._settings.openai_model_smart
 
+    @property
+    def embedding_model(self) -> str:
+        """既定の埋め込みモデル。"""
+
+        return "text-embedding-3-small"
+
     # --- 公開メソッド ---------------------------------------------------
 
     async def chat(
@@ -122,6 +128,35 @@ class OpenAIClient:
             raise RuntimeError("structured output returned no parsed result")
         return parsed
 
+    async def embed(
+        self,
+        texts: list[str],
+        *,
+        model: str | None = None,
+    ) -> list[list[float]]:
+        """テキスト群の埋め込みベクトルを返す。"""
+
+        if not texts:
+            return []
+        chosen_model = model or self.embedding_model
+        response: Any = None
+        async for attempt in self._retrier():
+            with attempt:
+                response = await self._client.embeddings.create(
+                    model=chosen_model,
+                    input=texts,
+                )
+        if response is None:  # pragma: no cover - 防御的
+            raise RuntimeError("openai client returned no response")
+        self._log_embedding_usage(response, chosen_model, len(texts))
+        return [item.embedding for item in response.data]
+
+    async def embed_one(self, text: str, *, model: str | None = None) -> list[float]:
+        """単一テキストの埋め込み。"""
+
+        result = await self.embed([text], model=model)
+        return result[0]
+
     # --- 内部 -----------------------------------------------------------
 
     def _retrier(self) -> AsyncRetrying:
@@ -142,6 +177,16 @@ class OpenAIClient:
             prompt_tokens=getattr(usage, "prompt_tokens", None),
             completion_tokens=getattr(usage, "completion_tokens", None),
             total_tokens=getattr(usage, "total_tokens", None),
+        )
+
+    def _log_embedding_usage(self, response: Any, model: str, n_inputs: int) -> None:
+        usage = getattr(response, "usage", None)
+        self._log.info(
+            "openai.embedding_usage",
+            model=model,
+            n_inputs=n_inputs,
+            prompt_tokens=getattr(usage, "prompt_tokens", None) if usage else None,
+            total_tokens=getattr(usage, "total_tokens", None) if usage else None,
         )
 
 

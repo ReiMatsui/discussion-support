@@ -24,9 +24,7 @@ class _ExtractedUnit(BaseModel):
     """LLM から返ってくる 1 つの論証単位。"""
 
     text: str = Field(description="抽出された論証文 (原文の意味を保つ)")
-    node_type: Literal["claim", "premise"] = Field(
-        description="claim=主張, premise=前提・根拠"
-    )
+    node_type: Literal["claim", "premise"] = Field(description="claim=主張, premise=前提・根拠")
 
 
 class _ExtractionResult(BaseModel):
@@ -52,9 +50,7 @@ class ExtractionAgent(BaseAgent):
         """発話 1 つを論証ノードに分解する。"""
 
         user_content = (
-            f"発話番号: {utterance.turn_id}\n"
-            f"話者: {utterance.speaker}\n"
-            f"発話: {utterance.text}"
+            f"発話番号: {utterance.turn_id}\n話者: {utterance.speaker}\n発話: {utterance.text}"
         )
         messages = [
             {"role": "system", "content": self._system_prompt},

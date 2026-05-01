@@ -52,6 +52,7 @@ def _fake_async_client(
     *,
     create: AsyncMock | None = None,
     parse: AsyncMock | None = None,
+    embeddings: AsyncMock | None = None,
 ) -> MagicMock:
     """AsyncOpenAI を模したオブジェクトを返す。"""
 
@@ -63,7 +64,16 @@ def _fake_async_client(
     fake.beta.chat = MagicMock()
     fake.beta.chat.completions = MagicMock()
     fake.beta.chat.completions.parse = parse or AsyncMock()
+    fake.embeddings = MagicMock()
+    fake.embeddings.create = embeddings or AsyncMock()
     return fake
+
+
+def _embedding_response(vectors: list[list[float]]) -> SimpleNamespace:
+    return SimpleNamespace(
+        data=[SimpleNamespace(embedding=v) for v in vectors],
+        usage=SimpleNamespace(prompt_tokens=4, total_tokens=4),
+    )
 
 
 def _rate_limit_error(message: str = "rate limited") -> RateLimitError:
@@ -208,3 +218,38 @@ async def test_non_retryable_error_propagates_immediately() -> None:
     with pytest.raises(ValueError):
         await client.chat([{"role": "user", "content": "x"}])
     assert create.await_count == 1
+
+
+# --- embeddings ----------------------------------------------------------
+
+
+async def test_embed_returns_vectors_and_uses_default_model() -> None:
+    embeddings = AsyncMock(return_value=_embedding_response([[0.1, 0.2], [0.3, 0.4]]))
+    fake = _fake_async_client(embeddings=embeddings)
+    client = OpenAIClient(client=fake)
+
+    vectors = await client.embed(["a", "b"])
+    assert vectors == [[0.1, 0.2], [0.3, 0.4]]
+    embeddings.assert_awaited_once()
+    kwargs = embeddings.await_args.kwargs
+    assert kwargs["model"] == client.embedding_model
+    assert kwargs["input"] == ["a", "b"]
+
+
+async def test_embed_one_returns_single_vector() -> None:
+    embeddings = AsyncMock(return_value=_embedding_response([[0.5, 0.5]]))
+    fake = _fake_async_client(embeddings=embeddings)
+    client = OpenAIClient(client=fake)
+
+    vec = await client.embed_one("hello")
+    assert vec == [0.5, 0.5]
+
+
+async def test_embed_empty_returns_empty_without_calling() -> None:
+    embeddings = AsyncMock()
+    fake = _fake_async_client(embeddings=embeddings)
+    client = OpenAIClient(client=fake)
+
+    vectors = await client.embed([])
+    assert vectors == []
+    embeddings.assert_not_awaited()
