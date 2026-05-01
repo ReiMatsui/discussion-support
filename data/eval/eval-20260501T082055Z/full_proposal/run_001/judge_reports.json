@@ -1,0 +1,41 @@
+[
+  {
+    "persona_name": "A",
+    "condition_name": "full_proposal",
+    "topic": "大学のカフェテリアでプラスチック容器を廃止すべきか",
+    "scores": {
+      "overall_satisfaction": 6,
+      "information_usefulness": 6,
+      "opposition_understanding": 5,
+      "confidence_change": 2,
+      "intervention_transparency": 5,
+      "rationale": "議論は環境負荷とサステナビリティの重要性を強調しつつ、経済的負担についても考慮されており、全体的に満足できる内容でした。情報の有用性は高く、リユース容器やバイオプラスチックの導入が長期的にコスト削減につながる可能性が示されました。反対意見の理解はある程度できましたが、経済的負担の具体的なデータに対する対応策がもう少し明確であればさらに良かったです。議論を通じて、持続可能な選択肢の重要性への自信が強まりました。情報提供の透明性は概ね良好でしたが、もう少し構造化されているとさらに良かったです。"
+    }
+  },
+  {
+    "persona_name": "B",
+    "condition_name": "full_proposal",
+    "topic": "大学のカフェテリアでプラスチック容器を廃止すべきか",
+    "scores": {
+      "overall_satisfaction": 3,
+      "information_usefulness": 4,
+      "opposition_understanding": 5,
+      "confidence_change": 1,
+      "intervention_transparency": 4,
+      "rationale": "議論では、環境への配慮と経済的負担のバランスを取るための具体的な提案がいくつか出されましたが、私の懸念であるコスト増加についての解決策は十分に示されませんでした。情報の有用性は、段階的な導入やリユース容器の試験的導入といった具体的な提案があったため、ある程度役立ちました。反対意見の理解は進みましたが、私の立場への自信は少し弱まりました。情報提供の透明性は中程度で、なぜその情報が出されたかは部分的に理解できました。"
+    }
+  },
+  {
+    "persona_name": "C",
+    "condition_name": "full_proposal",
+    "topic": "大学のカフェテリアでプラスチック容器を廃止すべきか",
+    "scores": {
+      "overall_satisfaction": 6,
+      "information_usefulness": 6,
+      "opposition_understanding": 7,
+      "confidence_change": 0,
+      "intervention_transparency": 6,
+      "rationale": "議論は両者の意見を尊重しつつ、折衷案を模索する形で進行し、満足度が高かった。情報の有用性も高く、特にコストに関する具体的なデータが判断に役立った。異なる立場の理解も深まり、特に学生の経済的負担に関する懸念が明確に伝わった。自分の立場への自信は変わらなかったが、議論の透明性は高く、情報が適切に提供されたと感じた。"
+    }
+  }
+]

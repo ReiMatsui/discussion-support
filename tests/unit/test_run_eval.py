@@ -208,3 +208,125 @@ def test_single_run_result_fields() -> None:
     assert sr.condition_name == "none"
     assert sr.judge_reports == []
     assert sr.intervention_log is None
+    assert sr.consensus is None
+    assert sr.n_turns == 0
+
+
+# --- 合意ベース早期終了 ----------------------------------------------
+
+
+async def test_run_eval_until_consensus_stops_early() -> None:
+    """until_consensus=True のとき、合意キーワードが続けば max_turns 前に停止する。"""
+
+    llm = _fake_llm("u")
+    # 4 ターン目以降に合意フレーズを連発
+    replies = [
+        "プラ容器を廃止すべき",
+        "コストが高い",
+        "折衷案",
+        "なるほど納得です",
+        "賛成です",
+        "その通りです",
+        "(これ以降は呼ばれないはず)",
+        "(これも呼ばれないはず)",
+    ]
+    llm.chat = AsyncMock(side_effect=replies)  # type: ignore[method-assign]
+    personas = [
+        build_persona(name="A"),
+        build_persona(name="B"),
+        build_persona(name="C"),
+    ]
+    result = await run_eval(
+        topic="t",
+        personas=personas,
+        condition_factories={"none": ConditionNone},
+        n_runs=1,
+        max_turns=10,
+        llm=llm,
+        until_consensus=True,
+    )
+    run = result.runs[0]
+    # max_turns=10 より少ないターンで停止しているはず
+    assert run.n_turns < 10
+    assert run.consensus is not None
+    assert run.consensus.consensus_reached is True
+    assert run.consensus.detected_at_turn is not None
+
+
+async def test_run_eval_consensus_report_present_even_without_until_consensus() -> None:
+    """until_consensus=False でも consensus フィールドは後付け判定で埋まる。"""
+
+    llm = _fake_llm("u")
+    personas = [build_persona(name="A")]
+    result = await run_eval(
+        topic="t",
+        personas=personas,
+        condition_factories={"none": ConditionNone},
+        n_runs=1,
+        max_turns=2,
+        llm=llm,
+    )
+    run = result.runs[0]
+    assert run.consensus is not None
+    # 短すぎるので合意は立たない
+    assert run.consensus.consensus_reached is False
+
+
+async def test_run_eval_concurrency_invalid() -> None:
+    llm = _fake_llm("u")
+    with pytest.raises(ValueError):
+        await run_eval(
+            topic="t",
+            personas=[build_persona(name="A")],
+            condition_factories={"none": ConditionNone},
+            n_runs=1,
+            max_turns=2,
+            llm=llm,
+            concurrency=0,
+        )
+
+
+async def test_run_eval_concurrency_preserves_order_and_count() -> None:
+    """concurrency>1 でも runs は (cond order, run_idx) で並ぶ。"""
+
+    llm = _fake_llm("u")
+    personas = [build_persona(name="A")]
+    result = await run_eval(
+        topic="t",
+        personas=personas,
+        condition_factories={"none": ConditionNone, "none2": ConditionNone},
+        n_runs=3,
+        max_turns=2,
+        llm=llm,
+        concurrency=4,
+    )
+    assert len(result.runs) == 6
+    # condition順 (none, none2) かつ run_idx 順に並んでいる
+    expected_cond_seq = ["none", "none", "none", "none2", "none2", "none2"]
+    assert [r.condition_name for r in result.runs] == expected_cond_seq
+
+
+async def test_run_eval_writes_run_meta_with_convergence(tmp_path: Path) -> None:
+    """eval_dir 指定時に run_meta.json と summary.convergence が書かれる。"""
+
+    llm = _fake_llm("u")
+    personas = [build_persona(name="A")]
+    await run_eval(
+        topic="t",
+        personas=personas,
+        condition_factories={"none": ConditionNone},
+        n_runs=1,
+        max_turns=2,
+        llm=llm,
+        eval_dir=tmp_path,
+        eval_id="ev",
+    )
+    run_meta_path = tmp_path / "ev" / "none" / "run_001" / "run_meta.json"
+    assert run_meta_path.exists()
+    rm = json.loads(run_meta_path.read_text())
+    assert rm["n_turns"] == 2
+    assert "consensus" in rm
+    summary = json.loads((tmp_path / "ev" / "summary.json").read_text())
+    assert "convergence" in summary["by_condition"]["none"]
+    conv = summary["by_condition"]["none"]["convergence"]
+    assert conv["n_runs"] == 1

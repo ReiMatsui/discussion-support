@@ -1,0 +1,41 @@
+[
+  {
+    "persona_name": "A",
+    "condition_name": "flat_rag",
+    "topic": "大学のカフェテリアでプラスチック容器を廃止すべきか",
+    "scores": {
+      "overall_satisfaction": 6,
+      "information_usefulness": 6,
+      "opposition_understanding": 6,
+      "confidence_change": 2,
+      "intervention_transparency": 1,
+      "rationale": "議論は環境負荷の軽減と学生の経済的負担のバランスを探る内容で、長期的視点が強調されており、満足度が高かったです。情報はX大学の事例を通じて具体的で、判断に役立ちました。反対意見もコスト面での懸念を明確にしており、理解が深まりました。自分の立場への自信は、長期的な利益が強調されたことで強まりましたが、情報提供の透明性は低かったです。"
+    }
+  },
+  {
+    "persona_name": "B",
+    "condition_name": "flat_rag",
+    "topic": "大学のカフェテリアでプラスチック容器を廃止すべきか",
+    "scores": {
+      "overall_satisfaction": 4,
+      "information_usefulness": 5,
+      "opposition_understanding": 6,
+      "confidence_change": 1,
+      "intervention_transparency": 3,
+      "rationale": "議論は多角的な視点を提供し、特に環境負荷とコストのバランスについての理解が深まったため、情報の有用性は高かったです。しかし、具体的なコスト削減策や学生への影響を軽減する方法についての詳細が不足していたため、全体的な満足度は中程度です。異なる立場の理解は進みましたが、私の立場への自信は大きく変わりませんでした。情報提供の透明性は低く、議論の流れがやや不明瞭でした。"
+    }
+  },
+  {
+    "persona_name": "C",
+    "condition_name": "flat_rag",
+    "topic": "大学のカフェテリアでプラスチック容器を廃止すべきか",
+    "scores": {
+      "overall_satisfaction": 6,
+      "information_usefulness": 6,
+      "opposition_understanding": 7,
+      "confidence_change": 0,
+      "intervention_transparency": 5,
+      "rationale": "議論は両者の意見をしっかりと取り入れ、折衷案を模索する形で進行したため、全体的に満足度が高かったです。情報の有用性も高く、特にX大学の事例が具体的な参考として役立ちました。両者の立場を理解するための議論が行われ、異なる視点を深く理解できました。元の立場への自信度は変わりませんでしたが、議論を通じて新たな視点が得られました。情報提供の透明性はやや不明瞭な部分もありましたが、全体としては納得できるものでした。"
+    }
+  }
+]

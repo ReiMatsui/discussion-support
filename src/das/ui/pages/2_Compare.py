@@ -68,7 +68,8 @@ with st.sidebar:
     )
     label, persona_factory, default_topic = PRESETS[preset_key]
     topic = st.text_area("議論トピック", value=default_topic, height=80)
-    max_turns = st.slider("各条件のターン数", 3, 12, 6)
+    # max_turns は合意検出による早期終了の安全上限としてのみ使う。UI では持たず固定値。
+    max_turns = 12
     temperature = st.slider("temperature", 0.0, 1.5, 0.7, 0.1)
     docs_dir_str = st.text_input("ドキュメントディレクトリ", value=str(get_settings().docs_dir))
 

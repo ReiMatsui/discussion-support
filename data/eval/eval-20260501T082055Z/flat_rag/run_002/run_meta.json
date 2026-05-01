@@ -1,0 +1,13 @@
+{
+  "run_id": "flat_rag-run-002-e9806f",
+  "condition_name": "flat_rag",
+  "n_turns": 12,
+  "consensus": {
+    "reached": false,
+    "signal": "none",
+    "confidence": 0.0,
+    "fired_signals": [],
+    "detected_at_turn": null,
+    "rationale": "シグナルなし"
+  }
+}

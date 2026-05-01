@@ -1,0 +1,13 @@
+{
+  "run_id": "none-run-001-91a3eb",
+  "condition_name": "none",
+  "n_turns": 12,
+  "consensus": {
+    "reached": false,
+    "signal": "none",
+    "confidence": 0.0,
+    "fired_signals": [],
+    "detected_at_turn": null,
+    "rationale": "シグナルなし"
+  }
+}

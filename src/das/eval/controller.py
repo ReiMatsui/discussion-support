@@ -22,6 +22,9 @@ from das.types import Utterance
 # 履歴と次の発話者の persona から参考情報を返す関数。None なら情報なし。
 InfoProvider = Callable[[list[Utterance], PersonaSpec], Awaitable[str | None]]
 
+# transcript を見て、合意などの条件で True を返したらセッション早期終了するコールバック。
+StopCondition = Callable[[list[Utterance]], bool]
+
 
 @dataclass(frozen=True)
 class SessionConfig:
@@ -65,11 +68,14 @@ class SessionRunner:
         self,
         *,
         info_provider: InfoProvider | None = None,
+        stop_condition: StopCondition | None = None,
     ) -> list[Utterance]:
         """全ターンをまとめて走らせ、transcript を返す。"""
 
         transcript: list[Utterance] = []
-        async for u in self.run_streaming(info_provider=info_provider):
+        async for u in self.run_streaming(
+            info_provider=info_provider, stop_condition=stop_condition
+        ):
             transcript.append(u)
         return transcript
 
@@ -77,10 +83,13 @@ class SessionRunner:
         self,
         *,
         info_provider: InfoProvider | None = None,
+        stop_condition: StopCondition | None = None,
     ) -> AsyncIterator[Utterance]:
         """各ターンの ``Utterance`` を完成次第 yield する。
 
-        ``info_provider`` は ``await`` 可能。条件ごとに異なる情報注入をする際に使う。
+        - ``info_provider``: ``await`` 可能。条件ごとに異なる情報注入。
+        - ``stop_condition``: ターン後に呼び出される同期コールバック。
+          True を返したら ``max_turns`` 未満でも早期終了する。
         """
 
         agents = [PersonaAgent(spec, llm=self._llm) for spec in self._personas]
@@ -111,8 +120,13 @@ class SessionRunner:
                 info_provided=info is not None,
             )
             yield utterance
+            if stop_condition is not None and stop_condition(history):
+                self._log.info(
+                    "session.early_stop", at_turn=turn_id, n_utterances=len(history)
+                )
+                return
 
         self._log.info("session.done", n_utterances=len(history))
 
 
-__all__ = ["InfoProvider", "SessionConfig", "SessionRunner"]
+__all__ = ["InfoProvider", "SessionConfig", "SessionRunner", "StopCondition"]

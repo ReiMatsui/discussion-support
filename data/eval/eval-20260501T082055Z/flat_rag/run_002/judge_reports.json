@@ -1,0 +1,41 @@
+[
+  {
+    "persona_name": "A",
+    "condition_name": "flat_rag",
+    "topic": "大学のカフェテリアでプラスチック容器を廃止すべきか",
+    "scores": {
+      "overall_satisfaction": 6,
+      "information_usefulness": 5,
+      "opposition_understanding": 6,
+      "confidence_change": 2,
+      "intervention_transparency": 3,
+      "rationale": "議論は環境負荷とサステナビリティの重要性を強調しつつ、コスト面での懸念にも触れられており、全体的にバランスが取れていたため満足度は高いです。情報の有用性は、バイオプラスチックの導入や段階的移行の提案が具体的で役立ちましたが、詳細なデータが不足していたため満点には至りませんでした。反対意見の理解は、コスト増の影響についての議論が深く、よく理解できました。自信度は、長期的な視点での持続可能性の重要性が再確認できたため、やや強まりました。情報提供がない条件での議論だったため、介入の透明性は中程度です。"
+    }
+  },
+  {
+    "persona_name": "B",
+    "condition_name": "flat_rag",
+    "topic": "大学のカフェテリアでプラスチック容器を廃止すべきか",
+    "scores": {
+      "overall_satisfaction": 4,
+      "information_usefulness": 5,
+      "opposition_understanding": 6,
+      "confidence_change": 1,
+      "intervention_transparency": 3,
+      "rationale": "議論は多角的な視点を提供し、特にコストと環境負荷のバランスについての理解が深まったため、全体的な満足度は中程度です。情報の有用性は、バイオプラスチックのコスト改善や段階的移行の提案が役立ちました。反対意見の理解は深まりましたが、短期的なコスト増の影響を軽視する意見には納得しきれませんでした。自分の立場への自信は少し強まりましたが、情報提供の透明性は低く、なぜ特定の情報が出されたかが不明瞭でした。"
+    }
+  },
+  {
+    "persona_name": "C",
+    "condition_name": "flat_rag",
+    "topic": "大学のカフェテリアでプラスチック容器を廃止すべきか",
+    "scores": {
+      "overall_satisfaction": 6,
+      "information_usefulness": 6,
+      "opposition_understanding": 7,
+      "confidence_change": 0,
+      "intervention_transparency": 5,
+      "rationale": "議論は両者の意見をしっかりと取り入れ、折衷案を模索する形で進行したため、全体的に満足度が高かったです。情報の有用性も高く、特にバイオプラスチックや段階的移行の提案が具体的で役立ちました。異なる立場の理解も深まり、特にコストと環境負荷のバランスについての理解が進みました。元の立場への自信度は変わりませんでしたが、議論の透明性は情報提供がなかったためやや低めです。"
+    }
+  }
+]

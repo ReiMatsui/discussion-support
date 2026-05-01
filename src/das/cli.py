@@ -118,6 +118,80 @@ def visualize(
     typer.echo(f"[visualize] wrote {out}")
 
 
+@app.command(name="eval")
+def eval_cmd(
+    preset: str = typer.Argument(
+        "cafeteria",
+        help="トピックプリセット: cafeteria / policy_ai",
+    ),
+    n_runs: int = typer.Option(2, "--n-runs", "-n", help="各条件を何回回すか"),
+    max_turns: int = typer.Option(
+        20,
+        "--max-turns",
+        "-t",
+        help="各セッションのターン上限 (--until-consensus 利用時は安全上限として機能)",
+    ),
+    concurrency: int = typer.Option(
+        1,
+        "--concurrency",
+        "-j",
+        help="並列実行する (condition, run) 数。API レート制限に注意",
+    ),
+    temperature: float = typer.Option(0.7, "--temperature", help="persona の生成 temperature"),
+    conditions: str = typer.Option(
+        "none,flat_rag,full_proposal",
+        "--conditions",
+        help="走らせる条件 (カンマ区切り)",
+    ),
+    no_judge: bool = typer.Option(False, "--no-judge", help="LLM-as-judge をスキップ"),
+    until_consensus: bool = typer.Option(
+        False,
+        "--until-consensus",
+        help="合意検出されたら max_turns 未満でも早期終了する (合意形成までの時間を計測)",
+    ),
+    agreement_window: int = typer.Option(
+        3, "--agreement-window", help="合意キーワード判定の直近ターン数"
+    ),
+    agreement_threshold: float = typer.Option(
+        0.6,
+        "--agreement-threshold",
+        help="合意キーワード割合のしきい値 (0..1)",
+    ),
+    min_turns_before_consensus: int = typer.Option(
+        4,
+        "--min-turns-before-consensus",
+        help="合意判定を始める最小ターン数 (序盤の誤検出を避ける)",
+    ),
+    eval_id: str | None = typer.Option(None, "--eval-id", help="出力先 eval_id (省略時は自動)"),
+    docs: Path | None = typer.Option(None, "--docs", help="ドキュメントディレクトリ"),
+    eval_dir: Path | None = typer.Option(
+        None,
+        "--eval-dir",
+        help="出力ベースディレクトリ (省略時は data/eval)",
+    ),
+) -> None:
+    """シミュレーション評価を一括実行する (3 条件比較 + LLM-as-judge)。"""
+
+    asyncio.run(
+        _run_eval_cli(
+            preset=preset,
+            n_runs=n_runs,
+            max_turns=max_turns,
+            temperature=temperature,
+            conditions=conditions,
+            no_judge=no_judge,
+            eval_id=eval_id,
+            docs=docs,
+            eval_dir=eval_dir,
+            until_consensus=until_consensus,
+            agreement_window=agreement_window,
+            agreement_threshold=agreement_threshold,
+            min_turns_before_consensus=min_turns_before_consensus,
+            concurrency=concurrency,
+        )
+    )
+
+
 @app.command(name="run-session")
 def run_session(
     transcript: Path = typer.Argument(
@@ -245,6 +319,142 @@ async def _run_session_async(
     if html_path is not None:
         summary += f"\n  html     -> {html_path}"
     typer.echo(summary)
+
+
+async def _run_eval_cli(
+    *,
+    preset: str,
+    n_runs: int,
+    max_turns: int,
+    temperature: float,
+    conditions: str,
+    no_judge: bool,
+    eval_id: str | None,
+    docs: Path | None,
+    eval_dir: Path | None,
+    until_consensus: bool = False,
+    agreement_window: int = 3,
+    agreement_threshold: float = 0.6,
+    min_turns_before_consensus: int = 4,
+    concurrency: int = 1,
+) -> None:
+    from das.eval import (
+        ConditionFlatRAG,
+        ConditionFullProposal,
+        ConditionNone,
+        JudgeAgent,
+        cafeteria_personas,
+        policy_ai_lecture_personas,
+        run_eval,
+    )
+
+    presets = {
+        "cafeteria": (
+            cafeteria_personas,
+            "大学のカフェテリアでプラスチック容器を廃止すべきか",
+        ),
+        "policy_ai": (
+            policy_ai_lecture_personas,
+            "生成 AI を大学の講義・レポート作成で許容すべきか",
+        ),
+    }
+    if preset not in presets:
+        typer.echo(f"未知の preset: {preset}. 利用可能: {list(presets.keys())}")
+        raise typer.Exit(1)
+
+    persona_factory, topic = presets[preset]
+    personas = persona_factory()
+
+    settings = get_settings()
+    docs_dir = docs if docs is not None else settings.docs_dir
+    target_eval_dir = eval_dir if eval_dir is not None else settings.data_dir / "eval"
+
+    llm = OpenAIClient()
+    factories: dict = {}
+    for name in (c.strip() for c in conditions.split(",") if c.strip()):
+        if name == "none":
+            factories[name] = ConditionNone
+        elif name == "flat_rag":
+            factories[name] = lambda llm=llm: ConditionFlatRAG(llm=llm)
+        elif name == "full_proposal":
+            factories[name] = lambda llm=llm: ConditionFullProposal(llm=llm)
+        else:
+            typer.echo(f"未知の condition: {name}")
+            raise typer.Exit(1)
+
+    judge = None if no_judge else JudgeAgent(llm=llm)
+
+    typer.echo(
+        f"[eval] preset={preset} topic='{topic}' "
+        f"conditions={list(factories.keys())} n_runs={n_runs} "
+        f"max_turns={max_turns} concurrency={concurrency} "
+        f"until_consensus={'on' if until_consensus else 'off'} "
+        f"judge={'on' if judge else 'off'}"
+    )
+
+    def _progress(cond: str, done: int, total: int) -> None:
+        typer.echo(f"  [{done}/{total}] condition={cond}")
+
+    consensus_kwargs = {
+        "agreement_window": agreement_window,
+        "agreement_threshold": agreement_threshold,
+        "min_turns_before_consensus": min_turns_before_consensus,
+    }
+
+    result = await run_eval(
+        topic=topic,
+        personas=personas,
+        condition_factories=factories,
+        n_runs=n_runs,
+        max_turns=max_turns,
+        temperature=temperature,
+        docs_dir=docs_dir if docs_dir.exists() else None,
+        llm=llm,
+        judge=judge,
+        eval_dir=target_eval_dir,
+        eval_id=eval_id,
+        progress=_progress,
+        until_consensus=until_consensus,
+        consensus_kwargs=consensus_kwargs,
+        concurrency=concurrency,
+    )
+
+    typer.echo("")
+    typer.echo(f"[eval] done. eval_id={result.eval_id}")
+    if result.eval_dir is not None:
+        typer.echo(f"[eval] saved to {result.eval_dir}")
+
+    # 収束統計 (until_consensus 関係なく常に表示: 後追い判定で意味がある)
+    typer.echo("")
+    typer.echo("[eval] convergence:")
+    grouped = result.by_condition()
+    for cond, runs in grouped.items():
+        n = len(runs)
+        if n == 0:
+            continue
+        n_conv = sum(1 for r in runs if r.consensus and r.consensus.consensus_reached)
+        mean_turns = sum(r.n_turns for r in runs) / n
+        conv_turns = [
+            r.consensus.detected_at_turn
+            for r in runs
+            if r.consensus and r.consensus.consensus_reached and r.consensus.detected_at_turn
+        ]
+        ttc = sum(conv_turns) / len(conv_turns) if conv_turns else None
+        ttc_str = f"{ttc:.1f}" if ttc is not None else "-"
+        typer.echo(
+            f"  {cond}: 収束 {n_conv}/{n} ({n_conv / n:.0%}), "
+            f"平均ターン {mean_turns:.1f}, 平均到達ターン {ttc_str}"
+        )
+
+    if judge is not None:
+        typer.echo("")
+        typer.echo("[eval] aggregated scores:")
+        for cond, agg in result.aggregate().items():
+            typer.echo(
+                f"  {cond}: 満足度 {agg.overall_satisfaction_mean:.2f}±{agg.overall_satisfaction_std:.2f}, "
+                f"反対理解 {agg.opposition_understanding_mean:.2f}±{agg.opposition_understanding_std:.2f}, "
+                f"透明性 {agg.intervention_transparency_mean:.2f}±{agg.intervention_transparency_std:.2f}"
+            )
 
 
 if __name__ == "__main__":

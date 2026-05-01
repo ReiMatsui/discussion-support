@@ -1,0 +1,1703 @@
+{
+  "nodes": [
+    {
+      "id": "8da668a6-7dae-4e9f-98e9-b13bd68df75f",
+      "text": "バイオプラスチックは、バイオマス由来の原料から作られたプラスチックの総称である",
+      "node_type": "premise",
+      "source": "document",
+      "author": "bioplastic_overview",
+      "timestamp": "2026-05-01T08:27:15.788585Z",
+      "metadata": {
+        "doc_id": "bioplastic_overview",
+        "source_path": "data/docs/bioplastic_overview.md"
+      }
+    },
+    {
+      "id": "afe688d5-72e4-4417-925a-ff47d9ef7483",
+      "text": "代表的な素材として PLA (ポリ乳酸) と PBS (ポリブチレンサクシネート) がある",
+      "node_type": "premise",
+      "source": "document",
+      "author": "bioplastic_overview",
+      "timestamp": "2026-05-01T08:27:15.788828Z",
+      "metadata": {
+        "doc_id": "bioplastic_overview",
+        "source_path": "data/docs/bioplastic_overview.md"
+      }
+    },
+    {
+      "id": "91c58919-a0d1-443a-9e7e-669b447b9673",
+      "text": "最新世代のバイオプラ容器は、従来の石油由来プラスチックと比べて約 +40% のコストで製造可能になっている",
+      "node_type": "premise",
+      "source": "document",
+      "author": "bioplastic_overview",
+      "timestamp": "2026-05-01T08:27:15.788900Z",
+      "metadata": {
+        "doc_id": "bioplastic_overview",
+        "source_path": "data/docs/bioplastic_overview.md"
+      }
+    },
+    {
+      "id": "ed4917df-b54d-4658-aceb-732aee1ef82c",
+      "text": "コストギャップは 5 年前と比べて大幅に縮小している",
+      "node_type": "premise",
+      "source": "document",
+      "author": "bioplastic_overview",
+      "timestamp": "2026-05-01T08:27:15.788952Z",
+      "metadata": {
+        "doc_id": "bioplastic_overview",
+        "source_path": "data/docs/bioplastic_overview.md"
+      }
+    },
+    {
+      "id": "a8534752-4ca7-4203-b422-52e4220ec5f9",
+      "text": "生分解には高温堆肥化施設が必要である",
+      "node_type": "premise",
+      "source": "document",
+      "author": "bioplastic_overview",
+      "timestamp": "2026-05-01T08:27:15.788995Z",
+      "metadata": {
+        "doc_id": "bioplastic_overview",
+        "source_path": "data/docs/bioplastic_overview.md"
+      }
+    },
+    {
+      "id": "f9957f67-9dd6-47f2-b885-0fdff118eaa4",
+      "text": "家庭用ゴミとして処理した場合は通常のプラスチックと同様に環境負荷を持つ可能性がある",
+      "node_type": "premise",
+      "source": "document",
+      "author": "bioplastic_overview",
+      "timestamp": "2026-05-01T08:27:15.789033Z",
+      "metadata": {
+        "doc_id": "bioplastic_overview",
+        "source_path": "data/docs/bioplastic_overview.md"
+      }
+    },
+    {
+      "id": "ecfa9f6d-5c9c-430f-ac84-418262324ceb",
+      "text": "バイオプラスチックは「廃止」と「現状維持」の中間にある第 3 の選択肢として位置づけることができる",
+      "node_type": "claim",
+      "source": "document",
+      "author": "bioplastic_overview",
+      "timestamp": "2026-05-01T08:27:15.789072Z",
+      "metadata": {
+        "doc_id": "bioplastic_overview",
+        "source_path": "data/docs/bioplastic_overview.md"
+      }
+    },
+    {
+      "id": "294c7178-9028-4e27-9b43-91d2a972d8ff",
+      "text": "回収・処理の仕組みが整っていない環境ではメリットを十分に発揮できない",
+      "node_type": "claim",
+      "source": "document",
+      "author": "bioplastic_overview",
+      "timestamp": "2026-05-01T08:27:15.789106Z",
+      "metadata": {
+        "doc_id": "bioplastic_overview",
+        "source_path": "data/docs/bioplastic_overview.md"
+      }
+    },
+    {
+      "id": "7b15a6eb-ba50-45e4-8495-ee0bb5597b16",
+      "text": "学食メニュー 1 食あたりのコスト構成は、食材費が約 50%、人件費が約 25%、光熱費・什器費が約 15%、容器・備品費が約 10% である",
+      "node_type": "premise",
+      "source": "document",
+      "author": "cafeteria_cost_structure",
+      "timestamp": "2026-05-01T08:27:21.558898Z",
+      "metadata": {
+        "doc_id": "cafeteria_cost_structure",
+        "source_path": "data/docs/cafeteria_cost_structure.md"
+      }
+    },
+    {
+      "id": "fd930b4a-6773-4172-8150-808ffb2ab366",
+      "text": "容器費が 3 倍に増加した場合、メニュー単価への影響は理論上 +20% となる",
+      "node_type": "premise",
+      "source": "document",
+      "author": "cafeteria_cost_structure",
+      "timestamp": "2026-05-01T08:27:21.559103Z",
+      "metadata": {
+        "doc_id": "cafeteria_cost_structure",
+        "source_path": "data/docs/cafeteria_cost_structure.md"
+      }
+    },
+    {
+      "id": "9dbe07fa-593c-4d07-8bc5-0e9d6e4392f7",
+      "text": "これは他項目を一切調整しない場合のシナリオである",
+      "node_type": "premise",
+      "source": "document",
+      "author": "cafeteria_cost_structure",
+      "timestamp": "2026-05-01T08:27:21.559176Z",
+      "metadata": {
+        "doc_id": "cafeteria_cost_structure",
+        "source_path": "data/docs/cafeteria_cost_structure.md"
+      }
+    },
+    {
+      "id": "e88c7f36-e18c-4009-9529-bf134336f79e",
+      "text": "実際には食材調達の最適化、メニュー構成の見直し、提供量調整などで部分的に吸収できる",
+      "node_type": "premise",
+      "source": "document",
+      "author": "cafeteria_cost_structure",
+      "timestamp": "2026-05-01T08:27:21.559229Z",
+      "metadata": {
+        "doc_id": "cafeteria_cost_structure",
+        "source_path": "data/docs/cafeteria_cost_structure.md"
+      }
+    },
+    {
+      "id": "7b00ba56-3640-4599-bfc6-104d7055caf9",
+      "text": "過去事例では、紙容器への移行直後に値上げを実施した大学は 3 校中 2 校で、いずれも 2 年以内に元の価格水準まで戻している",
+      "node_type": "premise",
+      "source": "document",
+      "author": "cafeteria_cost_structure",
+      "timestamp": "2026-05-01T08:27:21.559272Z",
+      "metadata": {
+        "doc_id": "cafeteria_cost_structure",
+        "source_path": "data/docs/cafeteria_cost_structure.md"
+      }
+    },
+    {
+      "id": "8b1150a5-1ee9-4e44-bbb7-1fe00de2286b",
+      "text": "「コスト増 = 永続的な値上げ」という単純な対応関係は成立しないと言える",
+      "node_type": "claim",
+      "source": "document",
+      "author": "cafeteria_cost_structure",
+      "timestamp": "2026-05-01T08:27:21.559313Z",
+      "metadata": {
+        "doc_id": "cafeteria_cost_structure",
+        "source_path": "data/docs/cafeteria_cost_structure.md"
+      }
+    },
+    {
+      "id": "dd4d89a9-fc24-4634-a7c1-6ed1b4e94f55",
+      "text": "国内の大学キャンパスにおけるプラスチック廃棄物のうち、カフェテリア由来の使い捨て容器が占める割合は平均 18% とされる",
+      "node_type": "premise",
+      "source": "document",
+      "author": "plastic_waste_statistics",
+      "timestamp": "2026-05-01T08:27:25.226524Z",
+      "metadata": {
+        "doc_id": "plastic_waste_statistics",
+        "source_path": "data/docs/plastic_waste_statistics.md"
+      }
+    },
+    {
+      "id": "1847e3cb-cf10-4bfb-9999-ed81b56d33fb",
+      "text": "中規模大学 (学生数 5,000-10,000) のカフェテリアでは年間 1.5〜2.5 トンのプラスチック廃棄物が発生する",
+      "node_type": "premise",
+      "source": "document",
+      "author": "plastic_waste_statistics",
+      "timestamp": "2026-05-01T08:27:25.226738Z",
+      "metadata": {
+        "doc_id": "plastic_waste_statistics",
+        "source_path": "data/docs/plastic_waste_statistics.md"
+      }
+    },
+    {
+      "id": "19320b2b-2507-44ec-8c9f-b97a9f2bc592",
+      "text": "リサイクル率は容器の汚染度に左右され、食品残渣が付着した使い捨て容器のリサイクル率は 12% にとどまる",
+      "node_type": "premise",
+      "source": "document",
+      "author": "plastic_waste_statistics",
+      "timestamp": "2026-05-01T08:27:25.226809Z",
+      "metadata": {
+        "doc_id": "plastic_waste_statistics",
+        "source_path": "data/docs/plastic_waste_statistics.md"
+      }
+    },
+    {
+      "id": "65d407de-f71c-4a0b-949c-7a956ff49942",
+      "text": "残りはサーマルリサイクルもしくは埋め立て処理となる",
+      "node_type": "premise",
+      "source": "document",
+      "author": "plastic_waste_statistics",
+      "timestamp": "2026-05-01T08:27:25.226862Z",
+      "metadata": {
+        "doc_id": "plastic_waste_statistics",
+        "source_path": "data/docs/plastic_waste_statistics.md"
+      }
+    },
+    {
+      "id": "1e07adb3-4795-48f8-9ca3-3eb3abf8a884",
+      "text": "カフェテリア単位での容器素材変更が、キャンパス全体のプラスチック廃棄量削減に直接寄与することを示している",
+      "node_type": "claim",
+      "source": "document",
+      "author": "plastic_waste_statistics",
+      "timestamp": "2026-05-01T08:27:25.226936Z",
+      "metadata": {
+        "doc_id": "plastic_waste_statistics",
+        "source_path": "data/docs/plastic_waste_statistics.md"
+      }
+    },
+    {
+      "id": "22413f52-4802-46c8-ba13-6099751a37eb",
+      "text": "X 大学のカフェテリアは 2019 年にプラスチック容器を全面廃止し、紙容器へ移行した",
+      "node_type": "premise",
+      "source": "document",
+      "author": "x_university_case_study",
+      "timestamp": "2026-05-01T08:27:29.507906Z",
+      "metadata": {
+        "doc_id": "x_university_case_study",
+        "source_path": "data/docs/x_university_case_study.md"
+      }
+    },
+    {
+      "id": "51be4f2b-b726-4cdb-b2b2-adc33f5eaac7",
+      "text": "導入初年度は容器コストが約 3 倍に膨らみ、学食メニューの一部に値上げ圧力がかかった",
+      "node_type": "premise",
+      "source": "document",
+      "author": "x_university_case_study",
+      "timestamp": "2026-05-01T08:27:29.508133Z",
+      "metadata": {
+        "doc_id": "x_university_case_study",
+        "source_path": "data/docs/x_university_case_study.md"
+      }
+    },
+    {
+      "id": "da3c1df7-587b-4ec8-9c6c-5f851f82dc23",
+      "text": "2 年目には仕入れルートの最適化と紙容器メーカーとの長期契約締結により、容器コストは従来比 1.2 倍まで低下した",
+      "node_type": "premise",
+      "source": "document",
+      "author": "x_university_case_study",
+      "timestamp": "2026-05-01T08:27:29.508265Z",
+      "metadata": {
+        "doc_id": "x_university_case_study",
+        "source_path": "data/docs/x_university_case_study.md"
+      }
+    },
+    {
+      "id": "a893a123-e153-4885-8cd2-6b17a9f717f5",
+      "text": "3 年目には学食価格を導入前水準に戻し、紙容器分のコスト増は他のオペレーション効率化で吸収できた",
+      "node_type": "premise",
+      "source": "document",
+      "author": "x_university_case_study",
+      "timestamp": "2026-05-01T08:27:29.508374Z",
+      "metadata": {
+        "doc_id": "x_university_case_study",
+        "source_path": "data/docs/x_university_case_study.md"
+      }
+    },
+    {
+      "id": "965dcf98-184c-40ba-84c2-352de7f33c89",
+      "text": "紙容器への移行に伴うコスト増は短期的なものであり、長期的には持続可能な選択肢である",
+      "node_type": "claim",
+      "source": "document",
+      "author": "x_university_case_study",
+      "timestamp": "2026-05-01T08:27:29.508442Z",
+      "metadata": {
+        "doc_id": "x_university_case_study",
+        "source_path": "data/docs/x_university_case_study.md"
+      }
+    },
+    {
+      "id": "9f54a65e-b694-4da7-bafe-f518f367a54e",
+      "text": "学生からのアンケートでも、3 年目の段階で紙容器への切り替えに対する満足度が 78% に達している",
+      "node_type": "premise",
+      "source": "document",
+      "author": "x_university_case_study",
+      "timestamp": "2026-05-01T08:27:29.508496Z",
+      "metadata": {
+        "doc_id": "x_university_case_study",
+        "source_path": "data/docs/x_university_case_study.md"
+      }
+    },
+    {
+      "id": "9a895a6d-e897-4c9c-8f4f-7cc7a95f8d26",
+      "text": "大学のカフェテリアでプラスチック容器を廃止するべき",
+      "node_type": "claim",
+      "source": "utterance",
+      "author": "A",
+      "timestamp": "2026-05-01T08:27:30.901148Z",
+      "metadata": {
+        "turn_id": 1
+      }
+    },
+    {
+      "id": "8926cf9e-8f28-421c-907b-e95d39abf204",
+      "text": "環境負荷を減らし、持続可能な未来を築くために、今こそ行動を起こす必要がある",
+      "node_type": "premise",
+      "source": "utterance",
+      "author": "A",
+      "timestamp": "2026-05-01T08:27:30.901148Z",
+      "metadata": {
+        "turn_id": 1
+      }
+    },
+    {
+      "id": "b88c065e-4606-42c7-b4a7-50fa7ee0ec67",
+      "text": "環境負荷を減らすことは重要",
+      "node_type": "claim",
+      "source": "utterance",
+      "author": "B",
+      "timestamp": "2026-05-01T08:27:45.380801Z",
+      "metadata": {
+        "turn_id": 2
+      }
+    },
+    {
+      "id": "8ca96d1b-83aa-4f52-afa6-17bde8332010",
+      "text": "プラスチック容器を廃止することによるコスト増加が学生に経済的負担を強いる",
+      "node_type": "premise",
+      "source": "utterance",
+      "author": "B",
+      "timestamp": "2026-05-01T08:27:45.380801Z",
+      "metadata": {
+        "turn_id": 2
+      }
+    },
+    {
+      "id": "0f4a11a3-dd19-4d7b-9c5d-f4a4bf604982",
+      "text": "現状の価格を維持することが学生にとって最も大切な要素",
+      "node_type": "premise",
+      "source": "utterance",
+      "author": "B",
+      "timestamp": "2026-05-01T08:27:45.380801Z",
+      "metadata": {
+        "turn_id": 2
+      }
+    },
+    {
+      "id": "a0ae6447-4cf6-4da7-9656-b04e1e0315bc",
+      "text": "プラスチック容器を廃止することが環境に与える影響は大きい",
+      "node_type": "premise",
+      "source": "utterance",
+      "author": "C",
+      "timestamp": "2026-05-01T08:27:59.080845Z",
+      "metadata": {
+        "turn_id": 3
+      }
+    },
+    {
+      "id": "4435a59d-1db2-4f03-8a10-a194ce4fbf03",
+      "text": "コストの問題も無視できない",
+      "node_type": "premise",
+      "source": "utterance",
+      "author": "C",
+      "timestamp": "2026-05-01T08:27:59.080845Z",
+      "metadata": {
+        "turn_id": 3
+      }
+    },
+    {
+      "id": "b15d1e99-e387-440c-9a23-3386962fbaa0",
+      "text": "過去の事例から、紙容器への移行が最終的には価格を維持できた",
+      "node_type": "premise",
+      "source": "utterance",
+      "author": "C",
+      "timestamp": "2026-05-01T08:27:59.080845Z",
+      "metadata": {
+        "turn_id": 3
+      }
+    },
+    {
+      "id": "613722b3-4a62-4946-8176-2933019a3f25",
+      "text": "効率化や他の選択肢を模索する余地があるかもしれない",
+      "node_type": "claim",
+      "source": "utterance",
+      "author": "C",
+      "timestamp": "2026-05-01T08:27:59.080845Z",
+      "metadata": {
+        "turn_id": 3
+      }
+    },
+    {
+      "id": "84e84b26-ab5b-49d6-9d12-78696e70dffd",
+      "text": "コストは重要な要素である",
+      "node_type": "premise",
+      "source": "utterance",
+      "author": "A",
+      "timestamp": "2026-05-01T08:28:13.678383Z",
+      "metadata": {
+        "turn_id": 4
+      }
+    },
+    {
+      "id": "6d0ba319-c967-479d-8eca-2c90c8128adc",
+      "text": "プラスチック容器の廃止は環境への負荷を軽減する",
+      "node_type": "premise",
+      "source": "utterance",
+      "author": "A",
+      "timestamp": "2026-05-01T08:28:13.678383Z",
+      "metadata": {
+        "turn_id": 4
+      }
+    },
+    {
+      "id": "89c8ad22-4150-422e-82b0-e738d13bb08d",
+      "text": "プラスチック容器の廃止は持続可能な社会を実現するための第一歩である",
+      "node_type": "claim",
+      "source": "utterance",
+      "author": "A",
+      "timestamp": "2026-05-01T08:28:13.678383Z",
+      "metadata": {
+        "turn_id": 4
+      }
+    },
+    {
+      "id": "b8317015-cb49-4666-9163-3ef7ece15dc7",
+      "text": "代替策としてバイオマスプラスチックやリサイクル可能な素材への切り替えが考えられる",
+      "node_type": "premise",
+      "source": "utterance",
+      "author": "A",
+      "timestamp": "2026-05-01T08:28:13.678383Z",
+      "metadata": {
+        "turn_id": 4
+      }
+    },
+    {
+      "id": "bb8f4743-45ec-44f2-87a6-19e8f1e606bc",
+      "text": "これらの選択肢を真剣に検討すべきである",
+      "node_type": "claim",
+      "source": "utterance",
+      "author": "A",
+      "timestamp": "2026-05-01T08:28:13.678383Z",
+      "metadata": {
+        "turn_id": 4
+      }
+    },
+    {
+      "id": "674b1fc2-900e-4a3f-8f5d-b20fe90da5bf",
+      "text": "持続可能な社会を実現することは重要",
+      "node_type": "claim",
+      "source": "utterance",
+      "author": "B",
+      "timestamp": "2026-05-01T08:28:32.513483Z",
+      "metadata": {
+        "turn_id": 5
+      }
+    },
+    {
+      "id": "3c6c6470-871f-4e36-909d-e0896c35f0dc",
+      "text": "学生にとっての経済的負担が最優先",
+      "node_type": "claim",
+      "source": "utterance",
+      "author": "B",
+      "timestamp": "2026-05-01T08:28:32.513483Z",
+      "metadata": {
+        "turn_id": 5
+      }
+    },
+    {
+      "id": "07019d04-ce34-4870-bdc2-fb734d798887",
+      "text": "バイオマスプラスチックやリサイクル素材についてのコストがどれほどになるか、具体的な試算がない限り、安易に移行を進めるべきではない",
+      "node_type": "claim",
+      "source": "utterance",
+      "author": "B",
+      "timestamp": "2026-05-01T08:28:32.513483Z",
+      "metadata": {
+        "turn_id": 5
+      }
+    },
+    {
+      "id": "dab42ecd-d8fb-467d-867e-7d35a754438d",
+      "text": "コストの問題は確かに重要である",
+      "node_type": "claim",
+      "source": "utterance",
+      "author": "C",
+      "timestamp": "2026-05-01T08:28:50.257034Z",
+      "metadata": {
+        "turn_id": 6
+      }
+    },
+    {
+      "id": "947ad2cc-1853-4e7d-af5b-d076a476c4bc",
+      "text": "バイオマスプラスチックやリサイクル素材の具体的なコストについて調査し、学生への影響を明確にすることが必要である",
+      "node_type": "claim",
+      "source": "utterance",
+      "author": "C",
+      "timestamp": "2026-05-01T08:28:50.257034Z",
+      "metadata": {
+        "turn_id": 6
+      }
+    },
+    {
+      "id": "7517d89d-5b7e-4dec-93bd-168d604b808e",
+      "text": "短期的なコストだけでなく、長期的な環境利益を考慮した上での選択肢を議論することも大切である",
+      "node_type": "claim",
+      "source": "utterance",
+      "author": "C",
+      "timestamp": "2026-05-01T08:28:50.257034Z",
+      "metadata": {
+        "turn_id": 6
+      }
+    },
+    {
+      "id": "55e159c0-1741-4752-8446-95529eb11634",
+      "text": "プラスチック容器の廃止は環境保護だけでなく、将来的なコスト削減にもつながる可能性がある",
+      "node_type": "claim",
+      "source": "utterance",
+      "author": "A",
+      "timestamp": "2026-05-01T08:29:10.615664Z",
+      "metadata": {
+        "turn_id": 7
+      }
+    },
+    {
+      "id": "19c70b4c-150c-426b-9fdd-73d0f10c426a",
+      "text": "リサイクルシステムの導入や新しい素材の採用が進めば、経済的な負担も軽減される",
+      "node_type": "premise",
+      "source": "utterance",
+      "author": "A",
+      "timestamp": "2026-05-01T08:29:10.615664Z",
+      "metadata": {
+        "turn_id": 7
+      }
+    },
+    {
+      "id": "ec0ee308-5610-47f0-aeb6-530360fe8b9d",
+      "text": "持続可能な選択肢を模索することが重要である",
+      "node_type": "claim",
+      "source": "utterance",
+      "author": "A",
+      "timestamp": "2026-05-01T08:29:10.615664Z",
+      "metadata": {
+        "turn_id": 7
+      }
+    },
+    {
+      "id": "d505c2a1-2a66-49c5-9034-c8bc1b4b26bf",
+      "text": "長期的な視点でのコスト削減の可能性は理解する",
+      "node_type": "premise",
+      "source": "utterance",
+      "author": "B",
+      "timestamp": "2026-05-01T08:29:29.071534Z",
+      "metadata": {
+        "turn_id": 8
+      }
+    },
+    {
+      "id": "e6cb01d7-1277-4e0f-abe0-cadcfd1b2c9a",
+      "text": "短期的に学生が負担することになる経済的影響を無視するわけにはいかない",
+      "node_type": "premise",
+      "source": "utterance",
+      "author": "B",
+      "timestamp": "2026-05-01T08:29:29.071534Z",
+      "metadata": {
+        "turn_id": 8
+      }
+    },
+    {
+      "id": "48f3387a-5a1a-485c-a01d-045b5f0a485b",
+      "text": "新しいシステムや素材の導入に伴う初期投資がどれほどのものになるか、具体的な試算がない限り、安易に進めるべきではない",
+      "node_type": "claim",
+      "source": "utterance",
+      "author": "B",
+      "timestamp": "2026-05-01T08:29:29.071534Z",
+      "metadata": {
+        "turn_id": 8
+      }
+    },
+    {
+      "id": "4ef3f1ce-bca7-4d3a-aae2-b8a002bd8c90",
+      "text": "短期的なコストの懸念は理解できる",
+      "node_type": "premise",
+      "source": "utterance",
+      "author": "C",
+      "timestamp": "2026-05-01T08:29:44.743793Z",
+      "metadata": {
+        "turn_id": 9
+      }
+    },
+    {
+      "id": "bc19444d-f6b3-47ac-abe7-99003af8fca9",
+      "text": "長期的には環境保護の観点からコスト削減の可能性があることを考慮するのは重要",
+      "node_type": "claim",
+      "source": "utterance",
+      "author": "C",
+      "timestamp": "2026-05-01T08:29:44.743793Z",
+      "metadata": {
+        "turn_id": 9
+      }
+    },
+    {
+      "id": "ba2f56b3-d3f9-4286-b10f-3e8761844dc6",
+      "text": "バイオプラスチックやリサイクル素材の導入によって新たなビジネスモデルや効率化が期待できるかもしれない",
+      "node_type": "premise",
+      "source": "utterance",
+      "author": "C",
+      "timestamp": "2026-05-01T08:29:44.743793Z",
+      "metadata": {
+        "turn_id": 9
+      }
+    },
+    {
+      "id": "c79250c7-ce3d-45d1-b4b1-cbdd0339388e",
+      "text": "両者のバランスを取る方法を一緒に探ることが大切",
+      "node_type": "claim",
+      "source": "utterance",
+      "author": "C",
+      "timestamp": "2026-05-01T08:29:44.743793Z",
+      "metadata": {
+        "turn_id": 9
+      }
+    },
+    {
+      "id": "815ff5e3-1512-482e-bbf5-fc293b1ec905",
+      "text": "短期的なコストだけでなく、長期的な環境への影響を考えることが不可欠である",
+      "node_type": "claim",
+      "source": "utterance",
+      "author": "A",
+      "timestamp": "2026-05-01T08:30:01.326699Z",
+      "metadata": {
+        "turn_id": 10
+      }
+    },
+    {
+      "id": "8376ff81-8024-419f-8d4c-82e6dd04a2e7",
+      "text": "バイオマスプラスチックやリサイクル素材の導入は初期投資がかかる",
+      "node_type": "premise",
+      "source": "utterance",
+      "author": "A",
+      "timestamp": "2026-05-01T08:30:01.326699Z",
+      "metadata": {
+        "turn_id": 10
+      }
+    },
+    {
+      "id": "a4ae1867-955a-477c-9220-0905098113d0",
+      "text": "持続可能な未来を築くためには、その価値を見極める必要がある",
+      "node_type": "claim",
+      "source": "utterance",
+      "author": "A",
+      "timestamp": "2026-05-01T08:30:01.326699Z",
+      "metadata": {
+        "turn_id": 10
+      }
+    },
+    {
+      "id": "0813c04c-124a-4445-a968-f45d0e8dca3c",
+      "text": "新しい選択肢が生まれることで、経済的な負担も軽減される可能性がある",
+      "node_type": "premise",
+      "source": "utterance",
+      "author": "A",
+      "timestamp": "2026-05-01T08:30:01.326699Z",
+      "metadata": {
+        "turn_id": 10
+      }
+    },
+    {
+      "id": "e4f77df0-dd7a-4386-9be2-3de2efb44359",
+      "text": "長期的な環境利益を考えることは重要",
+      "node_type": "claim",
+      "source": "utterance",
+      "author": "B",
+      "timestamp": "2026-05-01T08:30:18.772915Z",
+      "metadata": {
+        "turn_id": 11
+      }
+    },
+    {
+      "id": "fa43cf6b-bf6c-459d-a9ce-17d2e6459ebd",
+      "text": "学生にとっての短期的な経済的負担がどれほどになるか、具体的な試算なしに進めるのは危険",
+      "node_type": "claim",
+      "source": "utterance",
+      "author": "B",
+      "timestamp": "2026-05-01T08:30:18.772915Z",
+      "metadata": {
+        "turn_id": 11
+      }
+    },
+    {
+      "id": "f16653a3-3b46-471a-b95c-953760c5ed2c",
+      "text": "初期投資が大きい場合、学生の生活を圧迫する可能性がある",
+      "node_type": "premise",
+      "source": "utterance",
+      "author": "B",
+      "timestamp": "2026-05-01T08:30:18.772915Z",
+      "metadata": {
+        "turn_id": 11
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "707224ce-c025-4d89-8425-e9233bd0ab97",
+      "src_id": "9a895a6d-e897-4c9c-8f4f-7cc7a95f8d26",
+      "dst_id": "22413f52-4802-46c8-ba13-6099751a37eb",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "Aの主張は、Bの事例を根拠にしてプラスチック容器の廃止を支持しているため、AはBを支持する関係にある。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:27:34.998662Z"
+    },
+    {
+      "id": "c6152bdc-cd94-454d-9579-187b2bf3bcbe",
+      "src_id": "8926cf9e-8f28-421c-907b-e95d39abf204",
+      "dst_id": "965dcf98-184c-40ba-84c2-352de7f33c89",
+      "relation": "support",
+      "confidence": 0.8,
+      "rationale": "Aの主張は行動を起こす必要性を強調しており、Bの紙容器への移行が持続可能な選択肢であるという点を支持する内容であるため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:27:35.075786Z"
+    },
+    {
+      "id": "eb010387-4eee-4c38-8b17-2fa7cdec587a",
+      "src_id": "9a895a6d-e897-4c9c-8f4f-7cc7a95f8d26",
+      "dst_id": "dd4d89a9-fc24-4634-a7c1-6ed1b4e94f55",
+      "relation": "support",
+      "confidence": 0.8,
+      "rationale": "Aの主張は、Bの統計データによってプラスチック容器廃止の必要性が強化されるため、AはBを支持する根拠となる。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:27:36.560492Z"
+    },
+    {
+      "id": "048a2d3c-c31c-46aa-81f3-59f97abc0274",
+      "src_id": "9a895a6d-e897-4c9c-8f4f-7cc7a95f8d26",
+      "dst_id": "1847e3cb-cf10-4bfb-9999-ed81b56d33fb",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "Aの主張は、Bの統計データによってプラスチック容器廃止の必要性が強化されるため、AはBを支持する根拠となる。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:27:37.863465Z"
+    },
+    {
+      "id": "7fd9b875-f9f1-46b4-9765-ee7ee5ab5501",
+      "src_id": "9a895a6d-e897-4c9c-8f4f-7cc7a95f8d26",
+      "dst_id": "1e07adb3-4795-48f8-9ca3-3eb3abf8a884",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "Aの主張は、Bの示す統計的根拠を支持しており、プラスチック容器の廃止が廃棄量削減に寄与することを強調しているため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:27:39.388024Z"
+    },
+    {
+      "id": "13265729-e99d-4f95-b863-c45ead58502a",
+      "src_id": "8926cf9e-8f28-421c-907b-e95d39abf204",
+      "dst_id": "9a895a6d-e897-4c9c-8f4f-7cc7a95f8d26",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "Aの主張は持続可能な未来を築くための行動を促しており、Bの提案であるプラスチック容器の廃止はその行動の一環として支持される。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:27:42.066846Z"
+    },
+    {
+      "id": "3b046004-9de3-4948-9cdb-8482df01de62",
+      "src_id": "7b00ba56-3640-4599-bfc6-104d7055caf9",
+      "dst_id": "0f4a11a3-dd19-4d7b-9c5d-f4a4bf604982",
+      "relation": "support",
+      "confidence": 0.8,
+      "rationale": "B の過去事例は、価格維持の重要性を示すものであり、A の主張を支持する根拠となる。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:27:48.618689Z"
+    },
+    {
+      "id": "66b20f94-3452-4eee-9611-703ddffd6225",
+      "src_id": "b88c065e-4606-42c7-b4a7-50fa7ee0ec67",
+      "dst_id": "8926cf9e-8f28-421c-907b-e95d39abf204",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "Aの主張は環境負荷を減らすことの重要性を述べており、Bの行動を促す主張を支持する根拠となる。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:27:48.624559Z"
+    },
+    {
+      "id": "b02472c6-87f6-43a7-8cd2-95a34782c608",
+      "src_id": "8ca96d1b-83aa-4f52-afa6-17bde8332010",
+      "dst_id": "9a895a6d-e897-4c9c-8f4f-7cc7a95f8d26",
+      "relation": "attack",
+      "confidence": 0.9,
+      "rationale": "Aはプラスチック容器の廃止が経済的負担を強いると主張しており、Bの提案を否定する内容であるため、AはBに対して反論している。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:27:49.743279Z"
+    },
+    {
+      "id": "2ead10fe-db97-4507-9f0c-0e613448f6db",
+      "src_id": "0f4a11a3-dd19-4d7b-9c5d-f4a4bf604982",
+      "dst_id": "8b1150a5-1ee9-4e44-bbb7-1fe00de2286b",
+      "relation": "attack",
+      "confidence": 0.8,
+      "rationale": "A の主張は価格維持の重要性を強調しているが、B の主張はコスト増が必ずしも値上げにつながるわけではないと反論しているため、A は B を否定する関係にある。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:27:50.243747Z"
+    },
+    {
+      "id": "e2f530ba-e122-428b-8d7e-48e32661dea2",
+      "src_id": "22413f52-4802-46c8-ba13-6099751a37eb",
+      "dst_id": "8ca96d1b-83aa-4f52-afa6-17bde8332010",
+      "relation": "attack",
+      "confidence": 0.8,
+      "rationale": "B の事例は、プラスチック容器を廃止した結果としてのコスト増加を示しており、A の主張する経済的負担を否定する根拠となるため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:27:51.486526Z"
+    },
+    {
+      "id": "7e58837a-14d2-42f3-970d-5096b1a4de75",
+      "src_id": "0f4a11a3-dd19-4d7b-9c5d-f4a4bf604982",
+      "dst_id": "8ca96d1b-83aa-4f52-afa6-17bde8332010",
+      "relation": "attack",
+      "confidence": 0.8,
+      "rationale": "Aの主張は価格維持が重要であることを示しており、Bの主張は廃止によるコスト増加が学生に負担をかけると述べているため、AはBの主張を反論している。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:27:52.099050Z"
+    },
+    {
+      "id": "115f4eca-c9f3-47c9-95d0-95a23a742cd5",
+      "src_id": "b88c065e-4606-42c7-b4a7-50fa7ee0ec67",
+      "dst_id": "1e07adb3-4795-48f8-9ca3-3eb3abf8a884",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "Aの主張は環境負荷の重要性を述べており、Bの主張は具体的な行動がその環境負荷削減に寄与することを示しているため、AはBを支持する。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:27:53.641995Z"
+    },
+    {
+      "id": "41e12a8f-5bc6-4d63-996b-b8edc3ede92f",
+      "src_id": "a893a123-e153-4885-8cd2-6b17a9f717f5",
+      "dst_id": "0f4a11a3-dd19-4d7b-9c5d-f4a4bf604982",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "Bの事例は、学食価格が導入前水準に戻ることを示しており、Aの主張である「現状の価格を維持することが学生にとって最も大切な要素」を支持する根拠となる。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:27:54.241407Z"
+    },
+    {
+      "id": "87d90538-6f3b-4b85-bd00-ed87428be8c6",
+      "src_id": "b88c065e-4606-42c7-b4a7-50fa7ee0ec67",
+      "dst_id": "9a895a6d-e897-4c9c-8f4f-7cc7a95f8d26",
+      "relation": "support",
+      "confidence": 0.8,
+      "rationale": "Aの主張は環境負荷を減らすことの重要性を示しており、Bの提案であるプラスチック容器の廃止はその目的に沿った行動であるため、AはBを支持している。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:27:55.441951Z"
+    },
+    {
+      "id": "ee1cc4bb-9ad9-4c24-bc1c-18aed07561d9",
+      "src_id": "0f4a11a3-dd19-4d7b-9c5d-f4a4bf604982",
+      "dst_id": "51be4f2b-b726-4cdb-b2b2-adc33f5eaac7",
+      "relation": "attack",
+      "confidence": 0.9,
+      "rationale": "Aの主張は価格維持が重要であることを示しているが、Bはその価格維持が困難である理由を示しているため、Aの主張を反論している。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:27:55.635209Z"
+    },
+    {
+      "id": "c4859d77-2a3a-45c0-b49c-97fae466667c",
+      "src_id": "8ca96d1b-83aa-4f52-afa6-17bde8332010",
+      "dst_id": "1e07adb3-4795-48f8-9ca3-3eb3abf8a884",
+      "relation": "attack",
+      "confidence": 0.8,
+      "rationale": "Aはプラスチック容器廃止によるコスト増加が学生に負担をかけると主張しており、Bの提案がその経済的影響を無視しているため、AはBに対する反論となる。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:27:57.090379Z"
+    },
+    {
+      "id": "297849aa-7191-49d6-9266-9fc01fc9976f",
+      "src_id": "613722b3-4a62-4946-8176-2933019a3f25",
+      "dst_id": "e88c7f36-e18c-4009-9529-bf134336f79e",
+      "relation": "support",
+      "confidence": 0.8,
+      "rationale": "A の発言は、効率化の可能性を示唆しており、B の具体的な方法論（調達の最適化やメニュー構成の見直し）を支持する内容であるため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:03.058242Z"
+    },
+    {
+      "id": "30916a5f-7005-4cc9-9528-1fcbf7fb6c4d",
+      "src_id": "b15d1e99-e387-440c-9a23-3386962fbaa0",
+      "dst_id": "965dcf98-184c-40ba-84c2-352de7f33c89",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "A の事例は、紙容器への移行が価格を維持できることを示しており、B の主張である長期的な持続可能性を支持する根拠となる。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:03.363119Z"
+    },
+    {
+      "id": "ff5fe9e0-3418-4d8d-bae8-7003423520e3",
+      "src_id": "4435a59d-1db2-4f03-8a10-a194ce4fbf03",
+      "dst_id": "8b1150a5-1ee9-4e44-bbb7-1fe00de2286b",
+      "relation": "attack",
+      "confidence": 0.8,
+      "rationale": "A のコストの問題を指摘する発言は、B の主張である「コスト増が必ずしも値上げにつながる」という考えに対する反論となるため、A は B を攻撃している。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:04.285123Z"
+    },
+    {
+      "id": "63761720-e18d-476c-9474-7df3a0bc533b",
+      "src_id": "a0ae6447-4cf6-4da7-9656-b04e1e0315bc",
+      "dst_id": "9a895a6d-e897-4c9c-8f4f-7cc7a95f8d26",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "Aの主張はプラスチック容器廃止の環境への影響を強調しており、Bの提案を支持する根拠となる。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:04.669155Z"
+    },
+    {
+      "id": "f49b1058-9734-4ca7-866e-b31dfb5a2901",
+      "src_id": "b15d1e99-e387-440c-9a23-3386962fbaa0",
+      "dst_id": "7b00ba56-3640-4599-bfc6-104d7055caf9",
+      "relation": "support",
+      "confidence": 0.8,
+      "rationale": "A の主張は、紙容器への移行が価格を維持できたという事例を示しており、B の具体的な事例がその主張を補強しているため、A は B を支持する関係にある。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:05.204133Z"
+    },
+    {
+      "id": "066be16c-e926-4ab4-acff-7c0af4c1ba29",
+      "src_id": "a0ae6447-4cf6-4da7-9656-b04e1e0315bc",
+      "dst_id": "1e07adb3-4795-48f8-9ca3-3eb3abf8a884",
+      "relation": "support",
+      "confidence": 0.8,
+      "rationale": "Aの主張はプラスチック容器廃止の環境への影響を強調しており、Bの具体的な事例はその影響を示す根拠となるため、AはBを支持している。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:06.544480Z"
+    },
+    {
+      "id": "77702403-bd1b-47a8-ae3d-22c2d01b2c10",
+      "src_id": "b15d1e99-e387-440c-9a23-3386962fbaa0",
+      "dst_id": "da3c1df7-587b-4ec8-9c6c-5f851f82dc23",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "A の主張は紙容器への移行が価格を維持できたことを示しており、B の具体的な事例はその主張を補強する根拠となるため、A は B を支持する。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:07.254120Z"
+    },
+    {
+      "id": "2d476f51-77be-4321-895c-02e8ac484be9",
+      "src_id": "4435a59d-1db2-4f03-8a10-a194ce4fbf03",
+      "dst_id": "965dcf98-184c-40ba-84c2-352de7f33c89",
+      "relation": "attack",
+      "confidence": 0.8,
+      "rationale": "A の主張はコストの問題を強調しており、B の主張が短期的なコスト増を軽視していることに対する反論となるため、A は B を攻撃している。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:07.767555Z"
+    },
+    {
+      "id": "5a9494fc-37b9-4f84-9d03-8e8a456d18b2",
+      "src_id": "a0ae6447-4cf6-4da7-9656-b04e1e0315bc",
+      "dst_id": "22413f52-4802-46c8-ba13-6099751a37eb",
+      "relation": "support",
+      "confidence": 0.8,
+      "rationale": "A の主張はプラスチック容器廃止の環境への影響を強調しており、B の事例はその影響を具体的に示すものであるため、A は B を支持する。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:08.271934Z"
+    },
+    {
+      "id": "da9e6a9d-6e0f-4e74-880f-902a41d82301",
+      "src_id": "b15d1e99-e387-440c-9a23-3386962fbaa0",
+      "dst_id": "a893a123-e153-4885-8cd2-6b17a9f717f5",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "A の主張は紙容器への移行が価格を維持できることを示しており、B の具体的な事例はその主張を支持する根拠となるため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:08.791956Z"
+    },
+    {
+      "id": "6b1e1ecd-9663-440e-a21c-db1a1f1e3a0f",
+      "src_id": "a0ae6447-4cf6-4da7-9656-b04e1e0315bc",
+      "dst_id": "f9957f67-9dd6-47f2-b885-0fdff118eaa4",
+      "relation": "attack",
+      "confidence": 0.8,
+      "rationale": "Aはプラスチック容器の廃止が環境に良い影響を与えると主張しているのに対し、Bはその廃止が環境負荷を持つ可能性があると述べており、Aの主張を否定する内容であるため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:10.505967Z"
+    },
+    {
+      "id": "a75d1c00-2414-4016-82b2-e00f47d1da41",
+      "src_id": "b15d1e99-e387-440c-9a23-3386962fbaa0",
+      "dst_id": "51be4f2b-b726-4cdb-b2b2-adc33f5eaac7",
+      "relation": "attack",
+      "confidence": 0.9,
+      "rationale": "A の事例は、紙容器への移行が最終的に価格を維持できたことを示しており、B の主張する初年度のコスト増加による値上げ圧力を反証しているため、A は B に対する反論となる。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:10.847078Z"
+    },
+    {
+      "id": "1e8377c1-64b6-466a-b84c-6efbd3be0875",
+      "src_id": "b8317015-cb49-4666-9163-3ef7ece15dc7",
+      "dst_id": "ecfa9f6d-5c9c-430f-ac84-418262324ceb",
+      "relation": "support",
+      "confidence": 0.8,
+      "rationale": "A の提案する代替策としてのバイオマスプラスチックは、B の主張する第 3 の選択肢としての位置づけを支持する内容であるため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:19.415603Z"
+    },
+    {
+      "id": "09219143-cf55-46e8-ac9f-ba2d0b3f9638",
+      "src_id": "89c8ad22-4150-422e-82b0-e738d13bb08d",
+      "dst_id": "6d0ba319-c967-479d-8eca-2c90c8128adc",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "A の主張はプラスチック容器の廃止が持続可能な社会に寄与することを示しており、B の主張である環境への負荷軽減を支持する内容であるため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:19.646139Z"
+    },
+    {
+      "id": "6eed15f9-e9a4-4aca-ae91-7c97a8a84242",
+      "src_id": "b8317015-cb49-4666-9163-3ef7ece15dc7",
+      "dst_id": "6d0ba319-c967-479d-8eca-2c90c8128adc",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "A の提案する代替策は、B の主張するプラスチック容器廃止による環境負荷軽減を支持する根拠となるため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:20.961708Z"
+    },
+    {
+      "id": "4179b06e-69d8-4195-8602-9820c0d44695",
+      "src_id": "6d0ba319-c967-479d-8eca-2c90c8128adc",
+      "dst_id": "8ca96d1b-83aa-4f52-afa6-17bde8332010",
+      "relation": "attack",
+      "confidence": 0.9,
+      "rationale": "Aの主張はプラスチック容器の廃止が環境に良い影響を与えることを示しており、Bの主張であるコスト増加が経済的負担を強いるという点を反論している。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:22.042404Z"
+    },
+    {
+      "id": "da72491e-07e5-4f5b-b427-d5f5f85374fb",
+      "src_id": "89c8ad22-4150-422e-82b0-e738d13bb08d",
+      "dst_id": "a0ae6447-4cf6-4da7-9656-b04e1e0315bc",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "Aの主張はプラスチック容器の廃止が持続可能な社会に寄与することを示しており、Bの主張である環境への影響の大きさを支持する根拠となる。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:22.415338Z"
+    },
+    {
+      "id": "d45ebd49-c274-4f43-ad90-640611830713",
+      "src_id": "6d0ba319-c967-479d-8eca-2c90c8128adc",
+      "dst_id": "89c8ad22-4150-422e-82b0-e738d13bb08d",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "A の主張はプラスチック容器の廃止が環境負荷を軽減することを示しており、B の主張である持続可能な社会の実現に向けた第一歩を支持する内容であるため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:24.383404Z"
+    },
+    {
+      "id": "ab1a6dfa-412d-459c-b570-f7fc10d21b2b",
+      "src_id": "84e84b26-ab5b-49d6-9d12-78696e70dffd",
+      "dst_id": "8b1150a5-1ee9-4e44-bbb7-1fe00de2286b",
+      "relation": "attack",
+      "confidence": 0.8,
+      "rationale": "Aの主張はコストの重要性を強調しているが、Bはコスト増が必ずしも値上げにつながらないと反論しているため、AはBに対して攻撃的な立場を取っている。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:24.583344Z"
+    },
+    {
+      "id": "101e2d19-6347-4b94-a661-b0b606885d72",
+      "src_id": "b8317015-cb49-4666-9163-3ef7ece15dc7",
+      "dst_id": "89c8ad22-4150-422e-82b0-e738d13bb08d",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "A の提案する代替策は、B の主張するプラスチック容器廃止の目的を支持する根拠となるため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:24.687830Z"
+    },
+    {
+      "id": "1a1ad4de-5856-440d-be68-b327db799c75",
+      "src_id": "89c8ad22-4150-422e-82b0-e738d13bb08d",
+      "dst_id": "9a895a6d-e897-4c9c-8f4f-7cc7a95f8d26",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "Aの主張はプラスチック容器の廃止が持続可能な社会に寄与することを示しており、Bの主張である大学のカフェテリアでの廃止を支持する根拠となる。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:25.824828Z"
+    },
+    {
+      "id": "3fa3f713-e712-4b32-a626-f21797fbc559",
+      "src_id": "6d0ba319-c967-479d-8eca-2c90c8128adc",
+      "dst_id": "9a895a6d-e897-4c9c-8f4f-7cc7a95f8d26",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "Aの主張はプラスチック容器の廃止が環境に良い影響を与えることを示しており、Bの主張である大学のカフェテリアでの廃止を支持する根拠となる。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:26.916023Z"
+    },
+    {
+      "id": "c0c08a66-3a36-47ec-a6d4-6228fb1189e3",
+      "src_id": "89c8ad22-4150-422e-82b0-e738d13bb08d",
+      "dst_id": "8ca96d1b-83aa-4f52-afa6-17bde8332010",
+      "relation": "attack",
+      "confidence": 0.9,
+      "rationale": "Aの主張はプラスチック容器の廃止が持続可能性に寄与することを強調しており、Bのコスト増加による経済的負担の主張を否定する方向性があるため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:27.700685Z"
+    },
+    {
+      "id": "09dc473f-7886-4704-a20a-6aea88675a03",
+      "src_id": "6d0ba319-c967-479d-8eca-2c90c8128adc",
+      "dst_id": "b88c065e-4606-42c7-b4a7-50fa7ee0ec67",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "Aの主張はプラスチック容器の廃止が環境負荷を軽減することを示しており、Bの主張である環境負荷を減らすことの重要性を支持する内容であるため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:28.964291Z"
+    },
+    {
+      "id": "16cf55ab-c9ed-45c3-9aaf-ef0f0e45e2c6",
+      "src_id": "674b1fc2-900e-4a3f-8f5d-b20fe90da5bf",
+      "dst_id": "8926cf9e-8f28-421c-907b-e95d39abf204",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "A の主張は持続可能な社会の重要性を強調しており、B の行動を促す主張を支持する内容であるため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:36.114624Z"
+    },
+    {
+      "id": "006406ed-7f65-4997-8f06-9625ffca9e81",
+      "src_id": "07019d04-ce34-4870-bdc2-fb734d798887",
+      "dst_id": "b8317015-cb49-4666-9163-3ef7ece15dc7",
+      "relation": "attack",
+      "confidence": 0.9,
+      "rationale": "Aは具体的な試算がない限り、バイオマスプラスチックやリサイクル素材への移行を進めるべきではないと主張しており、Bの代替策提案に対して反論している。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:36.689330Z"
+    },
+    {
+      "id": "f10b5692-24f5-4b22-ad11-fb9632ccc84f",
+      "src_id": "3c6c6470-871f-4e36-909d-e0896c35f0dc",
+      "dst_id": "0f4a11a3-dd19-4d7b-9c5d-f4a4bf604982",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "A の主張は学生の経済的負担を重視しており、B の主張も価格維持が学生にとって重要であるため、A は B を支持する根拠となる。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:36.863121Z"
+    },
+    {
+      "id": "8d690f10-04a4-429f-81ba-de7d25f9f89d",
+      "src_id": "674b1fc2-900e-4a3f-8f5d-b20fe90da5bf",
+      "dst_id": "89c8ad22-4150-422e-82b0-e738d13bb08d",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "A の主張は持続可能な社会の重要性を述べており、B の主張はその実現手段としてプラスチック容器の廃止を挙げているため、A は B を支持する根拠となる。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:37.928929Z"
+    },
+    {
+      "id": "3b4f96e1-403a-42ff-941d-9dce6d57af48",
+      "src_id": "3c6c6470-871f-4e36-909d-e0896c35f0dc",
+      "dst_id": "8ca96d1b-83aa-4f52-afa6-17bde8332010",
+      "relation": "attack",
+      "confidence": 0.9,
+      "rationale": "A の主張は学生の経済的負担を最優先とし、B の主張はプラスチック容器廃止によるコスト増加がその負担を増すと述べているため、A は B の主張を否定する立場にある。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:38.793371Z"
+    },
+    {
+      "id": "298cae72-5965-47e5-8e13-a37deada5334",
+      "src_id": "84e84b26-ab5b-49d6-9d12-78696e70dffd",
+      "dst_id": "3c6c6470-871f-4e36-909d-e0896c35f0dc",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "Bの主張はコストの重要性を示しており、Aの経済的負担に関する主張を支持する内容であるため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:40.429207Z"
+    },
+    {
+      "id": "22884e0c-2af4-4282-8b29-45db4557fa94",
+      "src_id": "07019d04-ce34-4870-bdc2-fb734d798887",
+      "dst_id": "89c8ad22-4150-422e-82b0-e738d13bb08d",
+      "relation": "attack",
+      "confidence": 0.8,
+      "rationale": "Aはバイオマスプラスチックやリサイクル素材への移行を安易に進めるべきではないと主張しており、Bのプラスチック容器廃止の提案に対して懸念を示しているため、AはBを反論している。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:42.361615Z"
+    },
+    {
+      "id": "0f6aa8b5-f8a3-4e7d-91dc-2e7bde3d2a37",
+      "src_id": "07019d04-ce34-4870-bdc2-fb734d798887",
+      "dst_id": "6d0ba319-c967-479d-8eca-2c90c8128adc",
+      "relation": "attack",
+      "confidence": 0.8,
+      "rationale": "Aはコストの具体的な試算がない限り、プラスチック容器の廃止を進めるべきではないと主張しており、Bの環境負荷軽減の主張に対して反論している。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:45.347909Z"
+    },
+    {
+      "id": "ca6ed58c-96b5-497d-ba41-77ddcb2dd38a",
+      "src_id": "674b1fc2-900e-4a3f-8f5d-b20fe90da5bf",
+      "dst_id": "965dcf98-184c-40ba-84c2-352de7f33c89",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "Aの主張は持続可能な社会の重要性を強調しており、Bの主張はその持続可能性を実現するための選択肢として紙容器への移行を支持しているため、AはBを支持する根拠となる。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:46.728122Z"
+    },
+    {
+      "id": "8a350668-8718-4c49-95a3-31498177edca",
+      "src_id": "07019d04-ce34-4870-bdc2-fb734d798887",
+      "dst_id": "8ca96d1b-83aa-4f52-afa6-17bde8332010",
+      "relation": "attack",
+      "confidence": 0.8,
+      "rationale": "Aはバイオマスプラスチックやリサイクル素材への移行に対する具体的な試算がないことを指摘しており、Bの主張するコスト増加が学生に経済的負担を強いるという点を反論している。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:47.873224Z"
+    },
+    {
+      "id": "e2a4c85b-c90c-4bae-af8f-ca26ed903729",
+      "src_id": "dab42ecd-d8fb-467d-867e-7d35a754438d",
+      "dst_id": "84e84b26-ab5b-49d6-9d12-78696e70dffd",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "A の主張はコストの重要性を強調しており、B の主張を支持する内容であるため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:55.179133Z"
+    },
+    {
+      "id": "cf6cec7d-c9ee-4d83-9cee-62e1b66187aa",
+      "src_id": "7517d89d-5b7e-4dec-93bd-168d604b808e",
+      "dst_id": "965dcf98-184c-40ba-84c2-352de7f33c89",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "Aは長期的な環境利益を考慮する重要性を述べており、Bの主張である短期的なコスト増が長期的には持続可能な選択肢であるという点を支持している。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:56.053443Z"
+    },
+    {
+      "id": "964ddff2-5f1e-4c98-9b22-9bb2c7126bb9",
+      "src_id": "7517d89d-5b7e-4dec-93bd-168d604b808e",
+      "dst_id": "bb8f4743-45ec-44f2-87a6-19e8f1e606bc",
+      "relation": "support",
+      "confidence": 0.8,
+      "rationale": "Aの主張は、選択肢を真剣に検討することの重要性を強調しており、Bの主張を支持する内容である。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:57.572103Z"
+    },
+    {
+      "id": "4896a4cb-ee07-40aa-bad8-b89043e86930",
+      "src_id": "947ad2cc-1853-4e7d-af5b-d076a476c4bc",
+      "dst_id": "07019d04-ce34-4870-bdc2-fb734d798887",
+      "relation": "support",
+      "confidence": 0.8,
+      "rationale": "Aはバイオマスプラスチックやリサイクル素材のコスト調査の必要性を述べており、Bの主張である具体的な試算がない限り移行を進めるべきではないという意見を支持する根拠となる。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:28:58.278111Z"
+    },
+    {
+      "id": "478dcc69-57fb-474e-8d29-0aaf109b0421",
+      "src_id": "947ad2cc-1853-4e7d-af5b-d076a476c4bc",
+      "dst_id": "8ca96d1b-83aa-4f52-afa6-17bde8332010",
+      "relation": "support",
+      "confidence": 0.8,
+      "rationale": "A の調査提案は、B の主張するコスト増加の影響を具体的に明らかにするための根拠となるため、A は B を支持している。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:29:00.202862Z"
+    },
+    {
+      "id": "44d40828-0659-407e-a0d0-4aaec7e69667",
+      "src_id": "dab42ecd-d8fb-467d-867e-7d35a754438d",
+      "dst_id": "8b1150a5-1ee9-4e44-bbb7-1fe00de2286b",
+      "relation": "attack",
+      "confidence": 0.8,
+      "rationale": "A はコストの重要性を認めつつ、B の主張が単純すぎることを示唆しているため、B の主張を反論していると解釈できる。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:29:02.051927Z"
+    },
+    {
+      "id": "e4e4a467-8520-493b-8f19-0f78685d45d5",
+      "src_id": "947ad2cc-1853-4e7d-af5b-d076a476c4bc",
+      "dst_id": "b8317015-cb49-4666-9163-3ef7ece15dc7",
+      "relation": "support",
+      "confidence": 0.8,
+      "rationale": "A の主張は、バイオマスプラスチックやリサイクル素材のコスト調査が必要であることを示しており、B の代替策としての提案を支持する根拠となる。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:29:02.749485Z"
+    },
+    {
+      "id": "6b859572-b336-4ce9-94ef-103c4a64b70d",
+      "src_id": "55e159c0-1741-4752-8446-95529eb11634",
+      "dst_id": "6d0ba319-c967-479d-8eca-2c90c8128adc",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "A の主張はプラスチック容器の廃止が環境保護に寄与することを示しており、B の主張を支持する根拠となる。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:29:15.130762Z"
+    },
+    {
+      "id": "7b6b68c1-1b34-44ab-9bd0-184061b48c76",
+      "src_id": "ec0ee308-5610-47f0-aeb6-530360fe8b9d",
+      "dst_id": "bb8f4743-45ec-44f2-87a6-19e8f1e606bc",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "A の主張は持続可能な選択肢を模索する重要性を述べており、B の主張はその選択肢を真剣に検討すべきだと続けているため、A は B を支持していると判断した。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:29:16.990612Z"
+    },
+    {
+      "id": "b9fb5ab1-a98f-4287-80d5-8fa6be472e93",
+      "src_id": "55e159c0-1741-4752-8446-95529eb11634",
+      "dst_id": "a0ae6447-4cf6-4da7-9656-b04e1e0315bc",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "Aの主張はプラスチック容器の廃止が環境保護に寄与する可能性を示しており、Bの主張を支持する根拠となる。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:29:17.297410Z"
+    },
+    {
+      "id": "77fa5a2b-2674-4ada-9afa-273f2656177d",
+      "src_id": "19c70b4c-150c-426b-9fdd-73d0f10c426a",
+      "dst_id": "07019d04-ce34-4870-bdc2-fb734d798887",
+      "relation": "attack",
+      "confidence": 0.8,
+      "rationale": "Aの主張はリサイクルシステムの導入による経済的負担の軽減を示唆しており、Bの主張である移行に対する懸念を反論しているため、AはBを攻撃している。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:29:17.640290Z"
+    },
+    {
+      "id": "f2b331d7-2c15-425e-bb78-df20b9b988bf",
+      "src_id": "55e159c0-1741-4752-8446-95529eb11634",
+      "dst_id": "8ca96d1b-83aa-4f52-afa6-17bde8332010",
+      "relation": "attack",
+      "confidence": 0.9,
+      "rationale": "Aはプラスチック容器の廃止が将来的なコスト削減につながる可能性を示しており、Bの主張するコスト増加の懸念を反論している。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:29:21.214897Z"
+    },
+    {
+      "id": "59f20aa6-4e98-48ab-9c48-b82266f8ec2d",
+      "src_id": "19c70b4c-150c-426b-9fdd-73d0f10c426a",
+      "dst_id": "55e159c0-1741-4752-8446-95529eb11634",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "A の主張はリサイクルシステムや新素材の採用が経済的負担を軽減すると述べており、B の主張であるプラスチック容器廃止によるコスト削減の可能性を支持する内容であるため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:29:21.988209Z"
+    },
+    {
+      "id": "422618ff-ab48-4fbb-b354-be412875c039",
+      "src_id": "ec0ee308-5610-47f0-aeb6-530360fe8b9d",
+      "dst_id": "7517d89d-5b7e-4dec-93bd-168d604b808e",
+      "relation": "support",
+      "confidence": 0.8,
+      "rationale": "A の主張は持続可能な選択肢の重要性を強調しており、B の主張である長期的な環境利益を考慮することと関連しているため、A は B を支持していると判断した。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:29:22.775083Z"
+    },
+    {
+      "id": "49f61f2f-bfb8-4082-96bb-8c28b7ba4b2e",
+      "src_id": "55e159c0-1741-4752-8446-95529eb11634",
+      "dst_id": "9a895a6d-e897-4c9c-8f4f-7cc7a95f8d26",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "Aの主張はプラスチック容器の廃止がコスト削減につながる可能性を示しており、Bの主張を支持する根拠となる。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:29:22.931346Z"
+    },
+    {
+      "id": "1a1f556f-d2df-447f-a72c-e7fd95b8da2d",
+      "src_id": "d505c2a1-2a66-49c5-9034-c8bc1b4b26bf",
+      "dst_id": "7517d89d-5b7e-4dec-93bd-168d604b808e",
+      "relation": "support",
+      "confidence": 0.8,
+      "rationale": "A のコスト削減の可能性は、B の長期的な環境利益を考慮する議論を支持する根拠となるため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:29:33.716359Z"
+    },
+    {
+      "id": "95cbffd9-95ab-4e69-af6e-454cf4fd4b1e",
+      "src_id": "e6cb01d7-1277-4e0f-abe0-cadcfd1b2c9a",
+      "dst_id": "3c6c6470-871f-4e36-909d-e0896c35f0dc",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "A の主張は短期的な経済的影響を考慮する必要性を述べており、B の主張である学生の経済的負担が最優先であることを支持する内容であるため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:29:34.209511Z"
+    },
+    {
+      "id": "4ae81ff7-e387-4ee9-b83f-0f74c89fdac8",
+      "src_id": "d505c2a1-2a66-49c5-9034-c8bc1b4b26bf",
+      "dst_id": "965dcf98-184c-40ba-84c2-352de7f33c89",
+      "relation": "support",
+      "confidence": 0.8,
+      "rationale": "A の長期的なコスト削減の可能性の理解は、B の主張する紙容器への移行が長期的には持続可能であるという点を支持する。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:29:35.114734Z"
+    },
+    {
+      "id": "5ed33629-b2b8-42c4-9d1f-b46e213a26d2",
+      "src_id": "48f3387a-5a1a-485c-a01d-045b5f0a485b",
+      "dst_id": "19c70b4c-150c-426b-9fdd-73d0f10c426a",
+      "relation": "attack",
+      "confidence": 0.9,
+      "rationale": "Aは新しいシステムや素材の導入に対して初期投資の懸念を示しており、Bの主張する経済的負担の軽減に対する反論となっている。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:29:35.801028Z"
+    },
+    {
+      "id": "1e1fdb9e-aec3-4161-a1f3-1a1cbf144d6c",
+      "src_id": "48f3387a-5a1a-485c-a01d-045b5f0a485b",
+      "dst_id": "51be4f2b-b726-4cdb-b2b2-adc33f5eaac7",
+      "relation": "attack",
+      "confidence": 0.9,
+      "rationale": "Aは新しいシステムや素材の導入に対する初期投資の懸念を示しており、Bの主張するコスト増加がその懸念を裏付けるため、AはBの主張を反論していると解釈できる。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:29:38.085246Z"
+    },
+    {
+      "id": "ac71a9da-d4b8-4ce0-bdb4-8ceab6b137cb",
+      "src_id": "55e159c0-1741-4752-8446-95529eb11634",
+      "dst_id": "d505c2a1-2a66-49c5-9034-c8bc1b4b26bf",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "Bの主張はAのコスト削減の可能性を支持しており、Bが言及するプラスチック容器の廃止が将来的なコスト削減につながるという点がAの理解を補強している。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:29:40.030052Z"
+    },
+    {
+      "id": "833794c3-1b0f-40d5-a7a4-c2ab42272a44",
+      "src_id": "48f3387a-5a1a-485c-a01d-045b5f0a485b",
+      "dst_id": "965dcf98-184c-40ba-84c2-352de7f33c89",
+      "relation": "attack",
+      "confidence": 0.9,
+      "rationale": "Aは新しいシステムや素材の導入に対する初期投資の懸念を示しており、Bの主張する紙容器への移行が短期的なコスト増であるという点を反論している。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:29:41.026622Z"
+    },
+    {
+      "id": "b76a546a-78fa-4c8f-90f3-de3653dc7ba2",
+      "src_id": "e6cb01d7-1277-4e0f-abe0-cadcfd1b2c9a",
+      "dst_id": "8ca96d1b-83aa-4f52-afa6-17bde8332010",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "A の主張は学生の経済的影響を無視できないと述べており、B の主張であるコスト増加が学生に負担を強いることを支持する内容であるため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:29:41.669397Z"
+    },
+    {
+      "id": "8c0e891c-8486-43af-b25e-6c09bf93d577",
+      "src_id": "b8317015-cb49-4666-9163-3ef7ece15dc7",
+      "dst_id": "ba2f56b3-d3f9-4286-b10f-3e8761844dc6",
+      "relation": "support",
+      "confidence": 0.8,
+      "rationale": "BはAの主張を具体的な代替策として示しており、Aの提案を支持する内容であるため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:29:49.431156Z"
+    },
+    {
+      "id": "b5e8961b-a830-4ea9-91c2-894a33ba7f1d",
+      "src_id": "d505c2a1-2a66-49c5-9034-c8bc1b4b26bf",
+      "dst_id": "bc19444d-f6b3-47ac-abe7-99003af8fca9",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "B の発言は A の主張を理解していることを示しており、A の主張を支持する内容であるため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:29:49.965589Z"
+    },
+    {
+      "id": "2b2c7977-6031-4c89-9493-56791e26ab0c",
+      "src_id": "ba2f56b3-d3f9-4286-b10f-3e8761844dc6",
+      "dst_id": "07019d04-ce34-4870-bdc2-fb734d798887",
+      "relation": "attack",
+      "confidence": 0.8,
+      "rationale": "Aはバイオプラスチックやリサイクル素材の導入による期待を述べているのに対し、Bはそのコストに懸念を示しており、Aの主張を否定する立場にあるため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:29:50.986675Z"
+    },
+    {
+      "id": "2b38daa9-9bc7-4fc8-94ad-ccb9b037f00d",
+      "src_id": "bc19444d-f6b3-47ac-abe7-99003af8fca9",
+      "dst_id": "7517d89d-5b7e-4dec-93bd-168d604b808e",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "A は長期的な環境保護とコスト削減の重要性を述べており、B の主張である長期的な環境利益を考慮することを支持している。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:29:52.102471Z"
+    },
+    {
+      "id": "80b534bf-49fd-4dfa-92c2-aa0b29691b97",
+      "src_id": "ba2f56b3-d3f9-4286-b10f-3e8761844dc6",
+      "dst_id": "19c70b4c-150c-426b-9fdd-73d0f10c426a",
+      "relation": "support",
+      "confidence": 0.8,
+      "rationale": "Aの主張は新たなビジネスモデルや効率化を期待するものであり、Bのリサイクルシステムや新素材の採用が経済的負担を軽減するという主張を支持する内容であるため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:29:53.073932Z"
+    },
+    {
+      "id": "a1860575-3c10-4548-903e-b7b9b4491d9a",
+      "src_id": "bc19444d-f6b3-47ac-abe7-99003af8fca9",
+      "dst_id": "b88c065e-4606-42c7-b4a7-50fa7ee0ec67",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "A の主張は環境保護の観点からコスト削減の可能性を示唆しており、B の環境負荷を減らすことの重要性を支持する内容であるため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:29:53.607317Z"
+    },
+    {
+      "id": "7241291d-f8f1-44f1-b10e-60c7a4899b82",
+      "src_id": "4ef3f1ce-bca7-4d3a-aae2-b8a002bd8c90",
+      "dst_id": "8b1150a5-1ee9-4e44-bbb7-1fe00de2286b",
+      "relation": "support",
+      "confidence": 0.8,
+      "rationale": "A の短期的なコスト懸念を理解することは、B の主張であるコスト増が永続的な値上げに直結しないという点を支持する根拠となる。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:29:56.106857Z"
+    },
+    {
+      "id": "b5bfa220-36f1-4b08-9cc4-5251caa1f83b",
+      "src_id": "bc19444d-f6b3-47ac-abe7-99003af8fca9",
+      "dst_id": "55e159c0-1741-4752-8446-95529eb11634",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "A の主張は B のコスト削減の可能性を支持しており、両者は環境保護とコスト削減の関連性を共有しているため、A は B を補強している。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:29:56.225691Z"
+    },
+    {
+      "id": "272791bb-47c9-4fd4-8a4d-0f10ce235374",
+      "src_id": "bc19444d-f6b3-47ac-abe7-99003af8fca9",
+      "dst_id": "965dcf98-184c-40ba-84c2-352de7f33c89",
+      "relation": "support",
+      "confidence": 0.8,
+      "rationale": "A の主張は長期的な環境保護とコスト削減の可能性を示唆しており、B の主張である紙容器への移行が持続可能な選択肢であることを支持している。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:29:57.848363Z"
+    },
+    {
+      "id": "819bb2c2-b0d4-43ee-8e09-544b02fb46a6",
+      "src_id": "8376ff81-8024-419f-8d4c-82e6dd04a2e7",
+      "dst_id": "07019d04-ce34-4870-bdc2-fb734d798887",
+      "relation": "support",
+      "confidence": 0.8,
+      "rationale": "Aの主張は、バイオマスプラスチックやリサイクル素材の導入に初期投資がかかることを示しており、Bの主張である安易な移行を進めるべきではないという意見を支持する根拠となる。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:30:06.926108Z"
+    },
+    {
+      "id": "8ec7099f-64dc-4461-8671-836777fa19f3",
+      "src_id": "7517d89d-5b7e-4dec-93bd-168d604b808e",
+      "dst_id": "815ff5e3-1512-482e-bbf5-fc293b1ec905",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "B は A の主張を補強しており、長期的な環境への影響を考慮することの重要性を強調しているため、B は A を支持していると判断した。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:30:07.764338Z"
+    },
+    {
+      "id": "a4d38594-e501-48d1-879c-fa9c66e07e07",
+      "src_id": "0813c04c-124a-4445-a968-f45d0e8dca3c",
+      "dst_id": "ec0ee308-5610-47f0-aeb6-530360fe8b9d",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "A の主張は新しい選択肢が経済的負担を軽減する可能性を示しており、B の持続可能な選択肢の重要性を支持する内容であるため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:30:07.992626Z"
+    },
+    {
+      "id": "9509add8-1c79-4295-b15c-26fea6e7105f",
+      "src_id": "815ff5e3-1512-482e-bbf5-fc293b1ec905",
+      "dst_id": "bc19444d-f6b3-47ac-abe7-99003af8fca9",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "A の主張は長期的な環境への影響を考慮する重要性を強調しており、B の主張も同様に長期的な環境保護とコスト削減の関連を述べているため、A は B を支持する根拠となる。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:30:09.932209Z"
+    },
+    {
+      "id": "4ab2c641-9048-46e4-bfdb-49c36b867c7c",
+      "src_id": "0813c04c-124a-4445-a968-f45d0e8dca3c",
+      "dst_id": "613722b3-4a62-4946-8176-2933019a3f25",
+      "relation": "support",
+      "confidence": 0.8,
+      "rationale": "A の主張は新しい選択肢が経済的負担を軽減する可能性を示唆しており、B の効率化や他の選択肢を模索する余地があるという考えを支持する内容であるため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:30:10.595307Z"
+    },
+    {
+      "id": "9f3ba7a8-e6fa-4823-8950-69dedd79daf1",
+      "src_id": "815ff5e3-1512-482e-bbf5-fc293b1ec905",
+      "dst_id": "d505c2a1-2a66-49c5-9034-c8bc1b4b26bf",
+      "relation": "support",
+      "confidence": 0.8,
+      "rationale": "Aの主張は長期的な環境への影響を考慮する重要性を強調しており、Bの長期的な視点でのコスト削減の可能性を理解することを支持する内容である。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:30:14.052440Z"
+    },
+    {
+      "id": "4f9f821e-80b4-4b7e-b4b0-834ddce7fe27",
+      "src_id": "8376ff81-8024-419f-8d4c-82e6dd04a2e7",
+      "dst_id": "19c70b4c-150c-426b-9fdd-73d0f10c426a",
+      "relation": "attack",
+      "confidence": 0.8,
+      "rationale": "Aの主張は初期投資の負担を強調しており、Bの主張が提案する経済的負担の軽減に対して反論しているため、AはBを攻撃していると判断した。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:30:14.947394Z"
+    },
+    {
+      "id": "4f6c4e56-a3d4-4042-8e1c-349529bd1d00",
+      "src_id": "7517d89d-5b7e-4dec-93bd-168d604b808e",
+      "dst_id": "e4f77df0-dd7a-4386-9be2-3de2efb44359",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "B は A の主張を補強しており、長期的な環境利益を考慮することの重要性をさらに強調しているため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:30:22.964780Z"
+    },
+    {
+      "id": "25d383d1-1fcd-4a12-bf1c-29625c7653d3",
+      "src_id": "f16653a3-3b46-471a-b95c-953760c5ed2c",
+      "dst_id": "fa43cf6b-bf6c-459d-a9ce-17d2e6459ebd",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "A の主張は初期投資が学生の生活に影響を与える可能性を示しており、B の主張はその影響を具体的に試算する必要性を強調しているため、A は B を支持する根拠となる。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:30:23.219000Z"
+    },
+    {
+      "id": "a051ece7-7dda-4378-bf36-0e6c19bf3b62",
+      "src_id": "e4f77df0-dd7a-4386-9be2-3de2efb44359",
+      "dst_id": "815ff5e3-1512-482e-bbf5-fc293b1ec905",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "A の主張は長期的な環境利益の重要性を強調しており、B の主張も同様に長期的な環境への影響を考慮することの重要性を述べているため、A は B を支持していると判断した。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:30:24.819607Z"
+    },
+    {
+      "id": "01b92fe6-07c8-42d2-a876-e078d2ae7d16",
+      "src_id": "4ef3f1ce-bca7-4d3a-aae2-b8a002bd8c90",
+      "dst_id": "fa43cf6b-bf6c-459d-a9ce-17d2e6459ebd",
+      "relation": "support",
+      "confidence": 0.8,
+      "rationale": "B の発言は A の主張に対する理解を示しており、短期的な経済的負担の懸念を支持する内容であるため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:30:25.670702Z"
+    },
+    {
+      "id": "4df673a8-47a3-4845-9149-53c9c8f37b86",
+      "src_id": "f16653a3-3b46-471a-b95c-953760c5ed2c",
+      "dst_id": "3c6c6470-871f-4e36-909d-e0896c35f0dc",
+      "relation": "support",
+      "confidence": 0.8,
+      "rationale": "A の主張は、初期投資が学生の生活に影響を与える可能性を示しており、B の主張である経済的負担が最優先であることを支持する根拠となる。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:30:25.733992Z"
+    },
+    {
+      "id": "06c912b5-f620-40cd-8ba4-4f1c0ba5c062",
+      "src_id": "e4f77df0-dd7a-4386-9be2-3de2efb44359",
+      "dst_id": "bc19444d-f6b3-47ac-abe7-99003af8fca9",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "A の主張は長期的な環境利益の重要性を強調しており、B の主張も環境保護とコスト削減の関連を述べているため、A は B を支持する根拠となる。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:30:26.706973Z"
+    },
+    {
+      "id": "ae3c9f82-df07-4e45-8277-2f2ce319bdf4",
+      "src_id": "fa43cf6b-bf6c-459d-a9ce-17d2e6459ebd",
+      "dst_id": "f16653a3-3b46-471a-b95c-953760c5ed2c",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "A の主張は、具体的な試算なしに進めることの危険性を指摘しており、B の主張である初期投資が学生の生活を圧迫する可能性を支持する根拠となる。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:30:27.954112Z"
+    },
+    {
+      "id": "b350b10e-3755-4a86-83cd-d3969388fc96",
+      "src_id": "f16653a3-3b46-471a-b95c-953760c5ed2c",
+      "dst_id": "e6cb01d7-1277-4e0f-abe0-cadcfd1b2c9a",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "A の主張は初期投資が学生に与える影響を指摘しており、B の主張である短期的な経済的影響を支持する根拠となる。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:30:27.959881Z"
+    },
+    {
+      "id": "1ce46937-06ce-43fb-9407-e21d8a935358",
+      "src_id": "f16653a3-3b46-471a-b95c-953760c5ed2c",
+      "dst_id": "8376ff81-8024-419f-8d4c-82e6dd04a2e7",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "A の主張は、B の初期投資の懸念を支持しており、学生の生活への影響を示唆しているため、A は B を支持する根拠となる。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T08:30:31.537325Z"
+    }
+  ]
+}

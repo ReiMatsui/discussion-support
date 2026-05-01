@@ -14,7 +14,8 @@ from das.eval.conditions import (
     InterventionLogEntry,
     write_intervention_log,
 )
-from das.eval.controller import InfoProvider, SessionConfig, SessionRunner
+from das.eval.consensus import ConsensusReport, ConsensusSignal, detect_consensus
+from das.eval.controller import InfoProvider, SessionConfig, SessionRunner, StopCondition
 from das.eval.judge import (
     AggregatedScores,
     JudgeAgent,
@@ -45,6 +46,8 @@ __all__ = [
     "ConditionFlatRAG",
     "ConditionFullProposal",
     "ConditionNone",
+    "ConsensusReport",
+    "ConsensusSignal",
     "EvalResult",
     "FlatRAGItem",
     "GraphMetrics",
@@ -60,10 +63,12 @@ __all__ = [
     "SessionRunner",
     "SingleRunResult",
     "Stance",
+    "StopCondition",
     "TranscriptMetrics",
     "aggregate_reports",
     "build_persona",
     "cafeteria_personas",
+    "detect_consensus",
     "gini_coefficient",
     "graph_metrics",
     "policy_ai_lecture_personas",

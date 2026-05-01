@@ -29,8 +29,10 @@ from das.eval import (
     SessionConfig,
     SessionRunner,
     cafeteria_personas,
+    detect_consensus,
     policy_ai_lecture_personas,
 )
+from das.eval.consensus import ConsensusReport
 from das.graph.store import GraphStore
 from das.llm import OpenAIClient
 from das.settings import get_settings
@@ -72,7 +74,9 @@ with st.sidebar:
     )
     label, persona_factory, default_topic = PRESETS[preset_key]
     topic = st.text_area("議論トピック (編集可)", value=default_topic, height=80)
-    max_turns = st.slider("最大ターン数", 3, 20, 8)
+    # 合意検出による早期終了が標準ルートになったので、ターン数は安全上限としてのみ機能する。
+    # 直接いじる必要はないため UI からは外し、定数で持つ。
+    max_turns = 20
     temperature = st.slider("temperature", 0.0, 1.5, 0.7, 0.1)
 
     st.divider()
@@ -93,6 +97,14 @@ with st.sidebar:
         "終了後にスナップショットを保存",
         value=True,
         help="full_proposal 条件のとき data/runs/<タイムスタンプ>/ に snapshot.json と graph.html を保存",
+    )
+    auto_stop_on_consensus = st.checkbox(
+        "合意検出で早期終了",
+        value=False,
+        help=(
+            "明示的合意フレーズや新規 claim/attack の停止を検出したら、"
+            "max_turns 未満でもセッションを終了します"
+        ),
     )
 
     st.caption(
@@ -130,6 +142,13 @@ def _truncate(text: str, n: int = 40) -> str:
     return text if len(text) <= n else text[: n - 1] + "…"
 
 
+_REASON_LABEL: dict[str, str] = {
+    "adjacent": "🟦 隣接",
+    "balance_correction": "⚖️ 偏り補正",
+    "stage_alignment": "🎯 ステージ合わせ",
+}
+
+
 def _render_full_proposal_info(persona_name: str, items: list[InfoItem]) -> None:
     st.markdown(f"#### {persona_name} さんへの参考情報")
     if not items:
@@ -140,8 +159,12 @@ def _render_full_proposal_info(persona_name: str, items: list[InfoItem]) -> None
         author = item.source_author or "?"
         target_short = _truncate(item.target_text)
         rationale_part = f"\n\n_「{item.rationale}」_" if item.rationale else ""
+        reason_badge = _REASON_LABEL.get(item.reason, item.reason)
+        priority_pct = round(item.priority * 100)
+        priority_bar = "█" * (priority_pct // 10) + "░" * (10 - priority_pct // 10)
         body = (
-            f"**{badge} `{author}`** | conf {item.confidence:.0%}\n\n"
+            f"**{badge} `{author}`** | conf {item.confidence:.0%} | "
+            f"優先度 {priority_pct}% `{priority_bar}` | {reason_badge}\n\n"
             f"> {item.source_text}\n\n"
             f"あなたの「{target_short}」への "
             f"{'支持' if item.relation == 'support' else '反論'}"
@@ -210,6 +233,61 @@ def _update_af_panel(condition: Condition, af_metric, af_box) -> None:
         components.html(html, height=520, scrolling=False)
 
 
+_STAGE_LABEL: dict[str, str] = {
+    "diverge": "🌱 発散 (diverge)",
+    "converge": "🎯 収束 (converge)",
+    "stalled": "🛑 停滞 (stalled)",
+}
+
+
+def _render_facilitator_state(
+    condition: Condition,
+    history: list[Utterance],
+    placeholder,
+) -> None:
+    """FullProposal の bias/stage を panel に描く。"""
+
+    if not isinstance(condition, ConditionFullProposal) or condition.orchestrator is None:
+        with placeholder.container():
+            st.caption("(facilitation 状態は提案手法でのみ表示されます)")
+        return
+    fac = condition.facilitator
+    bias = fac.detect_bias(condition.orchestrator.store)
+    stage = fac.detect_stage(history)
+    with placeholder.container():
+        c1, c2, c3 = st.columns(3)
+        c1.metric(
+            "支持/反論バランス",
+            f"{bias.n_support} / {bias.n_attack}",
+            help="グラフ全体の support エッジ数 / attack エッジ数",
+        )
+        c2.metric(
+            "偏り (imbalance)",
+            f"{bias.imbalance_ratio:.0%}",
+            help="0 = 均衡, 1 = 完全片寄り",
+        )
+        c3.metric("ステージ", _STAGE_LABEL.get(stage.stage, stage.stage))
+        if bias.weak_claims:
+            st.caption(
+                f"⚠️ 反論を受けて応答していない claim: {len(bias.weak_claims)} 件 "
+                "(facilitator は反対側を強調)"
+            )
+
+
+def _render_consensus(report: ConsensusReport, placeholder) -> None:
+    """合意検出の状態を panel に描く。"""
+
+    with placeholder.container():
+        if report.consensus_reached:
+            st.success(
+                f"✅ 合意検出 (turn {report.detected_at_turn}): "
+                f"{report.signal} | conf {report.confidence:.0%}\n\n"
+                f"_{report.rationale}_"
+            )
+        else:
+            st.info(f"議論継続中: {report.rationale}")
+
+
 async def _run(
     runner: SessionRunner,
     condition: Condition,
@@ -219,12 +297,22 @@ async def _run(
     info_placeholder,
     af_metric,
     af_box,
-) -> list[Utterance]:
+    facilitator_placeholder,
+    consensus_placeholder,
+    auto_stop_on_consensus: bool,
+) -> tuple[list[Utterance], ConsensusReport]:
     transcript: list[Utterance] = []
+    last_consensus = ConsensusReport(
+        consensus_reached=False, signal="none", confidence=0.0, rationale="未検出"
+    )
+
+    def _store_for_consensus():
+        if isinstance(condition, ConditionFullProposal) and condition.orchestrator:
+            return condition.orchestrator.store
+        return None
 
     async def info_provider_with_display(history, persona):
         info = await condition.info_provider(history, persona)
-        # 最新ターンの参考情報だけを表示 (前のターンの分は上書き消去)
         with info_placeholder.container():
             if isinstance(condition, ConditionFullProposal):
                 _render_full_proposal_info(persona.name, condition.last_items)
@@ -233,9 +321,19 @@ async def _run(
             else:
                 st.caption("(情報提供なし)")
         _update_af_panel(condition, af_metric, af_box)
+        _render_facilitator_state(condition, history, facilitator_placeholder)
         return info
 
-    async for utterance in runner.run_streaming(info_provider=info_provider_with_display):
+    def _stop_cond(history: list[Utterance]) -> bool:
+        nonlocal last_consensus
+        last_consensus = detect_consensus(history, store=_store_for_consensus())
+        _render_consensus(last_consensus, consensus_placeholder)
+        return auto_stop_on_consensus and last_consensus.consensus_reached
+
+    async for utterance in runner.run_streaming(
+        info_provider=info_provider_with_display,
+        stop_condition=_stop_cond,
+    ):
         transcript.append(utterance)
         with transcript_box:
             st.markdown(_format_utterance(utterance))
@@ -243,9 +341,10 @@ async def _run(
         progress_text.markdown(f"進行中... {len(transcript)} / {runner.config.max_turns}")
         counter_metric.metric("発話数", len(transcript))
 
-    # ループ終了後にも一度更新 (最終ターンの AF が反映済みであることを保証)
+    # ループ終了後の最終更新
     _update_af_panel(condition, af_metric, af_box)
-    return transcript
+    _render_facilitator_state(condition, transcript, facilitator_placeholder)
+    return transcript, last_consensus
 
 
 def _save_snapshot(condition: Condition) -> Path | None:
@@ -310,6 +409,16 @@ if st.button("セッション開始", type="primary", use_container_width=True):
     progress_text = st.empty()
     progress_text.markdown(f"開始... 最大 {max_turns} ターン")
 
+    st.markdown("### facilitator の状態")
+    facilitator_placeholder = st.empty()
+    with facilitator_placeholder.container():
+        st.caption("(セッション開始後に bias / stage が表示されます)")
+
+    st.markdown("### 合意検出")
+    consensus_placeholder = st.empty()
+    with consensus_placeholder.container():
+        st.caption("(まだ判定なし)")
+
     is_full_proposal = isinstance(condition, ConditionFullProposal)
 
     if is_full_proposal:
@@ -339,7 +448,7 @@ if st.button("セッション開始", type="primary", use_container_width=True):
             st.caption("(まだ情報なし)")
 
     try:
-        transcript = asyncio.run(
+        transcript, consensus = asyncio.run(
             _run(
                 runner,
                 condition,
@@ -349,13 +458,24 @@ if st.button("セッション開始", type="primary", use_container_width=True):
                 info_placeholder,
                 af_metric,
                 af_box,
+                facilitator_placeholder,
+                consensus_placeholder,
+                auto_stop_on_consensus,
             )
         )
     except Exception as exc:  # pragma: no cover - UI 用
         st.error(f"セッション中にエラーが発生しました: {exc}")
         st.exception(exc)
     else:
-        progress_text.markdown(f"✓ 完了 ({len(transcript)} ターン)")
+        if consensus.consensus_reached:
+            progress_text.markdown(
+                f"✓ 完了 ({len(transcript)} ターン) — "
+                f"合意検出 (turn {consensus.detected_at_turn}, {consensus.signal})"
+            )
+        else:
+            progress_text.markdown(
+                f"✓ 完了 ({len(transcript)} ターン) — 合意検出なし (安全上限に到達)"
+            )
 
         with st.expander("transcript JSONL (コピペ用)"):
             payload = "\n".join(

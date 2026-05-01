@@ -1,0 +1,100 @@
+{
+  "eval_id": "eval-20260501T082055Z",
+  "topic": "大学のカフェテリアでプラスチック容器を廃止すべきか",
+  "n_runs_total": 6,
+  "by_condition": {
+    "none": {
+      "n_judge_reports": 6,
+      "overall_satisfaction": [
+        5.333333333333333,
+        0.9428090415820634
+      ],
+      "information_usefulness": [
+        5.5,
+        0.5
+      ],
+      "opposition_understanding": [
+        6.166666666666667,
+        0.6871842709362768
+      ],
+      "confidence_change": [
+        1.0,
+        0.816496580927726
+      ],
+      "intervention_transparency": [
+        4.0,
+        0.816496580927726
+      ],
+      "convergence": {
+        "n_runs": 2,
+        "n_converged": 0,
+        "convergence_rate": 0.0,
+        "mean_turns": 12.0,
+        "mean_turns_to_consensus": null,
+        "signals": {}
+      }
+    },
+    "flat_rag": {
+      "n_judge_reports": 6,
+      "overall_satisfaction": [
+        5.333333333333333,
+        0.9428090415820634
+      ],
+      "information_usefulness": [
+        5.5,
+        0.5
+      ],
+      "opposition_understanding": [
+        6.333333333333333,
+        0.4714045207910317
+      ],
+      "confidence_change": [
+        1.0,
+        0.816496580927726
+      ],
+      "intervention_transparency": [
+        3.3333333333333335,
+        1.3743685418725535
+      ],
+      "convergence": {
+        "n_runs": 2,
+        "n_converged": 0,
+        "convergence_rate": 0.0,
+        "mean_turns": 12.0,
+        "mean_turns_to_consensus": null,
+        "signals": {}
+      }
+    },
+    "full_proposal": {
+      "n_judge_reports": 6,
+      "overall_satisfaction": [
+        5.0,
+        1.4142135623730951
+      ],
+      "information_usefulness": [
+        5.166666666666667,
+        0.8975274678557507
+      ],
+      "opposition_understanding": [
+        5.833333333333333,
+        0.8975274678557507
+      ],
+      "confidence_change": [
+        0.8333333333333334,
+        0.8975274678557507
+      ],
+      "intervention_transparency": [
+        4.666666666666667,
+        1.1055415967851334
+      ],
+      "convergence": {
+        "n_runs": 2,
+        "n_converged": 0,
+        "convergence_rate": 0.0,
+        "mean_turns": 12.0,
+        "mean_turns_to_consensus": null,
+        "signals": {}
+      }
+    }
+  }
+}

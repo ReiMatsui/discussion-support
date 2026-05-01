@@ -205,6 +205,12 @@ class ConditionFullProposal:
         return self._orchestrator
 
     @property
+    def facilitator(self) -> FacilitationAgent:
+        """ライブ UI から bias/stage を読むためのフック。"""
+
+        return self._facilitator
+
+    @property
     def last_items(self) -> list[InfoItem]:
         """直近の info_provider 呼び出しで生成された InfoItem 群。"""
 

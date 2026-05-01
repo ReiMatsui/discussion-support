@@ -1,0 +1,13 @@
+{
+  "run_id": "full_proposal-run-002-e03439",
+  "condition_name": "full_proposal",
+  "n_turns": 12,
+  "consensus": {
+    "reached": false,
+    "signal": "none",
+    "confidence": 0.0,
+    "fired_signals": [],
+    "detected_at_turn": null,
+    "rationale": "シグナルなし"
+  }
+}

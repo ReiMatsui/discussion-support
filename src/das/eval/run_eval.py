@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
@@ -31,6 +32,7 @@ from das.eval.conditions import (
     InterventionLogEntry,
     write_intervention_log,
 )
+from das.eval.consensus import ConsensusReport, detect_consensus
 from das.eval.controller import SessionConfig, SessionRunner
 from das.eval.judge import (
     AggregatedScores,
@@ -45,6 +47,7 @@ from das.eval.metrics import (
     transcript_metrics,
 )
 from das.eval.persona import PersonaSpec
+from das.graph.store import GraphStore
 from das.llm import OpenAIClient
 from das.logging import get_logger
 from das.types import Utterance
@@ -69,6 +72,14 @@ class SingleRunResult:
     judge_reports: list[JudgeReport] = field(default_factory=list)
     intervention_log: list[InterventionLogEntry] | None = None
     snapshot: dict | None = None
+    consensus: ConsensusReport | None = None
+    """セッション終了時の合意検出レポート (until_consensus 有効時のみ非 None)。"""
+
+    @property
+    def n_turns(self) -> int:
+        """実際に走ったターン数 (max_turns 未満で早期終了したかを判定可能)。"""
+
+        return len(self.transcript)
 
 
 @dataclass(frozen=True)
@@ -153,9 +164,69 @@ def _save_run(
             encoding="utf-8",
         )
 
+    # ラン単位のメタ (収束情報やターン数を解析できるように残す)
+    run_meta: dict = {
+        "run_id": result.run_id,
+        "condition_name": result.condition_name,
+        "n_turns": result.n_turns,
+    }
+    if result.consensus is not None:
+        run_meta["consensus"] = {
+            "reached": result.consensus.consensus_reached,
+            "signal": result.consensus.signal,
+            "confidence": result.consensus.confidence,
+            "fired_signals": list(result.consensus.fired_signals),
+            "detected_at_turn": result.consensus.detected_at_turn,
+            "rationale": result.consensus.rationale,
+        }
+    (run_dir / "run_meta.json").write_text(
+        json.dumps(run_meta, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _convergence_stats(runs: list[SingleRunResult]) -> dict:
+    """ラン群を「収束したか / 何ターンで収束したか」で集計する。"""
+
+    total = len(runs)
+    if total == 0:
+        return {
+            "n_runs": 0,
+            "n_converged": 0,
+            "convergence_rate": 0.0,
+            "mean_turns": 0.0,
+            "mean_turns_to_consensus": None,
+            "signals": {},
+        }
+
+    n_converged = 0
+    sum_turns = 0
+    converged_turns: list[int] = []
+    signal_counts: dict[str, int] = {}
+
+    for r in runs:
+        sum_turns += r.n_turns
+        if r.consensus is not None and r.consensus.consensus_reached:
+            n_converged += 1
+            if r.consensus.detected_at_turn is not None:
+                converged_turns.append(r.consensus.detected_at_turn)
+            signal_counts[r.consensus.signal] = signal_counts.get(r.consensus.signal, 0) + 1
+
+    return {
+        "n_runs": total,
+        "n_converged": n_converged,
+        "convergence_rate": n_converged / total,
+        "mean_turns": sum_turns / total,
+        "mean_turns_to_consensus": (
+            sum(converged_turns) / len(converged_turns) if converged_turns else None
+        ),
+        "signals": signal_counts,
+    }
+
 
 def _save_eval_result(eval_dir: Path, result: EvalResult) -> None:
     aggregates = result.aggregate()
+    grouped = result.by_condition()
     summary_payload = {
         "eval_id": result.eval_id,
         "topic": result.topic,
@@ -183,6 +254,7 @@ def _save_eval_result(eval_dir: Path, result: EvalResult) -> None:
                     agg.intervention_transparency_mean,
                     agg.intervention_transparency_std,
                 ],
+                "convergence": _convergence_stats(grouped.get(cond, [])),
             }
             for cond, agg in aggregates.items()
         },
@@ -196,6 +268,14 @@ def _save_eval_result(eval_dir: Path, result: EvalResult) -> None:
 # --- main ----------------------------------------------------------
 
 
+def _store_for_condition(condition: Condition) -> GraphStore | None:
+    """ConditionFullProposal なら orchestrator の store を返す。それ以外は None。"""
+
+    if isinstance(condition, ConditionFullProposal) and condition.orchestrator:
+        return condition.orchestrator.store
+    return None
+
+
 async def _run_single(
     *,
     condition_name: str,
@@ -207,12 +287,29 @@ async def _run_single(
     llm: OpenAIClient,
     judge: JudgeAgent | None,
     run_id: str,
+    until_consensus: bool = False,
+    consensus_kwargs: dict | None = None,
 ) -> SingleRunResult:
     await condition.setup(docs_dir=docs_dir)
 
+    consensus_kwargs = consensus_kwargs or {}
+
+    # until_consensus=True のときのみ stop_condition を組み立てる。
+    # FullProposal なら orchestrator.store を渡して構造シグナルも使う。
+    stop_condition = None
+    if until_consensus:
+        store_ref = _store_for_condition(condition)
+
+        def _stop(history: list[Utterance]) -> bool:
+            return detect_consensus(history, store=store_ref, **consensus_kwargs).consensus_reached
+
+        stop_condition = _stop
+
     transcript: list[Utterance] = []
     runner = SessionRunner(personas, config, llm=llm)
-    async for u in runner.run_streaming(info_provider=condition.info_provider):
+    async for u in runner.run_streaming(
+        info_provider=condition.info_provider, stop_condition=stop_condition
+    ):
         transcript.append(u)
 
     t_metrics = transcript_metrics(transcript)
@@ -220,11 +317,16 @@ async def _run_single(
     g_metrics: GraphMetrics | None = None
     snapshot: dict | None = None
     intervention_log: list[InterventionLogEntry] | None = None
-    if isinstance(condition, ConditionFullProposal) and condition.orchestrator:
-        store = condition.orchestrator.store
-        g_metrics = graph_metrics(store)
-        snapshot = store.snapshot()
-        intervention_log = condition.intervention_log
+    final_store = _store_for_condition(condition)
+    if final_store is not None:
+        g_metrics = graph_metrics(final_store)
+        snapshot = final_store.snapshot()
+        if isinstance(condition, ConditionFullProposal):
+            intervention_log = condition.intervention_log
+
+    # 合意検出の最終レポート (until_consensus でない場合も「実際に合意していたか」を
+    # 後付け判定して残すと分析しやすいので、常に算出する)。
+    consensus_report = detect_consensus(transcript, store=final_store, **consensus_kwargs)
 
     judge_reports: list[JudgeReport] = []
     if judge is not None:
@@ -246,6 +348,7 @@ async def _run_single(
         judge_reports=judge_reports,
         intervention_log=intervention_log,
         snapshot=snapshot,
+        consensus=consensus_report,
     )
 
 
@@ -263,13 +366,28 @@ async def run_eval(
     eval_dir: Path | None = None,
     eval_id: str | None = None,
     progress: ProgressCallback | None = None,
+    until_consensus: bool = False,
+    consensus_kwargs: dict | None = None,
+    concurrency: int = 1,
 ) -> EvalResult:
-    """N 本のランを条件 xトピックで回し、集計結果を返す。"""
+    """N 本のランを条件 xトピックで回し、集計結果を返す。
+
+    ``until_consensus=True`` のとき、各セッションは ``detect_consensus`` が True を
+    返した時点で早期終了する。``max_turns`` はその場合「安全上限」として機能する。
+    ``consensus_kwargs`` は ``detect_consensus`` にそのまま渡されるため、
+    ``agreement_window`` などのチューニングが可能。
+
+    ``concurrency`` (>=1) を上げると、(condition, run) 単位の独立タスクを
+    並列実行する。LLM 呼び出しは asyncio で多重化されるが、API のレート制限を
+    超えないよう適切な値 (例: 4〜8) に抑えることを推奨。
+    """
 
     if n_runs < 1:
         raise ValueError("n_runs must be >= 1")
     if not condition_factories:
         raise ValueError("condition_factories must not be empty")
+    if concurrency < 1:
+        raise ValueError("concurrency must be >= 1")
 
     llm = llm or OpenAIClient()
     eval_id = eval_id or datetime.now(timezone.utc).strftime("eval-%Y%m%dT%H%M%SZ")
@@ -281,12 +399,14 @@ async def run_eval(
         topic=topic, max_turns=max_turns, temperature=temperature
     )
 
-    runs: list[SingleRunResult] = []
     total = n_runs * len(condition_factories)
-    completed = 0
+    semaphore = asyncio.Semaphore(concurrency)
+    completed_counter = {"n": 0}
 
-    for cond_name, factory in condition_factories.items():
-        for run_idx in range(1, n_runs + 1):
+    async def _job(
+        cond_name: str, factory: ConditionFactory, run_idx: int
+    ) -> tuple[str, int, SingleRunResult]:
+        async with semaphore:
             condition = factory()
             run_id = f"{cond_name}-run-{run_idx:03d}-{uuid4().hex[:6]}"
             _log.info("eval.run.start", run_id=run_id, condition=cond_name)
@@ -300,16 +420,31 @@ async def run_eval(
                 llm=llm,
                 judge=judge,
                 run_id=run_id,
+                until_consensus=until_consensus,
+                consensus_kwargs=consensus_kwargs,
             )
-            runs.append(result)
             if target_dir is not None:
                 run_dir = target_dir / cond_name / f"run_{run_idx:03d}"
                 _save_run(run_dir, result)
-            completed += 1
+            # asyncio は単一スレッドなので排他制御不要
+            completed_counter["n"] += 1
             if progress is not None:
-                ret = progress(cond_name, completed, total)
+                ret = progress(cond_name, completed_counter["n"], total)
                 if hasattr(ret, "__await__"):
                     await ret  # type: ignore[func-returns-value]
+            return cond_name, run_idx, result
+
+    tasks: list[asyncio.Task] = []
+    cond_order = list(condition_factories.keys())
+    for cond_name in cond_order:
+        factory = condition_factories[cond_name]
+        for run_idx in range(1, n_runs + 1):
+            tasks.append(asyncio.create_task(_job(cond_name, factory, run_idx)))
+
+    completed_results = await asyncio.gather(*tasks)
+    # condition の順、run_idx の順に並べ直して再現性のある runs リストにする
+    completed_results.sort(key=lambda triple: (cond_order.index(triple[0]), triple[1]))
+    runs: list[SingleRunResult] = [t[2] for t in completed_results]
 
     eval_result = EvalResult(
         eval_id=eval_id,
@@ -327,6 +462,9 @@ async def run_eval(
             "n_runs_per_condition": n_runs,
             "max_turns": max_turns,
             "temperature": temperature,
+            "until_consensus": until_consensus,
+            "consensus_kwargs": consensus_kwargs or {},
+            "concurrency": concurrency,
             "personas": [asdict(p) for p in personas],
             "condition_names": list(condition_factories.keys()),
             "started_at": datetime.now(timezone.utc).isoformat(),

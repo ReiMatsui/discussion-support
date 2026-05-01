@@ -3,7 +3,7 @@
 from das.agents.base import BaseAgent
 from das.agents.document import DocumentAgent
 from das.agents.extraction import ExtractionAgent
-from das.agents.facilitation import FacilitationAgent, FacilitationItem
+from das.agents.facilitation import FacilitationAgent
 from das.agents.linking import LinkingAgent
 
 __all__ = [
@@ -11,6 +11,5 @@ __all__ = [
     "DocumentAgent",
     "ExtractionAgent",
     "FacilitationAgent",
-    "FacilitationItem",
     "LinkingAgent",
 ]

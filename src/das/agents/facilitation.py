@@ -91,9 +91,6 @@ class InfoItem:
     """この項目が選ばれた論理的理由。介入の透明性 (§4.3) のために残す。"""
 
 
-# 後方互換のためのエイリアス (旧コードが FacilitationItem を import している場合用)
-FacilitationItem = InfoItem
-
 
 class FacilitationAgent(BaseAgent):
     """中央調停者。グラフ全体を読み、提示候補を優先度付きで返す。"""
@@ -301,7 +298,6 @@ class FacilitationAgent(BaseAgent):
 __all__ = [
     "BiasReport",
     "FacilitationAgent",
-    "FacilitationItem",
     "InfoItem",
     "Stage",
     "StageReport",
