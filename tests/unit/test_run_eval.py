@@ -286,6 +286,33 @@ async def test_run_eval_concurrency_invalid() -> None:
         )
 
 
+async def test_run_eval_event_emitter_fires_run_start_utterance_run_end() -> None:
+    """event_emitter に run_start / utterance / run_end の各 type が流れる。"""
+
+    llm = _fake_llm("u")
+    personas = [build_persona(name="A")]
+    events: list[dict] = []
+
+    def emit(payload: dict) -> None:
+        events.append(payload)
+
+    await run_eval(
+        topic="t",
+        personas=personas,
+        condition_factories={"none": ConditionNone},
+        n_runs=1,
+        max_turns=2,
+        llm=llm,
+        event_emitter=emit,
+    )
+    types = [e.get("type") for e in events]
+    assert types[0] == "run_start"
+    assert "utterance" in types
+    assert types[-1] == "run_end"
+    # utterance 数 = max_turns
+    assert sum(1 for e in events if e.get("type") == "utterance") == 2
+
+
 async def test_run_eval_concurrency_preserves_order_and_count() -> None:
     """concurrency>1 でも runs は (cond order, run_idx) で並ぶ。"""
 

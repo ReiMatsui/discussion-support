@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
@@ -55,6 +56,10 @@ from das.types import Utterance
 ConditionFactory = Callable[[], Condition]
 ProgressCallback = Callable[[str, int, int], Awaitable[None] | None]
 """``(condition_name, run_index, total_runs)`` を受け取る進捗コールバック。"""
+
+EventEmitter = Callable[[dict], None]
+"""UI 等に向けたイベント通知。``run_start`` / ``utterance`` / ``intervention`` /
+``run_end`` の 4 種を発火する。同期コールバック想定。"""
 
 _log = get_logger("das.eval.run_eval")
 
@@ -287,12 +292,33 @@ async def _run_single(
     llm: OpenAIClient,
     judge: JudgeAgent | None,
     run_id: str,
+    run_idx: int = 1,
     until_consensus: bool = False,
     consensus_kwargs: dict | None = None,
+    event_emitter: EventEmitter | None = None,
 ) -> SingleRunResult:
     await condition.setup(docs_dir=docs_dir)
 
     consensus_kwargs = consensus_kwargs or {}
+
+    def _emit(payload: dict) -> None:
+        if event_emitter is None:
+            return
+        with contextlib.suppress(Exception):  # 防御的: emitter 失敗で本筋を止めない
+            event_emitter(payload)
+
+    _emit(
+        {
+            "type": "run_start",
+            "condition": condition_name,
+            "run_idx": run_idx,
+            "run_id": run_id,
+            "topic": topic,
+            "personas": [
+                {"name": p.name, "stance": p.stance, "focus": p.focus} for p in personas
+            ],
+        }
+    )
 
     # until_consensus=True のときのみ stop_condition を組み立てる。
     # FullProposal なら orchestrator.store を渡して構造シグナルも使う。
@@ -306,11 +332,41 @@ async def _run_single(
         stop_condition = _stop
 
     transcript: list[Utterance] = []
+    prev_iv_count = 0
     runner = SessionRunner(personas, config, llm=llm)
     async for u in runner.run_streaming(
         info_provider=condition.info_provider, stop_condition=stop_condition
     ):
+        # この発話の前に出された介入を先に通知 (タイムライン上は intervention → utterance の順)
+        if isinstance(condition, ConditionFullProposal):
+            new_log = condition.intervention_log
+            for entry in new_log[prev_iv_count:]:
+                _emit(
+                    {
+                        "type": "intervention",
+                        "condition": condition_name,
+                        "run_idx": run_idx,
+                        "turn_id": entry.turn_id,
+                        "kind": entry.kind,
+                        "addressed_to": entry.addressed_to,
+                        "brief": entry.brief,
+                        "decision_reason": entry.decision_reason,
+                        "items": entry.items,
+                    }
+                )
+            prev_iv_count = len(new_log)
+
         transcript.append(u)
+        _emit(
+            {
+                "type": "utterance",
+                "condition": condition_name,
+                "run_idx": run_idx,
+                "turn_id": u.turn_id,
+                "speaker": u.speaker,
+                "text": u.text,
+            }
+        )
 
     t_metrics = transcript_metrics(transcript)
 
@@ -327,6 +383,18 @@ async def _run_single(
     # 合意検出の最終レポート (until_consensus でない場合も「実際に合意していたか」を
     # 後付け判定して残すと分析しやすいので、常に算出する)。
     consensus_report = detect_consensus(transcript, store=final_store, **consensus_kwargs)
+
+    _emit(
+        {
+            "type": "run_end",
+            "condition": condition_name,
+            "run_idx": run_idx,
+            "n_turns": len(transcript),
+            "consensus_reached": consensus_report.consensus_reached,
+            "consensus_signal": consensus_report.signal,
+            "consensus_at": consensus_report.detected_at_turn,
+        }
+    )
 
     judge_reports: list[JudgeReport] = []
     if judge is not None:
@@ -369,6 +437,7 @@ async def run_eval(
     until_consensus: bool = False,
     consensus_kwargs: dict | None = None,
     concurrency: int = 1,
+    event_emitter: EventEmitter | None = None,
 ) -> EvalResult:
     """N 本のランを条件 xトピックで回し、集計結果を返す。
 
@@ -420,8 +489,10 @@ async def run_eval(
                 llm=llm,
                 judge=judge,
                 run_id=run_id,
+                run_idx=run_idx,
                 until_consensus=until_consensus,
                 consensus_kwargs=consensus_kwargs,
+                event_emitter=event_emitter,
             )
             if target_dir is not None:
                 run_dir = target_dir / cond_name / f"run_{run_idx:03d}"

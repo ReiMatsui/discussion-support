@@ -169,6 +169,12 @@ def eval_cmd(
         "--eval-dir",
         help="出力ベースディレクトリ (省略時は data/eval)",
     ),
+    emit_events: bool = typer.Option(
+        False,
+        "--emit-events",
+        help="UI 連携用: 各イベント (utterance/intervention/run_start/run_end) "
+        "を `__DAS_EVT__<json>` 行として stdout に流す",
+    ),
 ) -> None:
     """シミュレーション評価を一括実行する (3 条件比較 + LLM-as-judge)。"""
 
@@ -188,6 +194,7 @@ def eval_cmd(
             agreement_threshold=agreement_threshold,
             min_turns_before_consensus=min_turns_before_consensus,
             concurrency=concurrency,
+            emit_events=emit_events,
         )
     )
 
@@ -337,6 +344,7 @@ async def _run_eval_cli(
     agreement_threshold: float = 0.6,
     min_turns_before_consensus: int = 4,
     concurrency: int = 1,
+    emit_events: bool = False,
 ) -> None:
     from das.eval import (
         ConditionFlatRAG,
@@ -401,6 +409,18 @@ async def _run_eval_cli(
         "min_turns_before_consensus": min_turns_before_consensus,
     }
 
+    # UI 連携: --emit-events でイベントを stdout に流す。
+    # ログ行と区別できるよう先頭に sentinel ``__DAS_EVT__`` を付ける。
+    event_emitter = None
+    if emit_events:
+        import sys as _sys
+
+        def _emit(payload: dict) -> None:
+            line = "__DAS_EVT__" + json.dumps(payload, ensure_ascii=False, default=str)
+            print(line, flush=True, file=_sys.stdout)
+
+        event_emitter = _emit
+
     result = await run_eval(
         topic=topic,
         personas=personas,
@@ -417,6 +437,7 @@ async def _run_eval_cli(
         until_consensus=until_consensus,
         consensus_kwargs=consensus_kwargs,
         concurrency=concurrency,
+        event_emitter=event_emitter,
     )
 
     typer.echo("")
