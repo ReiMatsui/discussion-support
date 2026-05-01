@@ -303,15 +303,36 @@ with right:
 
     interventions_path = run_dir / "interventions.jsonl"
     if interventions_path.exists():
+        # 介入率の集計を上に表示
+        all_entries = [
+            json.loads(line)
+            for line in interventions_path.read_text(encoding="utf-8").strip().split("\n")
+            if line.strip()
+        ]
+        if all_entries:
+            n = len(all_entries)
+            n_l1 = sum(1 for e in all_entries if e.get("kind") == "l1")
+            n_l2 = sum(1 for e in all_entries if e.get("kind") == "l2")
+            n_skip = sum(1 for e in all_entries if e.get("kind") == "skip")
+            st.markdown("#### 介入種別")
+            ic = st.columns(4)
+            ic[0].metric("総ターン", n)
+            ic[1].metric("L1 (個別)", f"{n_l1} ({n_l1 / n:.0%})")
+            ic[2].metric("L2 (俯瞰)", f"{n_l2} ({n_l2 / n:.0%})")
+            ic[3].metric("skip", f"{n_skip} ({n_skip / n:.0%})")
         with st.expander("介入ログ (interventions.jsonl)"):
-            for line in interventions_path.read_text(encoding="utf-8").strip().split("\n"):
-                if not line.strip():
-                    continue
-                entry = json.loads(line)
+            for entry in all_entries:
+                kind = entry.get("kind", "l1")
+                badge = {"l1": "🟦 L1", "l2": "🟪 L2", "skip": "⬜ skip"}.get(kind, kind)
                 st.markdown(
-                    f"**turn {entry['turn_id']}** → {entry['persona_name']} "
+                    f"**turn {entry['turn_id']}** {badge} → "
+                    f"{entry.get('addressed_to') or '全員'} "
                     f"({len(entry.get('items', []))} 件)"
                 )
+                if entry.get("decision_reason"):
+                    st.caption(f"理由: {entry['decision_reason']}")
+                if entry.get("brief"):
+                    st.markdown(f"> {entry['brief']}")
                 for item in entry.get("items", []):
                     tag = "🟢" if item.get("relation") == "support" else "🔴"
                     reason = item.get("reason", "-")

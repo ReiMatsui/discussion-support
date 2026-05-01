@@ -1,0 +1,45 @@
+{
+  "eval_id": "smoke",
+  "topic": "大学のカフェテリアでプラスチック容器を廃止すべきか",
+  "n_runs_per_condition": 2,
+  "max_turns": 15,
+  "temperature": 0.7,
+  "until_consensus": true,
+  "consensus_kwargs": {
+    "agreement_window": 4,
+    "agreement_threshold": 0.4,
+    "min_turns_before_consensus": 4
+  },
+  "concurrency": 2,
+  "personas": [
+    {
+      "name": "A",
+      "stance": "pro",
+      "focus": "環境負荷とサステナビリティ",
+      "personality": "原則重視で、長期的な視点を強調する",
+      "extra": "プラスチック廃棄の影響に強い問題意識を持つ",
+      "metadata": {}
+    },
+    {
+      "name": "B",
+      "stance": "con",
+      "focus": "学食価格とコスト負担",
+      "personality": "現実主義で、運用面の懸念を強く示す",
+      "extra": "学生の経済負担を最優先で考える",
+      "metadata": {}
+    },
+    {
+      "name": "C",
+      "stance": "neutral",
+      "focus": "折衷案や代替策",
+      "personality": "調整役で、両論を整理しつつ第 3 の選択肢を探す",
+      "extra": "バイオプラやリユース容器など、選択肢の多さに関心",
+      "metadata": {}
+    }
+  ],
+  "condition_names": [
+    "none",
+    "full_proposal"
+  ],
+  "started_at": "2026-05-01T09:05:45.095169+00:00"
+}

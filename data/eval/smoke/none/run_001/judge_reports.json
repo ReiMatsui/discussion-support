@@ -1,0 +1,41 @@
+[
+  {
+    "persona_name": "A",
+    "condition_name": "none",
+    "topic": "大学のカフェテリアでプラスチック容器を廃止すべきか",
+    "scores": {
+      "overall_satisfaction": 7,
+      "information_usefulness": 7,
+      "opposition_understanding": 7,
+      "confidence_change": 2,
+      "intervention_transparency": 6,
+      "rationale": "overall_satisfaction: 議論は建設的で合意点（段階的試行と代替策検証）に収束したため非常に満足です。Cの具体案とBの現場的懸念が組み合わさり実行可能な方向に進んだ点を評価します。 information_usefulness: Bが運用コストや回収・消毒の負担を具体的に指摘したこと（t2,t5）と、Cが評価指標を提示したこと（t3,t6）は判断に直接役立ちました。提案された回収率目標や価格上昇上限などの定量的指標は特に有用です。 opposition_understanding: B側の「コストと運用負担」の論点を十分に理解できました（t2,t5）。相手の懸念を踏まえて自分の立場を修正したこと（t4）もあり、異論の主旨は明確でした。 confidence_change: 議論を経て即時全廃から段階的導入へと現実的に修正したため、自分の主張の実現可能性に対する自信は強まりました。だが運用負担の不確実性は依然残るため大幅な増強ではなく+2です。 intervention_transparency: 各参加者がなぜその情報を出したか（コスト懸念、環境負荷、評価指標の必要性）が概ね示されていたため高い透明性がありました。若干、運用コストの試算根拠や補助金財源に関する説明が不足していたので満点にはしませんでした。"
+    }
+  },
+  {
+    "persona_name": "B",
+    "condition_name": "none",
+    "topic": "大学のカフェテリアでプラスチック容器を廃止すべきか",
+    "scores": {
+      "overall_satisfaction": 6,
+      "information_usefulness": 6,
+      "opposition_understanding": 6,
+      "confidence_change": 1,
+      "intervention_transparency": 6,
+      "rationale": "overall_satisfaction: 議論は私の主張（高廃棄メニュー限定の段階的試行、価格上昇の上限設定）を取り入れて具体化したため満足度は高い。Aが譲歩し、Cが評価指標（回収率80％、上限20円、評価期間6か月）を提示した点が評価できる。\ninformation_usefulness: Cの提案する評価指標や私が要求した試行前の測定項目（1食当たり価格上昇の上限、回収率等）は判断に直接役立つ。具体的数値案が提示されたことで費用対効果の検証計画が立てやすくなった。\nopposition_understanding: 相手側の環境負荷の懸念は繰り返し説明され、Aは私のコスト懸念を受け入れて修正を行ったため理解は深まった。環境側の主張は長期的負荷という点で明確だった。\nconfidence_change: 私の懸念が議論で反映され実務的な評価指標が提示されたため、現状維持を支持する自信はやや強まった。とはいえ運用・維持費の不確実性は残るので大きく変化はしていない。\nintervention_transparency: 各発言で「なぜその情報が出されたか」が比較的明示されており、特にCが構造化した評価項目を提示した点で透明性は高い。私からの要求（価格上限や測定項目）にも直接応える形で情報が提示された。"
+    }
+  },
+  {
+    "persona_name": "C",
+    "condition_name": "none",
+    "topic": "大学のカフェテリアでプラスチック容器を廃止すべきか",
+    "scores": {
+      "overall_satisfaction": 6,
+      "information_usefulness": 6,
+      "opposition_understanding": 7,
+      "confidence_change": 0,
+      "intervention_transparency": 6,
+      "rationale": "overall_satisfaction: 議論は対立点を明確にし、実行可能な折衷案（高廃棄メニュー限定の段階的試行、デポジット・補助金併用、評価指標の提示）にまとまったため満足度は高めです。唯一の欠点は定量的なコスト見積りや具体的な資金源の提示が不足していた点で完璧ではありません。 information_usefulness: Aの環境リスクの指摘とBの運用コスト懸念、Cの評価指標提案が揃い実務判断に役立つ情報が得られました。とはいえ具体的数値データが欠けているため完全ではなく、補足調査が必要です。 opposition_understanding: 双方の主張が互いに受け入れ・修正される形で提示され（Aが段階的導入に修正、Bが試行の詳細条件を要求）、相手側の論拠は非常によく理解できました。具体例としてBの運用費や回収率問題、Aのデポジット・補助金提案が明瞭に示されました。 confidence_change: 中立的調整役として自分の立場（折衷案重視）は議論後も変わらず、信頼度は変化しません。参加者の主張が互いに補完し合ったため、既存の方針への確信が増減しませんでした。 intervention_transparency: 情報提供の意図や提案の根拠（コスト懸念→試行、小規模試行→評価指標導入）が明確に示されており透明性は高いです。改善余地はあるが、議論の流れでなぜその情報が出たかは概ね理解できました。"
+    }
+  }
+]

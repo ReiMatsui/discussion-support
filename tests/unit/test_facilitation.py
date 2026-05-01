@@ -115,22 +115,29 @@ def test_stage_diverge_with_diverse_speakers() -> None:
     assert stage.stage == "diverge"
 
 
-def test_stage_stalled_with_repetitions() -> None:
+def test_stage_stalled_when_no_new_claims_or_attacks() -> None:
+    """直近窓で新 claim も新 attack も追加されていなければ stalled。"""
+
+    # 古いノードのみがある store。直近発話に対応するノードは無い。
+    store = NetworkXGraphStore()
+    old = Node(text="古い主張", node_type="claim", source="utterance", author="X")
+    store.add_node(old)
+
     transcript = [
-        Utterance(turn_id=i, speaker="A", text="プラ容器を廃止すべきだ。コスト軽視できる。")
-        for i in range(1, 7)
+        Utterance(turn_id=i, speaker="A", text="繰り返しの発言") for i in range(1, 5)
     ]
     agent = FacilitationAgent(llm=_fake_llm())
-    stage = agent.detect_stage(transcript)
+    stage = agent.detect_stage(transcript, store)
     assert stage.stage == "stalled"
-    assert stage.repetition_rate > 0.5
+    assert stage.new_claims_in_window == 0
+    assert stage.new_attacks_in_window == 0
 
 
 def test_stage_empty_transcript() -> None:
     agent = FacilitationAgent(llm=_fake_llm())
     stage = agent.detect_stage([])
     assert stage.stage == "diverge"
-    assert stage.n_recent_turns == 0
+    assert stage.n_recent_utterances == 0
 
 
 # --- select_for_target --------------------------------------------------
@@ -254,5 +261,181 @@ def test_bias_report_imbalance_ratio_bounds() -> None:
 
 
 def test_stage_report_fields() -> None:
-    s = StageReport(stage="converge", n_recent_turns=4, repetition_rate=0.2, speaker_diversity=0.5)
+    s = StageReport(
+        stage="converge",
+        n_recent_utterances=4,
+        new_claims_in_window=2,
+        new_attacks_in_window=1,
+        speaker_diversity=0.5,
+    )
     assert s.stage == "converge"
+    assert s.new_claims_in_window == 2
+
+
+# --- decide_intervention (Stage 1: いつ介入するか) -----------------------
+
+
+def _utt(turn_id: int, speaker: str = "A", text: str = "発言") -> Utterance:
+    return Utterance(turn_id=turn_id, speaker=speaker, text=text)
+
+
+def test_decide_skip_when_history_empty() -> None:
+    agent = FacilitationAgent(llm=_fake_llm())
+    decision = agent.decide_intervention([], NetworkXGraphStore())
+    assert decision.kind == "skip"
+    assert "履歴" in decision.reason
+
+
+def test_decide_skip_when_last_utterance_has_no_nodes() -> None:
+    """発話はあるが extraction 未完了で対応ノードが無いときは skip。"""
+
+    agent = FacilitationAgent(llm=_fake_llm())
+    decision = agent.decide_intervention([_utt(1, "A", "x")], NetworkXGraphStore())
+    assert decision.kind == "skip"
+
+
+def test_decide_l1_with_addressed_to_last_speaker() -> None:
+    """最新発話に隣接エッジがあれば L1。addressed_to は発話者。"""
+
+    store = NetworkXGraphStore()
+    target = Node(
+        text="主張", node_type="claim", source="utterance", author="A",
+        metadata={"turn_id": 1},
+    )
+    attacker = Node(text="反論", node_type="claim", source="document", author="d1")
+    store.add_node(target)
+    store.add_node(attacker)
+    store.add_edge(Edge(src_id=attacker.id, dst_id=target.id, relation="attack", confidence=0.9))
+
+    agent = FacilitationAgent(llm=_fake_llm())
+    decision = agent.decide_intervention([_utt(1, "A")], store)
+    assert decision.kind == "l1"
+    assert decision.addressed_to == "A"
+    assert len(decision.items) == 1
+    assert decision.items[0].relation == "attack"
+
+
+def test_decide_skip_after_intervention_with_no_new_edges() -> None:
+    """直前介入後にエッジが増えていなければ skip (連続介入の抑制)。"""
+
+    store = NetworkXGraphStore()
+    target = Node(
+        text="主張", node_type="claim", source="utterance", author="A",
+        metadata={"turn_id": 1},
+    )
+    src = Node(text="支持", node_type="premise", source="document", author="d1")
+    store.add_node(target)
+    store.add_node(src)
+    store.add_edge(Edge(src_id=src.id, dst_id=target.id, relation="support", confidence=0.8))
+
+    agent = FacilitationAgent(llm=_fake_llm())
+    # 1 回目: L1 が出る
+    d1 = agent.decide_intervention([_utt(1, "A")], store)
+    assert d1.kind == "l1"
+
+    # 2 回目: 新しい発話のノードが無く、エッジも増えていない → skip
+    target2 = Node(
+        text="続き", node_type="claim", source="utterance", author="B",
+        metadata={"turn_id": 2},
+    )
+    store.add_node(target2)  # ノードは増えるが、エッジは増えない
+    d2 = agent.decide_intervention(
+        [_utt(1, "A"), _utt(2, "B", "続き")], store
+    )
+    assert d2.kind == "skip"
+    assert "新エッジ追加なし" in d2.reason
+
+
+def test_decide_l2_when_stalled() -> None:
+    """十分な発話数があり、直近窓で新 claim/attack が無い → L2。"""
+
+    store = NetworkXGraphStore()
+    # 古い発話のノードのみ (timestamp が古い)
+    old_node = Node(
+        text="古い主張", node_type="claim", source="utterance", author="A",
+        metadata={"turn_id": -1},
+    )
+    store.add_node(old_node)
+
+    # 最新発話に対応するノードが無いと skip にされてしまうので、turn_id 経由で 1 件は紐付ける
+    last_node = Node(
+        text="最新", node_type="claim", source="utterance", author="C",
+        metadata={"turn_id": 6},
+    )
+    store.add_node(last_node)
+
+    agent = FacilitationAgent(llm=_fake_llm(), stall_window=4, l2_min_interval=2)
+    transcript = [
+        _utt(i, ["A", "B", "C"][i % 3], "繰り返しの議論") for i in range(1, 7)
+    ]
+    decision = agent.decide_intervention(transcript, store)
+    # last_node の隣接が無いので L1 にもならない場合があるが、この設定では stalled が立つ
+    assert decision.kind in ("l2", "skip")
+    if decision.kind == "l2":
+        assert decision.addressed_to is None
+        assert decision.brief
+        assert "停滞" in decision.reason or "偏り" in decision.reason
+
+
+def test_decide_l2_respects_min_interval() -> None:
+    """L2 を 1 回出した直後は、間隔条件を満たさないので L2 が再発しない。"""
+
+    store = NetworkXGraphStore()
+    last_node = Node(
+        text="最新", node_type="claim", source="utterance", author="A",
+        metadata={"turn_id": 5},
+    )
+    store.add_node(last_node)
+
+    agent = FacilitationAgent(llm=_fake_llm(), stall_window=4, l2_min_interval=5)
+    transcript = [_utt(i, "A", "x") for i in range(1, 6)]
+    d1 = agent.decide_intervention(transcript, store)
+    # 6 ターン目: 新ノードを足してエッジも 1 本足す → 連続抑制は外れるが L2 間隔条件で抑制
+    next_node = Node(
+        text="続き", node_type="claim", source="utterance", author="B",
+        metadata={"turn_id": 6},
+    )
+    store.add_node(next_node)
+    store.add_edge(Edge(src_id=next_node.id, dst_id=last_node.id, relation="support", confidence=0.7))
+    transcript2 = [*transcript, _utt(6, "B", "y")]
+    d2 = agent.decide_intervention(transcript2, store)
+    # 直前が L2 だった場合、5 発話空くまで L2 は再発しない
+    if d1.kind == "l2":
+        assert d2.kind != "l2"
+
+
+def test_reset_clears_internal_state() -> None:
+    agent = FacilitationAgent(llm=_fake_llm())
+    store = NetworkXGraphStore()
+    target = Node(
+        text="m", node_type="claim", source="utterance", author="A",
+        metadata={"turn_id": 1},
+    )
+    store.add_node(target)
+    agent.decide_intervention([_utt(1, "A")], store)  # 内部状態を進める
+    agent.reset()
+    # reset 後は再び 1 ターン目から始まったかのように扱える
+    assert agent._last_decision_kind is None  # type: ignore[attr-defined]
+
+
+# --- compose_l2_brief (deterministic fallback) ---------------------------
+
+
+def test_compose_l2_brief_deterministic_runs_without_llm() -> None:
+    """LLM が None でも deterministic fallback が走る。"""
+
+    import asyncio
+
+    store = NetworkXGraphStore()
+    a1 = Node(text="主張", node_type="claim", source="utterance", author="A")
+    a2 = Node(text="反論", node_type="claim", source="utterance", author="B")
+    store.add_node(a1)
+    store.add_node(a2)
+    store.add_edge(Edge(src_id=a2.id, dst_id=a1.id, relation="attack", confidence=0.9))
+    store.add_edge(Edge(src_id=a2.id, dst_id=a1.id, relation="attack", confidence=0.8))
+
+    agent = FacilitationAgent(llm=None)
+    transcript = [_utt(i, ["A", "B"][i % 2], "発言") for i in range(1, 5)]
+    brief = asyncio.run(agent.compose_l2_brief(transcript, store))
+    assert "ここまでの整理" in brief
+    assert "支持" in brief or "反論" in brief

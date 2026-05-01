@@ -1,0 +1,15 @@
+{
+  "run_id": "none-run-001-dec672",
+  "condition_name": "none",
+  "n_turns": 6,
+  "consensus": {
+    "reached": true,
+    "signal": "explicit_agreement",
+    "confidence": 0.5,
+    "fired_signals": [
+      "explicit_agreement"
+    ],
+    "detected_at_turn": 6,
+    "rationale": "直近 4 ターンの 50% に合意キーワード"
+  }
+}

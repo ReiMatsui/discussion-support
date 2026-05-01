@@ -1,0 +1,73 @@
+{
+  "eval_id": "smoke",
+  "topic": "大学のカフェテリアでプラスチック容器を廃止すべきか",
+  "n_runs_total": 4,
+  "by_condition": {
+    "none": {
+      "n_judge_reports": 6,
+      "overall_satisfaction": [
+        6.0,
+        0.5773502691896257
+      ],
+      "information_usefulness": [
+        6.0,
+        0.5773502691896257
+      ],
+      "opposition_understanding": [
+        6.5,
+        0.5
+      ],
+      "confidence_change": [
+        1.1666666666666667,
+        0.6871842709362768
+      ],
+      "intervention_transparency": [
+        5.666666666666667,
+        0.7453559924999299
+      ],
+      "convergence": {
+        "n_runs": 2,
+        "n_converged": 2,
+        "convergence_rate": 1.0,
+        "mean_turns": 5.5,
+        "mean_turns_to_consensus": 5.5,
+        "signals": {
+          "explicit_agreement": 2
+        }
+      }
+    },
+    "full_proposal": {
+      "n_judge_reports": 6,
+      "overall_satisfaction": [
+        5.833333333333333,
+        0.37267799624996495
+      ],
+      "information_usefulness": [
+        6.166666666666667,
+        0.37267799624996495
+      ],
+      "opposition_understanding": [
+        6.833333333333333,
+        0.37267799624996495
+      ],
+      "confidence_change": [
+        1.3333333333333333,
+        0.4714045207910317
+      ],
+      "intervention_transparency": [
+        6.0,
+        0.0
+      ],
+      "convergence": {
+        "n_runs": 2,
+        "n_converged": 2,
+        "convergence_rate": 1.0,
+        "mean_turns": 4.0,
+        "mean_turns_to_consensus": 4.0,
+        "signals": {
+          "explicit_agreement": 2
+        }
+      }
+    }
+  }
+}

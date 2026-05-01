@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
 
-from das.agents.facilitation import FacilitationAgent, InfoItem
+from das.agents.facilitation import FacilitationAgent, InfoItem, InterventionDecision
 from das.agents.linking import cosine_similarity
 from das.eval.persona import PersonaSpec
 from das.graph.store import NetworkXGraphStore
@@ -34,12 +34,30 @@ from das.types import Utterance
 
 @dataclass(frozen=True)
 class InterventionLogEntry:
-    """1 ターンに対して提示された情報の記録 (§4.3 介入の透明性)。"""
+    """1 介入分の記録 (§4.3 介入の透明性)。
+
+    L1/L2/skip いずれの判断も全て記録する。配信チャネル非依存にするため、
+    ``turn_id`` は補助情報として残し、本質的な識別は ``timestamp`` と
+    ``triggered_by_speaker`` で行う。
+    """
 
     turn_id: int
     persona_name: str
+    """旧フィールド: シミュレーションでの「次話者」または triggered_by_speaker。
+    対面では triggered_by_speaker と同義。"""
     timestamp: str
     items: list[dict] = field(default_factory=list)
+    kind: str = "l1"
+    """"l1" / "l2" / "skip"。"""
+
+    addressed_to: str | None = None
+    """L1 の通知対象話者。L2 / skip では None (= 全員 / 該当なし)。"""
+
+    brief: str = ""
+    """L2 のときの俯瞰サマリ本文。L1 / skip では空。"""
+
+    decision_reason: str = ""
+    """この判断に至ったロジカルな理由。"""
 
 
 def write_intervention_log(entries: list[InterventionLogEntry], path: Path) -> Path:
@@ -174,7 +192,7 @@ class ConditionFullProposal:
         *,
         threshold: float | None = None,
         top_k: int = 5,
-        max_info_items: int = 3,
+        max_info_items: int = 2,
         facilitator: FacilitationAgent | None = None,
     ) -> None:
         self._llm = llm or OpenAIClient()
@@ -184,6 +202,7 @@ class ConditionFullProposal:
         self._orchestrator: Orchestrator | None = None
         self._processed_turn_ids: set[int] = set()
         self._last_items: list[InfoItem] = []
+        self._last_decision_kind: str = "skip"
         self._intervention_log: list[InterventionLogEntry] = []
         # ファシリテーション (中央調停) は FacilitationAgent に委譲する
         self._facilitator = facilitator or FacilitationAgent(
@@ -216,6 +235,12 @@ class ConditionFullProposal:
 
         return list(self._last_items)
 
+    @property
+    def last_decision_kind(self) -> str:
+        """直近の info_provider 呼び出しが返した介入種別 (skip/l1/l2)。"""
+
+        return self._last_decision_kind
+
     async def setup(self, *, docs_dir: Path | None = None) -> None:
         store = NetworkXGraphStore()
         self._orchestrator = Orchestrator.assemble(
@@ -229,58 +254,90 @@ class ConditionFullProposal:
         self._log.info("full_proposal.setup")
 
     async def info_provider(self, history: list[Utterance], persona: PersonaSpec) -> str | None:
+        """シミュレーション側のアダプタ。
+
+        FacilitationAgent.decide_intervention で「介入の要否と内容」を
+        モダリティ非依存に決定し、その結果を「次話者のプロンプト用テキスト」
+        に翻訳する。対面 UI / 音声に展開するときはここを置き換える。
+        """
+
         self._last_items = []
+        self._last_decision_kind = "skip"
         if not history or self._orchestrator is None:
             return None
 
-        # 未処理の発話だけ追加で流す
+        # 未処理の発話だけ追加で流す (extraction → linking が走る)
         for utterance in history:
             if utterance.turn_id not in self._processed_turn_ids:
                 await self._orchestrator.bus.publish(utterance)
                 self._processed_turn_ids.add(utterance.turn_id)
         await self._orchestrator.bus.drain()
 
-        last_turn_id = history[-1].turn_id
         store = self._orchestrator.store
-        related_nodes = [
-            n
-            for n in store.nodes()
-            if n.source == "utterance" and n.metadata.get("turn_id") == last_turn_id
-        ]
-        if not related_nodes:
-            return None
 
-        # ファシリテーションエージェントが偏り検知 + ステージ判断 + 優先度付けを行う
-        items: list[InfoItem] = []
-        seen: set[str] = set()
-        for node in related_nodes:
-            for item in self._facilitator.select_for_target(node, store, history):
-                key = f"{item.relation}|{item.source_text}|{item.target_text}"
-                if key in seen:
-                    continue
-                seen.add(key)
-                items.append(item)
+        # 同期 API で「いつ・誰に・何を」を決める。L2 が選ばれた場合は
+        # この段階での brief は deterministic なので、必要なら LLM 整文を後置する。
+        decision = self._facilitator.decide_intervention(history, store)
+        self._last_decision_kind = decision.kind
 
-        # 優先度の高い順に上位 N を選択
-        items.sort(key=lambda it: it.priority, reverse=True)
-        items = items[: self._max_info_items]
-        self._last_items = items
+        # L2 のときは LLM で自然文に整える (失敗時は decision.brief をそのまま使う)
+        if decision.kind == "l2":
+            try:
+                better_brief = await self._facilitator.compose_l2_brief(
+                    history, store
+                )
+                if better_brief:
+                    decision = InterventionDecision(
+                        kind=decision.kind,
+                        items=decision.items,
+                        brief=better_brief,
+                        addressed_to=decision.addressed_to,
+                        reason=decision.reason,
+                    )
+            except Exception as exc:  # pragma: no cover - 防御的
+                self._log.warning("l2_brief.format_failed", error=str(exc))
 
-        # 介入ログに記録 (§4.3 介入の透明性のための事後追跡)
+        # 介入ログ
+        self._last_items = list(decision.items)
         self._intervention_log.append(
             InterventionLogEntry(
-                turn_id=last_turn_id,
+                turn_id=history[-1].turn_id,
                 persona_name=persona.name,
                 timestamp=datetime.now(timezone.utc).isoformat(),
-                items=[asdict(it) for it in items],
+                items=[asdict(it) for it in decision.items],
+                kind=decision.kind,
+                addressed_to=decision.addressed_to,
+                brief=decision.brief,
+                decision_reason=decision.reason,
             )
         )
 
-        if not items:
+        # シミュレーション固有の翻訳: 次話者のプロンプトに混ぜるテキストへ
+        if decision.kind == "skip":
             return None
-        lines = [
-            f"[{'支持' if it.relation == 'support' else '反論'}] {it.source_text}" for it in items
-        ]
+        if decision.kind == "l2":
+            return f"[議論の整理 (全体共有)]\n{decision.brief}"
+        # L1: addressed_to が次話者 (=persona.name) と一致するなら自分宛、
+        # 違えば三人称で「Aさんの先ほどの発言には〜」と整形
+        if decision.addressed_to == persona.name:
+            return self._format_l1_self(decision)
+        return self._format_l1_third_person(decision)
+
+    @staticmethod
+    def _format_l1_self(decision: InterventionDecision) -> str:
+        lines = ["[あなたの先ほどの発言に対する関連情報]"]
+        for it in decision.items:
+            tag = "支持" if it.relation == "support" else "反論"
+            lines.append(f"- [{tag}] {it.source_text}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_l1_third_person(decision: InterventionDecision) -> str:
+        speaker = decision.addressed_to or "直前の発言者"
+        lines = [f"[{speaker}さんの先ほどの発言に対する関連情報]"]
+        for it in decision.items:
+            tag = "支持" if it.relation == "support" else "反論"
+            lines.append(f"- [{tag}] {it.source_text}")
         return "\n".join(lines)
 
 

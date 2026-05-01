@@ -23,8 +23,8 @@ class Settings(BaseSettings):
 
     # OpenAI
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
-    openai_model_fast: str = Field(default="gpt-4o-mini", alias="OPENAI_MODEL_FAST")
-    openai_model_smart: str = Field(default="gpt-4o", alias="OPENAI_MODEL_SMART")
+    openai_model_fast: str = Field(default="gpt-5-mini", alias="OPENAI_MODEL_FAST")
+    openai_model_smart: str = Field(default="gpt-5-mini", alias="OPENAI_MODEL_SMART")
 
     # Tavily
     tavily_api_key: str = Field(default="", alias="TAVILY_API_KEY")

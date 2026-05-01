@@ -36,6 +36,20 @@ _RETRYABLE_EXCEPTIONS: tuple[type[Exception], ...] = (
 )
 
 
+def _supports_custom_temperature(model: str) -> bool:
+    """このモデルが ``temperature`` パラメータの上書きを受け付けるか。
+
+    GPT-5 系および o1 / o3 系の reasoning model は ``temperature`` を
+    既定値 (=1.0) 以外に設定できない (API が 400 を返す)。それ以外の
+    モデル (gpt-4*, gpt-3.5*, ...) は従来通り任意の温度を渡せる。
+    """
+
+    name = model.lower()
+    if name.startswith("gpt-5"):
+        return False
+    return not name.startswith(("o1", "o3", "o4"))
+
+
 class OpenAIClient:
     """非同期前提の OpenAI クライアントラッパ。"""
 
@@ -83,13 +97,14 @@ class OpenAIClient:
         """プレーンテキストの応答を返す。"""
 
         chosen_model = model or self.fast_model
+        kwargs = self._build_chat_kwargs(chosen_model, temperature)
         response: Any = None
         async for attempt in self._retrier():
             with attempt:
                 response = await self._client.chat.completions.create(
                     model=chosen_model,
                     messages=messages,
-                    temperature=temperature,
+                    **kwargs,
                 )
         if response is None:  # pragma: no cover - 防御的
             raise RuntimeError("openai client returned no response")
@@ -111,6 +126,7 @@ class OpenAIClient:
         """
 
         chosen_model = model or self.fast_model
+        kwargs = self._build_chat_kwargs(chosen_model, temperature)
         response: Any = None
         async for attempt in self._retrier():
             with attempt:
@@ -118,7 +134,7 @@ class OpenAIClient:
                     model=chosen_model,
                     messages=messages,
                     response_format=response_format,
-                    temperature=temperature,
+                    **kwargs,
                 )
         if response is None:  # pragma: no cover - 防御的
             raise RuntimeError("openai client returned no response")
@@ -158,6 +174,26 @@ class OpenAIClient:
         return result[0]
 
     # --- 内部 -----------------------------------------------------------
+
+    def _build_chat_kwargs(self, model: str, temperature: float) -> dict[str, Any]:
+        """モデルに応じた chat completion の kwargs を組み立てる。
+
+        GPT-5 / o-series は ``temperature`` の上書きを受け付けないので、
+        その場合は kwargs から削る (= API 側で既定値が使われる)。
+        ``temperature`` が既定値 1.0 のときは元から特別扱いの必要なし。
+        """
+
+        kwargs: dict[str, Any] = {}
+        if _supports_custom_temperature(model):
+            kwargs["temperature"] = temperature
+        elif temperature != 1.0:
+            self._log.debug(
+                "openai.temperature.ignored",
+                model=model,
+                requested=temperature,
+                reason="model only supports default temperature",
+            )
+        return kwargs
 
     def _retrier(self) -> AsyncRetrying:
         return AsyncRetrying(

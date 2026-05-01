@@ -1,0 +1,41 @@
+[
+  {
+    "persona_name": "A",
+    "condition_name": "full_proposal",
+    "topic": "大学のカフェテリアでプラスチック容器を廃止すべきか",
+    "scores": {
+      "overall_satisfaction": 6,
+      "information_usefulness": 6,
+      "opposition_understanding": 7,
+      "confidence_change": 2,
+      "intervention_transparency": 6,
+      "rationale": "overall_satisfaction: 議論は現実的な妥協点（高頻度メニューでのパイロット、預り金・助成金、2年検証）に収束しており、提案側として満足できる進展があったため高評価です。Bの費用面の懸念も取り込まれ、実行可能性を考慮した案になった点が良かったです。\ninformation_usefulness: Bが示した初期投資・運営コストや「年間1.5〜2.5トン削減」の効果試算など、判断に直接役立つ情報が提示されました。Cの提案で検証期間と資金負担の選択肢が具体化されたのも有益でした。\nopposition_understanding: Bのコスト負担・価格転嫁への懸念は明確に理解できますし、Cが両者を整理して妥協案を出したことも把握できました。反対意見が議論に反映されて最終案に織り込まれているので理解度は高いです。\nconfidence_change: 当初の賛成立場は、実地検証と大学助成・LCA組み込みという合意案により強まりました（+2）。特にバイオプラを主要代替にしない点を確約できたのが自信強化につながりました。\nintervention_transparency: 発言の意図やタイミング（Bの懸念提示、Cの合意形成、Aの再主張）は比較的明瞭で、なぜその情報が出されたかが分かりやすかったです。完全に構造化されているわけではないが、論点と次の行動に結びつく提示があったため透明性は高めと評価します."
+    }
+  },
+  {
+    "persona_name": "B",
+    "condition_name": "full_proposal",
+    "topic": "大学のカフェテリアでプラスチック容器を廃止すべきか",
+    "scores": {
+      "overall_satisfaction": 6,
+      "information_usefulness": 6,
+      "opposition_understanding": 7,
+      "confidence_change": 2,
+      "intervention_transparency": 6,
+      "rationale": "overall_satisfaction: 合意点として高頻度メニューでのパイロット導入と預り金・助成金を組み合わせる現実的な案にまとまったため、現状維持を重視する立場から見て妥協点が得られた。とはいえ初期投資や学食価格転嫁のリスクが完全に解消されたわけではないので満点ではない。\n\ninformation_usefulness: 参考情報の「年間1.5〜2.5トン」の数値と、Cの提案する預り金・助成金・2年検証という具体案は、費用対効果を評価するための実務的指針として役立った。導入に伴う運用コスト項目（洗浄・破損補充等）を改めて議題化できた点も有益だった。\n\nopposition_understanding: Aの環境負荷に関する主張（長期的な分解の遅さや微小プラスチックの問題）は明確で、なぜ急ぐべきかは十分理解できた。AもLCAやリユース優先の重要性を認める発言をしており、立場の違いは主にコスト負担と導入速度にあると把握できた。\n\nconfidence_change: 議論で試験導入と大学助成・LCA評価が提案されたことで、慎重に進めるべきという自分の立場は強化された。とはいえ具体的な費用試算や価格転嫁防止策が未提示なので、完全に安心したわけではない。\n\nintervention_transparency: Cが段階・期間・資金手当ての枠組み（高頻度メニューでのパイロット、預り金・助成金、2年での検証）を提示したため、なぜその順序で検討するのかが分かりやすかった。逆に、導入コストの内訳や評価指標の提示が不足しており、そこは透明性がやや欠けていると感じた。"
+    }
+  },
+  {
+    "persona_name": "C",
+    "condition_name": "full_proposal",
+    "topic": "大学のカフェテリアでプラスチック容器を廃止すべきか",
+    "scores": {
+      "overall_satisfaction": 6,
+      "information_usefulness": 6,
+      "opposition_understanding": 7,
+      "confidence_change": 1,
+      "intervention_transparency": 6,
+      "rationale": "overall_satisfaction: 両者の主要論点（環境負荷の低減と費用負担の懸念）が明確に提示され、私が提案した折衷案で合意点に近づいたため満足です。最終的にパイロットと検証に絞る方向に収束した点が評価できます。\ninformation_usefulness: 環境影響（分解やマイクロプラスチック、CO2等）と具体的な削減量の提示、そして業務コストや過去事例に関する反論情報が判断に直接役立ちました。費用対効果の不確実性も明示されており、実務的評価の必要性が明確です。\nopposition_understanding: Bの運営コスト・価格転嫁に関する懸念と、Aのリユース優先・バイオプラ懸念の双方を具体的な論拠付きで把握できました。双方の主張が整理され、どの点が妥協可能かも理解できています。\nconfidence_change: 当初の折衷志向（段階的対策・検証重視）が議論で支持され、提案の現実性が高まったため自信がやや強まりました。ただしコストの不確実性は残っているため大きな変化には至っていません。\nintervention_transparency: 各発言でなぜその情報が出されたか（環境データ＝環境懸念、コスト数値＝費用の反論、過去事例＝価格回復の根拠）が比較的明示されていました。とはいえ導入コストの内訳や助成スキームの詳細が不足しており完全に透明とは言えません。"
+    }
+  }
+]

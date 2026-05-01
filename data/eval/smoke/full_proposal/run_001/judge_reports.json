@@ -1,0 +1,41 @@
+[
+  {
+    "persona_name": "A",
+    "condition_name": "full_proposal",
+    "topic": "大学のカフェテリアでプラスチック容器を廃止すべきか",
+    "scores": {
+      "overall_satisfaction": 6,
+      "information_usefulness": 7,
+      "opposition_understanding": 7,
+      "confidence_change": 1,
+      "intervention_transparency": 6,
+      "rationale": "overall_satisfaction: 建設的な妥協点（上位5メニューのパイロット）で議論が終わり、実行可能な計画に落ち着いた点は評価できます。ただし無条件の全廃が受け入れられなかった点で満足度が満点ではありません。\ninformation_usefulness: Bさんの初年度コストや処理インフラの指摘、Cさんの長期コスト吸収の見通しやオペレーション改善案など、判断に直結する具体的情報が多く役立ちました。\nopposition_understanding: Bさんの懸念（導入初年度のコスト増・処理ルート不足）を明確に受け止めた上で立場を修正しており、反対意見を十分に理解していると感じます。\nconfidence_change: 私の原則（プラスチック削減）の根本は維持された上で、現実的な段階的実施案に修正されたため、方針への自信はやや強まりましたが大きな変化ではありません。\nintervention_transparency: 各発言で理由（コスト試算、処理インフラ、LCA指標、パイロット評価指標）が示され、なぜその情報が出されたかは概ね分かりやすかったです。"
+    }
+  },
+  {
+    "persona_name": "B",
+    "condition_name": "full_proposal",
+    "topic": "大学のカフェテリアでプラスチック容器を廃止すべきか",
+    "scores": {
+      "overall_satisfaction": 5,
+      "information_usefulness": 6,
+      "opposition_understanding": 6,
+      "confidence_change": 1,
+      "intervention_transparency": 6,
+      "rationale": "overall_satisfaction: Aさんが私の懸念を受け入れて無条件の全廃から段階的なパイロット提案に修正した点は評価できるため満足度は高めです。ただし導入の運用負担やコスト負担の具体的な保証がまだ不十分で、完全に安心はしていないため満点にはしません。 information_usefulness: 議論中に示された「導入初年度で容器コストが約3倍」「生分解性は高温堆肥化が必要」という具体的な参考情報は判断に大いに役立ちました。これらの数値と処理インフラの重要性が明確になったのは有益です。 opposition_understanding: Aさんの環境負荷削減の論点とCさんの条件付き妥協案の論拠はよく理解できました。とはいえ、コストが2年目以降に改善するという楽観的見通しにはまだ疑念が残っており、その点は十分に消化できていません。 confidence_change: 議論を通じて私の元の懸念（初年度コスト増や処理インフラ不足）が支持されたので、元の立場への自信はやや強まりました。だが完全な確信には至っておらず、条件付きの合意を引き出せた程度の強化にとどまります。 intervention_transparency: 提案には段階的導入、パイロット、大学支援という明確な条件が提示され、なぜその情報が出されたかは比較的明確でした。とはいえ大学の財政支援や処理ルート確保といった前提が実際にどう担保されるかの説明は不足しており、完全に透明とは言えません。"
+    }
+  },
+  {
+    "persona_name": "C",
+    "condition_name": "full_proposal",
+    "topic": "大学のカフェテリアでプラスチック容器を廃止すべきか",
+    "scores": {
+      "overall_satisfaction": 6,
+      "information_usefulness": 6,
+      "opposition_understanding": 7,
+      "confidence_change": 1,
+      "intervention_transparency": 6,
+      "rationale": "overall_satisfaction: 議論は具体案（上位5メニューのパイロット、回収率・実コスト・LCA評価、大学支援条件）に収斂し、対立点を明確に整理できたため満足しています。両者が主張を修正して妥協点を探った点も評価できます。\ninformation_usefulness: Aの段階的切替案や割引・デポ制などの運用案、Bの初年度コスト3倍や処理インフラの問題、参考情報の2〜3年でのコスト改善見通しといった実務的情報が揃っており判断に役立ちました。具体的指標と評価方法（年度ごとのLCA等）が提示されたのも有益です。\nopposition_understanding: Bの懸念（初年度のコスト増、堆肥化施設不足）が明確に示され、それを受けてAが主張を現実的に修正したため反対側の論拠は非常によく理解できました。コスト推移に関する具体的な反論事例が理解を助けました。\nconfidence_change: 中立から条件付きパイロット提案に落ち着いたことで、自分の妥協案への確信はやや強まりました（大きな方針転換はなく、現実的な実施条件が確認されたため+1）。\nintervention_transparency: 各発言でなぜその情報や懸念が提示されたか（リスク指摘、コスト低減根拠、拡大条件）が示されており議論の流れは比較的透明でした。ただし、具体的な費用試算や処理インフラの詳細がさらに示されれば完全に透明だったと感じます。"
+    }
+  }
+]

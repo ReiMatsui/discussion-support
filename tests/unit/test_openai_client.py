@@ -14,6 +14,7 @@ from openai import APITimeoutError, RateLimitError
 from pydantic import BaseModel
 
 from das.llm import OpenAIClient
+from das.settings import reset_settings
 
 
 def _completion_response(content: str = "hi") -> SimpleNamespace:
@@ -95,27 +96,105 @@ def _timeout_error() -> APITimeoutError:
 # --- モデル解決 -----------------------------------------------------------
 
 
-def test_default_models_from_settings() -> None:
-    client = OpenAIClient(client=_fake_async_client())
-    assert client.fast_model == "gpt-4o-mini"
-    assert client.smart_model == "gpt-4o"
+def _isolate_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """テスト用に Settings を env 非依存にする。
+
+    開発環境の .env が gpt-4* を指している場合でも、コード上の既定
+    (gpt-5-mini) を検証できるようにする。
+    """
+
+    for var in (
+        "OPENAI_MODEL_FAST",
+        "OPENAI_MODEL_SMART",
+        "OPENAI_API_KEY",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    # Settings はキャッシュされるので clear する
+    reset_settings()
+
+
+def test_default_models_from_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    _isolate_env(monkeypatch)
+    # コンストラクタで Settings を生成しない (DI 経由で env を bypass する)
+    from das.settings import Settings
+
+    client = OpenAIClient(
+        settings=Settings(_env_file=None),  # type: ignore[call-arg]
+        client=_fake_async_client(),
+    )
+    assert client.fast_model == "gpt-5-mini"
+    assert client.smart_model == "gpt-5-mini"
 
 
 # --- chat (plain text) ----------------------------------------------------
 
 
 async def test_chat_returns_content_and_uses_fast_model_by_default() -> None:
+    """default temperature=0.0 は gpt-4 系には kwargs として渡される。"""
+
     create = AsyncMock(return_value=_completion_response("こんにちは"))
     fake = _fake_async_client(create=create)
     client = OpenAIClient(client=fake)
 
-    result = await client.chat([{"role": "user", "content": "hi"}])
+    result = await client.chat(
+        [{"role": "user", "content": "hi"}],
+        model="gpt-4o-mini",
+    )
 
     assert result == "こんにちは"
     create.assert_awaited_once()
     kwargs = create.await_args.kwargs
-    assert kwargs["model"] == client.fast_model
+    assert kwargs["model"] == "gpt-4o-mini"
     assert kwargs["temperature"] == 0.0
+
+
+async def test_chat_includes_temperature_for_gpt4_models() -> None:
+    """gpt-4* には従来通り temperature が渡される。"""
+
+    create = AsyncMock(return_value=_completion_response("ok"))
+    fake = _fake_async_client(create=create)
+    client = OpenAIClient(client=fake)
+
+    await client.chat(
+        [{"role": "user", "content": "x"}],
+        model="gpt-4o-mini",
+        temperature=0.7,
+    )
+    kwargs = create.await_args.kwargs
+    assert kwargs["temperature"] == 0.7
+
+
+async def test_chat_omits_temperature_for_gpt5_models() -> None:
+    """gpt-5* は temperature を受け付けないので kwargs に入れない。"""
+
+    create = AsyncMock(return_value=_completion_response("ok"))
+    fake = _fake_async_client(create=create)
+    client = OpenAIClient(client=fake)
+
+    await client.chat(
+        [{"role": "user", "content": "x"}],
+        model="gpt-5-mini",
+        temperature=0.7,
+    )
+    kwargs = create.await_args.kwargs
+    assert "temperature" not in kwargs
+
+
+async def test_chat_omits_temperature_for_o_series_models() -> None:
+    """o1 / o3 / o4 系も同様に temperature 非対応。"""
+
+    create = AsyncMock(return_value=_completion_response("ok"))
+    fake = _fake_async_client(create=create)
+    client = OpenAIClient(client=fake)
+
+    for model in ("o1-mini", "o3-mini", "o4"):
+        create.reset_mock()
+        await client.chat(
+            [{"role": "user", "content": "x"}],
+            model=model,
+            temperature=0.5,
+        )
+        assert "temperature" not in create.await_args.kwargs
 
 
 async def test_chat_respects_explicit_model() -> None:

@@ -1,0 +1,1057 @@
+{
+  "nodes": [
+    {
+      "id": "32bcae8e-0b9b-4063-8e42-9bf34c276f0f",
+      "text": "バイオプラスチックは、バイオマス由来の原料から作られたプラスチックの総称である。",
+      "node_type": "premise",
+      "source": "document",
+      "author": "bioplastic_overview",
+      "timestamp": "2026-05-01T09:00:36.204491Z",
+      "metadata": {
+        "doc_id": "bioplastic_overview",
+        "source_path": "data/docs/bioplastic_overview.md"
+      }
+    },
+    {
+      "id": "0f2f5dcc-93db-4b62-ab15-1e76cf41d3b8",
+      "text": "代表的な素材として PLA (ポリ乳酸) と PBS (ポリブチレンサクシネート) がある。",
+      "node_type": "premise",
+      "source": "document",
+      "author": "bioplastic_overview",
+      "timestamp": "2026-05-01T09:00:36.204765Z",
+      "metadata": {
+        "doc_id": "bioplastic_overview",
+        "source_path": "data/docs/bioplastic_overview.md"
+      }
+    },
+    {
+      "id": "e2ded90f-9fc2-45c6-872c-672dc90e484e",
+      "text": "いずれも特定の条件下で生分解する。",
+      "node_type": "premise",
+      "source": "document",
+      "author": "bioplastic_overview",
+      "timestamp": "2026-05-01T09:00:36.204858Z",
+      "metadata": {
+        "doc_id": "bioplastic_overview",
+        "source_path": "data/docs/bioplastic_overview.md"
+      }
+    },
+    {
+      "id": "f32822a6-6d44-4231-9b43-da61f6c512e3",
+      "text": "最新世代のバイオプラ容器は、従来の石油由来プラスチックと比べて約 +40% のコストで製造可能になっている。",
+      "node_type": "premise",
+      "source": "document",
+      "author": "bioplastic_overview",
+      "timestamp": "2026-05-01T09:00:36.204925Z",
+      "metadata": {
+        "doc_id": "bioplastic_overview",
+        "source_path": "data/docs/bioplastic_overview.md"
+      }
+    },
+    {
+      "id": "dbf47720-701c-4830-a729-bd795a27690c",
+      "text": "コストギャップは 5 年前と比べて大幅に縮小している。",
+      "node_type": "premise",
+      "source": "document",
+      "author": "bioplastic_overview",
+      "timestamp": "2026-05-01T09:00:36.204974Z",
+      "metadata": {
+        "doc_id": "bioplastic_overview",
+        "source_path": "data/docs/bioplastic_overview.md"
+      }
+    },
+    {
+      "id": "7e7eb6ac-bda7-45f6-9e61-26184f0a9dbb",
+      "text": "生分解には高温堆肥化施設が必要である。",
+      "node_type": "premise",
+      "source": "document",
+      "author": "bioplastic_overview",
+      "timestamp": "2026-05-01T09:00:36.205016Z",
+      "metadata": {
+        "doc_id": "bioplastic_overview",
+        "source_path": "data/docs/bioplastic_overview.md"
+      }
+    },
+    {
+      "id": "15f331eb-45c5-4727-97e2-eb560daf4283",
+      "text": "家庭用ゴミとして処理した場合は通常のプラスチックと同様に環境負荷を持つ可能性がある。",
+      "node_type": "premise",
+      "source": "document",
+      "author": "bioplastic_overview",
+      "timestamp": "2026-05-01T09:00:36.205053Z",
+      "metadata": {
+        "doc_id": "bioplastic_overview",
+        "source_path": "data/docs/bioplastic_overview.md"
+      }
+    },
+    {
+      "id": "461a26b3-f2d0-4a23-86f0-10f1636f4b80",
+      "text": "バイオプラスチックは「廃止」と「現状維持」の中間にある第 3 の選択肢として位置づけることができる。",
+      "node_type": "claim",
+      "source": "document",
+      "author": "bioplastic_overview",
+      "timestamp": "2026-05-01T09:00:36.205086Z",
+      "metadata": {
+        "doc_id": "bioplastic_overview",
+        "source_path": "data/docs/bioplastic_overview.md"
+      }
+    },
+    {
+      "id": "91e3b66f-ebdd-495f-b523-1ccf95589c01",
+      "text": "回収・処理の仕組みが整っていない環境ではメリットを十分に発揮できない。",
+      "node_type": "premise",
+      "source": "document",
+      "author": "bioplastic_overview",
+      "timestamp": "2026-05-01T09:00:36.205120Z",
+      "metadata": {
+        "doc_id": "bioplastic_overview",
+        "source_path": "data/docs/bioplastic_overview.md"
+      }
+    },
+    {
+      "id": "470a9748-bf21-41ca-98e1-7d4251d72161",
+      "text": "学食メニュー 1 食あたりのコスト構成は、食材費が約 50%、人件費が約 25%、光熱費・什器費が約 15%、容器・備品費が約 10% である (大学生協連合, 2022)。",
+      "node_type": "premise",
+      "source": "document",
+      "author": "cafeteria_cost_structure",
+      "timestamp": "2026-05-01T09:00:49.174030Z",
+      "metadata": {
+        "doc_id": "cafeteria_cost_structure",
+        "source_path": "data/docs/cafeteria_cost_structure.md"
+      }
+    },
+    {
+      "id": "2df8684f-f4a3-465c-b3bb-98af8f9e1ee2",
+      "text": "容器費が 3 倍に増加した場合、メニュー単価への影響は理論上 +20% となる。",
+      "node_type": "premise",
+      "source": "document",
+      "author": "cafeteria_cost_structure",
+      "timestamp": "2026-05-01T09:00:49.174270Z",
+      "metadata": {
+        "doc_id": "cafeteria_cost_structure",
+        "source_path": "data/docs/cafeteria_cost_structure.md"
+      }
+    },
+    {
+      "id": "9625fce8-7557-4d5b-a741-7ce32f8c3728",
+      "text": "これは他項目を一切調整しない場合のシナリオである。",
+      "node_type": "premise",
+      "source": "document",
+      "author": "cafeteria_cost_structure",
+      "timestamp": "2026-05-01T09:00:49.174361Z",
+      "metadata": {
+        "doc_id": "cafeteria_cost_structure",
+        "source_path": "data/docs/cafeteria_cost_structure.md"
+      }
+    },
+    {
+      "id": "0692332b-92ca-4a72-a8ce-98cbe0a4bfb9",
+      "text": "実際には食材調達の最適化、メニュー構成の見直し、提供量調整などで部分的に吸収できる。",
+      "node_type": "premise",
+      "source": "document",
+      "author": "cafeteria_cost_structure",
+      "timestamp": "2026-05-01T09:00:49.174402Z",
+      "metadata": {
+        "doc_id": "cafeteria_cost_structure",
+        "source_path": "data/docs/cafeteria_cost_structure.md"
+      }
+    },
+    {
+      "id": "f378b716-8f65-4703-a697-92c098f9e269",
+      "text": "過去事例では、紙容器への移行直後に値上げを実施した大学は 3 校中 2 校で、いずれも 2 年以内に元の価格水準まで戻している。",
+      "node_type": "premise",
+      "source": "document",
+      "author": "cafeteria_cost_structure",
+      "timestamp": "2026-05-01T09:00:49.174440Z",
+      "metadata": {
+        "doc_id": "cafeteria_cost_structure",
+        "source_path": "data/docs/cafeteria_cost_structure.md"
+      }
+    },
+    {
+      "id": "be1382f3-33ee-49e4-a70a-efb572b15bc9",
+      "text": "「コスト増 = 永続的な値上げ」という単純な対応関係は成立しないと言える。",
+      "node_type": "claim",
+      "source": "document",
+      "author": "cafeteria_cost_structure",
+      "timestamp": "2026-05-01T09:00:49.174470Z",
+      "metadata": {
+        "doc_id": "cafeteria_cost_structure",
+        "source_path": "data/docs/cafeteria_cost_structure.md"
+      }
+    },
+    {
+      "id": "77d0d1e1-39ea-4df7-b31f-1e14b402ad49",
+      "text": "国内の大学キャンパスにおけるプラスチック廃棄物のうち、カフェテリア由来の使い捨て容器が占める割合は平均 18% とされる (環境省, 2023)。",
+      "node_type": "premise",
+      "source": "document",
+      "author": "plastic_waste_statistics",
+      "timestamp": "2026-05-01T09:00:59.563388Z",
+      "metadata": {
+        "doc_id": "plastic_waste_statistics",
+        "source_path": "data/docs/plastic_waste_statistics.md"
+      }
+    },
+    {
+      "id": "a9697527-ffb6-4d8c-8941-c93eedb416e7",
+      "text": "中規模大学 (学生数 5,000-10,000) のカフェテリアでは年間 1.5〜2.5 トンのプラスチック廃棄物が発生する。",
+      "node_type": "premise",
+      "source": "document",
+      "author": "plastic_waste_statistics",
+      "timestamp": "2026-05-01T09:00:59.563584Z",
+      "metadata": {
+        "doc_id": "plastic_waste_statistics",
+        "source_path": "data/docs/plastic_waste_statistics.md"
+      }
+    },
+    {
+      "id": "4056692b-9c40-41ec-a88b-94af2f7d7dcd",
+      "text": "リサイクル率は容器の汚染度に左右され、食品残渣が付着した使い捨て容器のリサイクル率は 12% にとどまる。",
+      "node_type": "premise",
+      "source": "document",
+      "author": "plastic_waste_statistics",
+      "timestamp": "2026-05-01T09:00:59.563648Z",
+      "metadata": {
+        "doc_id": "plastic_waste_statistics",
+        "source_path": "data/docs/plastic_waste_statistics.md"
+      }
+    },
+    {
+      "id": "7c191ad8-4111-4a99-b764-55b8623a34b8",
+      "text": "残りはサーマルリサイクルもしくは埋め立て処理となる。",
+      "node_type": "premise",
+      "source": "document",
+      "author": "plastic_waste_statistics",
+      "timestamp": "2026-05-01T09:00:59.563734Z",
+      "metadata": {
+        "doc_id": "plastic_waste_statistics",
+        "source_path": "data/docs/plastic_waste_statistics.md"
+      }
+    },
+    {
+      "id": "66a4e398-0dd5-48c3-9c23-7269b9eb4878",
+      "text": "これらの数値は、カフェテリア単位での容器素材変更が、キャンパス全体のプラスチック廃棄量削減に直接寄与することを示している。",
+      "node_type": "claim",
+      "source": "document",
+      "author": "plastic_waste_statistics",
+      "timestamp": "2026-05-01T09:00:59.563777Z",
+      "metadata": {
+        "doc_id": "plastic_waste_statistics",
+        "source_path": "data/docs/plastic_waste_statistics.md"
+      }
+    },
+    {
+      "id": "fe9ec5e8-9479-459d-990c-e04930ffbf64",
+      "text": "X 大学のカフェテリアは 2019 年にプラスチック容器を全面廃止し、紙容器へ移行した",
+      "node_type": "premise",
+      "source": "document",
+      "author": "x_university_case_study",
+      "timestamp": "2026-05-01T09:01:15.964019Z",
+      "metadata": {
+        "doc_id": "x_university_case_study",
+        "source_path": "data/docs/x_university_case_study.md"
+      }
+    },
+    {
+      "id": "bdac4e80-ff37-4814-841e-69a84eea720e",
+      "text": "導入初年度は容器コストが約 3 倍に膨らんだ",
+      "node_type": "premise",
+      "source": "document",
+      "author": "x_university_case_study",
+      "timestamp": "2026-05-01T09:01:15.964233Z",
+      "metadata": {
+        "doc_id": "x_university_case_study",
+        "source_path": "data/docs/x_university_case_study.md"
+      }
+    },
+    {
+      "id": "3236b0f0-dd09-4c63-bb72-bac62ea7a7ed",
+      "text": "導入初年度は学食メニューの一部に値上げ圧力がかかった",
+      "node_type": "premise",
+      "source": "document",
+      "author": "x_university_case_study",
+      "timestamp": "2026-05-01T09:01:15.964308Z",
+      "metadata": {
+        "doc_id": "x_university_case_study",
+        "source_path": "data/docs/x_university_case_study.md"
+      }
+    },
+    {
+      "id": "a62d96c5-c584-4488-8545-1ce43495fb49",
+      "text": "2 年目には仕入れルートの最適化と紙容器メーカーとの長期契約締結が行われた",
+      "node_type": "premise",
+      "source": "document",
+      "author": "x_university_case_study",
+      "timestamp": "2026-05-01T09:01:15.964356Z",
+      "metadata": {
+        "doc_id": "x_university_case_study",
+        "source_path": "data/docs/x_university_case_study.md"
+      }
+    },
+    {
+      "id": "f2226ce8-1398-4868-8bb7-218214e66b7f",
+      "text": "2 年目には容器コストは従来比 1.2 倍まで低下した",
+      "node_type": "premise",
+      "source": "document",
+      "author": "x_university_case_study",
+      "timestamp": "2026-05-01T09:01:15.964397Z",
+      "metadata": {
+        "doc_id": "x_university_case_study",
+        "source_path": "data/docs/x_university_case_study.md"
+      }
+    },
+    {
+      "id": "e034290c-b804-4a8f-a0ce-6a2207081bc5",
+      "text": "3 年目には学食価格を導入前水準に戻した",
+      "node_type": "premise",
+      "source": "document",
+      "author": "x_university_case_study",
+      "timestamp": "2026-05-01T09:01:15.964431Z",
+      "metadata": {
+        "doc_id": "x_university_case_study",
+        "source_path": "data/docs/x_university_case_study.md"
+      }
+    },
+    {
+      "id": "86362796-8f69-41c9-92a0-9f93e8ad0063",
+      "text": "3 年目には紙容器分のコスト増は他のオペレーション効率化で吸収できた",
+      "node_type": "premise",
+      "source": "document",
+      "author": "x_university_case_study",
+      "timestamp": "2026-05-01T09:01:15.964464Z",
+      "metadata": {
+        "doc_id": "x_university_case_study",
+        "source_path": "data/docs/x_university_case_study.md"
+      }
+    },
+    {
+      "id": "755ddffd-7e57-45a8-9570-4a620c0fe12e",
+      "text": "学生からのアンケートでも、3 年目の段階で紙容器への切り替えに対する満足度が 78% に達している",
+      "node_type": "premise",
+      "source": "document",
+      "author": "x_university_case_study",
+      "timestamp": "2026-05-01T09:01:15.964510Z",
+      "metadata": {
+        "doc_id": "x_university_case_study",
+        "source_path": "data/docs/x_university_case_study.md"
+      }
+    },
+    {
+      "id": "75eb3ea8-99d5-4e11-ad31-4580256de314",
+      "text": "この事例から、紙容器への移行に伴うコスト増は短期的なものであり、長期的には持続可能な選択肢である",
+      "node_type": "claim",
+      "source": "document",
+      "author": "x_university_case_study",
+      "timestamp": "2026-05-01T09:01:15.964545Z",
+      "metadata": {
+        "doc_id": "x_university_case_study",
+        "source_path": "data/docs/x_university_case_study.md"
+      }
+    },
+    {
+      "id": "42a79c91-ea31-4812-a42f-308d5ee259ed",
+      "text": "私は大学のカフェテリアでプラスチック容器を廃止することに賛成です。",
+      "node_type": "claim",
+      "source": "utterance",
+      "author": "A",
+      "timestamp": "2026-05-01T09:01:28.051303Z",
+      "metadata": {
+        "turn_id": 1
+      }
+    },
+    {
+      "id": "c9eeb33f-cabe-4f3c-ab24-a8713d4a1851",
+      "text": "使い捨てプラスチックは分解に数百年を要する",
+      "node_type": "premise",
+      "source": "utterance",
+      "author": "A",
+      "timestamp": "2026-05-01T09:01:28.051303Z",
+      "metadata": {
+        "turn_id": 1
+      }
+    },
+    {
+      "id": "7b5edf5f-1bfa-44d5-a19e-2019c0ef3d70",
+      "text": "使い捨てプラスチックは微小プラスチックや焼却時のCO2・有害物質を通じて長期的に環境と健康へ悪影響を及ぼす",
+      "node_type": "premise",
+      "source": "utterance",
+      "author": "A",
+      "timestamp": "2026-05-01T09:01:28.051303Z",
+      "metadata": {
+        "turn_id": 1
+      }
+    },
+    {
+      "id": "c0b3483d-1bee-4f0b-98be-b662fc4df08d",
+      "text": "段階的なリユース容器導入とメンテナンス体制の構築で廃棄物と温室効果ガスを大幅に削減すべきだと考えます。",
+      "node_type": "claim",
+      "source": "utterance",
+      "author": "A",
+      "timestamp": "2026-05-01T09:01:28.051303Z",
+      "metadata": {
+        "turn_id": 1
+      }
+    },
+    {
+      "id": "6bb0d08c-06a6-40e1-9429-924e54971b6e",
+      "text": "環境効果は理解する",
+      "node_type": "premise",
+      "source": "utterance",
+      "author": "B",
+      "timestamp": "2026-05-01T09:02:30.960119Z",
+      "metadata": {
+        "turn_id": 2
+      }
+    },
+    {
+      "id": "5f5f76f3-b9fa-4614-8937-4a23054c318a",
+      "text": "業務用食器洗浄機や回収・保管設備の初期投資、洗浄人員・洗剤・破損補充といった恒常的な運営コストは確実に発生する",
+      "node_type": "premise",
+      "source": "utterance",
+      "author": "B",
+      "timestamp": "2026-05-01T09:02:30.960119Z",
+      "metadata": {
+        "turn_id": 2
+      }
+    },
+    {
+      "id": "679fd6b1-59bc-42b6-9770-12aeaec33a50",
+      "text": "学食価格へ転嫁される可能性が高い",
+      "node_type": "premise",
+      "source": "utterance",
+      "author": "B",
+      "timestamp": "2026-05-01T09:02:30.960119Z",
+      "metadata": {
+        "turn_id": 2
+      }
+    },
+    {
+      "id": "125778b5-17e5-4cb2-8466-4067c1a0e878",
+      "text": "参考情報の「年間1.5〜2.5トンのプラスチック廃棄物」削減だけでは、導入コストに対する費用対効果が不明瞭である",
+      "node_type": "premise",
+      "source": "utterance",
+      "author": "B",
+      "timestamp": "2026-05-01T09:02:30.960119Z",
+      "metadata": {
+        "turn_id": 2
+      }
+    },
+    {
+      "id": "6dd1c90b-f303-4a1e-b144-fe21040f1914",
+      "text": "まずは低コストのリデュースや一部メニューでの試験導入にとどめるべきだ",
+      "node_type": "claim",
+      "source": "utterance",
+      "author": "B",
+      "timestamp": "2026-05-01T09:02:30.960119Z",
+      "metadata": {
+        "turn_id": 2
+      }
+    },
+    {
+      "id": "23eb60a5-bfe0-4a23-91c0-c143c242f96d",
+      "text": "使い捨てプラスチックの環境負荷低減が必要である",
+      "node_type": "premise",
+      "source": "utterance",
+      "author": "C",
+      "timestamp": "2026-05-01T09:03:40.058665Z",
+      "metadata": {
+        "turn_id": 3
+      }
+    },
+    {
+      "id": "47a4c9ed-d534-416c-8a16-75aee8eda7c6",
+      "text": "段階的な対策が現実的である",
+      "node_type": "premise",
+      "source": "utterance",
+      "author": "C",
+      "timestamp": "2026-05-01T09:03:40.058665Z",
+      "metadata": {
+        "turn_id": 3
+      }
+    },
+    {
+      "id": "ed3946b1-3887-4281-9b64-373b316b23ff",
+      "text": "残る争点は導入の速度と費用負担の所在である",
+      "node_type": "premise",
+      "source": "utterance",
+      "author": "C",
+      "timestamp": "2026-05-01T09:03:40.058665Z",
+      "metadata": {
+        "turn_id": 3
+      }
+    },
+    {
+      "id": "537edd22-327f-4d6d-b67f-21b644a941fb",
+      "text": "まずは高頻度メニューでのパイロット導入と預り金・助成金・バイオプラやリユース併用を組み合わせて2年で効果とコストを検証する案に絞るのはどうでしょうか",
+      "node_type": "claim",
+      "source": "utterance",
+      "author": "C",
+      "timestamp": "2026-05-01T09:03:40.058665Z",
+      "metadata": {
+        "turn_id": 3
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "2392aaf9-631d-4cc7-b08b-fc89ee029653",
+      "src_id": "c9eeb33f-cabe-4f3c-ab24-a8713d4a1851",
+      "dst_id": "7b5edf5f-1bfa-44d5-a19e-2019c0ef3d70",
+      "relation": "support",
+      "confidence": 0.95,
+      "rationale": "A states that disposable plastics persist for centuries, which provides a basis for B's claim that they cause long-term environmental and health harm (e.g., accumulation as microplastics and long-term emissions), so A strengthens B.",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:01:45.571596Z"
+    },
+    {
+      "id": "9dd79195-79a8-443f-be96-4079ddbeccb3",
+      "src_id": "c9eeb33f-cabe-4f3c-ab24-a8713d4a1851",
+      "dst_id": "7b5edf5f-1bfa-44d5-a19e-2019c0ef3d70",
+      "relation": "support",
+      "confidence": 0.95,
+      "rationale": "B's claim that disposable plastics persist for centuries implies long-term presence and ongoing degradation/emissions, which strengthens A's claim that they cause long-term environmental and health harms via microplastics and incineration byproducts.",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:01:45.988280Z"
+    },
+    {
+      "id": "48a124ab-4dc1-4765-8ea7-d3cac36da830",
+      "src_id": "c0b3483d-1bee-4f0b-98be-b662fc4df08d",
+      "dst_id": "42a79c91-ea31-4812-a42f-308d5ee259ed",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "A は再利用容器導入とメンテナンスで廃棄物・温室効果ガスを削減すべきとする根拠を示しており、大学カフェテリアでプラ容器廃止を支持する B の主張を補強しているため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:01:46.224186Z"
+    },
+    {
+      "id": "97f35324-8a5b-4039-8d8b-f143a80a703d",
+      "src_id": "fe9ec5e8-9479-459d-990c-e04930ffbf64",
+      "dst_id": "42a79c91-ea31-4812-a42f-308d5ee259ed",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "B は X 大学が実際に 2019 年にプラスチック容器を全面廃止して紙容器へ移行した事例を示しており、その前例・実行可能性の提示が A の『廃止すべき』という主張を支持するため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:01:48.749884Z"
+    },
+    {
+      "id": "50339324-5560-4d5a-aedf-123149a81504",
+      "src_id": "c9eeb33f-cabe-4f3c-ab24-a8713d4a1851",
+      "dst_id": "15f331eb-45c5-4727-97e2-eb560daf4283",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "A's claim that disposable plastics take hundreds of years to decompose provides evidence that such materials can persist and therefore supports B's point that, when handled as household waste, they may have environmental impacts similar to conventional plastics.",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:01:48.844189Z"
+    },
+    {
+      "id": "3ceb2157-f786-4885-a4ff-147bff43507f",
+      "src_id": "66a4e398-0dd5-48c3-9c23-7269b9eb4878",
+      "dst_id": "c0b3483d-1bee-4f0b-98be-b662fc4df08d",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "B の数値はカフェテリアでの容器変更がキャンパス全体のプラスチック廃棄削減に寄与することを示しており、リユース容器導入による廃棄物削減という A の主張を裏付ける根拠となるため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:01:52.597132Z"
+    },
+    {
+      "id": "b95d9525-b7dd-4fed-bf86-f11f2f3ff285",
+      "src_id": "77d0d1e1-39ea-4df7-b31f-1e14b402ad49",
+      "dst_id": "42a79c91-ea31-4812-a42f-308d5ee259ed",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "B の統計はカフェテリア由来の使い捨て容器がキャンパスのプラスチック廃棄物の約18%を占めると示しており、廃止による削減効果が一定程度見込めることから、A の「廃止に賛成」という主張を実証的に支持する。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:01:55.779515Z"
+    },
+    {
+      "id": "6ca2128b-cb3e-4000-bbd5-f99b59defbdc",
+      "src_id": "c0b3483d-1bee-4f0b-98be-b662fc4df08d",
+      "dst_id": "77d0d1e1-39ea-4df7-b31f-1e14b402ad49",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "B の統計は学内プラスチック廃棄物における使い捨て容器の占める割合（18%）を示しており、食堂向けリユース容器導入が廃棄物削減に寄与するという A の主張を裏付ける事実的根拠となるため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:01:57.657366Z"
+    },
+    {
+      "id": "277bc01e-79ef-4150-8233-03f04b6a6192",
+      "src_id": "7b5edf5f-1bfa-44d5-a19e-2019c0ef3d70",
+      "dst_id": "15f331eb-45c5-4727-97e2-eb560daf4283",
+      "relation": "support",
+      "confidence": 0.85,
+      "rationale": "A は使い捨てプラスチックが微小プラスチックや焼却時の CO2・有害物質で長期的に悪影響を及ぼすと具体的に述べており、これにより『家庭ゴミとして処理した場合も通常プラスチックと同様の環境負荷を持ち得る』という B の主張の妥当性が高まるため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:01:58.175031Z"
+    },
+    {
+      "id": "3304e5c4-da85-4604-a48b-702bd702c301",
+      "src_id": "a9697527-ffb6-4d8c-8941-c93eedb416e7",
+      "dst_id": "42a79c91-ea31-4812-a42f-308d5ee259ed",
+      "relation": "support",
+      "confidence": 0.95,
+      "rationale": "B provides empirical evidence that a medium-sized university generates substantial plastic waste (1.5–2.5 t/yr), which strengthens A's argument in favor of banning plastic containers as a measure to reduce that waste.",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:02:01.217274Z"
+    },
+    {
+      "id": "782217d5-dfe4-431e-a9fd-c5debea7436f",
+      "src_id": "4056692b-9c40-41ec-a88b-94af2f7d7dcd",
+      "dst_id": "c0b3483d-1bee-4f0b-98be-b662fc4df08d",
+      "relation": "support",
+      "confidence": 0.92,
+      "rationale": "B は使い捨て容器が食品残渣で汚染されリサイクル率が低い（12%）ことを示しており、廃棄物削減のために段階的なリユース導入とメンテナンス体制が必要であるという A の主張を裏付ける。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:02:04.415753Z"
+    },
+    {
+      "id": "da28c0d0-7c72-4fe4-b5fc-3e7da6a1c3ad",
+      "src_id": "c9eeb33f-cabe-4f3c-ab24-a8713d4a1851",
+      "dst_id": "461a26b3-f2d0-4a23-86f0-10f1636f4b80",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "A は使い捨てプラスチックの長期間分解という問題点を指摘しており、この問題への対応策としてバイオプラスチックを「第3の選択肢」と位置づける B の主張を裏付ける根拠になっているため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:02:04.912900Z"
+    },
+    {
+      "id": "081cd968-301c-4c08-a138-5af6779f0595",
+      "src_id": "66a4e398-0dd5-48c3-9c23-7269b9eb4878",
+      "dst_id": "42a79c91-ea31-4812-a42f-308d5ee259ed",
+      "relation": "support",
+      "confidence": 0.95,
+      "rationale": "B は容器素材の変更がキャンパス全体のプラスチック廃棄量削減に直接寄与するというデータ的根拠を示しており、カフェテリアでのプラ容器廃止という A の主張を支持しているため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:02:05.098438Z"
+    },
+    {
+      "id": "26dc05e3-90c1-4d47-8d8d-461122ffe9c0",
+      "src_id": "c0b3483d-1bee-4f0b-98be-b662fc4df08d",
+      "dst_id": "42a79c91-ea31-4812-a42f-308d5ee259ed",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "B proposes a practical alternative (段階的なリユース容器導入とメンテナンス) and environmental benefits (廃棄物・温室効果ガスの大幅削減), which provides supporting rationale and implementation for A の主張（プラスチック容器廃止）。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:02:09.540485Z"
+    },
+    {
+      "id": "7e27a7db-1701-4d3d-993f-138267835feb",
+      "src_id": "77d0d1e1-39ea-4df7-b31f-1e14b402ad49",
+      "dst_id": "7b5edf5f-1bfa-44d5-a19e-2019c0ef3d70",
+      "relation": "support",
+      "confidence": 0.8,
+      "rationale": "B の統計はキャンパス内で使い捨て容器がプラスチック廃棄物の約18%を占めると示しており、使い捨てプラスチックが環境負荷をもたらすという A の主張に対して、その排出源が重要であり対策効果が期待できるという実証的根拠を提供しているため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:02:09.682714Z"
+    },
+    {
+      "id": "c9298b1a-355b-4400-9ad6-925495ce4c3d",
+      "src_id": "a9697527-ffb6-4d8c-8941-c93eedb416e7",
+      "dst_id": "7b5edf5f-1bfa-44d5-a19e-2019c0ef3d70",
+      "relation": "support",
+      "confidence": 0.8,
+      "rationale": "B は中規模大学のカフェテリアで年間1.5–2.5トンのプラスチック廃棄が発生するとする統計であり、廃棄量の大きさが微小プラスチックや焼却時のCO2・有害物質による環境・健康影響の蓄積を示唆するため、A の主張を支持する根拠となる。ただし直接的な因果証拠ではないため確信度は完全ではない。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:02:16.806137Z"
+    },
+    {
+      "id": "68e72def-e405-4192-83eb-e463573f221e",
+      "src_id": "7b5edf5f-1bfa-44d5-a19e-2019c0ef3d70",
+      "dst_id": "c0b3483d-1bee-4f0b-98be-b662fc4df08d",
+      "relation": "support",
+      "confidence": 0.95,
+      "rationale": "Aは使い捨てプラスチックが環境・健康に長期的被害を与えると指摘しており、その被害を減らすための手段として段階的なリユース容器導入と体制構築を提案するBの主張を根拠として支持しているため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:02:21.424700Z"
+    },
+    {
+      "id": "2a9fcb9c-29d9-4411-887b-b1b4f473fd56",
+      "src_id": "2df8684f-f4a3-465c-b3bb-98af8f9e1ee2",
+      "dst_id": "679fd6b1-59bc-42b6-9770-12aeaec33a50",
+      "relation": "support",
+      "confidence": 0.95,
+      "rationale": "B は容器費が3倍になればメニュー価格に理論上+20%の影響が出ると定量的に示しており、費用転嫁が発生する可能性を裏付けているため、B は A を支持する。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:02:50.225350Z"
+    },
+    {
+      "id": "07662f11-970d-415b-8c4b-387c6790d29b",
+      "src_id": "3236b0f0-dd09-4c63-bb72-bac62ea7a7ed",
+      "dst_id": "6dd1c90b-f303-4a1e-b144-fe21040f1914",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "事例は導入初年度に一部メニューで値上げ圧力がかかったと報告しており、影響を抑えるために低コスト措置や一部での試験導入にとどめるべきだという慎重な提案を支持するため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:02:51.351280Z"
+    },
+    {
+      "id": "51ddced5-0f6c-437d-8766-6080e053e45f",
+      "src_id": "bdac4e80-ff37-4814-841e-69a84eea720e",
+      "dst_id": "5f5f76f3-b9fa-4614-8937-4a23054c318a",
+      "relation": "support",
+      "confidence": 0.92,
+      "rationale": "B の事例は導入初年度に容器コストが約3倍になったと報告しており、A が指摘する初期投資や恒常的な運営コストが実際に発生していることを実証的に裏付けるため、B は A を支持する。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:02:51.836683Z"
+    },
+    {
+      "id": "b1e7a60e-fe13-412b-80cc-8d9531cfa924",
+      "src_id": "91e3b66f-ebdd-495f-b523-1ccf95589c01",
+      "dst_id": "6bb0d08c-06a6-40e1-9429-924e54971b6e",
+      "relation": "attack",
+      "confidence": 0.85,
+      "rationale": "Bは回収・処理体制が整っていない場合に環境上のメリットが発揮されないと指摘しており、Aの「環境効果は理解する」（＝効果がある・重要だという受け止め）を条件付きで弱める反論になっているため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:02:52.282975Z"
+    },
+    {
+      "id": "90f03bc3-a6cf-413c-a08c-2a78f1b6e699",
+      "src_id": "e034290c-b804-4a8f-a0ce-6a2207081bc5",
+      "dst_id": "679fd6b1-59bc-42b6-9770-12aeaec33a50",
+      "relation": "attack",
+      "confidence": 0.9,
+      "rationale": "The case-study statement that cafeteria prices returned to pre-introduction levels by year 3 contradicts the claim that costs are likely to be passed through to higher cafeteria prices, serving as counterevidence that such pass-through is sustained.",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:02:54.499267Z"
+    },
+    {
+      "id": "906a7adc-e47c-43f9-858f-83a9ecb00838",
+      "src_id": "125778b5-17e5-4cb2-8466-4067c1a0e878",
+      "dst_id": "7b5edf5f-1bfa-44d5-a19e-2019c0ef3d70",
+      "relation": "attack",
+      "confidence": 0.9,
+      "rationale": "B は使い捨てプラスチック削減の必要性（環境・健康被害）を主張しているが、A は示された「年間1.5〜2.5トンの削減」だけでは導入コストに対する費用対効果が不明瞭だと指摘しており、B の主張の実行・正当化を弱める反論になっているため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:02:55.308593Z"
+    },
+    {
+      "id": "450e5bfa-f100-4d18-adcf-2704a9e9a518",
+      "src_id": "0692332b-92ca-4a72-a8ce-98cbe0a4bfb9",
+      "dst_id": "6dd1c90b-f303-4a1e-b144-fe21040f1914",
+      "relation": "attack",
+      "confidence": 0.9,
+      "rationale": "B states that cost impacts can be partly absorbed through procurement, menu, and portion adjustments, which undermines A's cautious recommendation to restrict implementation to low-cost trials. Therefore B functions as a counterargument to A's recommendation.",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:02:55.954026Z"
+    },
+    {
+      "id": "f17c7efe-1be7-4e6f-a823-430e5e80deaa",
+      "src_id": "6bb0d08c-06a6-40e1-9429-924e54971b6e",
+      "dst_id": "c0b3483d-1bee-4f0b-98be-b662fc4df08d",
+      "relation": "support",
+      "confidence": 0.85,
+      "rationale": "A は「環境効果は理解する」と述べており、環境改善を目的とする B のリユース容器導入・体制構築の提案を支持する姿勢を示しているため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:02:57.626506Z"
+    },
+    {
+      "id": "2dce7c92-4c8b-4e68-86e5-48b20853d341",
+      "src_id": "3236b0f0-dd09-4c63-bb72-bac62ea7a7ed",
+      "dst_id": "679fd6b1-59bc-42b6-9770-12aeaec33a50",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "Bは導入初年度に学食メニューで値上げ圧力がかかったという実例を示しており、その観察は「学食価格へ転嫁される可能性が高い」というAの主張を裏付けるため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:02:59.200180Z"
+    },
+    {
+      "id": "fd2406a7-fa78-4973-a8a0-8426057e84ea",
+      "src_id": "c9eeb33f-cabe-4f3c-ab24-a8713d4a1851",
+      "dst_id": "125778b5-17e5-4cb2-8466-4067c1a0e878",
+      "relation": "attack",
+      "confidence": 0.85,
+      "rationale": "Bは使い捨てプラスチックが何百年も分解されないことを示し、少量の削減でも環境上の価値が高いことを示唆するため、Aの「1.5〜2.5トンの削減では費用対効果が不明瞭」という懐疑を弱める（反論する）。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:03:02.452028Z"
+    },
+    {
+      "id": "16a485bd-2c8a-46b9-be7c-ff47202e5a0d",
+      "src_id": "6dd1c90b-f303-4a1e-b144-fe21040f1914",
+      "dst_id": "c0b3483d-1bee-4f0b-98be-b662fc4df08d",
+      "relation": "attack",
+      "confidence": 0.9,
+      "rationale": "A recommends limiting action to low‑cost reduction and small trials, which narrows or delays the broad, phased reuse‑container rollout and maintenance system advocated in B, weakening B's proposal for large‑scale implementation.",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:03:02.572308Z"
+    },
+    {
+      "id": "7ceaa3ac-4eb6-4365-a390-289d0d8aa7fa",
+      "src_id": "6bb0d08c-06a6-40e1-9429-924e54971b6e",
+      "dst_id": "7b5edf5f-1bfa-44d5-a19e-2019c0ef3d70",
+      "relation": "support",
+      "confidence": 0.75,
+      "rationale": "A は「環境効果は理解する」と述べており、使い捨てプラスチックの環境・健康への悪影響という B の主張を認める表明になっているため、A は B を支持していると判断した。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:03:05.543122Z"
+    },
+    {
+      "id": "8ca2db77-37ae-409c-989b-dc290847d12d",
+      "src_id": "5f5f76f3-b9fa-4614-8937-4a23054c318a",
+      "dst_id": "75eb3ea8-99d5-4e11-ad31-4580256de314",
+      "relation": "attack",
+      "confidence": 0.9,
+      "rationale": "A は設備投資や恒常的な運営コストが確実に発生すると指摘しており、コスト増が短期的で長期的には持続可能だという B の主張を直接弱めているため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:03:07.485528Z"
+    },
+    {
+      "id": "fcdf34ec-5080-44af-ba03-b15c0fb3f958",
+      "src_id": "470a9748-bf21-41ca-98e1-7d4251d72161",
+      "dst_id": "679fd6b1-59bc-42b6-9770-12aeaec33a50",
+      "relation": "support",
+      "confidence": 0.8,
+      "rationale": "文書は容器・備品費が1食あたり約10%を占めると示しており、容器関連コストの増加が学食の原価に影響を与え得るため、学食価格への転嫁可能性を支持する根拠となる。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:03:08.422269Z"
+    },
+    {
+      "id": "29e3bd62-57ab-4037-890c-f3f15a01e837",
+      "src_id": "75eb3ea8-99d5-4e11-ad31-4580256de314",
+      "dst_id": "6dd1c90b-f303-4a1e-b144-fe21040f1914",
+      "relation": "attack",
+      "confidence": 0.9,
+      "rationale": "A recommends a cautious, limited pilot likely due to cost concerns; B’s case asserts that cost increases are short-term and the switch is sustainable long-term, which undermines A’s precautionary rationale.",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:03:08.534069Z"
+    },
+    {
+      "id": "bcd6b6df-a6e5-4a7a-99fe-c05a6afc3f80",
+      "src_id": "5f5f76f3-b9fa-4614-8937-4a23054c318a",
+      "dst_id": "125778b5-17e5-4cb2-8466-4067c1a0e878",
+      "relation": "support",
+      "confidence": 0.95,
+      "rationale": "A は導入・運営に確実にコストが発生すると具体的に指摘しており、そのため年間1.5〜2.5トンの廃棄物削減のみでは費用対効果が不明瞭という B の主張を裏付ける根拠になっているため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:03:12.087779Z"
+    },
+    {
+      "id": "8260c765-3e00-4363-a469-62eab66afc35",
+      "src_id": "f378b716-8f65-4703-a697-92c098f9e269",
+      "dst_id": "679fd6b1-59bc-42b6-9770-12aeaec33a50",
+      "relation": "attack",
+      "confidence": 0.9,
+      "rationale": "B reports past cases where price increases after switching to paper containers were temporary (2 of 3 reverted within 2 years), which undermines A's claim that price pass-through is likely or persistent.",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:03:13.959847Z"
+    },
+    {
+      "id": "a6b3ad7f-aff1-44d2-99bf-d0a20a694bbf",
+      "src_id": "125778b5-17e5-4cb2-8466-4067c1a0e878",
+      "dst_id": "a9697527-ffb6-4d8c-8941-c93eedb416e7",
+      "relation": "attack",
+      "confidence": 0.9,
+      "rationale": "A argues that the reported annual 1.5–2.5 t plastic waste figure alone does not demonstrate cost-effectiveness of an intervention, which challenges the implication that B's statistic by itself justifies adopting the measure.",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:03:14.132304Z"
+    },
+    {
+      "id": "fbdb7a89-72e2-4829-b0ba-4e06fff6c1bf",
+      "src_id": "5f5f76f3-b9fa-4614-8937-4a23054c318a",
+      "dst_id": "6dd1c90b-f303-4a1e-b144-fe21040f1914",
+      "relation": "support",
+      "confidence": 0.93,
+      "rationale": "A は全面導入に伴う初期投資や恒常的な運営コストの発生を指摘しており、そのコスト負担を避けるため段階的・低コストの試行導入を提案する B の主張を支持しているため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:03:16.610821Z"
+    },
+    {
+      "id": "da99c46a-a72a-4de6-8298-a451b385097c",
+      "src_id": "125778b5-17e5-4cb2-8466-4067c1a0e878",
+      "dst_id": "c0b3483d-1bee-4f0b-98be-b662fc4df08d",
+      "relation": "attack",
+      "confidence": 0.9,
+      "rationale": "A は「年間1.5〜2.5トンの削減では導入コストに対する費用対効果が不明瞭」と述べ、段階的リユース導入で大幅削減すべきだとする B の提案の妥当性を疑問視しているため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:03:19.561873Z"
+    },
+    {
+      "id": "b4de0c5c-480a-4bc0-b6e5-eb05b6f252c3",
+      "src_id": "7b5edf5f-1bfa-44d5-a19e-2019c0ef3d70",
+      "dst_id": "23eb60a5-bfe0-4a23-91c0-c143c242f96d",
+      "relation": "support",
+      "confidence": 0.95,
+      "rationale": "B gives concrete harms (microplastics, CO2 and toxic emissions from incineration) that justify A's claim that reducing the environmental burden of disposable plastics is necessary, so B supports A.",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:04:13.953759Z"
+    },
+    {
+      "id": "25e153ca-9a00-4f2d-94e8-28dd03e5b262",
+      "src_id": "537edd22-327f-4d6d-b67f-21b644a941fb",
+      "dst_id": "6dd1c90b-f303-4a1e-b144-fe21040f1914",
+      "relation": "attack",
+      "confidence": 0.8,
+      "rationale": "Aは預り金・助成金やバイオプラ・リユースを併用する広範な2年試行を提案しており、コスト負担や適用範囲を拡大する方針であるため、低コスト・限定試行にとどめるべきというBの主張と対立している。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:04:15.230952Z"
+    },
+    {
+      "id": "852f7c4b-5031-44de-bc2d-9d7285ed6181",
+      "src_id": "0692332b-92ca-4a72-a8ce-98cbe0a4bfb9",
+      "dst_id": "47a4c9ed-d534-416c-8a16-75aee8eda7c6",
+      "relation": "support",
+      "confidence": 0.92,
+      "rationale": "B は調達最適化やメニュー調整など具体的手段を示し、影響を部分的に吸収できることを説明しているため、段階的対策が現実的であるという A の主張を支持している。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:04:16.337276Z"
+    },
+    {
+      "id": "6f71f046-77c0-4032-8782-9283c466d970",
+      "src_id": "6dd1c90b-f303-4a1e-b144-fe21040f1914",
+      "dst_id": "ed3946b1-3887-4281-9b64-373b316b23ff",
+      "relation": "support",
+      "confidence": 0.85,
+      "rationale": "A は導入の速度と費用負担が争点であると指摘しており、B の「低コスト・一部メニューでの試験導入」という提案はその懸念（速度とコスト負担）に直接対処しているため、B は A を支持している。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:04:17.538055Z"
+    },
+    {
+      "id": "9a923662-9ee3-4228-a362-d0007ce8fe08",
+      "src_id": "c9eeb33f-cabe-4f3c-ab24-a8713d4a1851",
+      "dst_id": "23eb60a5-bfe0-4a23-91c0-c143c242f96d",
+      "relation": "support",
+      "confidence": 0.95,
+      "rationale": "B claims that disposable plastics take centuries to decompose, which is direct evidence of long-term environmental harm and therefore supports the claim that reducing their environmental impact is necessary.",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:04:17.743645Z"
+    },
+    {
+      "id": "251265fb-1e42-4ce4-b2dd-752669b25086",
+      "src_id": "537edd22-327f-4d6d-b67f-21b644a941fb",
+      "dst_id": "ed3946b1-3887-4281-9b64-373b316b23ff",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "A proposes a pilot (slower, phased introduction) and specific financing measures (預り金・助成金等) to evaluate costs over 2 years, which directly addresses the concerns about導入の速度 and 費用負担の所在 stated in B.",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:04:19.558718Z"
+    },
+    {
+      "id": "5f21d0af-5759-46e9-a386-06748437cddd",
+      "src_id": "47a4c9ed-d534-416c-8a16-75aee8eda7c6",
+      "dst_id": "c0b3483d-1bee-4f0b-98be-b662fc4df08d",
+      "relation": "support",
+      "confidence": 0.95,
+      "rationale": "A は「段階的な対策が現実的である」と述べており、B の段階的なリユース容器導入という方針の実行可能性を裏付けているため、A は B を支持する根拠となっている。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:04:20.884978Z"
+    },
+    {
+      "id": "e9356443-a2b8-4349-bc9c-583e53404b6f",
+      "src_id": "537edd22-327f-4d6d-b67f-21b644a941fb",
+      "dst_id": "125778b5-17e5-4cb2-8466-4067c1a0e878",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "B argues that the reported waste-reduction figure alone leaves cost-effectiveness unclear; A proposes a two-year pilot and combined measures to empirically evaluate effects and costs, which directly supports B’s call for further evaluation.",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:04:24.952462Z"
+    },
+    {
+      "id": "f2fba870-59f2-4db9-a550-91e6bd1292f1",
+      "src_id": "75eb3ea8-99d5-4e11-ad31-4580256de314",
+      "dst_id": "ed3946b1-3887-4281-9b64-373b316b23ff",
+      "relation": "attack",
+      "confidence": 0.9,
+      "rationale": "Aは費用負担が残る争点だと指摘しているが、Bは事例からコスト増が短期的で長期的には持続可能だと示しており、費用負担に関する懸念を弱めてAの指摘を反証しているため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:04:26.206585Z"
+    },
+    {
+      "id": "b3d604b2-e9ca-455c-be8b-c188bbca14a7",
+      "src_id": "47a4c9ed-d534-416c-8a16-75aee8eda7c6",
+      "dst_id": "be1382f3-33ee-49e4-a70a-efb572b15bc9",
+      "relation": "support",
+      "confidence": 0.7,
+      "rationale": "段階的な対策が現実的であれば、コスト上昇に対して即時の恒久的値上げを避けられる方法があることを示唆しており、“コスト増 = 永続的な値上げ”という単純な対応関係を否定するBの主張を支持するため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:04:26.333796Z"
+    },
+    {
+      "id": "898663b0-631a-49fb-8079-b6778844a5b9",
+      "src_id": "15f331eb-45c5-4727-97e2-eb560daf4283",
+      "dst_id": "23eb60a5-bfe0-4a23-91c0-c143c242f96d",
+      "relation": "attack",
+      "confidence": 0.85,
+      "rationale": "Bは家庭ごみとして処理した場合に（例えば生分解性プラスチックが）通常のプラスチックと同等の環境負荷を持ち得ると指摘しており、使い捨てプラスチックの環境負荷低減が必要だというAの主張を効果や有効性の面で弱める反論になっているため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:04:31.436723Z"
+    },
+    {
+      "id": "172f763c-72b9-4d77-b2f8-b67d745e6f19",
+      "src_id": "47a4c9ed-d534-416c-8a16-75aee8eda7c6",
+      "dst_id": "75eb3ea8-99d5-4e11-ad31-4580256de314",
+      "relation": "support",
+      "confidence": 0.7,
+      "rationale": "「段階的な対策が現実的である」という主張は、移行を段階的に行えば短期的なコスト増に対処できることを示唆しており、事例が述べる「短期的なコスト増で長期的に持続可能」という結論を支持するため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:04:32.646084Z"
+    },
+    {
+      "id": "8a226094-2152-456d-9300-25acc461f94d",
+      "src_id": "3236b0f0-dd09-4c63-bb72-bac62ea7a7ed",
+      "dst_id": "537edd22-327f-4d6d-b67f-21b644a941fb",
+      "relation": "attack",
+      "confidence": 0.85,
+      "rationale": "Bは導入初年度に値上げ圧力がかかった事例を示しており、Aの導入案がコスト面で問題なく進むという期待や安全性を損なうため、Aへの反論となる。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:04:33.733508Z"
+    },
+    {
+      "id": "69ef985f-aea2-4efc-8f43-adc54b212fa8",
+      "src_id": "47a4c9ed-d534-416c-8a16-75aee8eda7c6",
+      "dst_id": "6dd1c90b-f303-4a1e-b144-fe21040f1914",
+      "relation": "support",
+      "confidence": 0.95,
+      "rationale": "A states that a phased (段階的) approach is realistic, which provides a supporting justification for B's recommendation to begin with low-cost reductions and limited trial implementation.",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:04:37.510251Z"
+    },
+    {
+      "id": "7a7b3126-313f-4bb1-b8cb-e0b0bf887b82",
+      "src_id": "125778b5-17e5-4cb2-8466-4067c1a0e878",
+      "dst_id": "23eb60a5-bfe0-4a23-91c0-c143c242f96d",
+      "relation": "attack",
+      "confidence": 0.9,
+      "rationale": "Bは『年間1.5〜2.5トンの削減』というデータだけでは導入の費用対効果が不明だと指摘しており、Aの『削減が必要である』という主張の正当性・実行可能性を弱める反論となっているため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:04:37.541962Z"
+    },
+    {
+      "id": "ddef4ada-fe73-4c66-b6a0-c9c78df27fb2",
+      "src_id": "537edd22-327f-4d6d-b67f-21b644a941fb",
+      "dst_id": "c0b3483d-1bee-4f0b-98be-b662fc4df08d",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "Aはリユース容器の段階的導入を実現するための具体的なパイロット案と実施条件（預り金・助成金・併用策、2年での効果・コスト検証）を示しており、Bの提案を実行可能にする支持的な補強になっている。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:04:41.337785Z"
+    },
+    {
+      "id": "7768aeff-b1d4-4cb2-94b8-7b2a544d4370",
+      "src_id": "bdac4e80-ff37-4814-841e-69a84eea720e",
+      "dst_id": "ed3946b1-3887-4281-9b64-373b316b23ff",
+      "relation": "support",
+      "confidence": 0.95,
+      "rationale": "B の事例は導入初年度に容器コストが約3倍になったことを示しており、A が挙げる「費用負担の所在」が争点であるという主張を裏付けるため、B は A を支持する。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:04:44.511991Z"
+    },
+    {
+      "id": "d573c3f1-3633-4c54-a89a-84cf8add28d8",
+      "src_id": "537edd22-327f-4d6d-b67f-21b644a941fb",
+      "dst_id": "ed3946b1-3887-4281-9b64-373b316b23ff",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "Bは導入速度と費用負担というAの残る争点に対し、パイロット実施と預り金・助成金などの費用負担策で検証する具体案を示しており、Aの問題提起に対する解決策を提示しているため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:04:53.404173Z"
+    },
+    {
+      "id": "0d951cb8-ccf4-48bd-914e-50ccbb98b32d",
+      "src_id": "c0b3483d-1bee-4f0b-98be-b662fc4df08d",
+      "dst_id": "23eb60a5-bfe0-4a23-91c0-c143c242f96d",
+      "relation": "support",
+      "confidence": 0.9,
+      "rationale": "B は段階的なリユース導入とメンテナンス体制により廃棄物と温室効果ガスを大幅に削減できると述べており、使い捨てプラスチックの環境負荷低減が必要だという A の主張を具体的手段によって支持しているため。",
+      "created_by": "linking",
+      "timestamp": "2026-05-01T09:04:55.123705Z"
+    }
+  ]
+}

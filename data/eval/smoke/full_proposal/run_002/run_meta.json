@@ -1,0 +1,15 @@
+{
+  "run_id": "full_proposal-run-002-993dd5",
+  "condition_name": "full_proposal",
+  "n_turns": 4,
+  "consensus": {
+    "reached": true,
+    "signal": "explicit_agreement",
+    "confidence": 0.75,
+    "fired_signals": [
+      "explicit_agreement"
+    ],
+    "detected_at_turn": 4,
+    "rationale": "直近 4 ターンの 75% に合意キーワード"
+  }
+}
