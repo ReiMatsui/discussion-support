@@ -28,6 +28,10 @@ viz = [
 web = [
     "tavily-python>=0.5",
 ]
+ui = [
+    "streamlit>=1.40",
+    "pandas>=2.0",
+]
 
 [project.scripts]
 das = "das.cli:app"

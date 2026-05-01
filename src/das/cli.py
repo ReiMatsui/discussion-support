@@ -62,6 +62,64 @@ def ingest_docs(
     asyncio.run(_run_ingest_docs(directory, output))
 
 
+@app.command(name="ui")
+def ui(
+    port: int = typer.Option(8501, "--port", help="Streamlit のポート"),
+    headless: bool = typer.Option(
+        False,
+        "--headless",
+        help="ブラウザを自動で開かない",
+    ),
+) -> None:
+    """Streamlit ベースの議論グラフ ビューアを起動する (ui extras 必要)。"""
+
+    import subprocess
+    import sys
+
+    try:
+        from das.ui import streamlit_app
+    except ImportError as exc:  # pragma: no cover
+        typer.echo(f"streamlit が未インストールです: {exc}")
+        typer.echo("`uv sync --extra ui` を実行してください。")
+        raise typer.Exit(1) from exc
+
+    app_path = Path(streamlit_app.__file__)
+    cmd = [
+        sys.executable,
+        "-m",
+        "streamlit",
+        "run",
+        str(app_path),
+        "--server.port",
+        str(port),
+    ]
+    if headless:
+        cmd += ["--server.headless", "true"]
+    raise typer.Exit(subprocess.call(cmd))
+
+
+@app.command(name="visualize")
+def visualize(
+    snapshot: Path = typer.Argument(
+        ..., exists=True, dir_okay=False, help="snapshot.json"
+    ),
+    output: Path = typer.Option(
+        Path("graph.html"),
+        "--output",
+        "-o",
+        help="出力 HTML パス",
+    ),
+) -> None:
+    """``snapshot.json`` を pyvis HTML として可視化する。"""
+
+    from das.viz import load_snapshot as _load
+    from das.viz import render_html
+
+    store = _load(snapshot)
+    out = render_html(store, output)
+    typer.echo(f"[visualize] wrote {out}")
+
+
 @app.command(name="run-session")
 def run_session(
     transcript: Path = typer.Argument(
@@ -106,6 +164,8 @@ def run_session(
 
 
 async def _run_ingest_docs(directory: Path, output: Path) -> None:
+    from das.viz import dump_snapshot
+
     settings = get_settings()
     typer.echo(f"[ingest] directory={directory}")
 
@@ -114,13 +174,9 @@ async def _run_ingest_docs(directory: Path, output: Path) -> None:
     orch = Orchestrator.assemble(llm=llm, store=store)
     nodes = await orch.ingest_documents(directory)
 
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(
-        json.dumps(store.snapshot(), ensure_ascii=False, indent=2, default=str),
-        encoding="utf-8",
-    )
+    snapshot_path = dump_snapshot(store, output)
     typer.echo(
-        f"[ingest] {len(nodes)} nodes from {directory} -> {output}\n"
+        f"[ingest] {len(nodes)} nodes from {directory} -> {snapshot_path}\n"
         f"         data_dir={settings.data_dir}"
     )
 
@@ -168,14 +224,18 @@ async def _run_session_async(
     typer.echo(f"[run-session] running {len(utterances)} utterances...")
     await orch.run_session(utterances)
 
-    snapshot_path = run_dir / "snapshot.json"
-    snapshot_path.write_text(
-        json.dumps(store.snapshot(), ensure_ascii=False, indent=2, default=str),
-        encoding="utf-8",
-    )
+    from das.viz import dump_snapshot, render_html
+
+    snapshot_path = dump_snapshot(store, run_dir / "snapshot.json")
+    html_path = render_html(store, run_dir / "graph.html")
+
     n_nodes = len(list(store.nodes()))
     n_edges = len(list(store.edges()))
-    typer.echo(f"[run-session] done. nodes={n_nodes} edges={n_edges} -> {snapshot_path}")
+    typer.echo(
+        f"[run-session] done. nodes={n_nodes} edges={n_edges}\n"
+        f"  snapshot -> {snapshot_path}\n"
+        f"  html     -> {html_path}"
+    )
 
 
 if __name__ == "__main__":
