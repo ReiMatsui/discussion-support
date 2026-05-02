@@ -48,6 +48,11 @@ from das.eval.metrics import (
     transcript_metrics,
 )
 from das.eval.persona import PersonaSpec
+from das.eval.structural_metrics import (
+    DiscussionStructuralMetrics,
+    aggregate_structural_metrics,
+    compute_structural_metrics,
+)
 from das.graph.store import GraphStore
 from das.llm import OpenAIClient
 from das.logging import get_logger
@@ -79,6 +84,9 @@ class SingleRunResult:
     snapshot: dict | None = None
     consensus: ConsensusReport | None = None
     """セッション終了時の合意検出レポート (until_consensus 有効時のみ非 None)。"""
+
+    structural: DiscussionStructuralMetrics | None = None
+    """AF + transcript から決定的に計算した構造指標 (DQI 風)。"""
 
     @property
     def n_turns(self) -> int:
@@ -183,7 +191,10 @@ def _save_run(
             "fired_signals": list(result.consensus.fired_signals),
             "detected_at_turn": result.consensus.detected_at_turn,
             "rationale": result.consensus.rationale,
+            "llm_judgement": result.consensus.llm_judgement,
         }
+    if result.structural is not None:
+        run_meta["structural_metrics"] = asdict(result.structural)
     (run_dir / "run_meta.json").write_text(
         json.dumps(run_meta, ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -260,6 +271,9 @@ def _save_eval_result(eval_dir: Path, result: EvalResult) -> None:
                     agg.intervention_transparency_std,
                 ],
                 "convergence": _convergence_stats(grouped.get(cond, [])),
+                "structural": aggregate_structural_metrics(
+                    [r.structural for r in grouped.get(cond, []) if r.structural]
+                ),
             }
             for cond, agg in aggregates.items()
         },
@@ -455,6 +469,8 @@ async def _run_single(
             info_log=intervention_log,
         )
 
+    structural = compute_structural_metrics(transcript, final_store)
+
     return SingleRunResult(
         run_id=run_id,
         condition_name=condition_name,
@@ -466,6 +482,7 @@ async def _run_single(
         intervention_log=intervention_log,
         snapshot=snapshot,
         consensus=consensus_report,
+        structural=structural,
     )
 
 

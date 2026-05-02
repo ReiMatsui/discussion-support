@@ -179,4 +179,59 @@ if convergence_rows:
     )
     st.altair_chart(chart, use_container_width=True)
 
+# --- 客観構造指標 (Stage 1) -------------------------------------------
+
+structural_rows: list[dict] = []
+for cond, payload in by_cond.items():
+    s = payload.get("structural")
+    if not s:
+        continue
+    structural_rows.append(
+        {
+            "condition": cond,
+            "participation_gini": s.get("participation_gini_mean", 0.0),
+            "avg_premises_per_claim": s.get("avg_premises_per_claim_mean", 0.0),
+            "pct_unsupported_claims": s.get("pct_unsupported_claims_mean", 0.0),
+            "response_rate": s.get("response_rate_mean", 0.0),
+            "pct_attacks_answered": s.get("pct_attacks_answered_mean", 0.0),
+            "avg_argument_chain_length": s.get("avg_argument_chain_length_mean", 0.0),
+            "n_total_edges": s.get("n_total_edges_mean", 0.0),
+        }
+    )
+
+if structural_rows:
+    st.divider()
+    st.markdown("## 客観構造指標 (LLM-free, AF 由来)")
+    st.caption(
+        "DQI / Social Laboratory の流れに沿った客観指標。"
+        "AF と transcript から決定的に計算できるため、対面・音声へも同じ意味で展開できる。"
+    )
+    sdf = pd.DataFrame(structural_rows)
+    display = sdf.assign(
+        participation_gini=lambda d: d["participation_gini"].round(3),
+        avg_premises_per_claim=lambda d: d["avg_premises_per_claim"].round(2),
+        pct_unsupported_claims=lambda d: (d["pct_unsupported_claims"] * 100).round(1).astype(str) + "%",
+        response_rate=lambda d: (d["response_rate"] * 100).round(1).astype(str) + "%",
+        pct_attacks_answered=lambda d: (d["pct_attacks_answered"] * 100).round(1).astype(str) + "%",
+        avg_argument_chain_length=lambda d: d["avg_argument_chain_length"].round(2),
+        n_total_edges=lambda d: d["n_total_edges"].round(1),
+    ).rename(
+        columns={
+            "condition": "条件",
+            "participation_gini": "参加偏在 (gini)",
+            "avg_premises_per_claim": "claim あたり premise",
+            "pct_unsupported_claims": "未根拠 claim 率",
+            "response_rate": "応答率",
+            "pct_attacks_answered": "反論への再反論率",
+            "avg_argument_chain_length": "論証連鎖の平均深さ",
+            "n_total_edges": "AF エッジ数 (平均)",
+        }
+    )
+    st.dataframe(display, use_container_width=True, hide_index=True)
+    st.caption(
+        "**参加偏在 (gini)**: 0 = 完全平等, 1 = 一極集中。0.2-0.4 程度が望ましい。"
+        " **応答率**: 各発話が以前の発話/文書に support/attack エッジを張った割合。"
+        " **反論への再反論率**: 反論を受けた話者が後で反論し返した割合 (DQI: respect)。"
+    )
+
 st.caption("個別ランの詳細は **議論レビュー** ページで条件タブを切り替えて確認できます。")
