@@ -194,11 +194,15 @@ class ConditionFullProposal:
         top_k: int = 5,
         max_info_items: int = 2,
         facilitator: FacilitationAgent | None = None,
+        enable_web_search: bool = False,
+        max_web_searches: int = 5,
     ) -> None:
         self._llm = llm or OpenAIClient()
         self._threshold = threshold
         self._top_k = top_k
         self._max_info_items = max_info_items
+        self._enable_web_search = enable_web_search
+        self._max_web_searches = max_web_searches
         self._orchestrator: Orchestrator | None = None
         self._processed_turn_ids: set[int] = set()
         self._last_items: list[InfoItem] = []
@@ -243,15 +247,30 @@ class ConditionFullProposal:
 
     async def setup(self, *, docs_dir: Path | None = None) -> None:
         store = NetworkXGraphStore()
+        web_search = None
+        if self._enable_web_search:
+            from das.agents.web_search import WebSearchAgent
+
+            web_search = WebSearchAgent(
+                llm=self._llm, max_searches_per_session=self._max_web_searches
+            )
+            if not web_search.is_enabled:
+                # API キー未設定なら静かに無効化
+                self._log.info("full_proposal.web_search_disabled_no_key")
+                web_search = None
         self._orchestrator = Orchestrator.assemble(
             llm=self._llm,
             store=store,
             threshold=self._threshold,
             top_k=self._top_k,
+            web_search=web_search,
         )
         if docs_dir is not None and docs_dir.exists():
             await self._orchestrator.ingest_documents(docs_dir)
-        self._log.info("full_proposal.setup")
+        self._log.info(
+            "full_proposal.setup",
+            web_search=web_search is not None,
+        )
 
     async def info_provider(self, history: list[Utterance], persona: PersonaSpec) -> str | None:
         """シミュレーション側のアダプタ。

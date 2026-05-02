@@ -14,6 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from das.agents import DocumentAgent, ExtractionAgent, LinkingAgent
+from das.agents.web_search import WebSearchAgent
 from das.graph.schema import Node
 from das.graph.store import GraphStore, NetworkXGraphStore
 from das.llm import OpenAIClient
@@ -33,12 +34,14 @@ class Orchestrator:
         extraction: ExtractionAgent,
         document: DocumentAgent,
         linking: LinkingAgent,
+        web_search: WebSearchAgent | None = None,
     ) -> None:
         self._store = store
         self._bus = bus
         self._extraction = extraction
         self._document = document
         self._linking = linking
+        self._web_search = web_search
         self._log = get_logger("das.runtime.orchestrator")
 
     # --- 組み立て -----------------------------------------------------
@@ -51,8 +54,13 @@ class Orchestrator:
         store: GraphStore | None = None,
         threshold: float | None = None,
         top_k: int = 5,
+        web_search: WebSearchAgent | None = None,
     ) -> Orchestrator:
-        """既定構成のオーケストレータを 1 つ作る。"""
+        """既定構成のオーケストレータを 1 つ作る。
+
+        ``web_search`` を渡すと、新しい utterance/claim ノードに対して
+        既存エッジ数が少ないとき自動で Web 検索 → AF 化が走る。
+        """
 
         llm = llm or OpenAIClient()
         store = store or NetworkXGraphStore()
@@ -68,6 +76,7 @@ class Orchestrator:
             extraction=extraction,
             document=document,
             linking=linking,
+            web_search=web_search,
         )
         orch._wire_handlers()
         return orch
@@ -93,6 +102,18 @@ class Orchestrator:
         # 連結エージェントは新ノードに対し、既存ノード群との関係を推定する
         await self._linking.link_node(node, self._store)
 
+        # 必要なら Web 検索エージェントが新規根拠を取りに行く。
+        # 戻ってきた web ノードもバスに publish して連結を走らせる
+        # (= 議論ノード ↔ web ノード のエッジが張られる)。
+        if self._web_search is not None and self._web_search.is_enabled:
+            new_web_nodes = await self._web_search.maybe_search_for_node(
+                node, self._store
+            )
+            for web_node in new_web_nodes:
+                await self._bus.publish(
+                    NodeAdded(node_id=web_node.id, source=web_node.source)
+                )
+
     # --- 公開 API -----------------------------------------------------
 
     @property
@@ -114,6 +135,10 @@ class Orchestrator:
     @property
     def linking(self) -> LinkingAgent:
         return self._linking
+
+    @property
+    def web_search(self) -> WebSearchAgent | None:
+        return self._web_search
 
     async def ingest_documents(self, directory: Path) -> list[Node]:
         """事前文書を AF 化してストアに追加する。

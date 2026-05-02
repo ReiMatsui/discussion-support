@@ -182,6 +182,17 @@ def eval_cmd(
         help="LLM-judge による合意検出を有効化 (Sirota et al. SIGDIAL 2025)。"
         "構造シグナルが立ったときだけ呼ぶので追加コストは小さい",
     ),
+    web_search: bool = typer.Option(
+        False,
+        "--web-search/--no-web-search",
+        help="full_proposal 条件で Web 検索エージェントを有効化 "
+        "(TAVILY_API_KEY 必須)。事前資料に無い論点をリアルタイム検索",
+    ),
+    max_web_searches: int = typer.Option(
+        5,
+        "--max-web-searches",
+        help="セッションあたりの Web 検索回数の上限",
+    ),
 ) -> None:
     """シミュレーション評価を一括実行する (3 条件比較 + LLM-as-judge)。"""
 
@@ -203,6 +214,8 @@ def eval_cmd(
             concurrency=concurrency,
             emit_events=emit_events,
             llm_consensus=llm_consensus,
+            web_search=web_search,
+            max_web_searches=max_web_searches,
         )
     )
 
@@ -354,6 +367,8 @@ async def _run_eval_cli(
     concurrency: int = 1,
     emit_events: bool = False,
     llm_consensus: bool = True,
+    web_search: bool = False,
+    max_web_searches: int = 5,
 ) -> None:
     from das.eval import (
         ConditionFlatRAG,
@@ -394,7 +409,11 @@ async def _run_eval_cli(
         elif name == "flat_rag":
             factories[name] = lambda llm=llm: ConditionFlatRAG(llm=llm)
         elif name == "full_proposal":
-            factories[name] = lambda llm=llm: ConditionFullProposal(llm=llm)
+            factories[name] = lambda llm=llm: ConditionFullProposal(
+                llm=llm,
+                enable_web_search=web_search,
+                max_web_searches=max_web_searches,
+            )
         else:
             typer.echo(f"未知の condition: {name}")
             raise typer.Exit(1)
