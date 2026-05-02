@@ -176,6 +176,12 @@ def eval_cmd(
         help="UI 連携用: 各イベント (utterance/intervention/run_start/run_end) "
         "を `__DAS_EVT__<json>` 行として stdout に流す",
     ),
+    llm_consensus: bool = typer.Option(
+        True,
+        "--llm-consensus/--no-llm-consensus",
+        help="LLM-judge による合意検出を有効化 (Sirota et al. SIGDIAL 2025)。"
+        "構造シグナルが立ったときだけ呼ぶので追加コストは小さい",
+    ),
 ) -> None:
     """シミュレーション評価を一括実行する (3 条件比較 + LLM-as-judge)。"""
 
@@ -196,6 +202,7 @@ def eval_cmd(
             min_turns_before_consensus=min_turns_before_consensus,
             concurrency=concurrency,
             emit_events=emit_events,
+            llm_consensus=llm_consensus,
         )
     )
 
@@ -346,6 +353,7 @@ async def _run_eval_cli(
     min_turns_before_consensus: int = 4,
     concurrency: int = 1,
     emit_events: bool = False,
+    llm_consensus: bool = True,
 ) -> None:
     from das.eval import (
         ConditionFlatRAG,
@@ -393,6 +401,13 @@ async def _run_eval_cli(
 
     judge = None if no_judge else JudgeAgent(llm=llm)
 
+    # LLM-judge ベースの合意検出 (Sirota et al. SIGDIAL 2025)
+    consensus_agent: object | None = None
+    if llm_consensus:
+        from das.agents.consensus_agent import ConsensusAgent
+
+        consensus_agent = ConsensusAgent(llm=llm)
+
     typer.echo(
         f"[eval] preset={preset} topic='{topic}' "
         f"conditions={list(factories.keys())} n_runs={n_runs} "
@@ -439,6 +454,7 @@ async def _run_eval_cli(
         consensus_kwargs=consensus_kwargs,
         concurrency=concurrency,
         event_emitter=event_emitter,
+        consensus_agent=consensus_agent,
     )
 
     typer.echo("")

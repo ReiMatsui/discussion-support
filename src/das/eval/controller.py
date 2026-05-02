@@ -23,7 +23,8 @@ from das.types import Utterance
 InfoProvider = Callable[[list[Utterance], PersonaSpec], Awaitable[str | None]]
 
 # transcript を見て、合意などの条件で True を返したらセッション早期終了するコールバック。
-StopCondition = Callable[[list[Utterance]], bool]
+# 同期 (bool を直接返す) でも非同期 (Awaitable[bool] を返す) でも良い。
+StopCondition = Callable[[list[Utterance]], "bool | Awaitable[bool]"]
 
 
 @dataclass(frozen=True)
@@ -120,11 +121,17 @@ class SessionRunner:
                 info_provided=info is not None,
             )
             yield utterance
-            if stop_condition is not None and stop_condition(history):
-                self._log.info(
-                    "session.early_stop", at_turn=turn_id, n_utterances=len(history)
-                )
-                return
+            if stop_condition is not None:
+                stop_result = stop_condition(history)
+                if hasattr(stop_result, "__await__"):
+                    stop_result = await stop_result  # type: ignore[assignment]
+                if stop_result:
+                    self._log.info(
+                        "session.early_stop",
+                        at_turn=turn_id,
+                        n_utterances=len(history),
+                    )
+                    return
 
         self._log.info("session.done", n_utterances=len(history))
 

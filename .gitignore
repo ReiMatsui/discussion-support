@@ -44,3 +44,8 @@ data/runs/
 *.sqlite
 *.sqlite3
 *.db
+
+data/eval/
+data/runs/
+!data/eval/.gitkeep
+!data/runs/.gitkeep

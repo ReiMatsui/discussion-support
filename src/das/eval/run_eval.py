@@ -33,7 +33,7 @@ from das.eval.conditions import (
     InterventionLogEntry,
     write_intervention_log,
 )
-from das.eval.consensus import ConsensusReport, detect_consensus
+from das.eval.consensus import ConsensusReport, detect_consensus, detect_consensus_with_llm
 from das.eval.controller import SessionConfig, SessionRunner
 from das.eval.judge import (
     AggregatedScores,
@@ -296,6 +296,8 @@ async def _run_single(
     until_consensus: bool = False,
     consensus_kwargs: dict | None = None,
     event_emitter: EventEmitter | None = None,
+    consensus_agent: object | None = None,
+    consensus_min_interval: int = 4,
 ) -> SingleRunResult:
     await condition.setup(docs_dir=docs_dir)
 
@@ -325,11 +327,46 @@ async def _run_single(
     stop_condition = None
     if until_consensus:
         store_ref = _store_for_condition(condition)
+        last_llm_check_at: dict[str, int] = {"turn": -1}
+        last_report: dict[str, ConsensusReport | None] = {"r": None}
 
-        def _stop(history: list[Utterance]) -> bool:
-            return detect_consensus(history, store=store_ref, **consensus_kwargs).consensus_reached
+        if consensus_agent is None:
+            # キーワード+構造シグナルだけの安価判定
+            def _stop_sync(history: list[Utterance]) -> bool:
+                return detect_consensus(
+                    history, store=store_ref, **consensus_kwargs
+                ).consensus_reached
 
-        stop_condition = _stop
+            stop_condition = _stop_sync
+        else:
+
+            async def _stop_async(history: list[Utterance]) -> bool:
+                # 安価な前段でシグナル無しなら LLM を呼ばずに False
+                cheap = detect_consensus(history, store=store_ref, **consensus_kwargs)
+                structural = any(
+                    s in cheap.fired_signals
+                    for s in ("new_claim_stalled", "no_new_attacks")
+                )
+                if not (cheap.consensus_reached or structural):
+                    return False
+                # 直近 LLM 呼び出しから min_interval ターン経っていなければスキップ
+                turn = len(history)
+                if turn - last_llm_check_at["turn"] < consensus_min_interval:
+                    prev = last_report["r"]
+                    return bool(prev and prev.consensus_reached)
+                last_llm_check_at["turn"] = turn
+                report = await detect_consensus_with_llm(
+                    history,
+                    topic=topic,
+                    personas=personas,
+                    agent=consensus_agent,
+                    store=store_ref,
+                    **consensus_kwargs,
+                )
+                last_report["r"] = report
+                return report.consensus_reached
+
+            stop_condition = _stop_async  # type: ignore[assignment]
 
     transcript: list[Utterance] = []
     prev_iv_count = 0
@@ -382,7 +419,19 @@ async def _run_single(
 
     # 合意検出の最終レポート (until_consensus でない場合も「実際に合意していたか」を
     # 後付け判定して残すと分析しやすいので、常に算出する)。
-    consensus_report = detect_consensus(transcript, store=final_store, **consensus_kwargs)
+    if consensus_agent is not None:
+        consensus_report = await detect_consensus_with_llm(
+            transcript,
+            topic=topic,
+            personas=personas,
+            agent=consensus_agent,
+            store=final_store,
+            **consensus_kwargs,
+        )
+    else:
+        consensus_report = detect_consensus(
+            transcript, store=final_store, **consensus_kwargs
+        )
 
     _emit(
         {
@@ -438,6 +487,8 @@ async def run_eval(
     consensus_kwargs: dict | None = None,
     concurrency: int = 1,
     event_emitter: EventEmitter | None = None,
+    consensus_agent: object | None = None,
+    consensus_min_interval: int = 4,
 ) -> EvalResult:
     """N 本のランを条件 xトピックで回し、集計結果を返す。
 
@@ -493,6 +544,8 @@ async def run_eval(
                 until_consensus=until_consensus,
                 consensus_kwargs=consensus_kwargs,
                 event_emitter=event_emitter,
+                consensus_agent=consensus_agent,
+                consensus_min_interval=consensus_min_interval,
             )
             if target_dir is not None:
                 run_dir = target_dir / cond_name / f"run_{run_idx:03d}"

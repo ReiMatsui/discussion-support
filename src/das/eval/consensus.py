@@ -105,6 +105,8 @@ class ConsensusReport:
     rationale: str = ""
     detected_at_turn: int | None = None
     fired_signals: list[ConsensusSignal] = field(default_factory=list)
+    llm_judgement: dict | None = None
+    """LLM-judge を呼んだ場合の構造化判定 (StanceJudgement の集合)。"""
 
 
 def _explicit_agreement_score(transcript: list[Utterance], window: int) -> float:
@@ -243,4 +245,70 @@ def detect_consensus(
     )
 
 
-__all__ = ["ConsensusReport", "ConsensusSignal", "detect_consensus"]
+async def detect_consensus_with_llm(
+    transcript: list[Utterance],
+    *,
+    topic: str,
+    personas: list,  # PersonaSpec but avoid circular import
+    agent: object,  # ConsensusAgent but avoid circular import
+    store: GraphStore | None = None,
+    min_judge_confidence: float = 0.7,
+    require_unanimity: bool = True,
+    **detect_kwargs: object,
+) -> ConsensusReport:
+    """構造的静止 + LLM-judge による二段の合意検出。
+
+    手順:
+      1. 安価な ``detect_consensus`` (キーワード + 構造シグナル) を **前段トリガー**
+         として使用。何らかのシグナルが立ったときだけ次に進む
+      2. ``ConsensusAgent.judge`` を呼んで構造化された立場・合意判定を取得
+      3. ``consensus_reached`` かつ ``n_agreeing == n_total`` (require_unanimity)
+         かつ ``confidence >= min_judge_confidence`` のときのみ合意成立とする
+
+    こうすることで:
+      - LLM 呼び出しは議論全体で数回程度に抑えられる (毎ターン呼ばない)
+      - 合意判定の根拠が説明可能
+      - キーワード表面ではなく文脈意味に基づく判定
+    """
+
+    cheap = detect_consensus(transcript, store=store, **detect_kwargs)  # type: ignore[arg-type]
+
+    # 前段で何の signal も立っていなければ LLM を呼ぶ価値なし
+    structural_signal = any(
+        s in cheap.fired_signals for s in ("new_claim_stalled", "no_new_attacks")
+    )
+    if not (cheap.consensus_reached or structural_signal):
+        return cheap
+
+    # LLM-judge を呼ぶ
+    judgement = await agent.judge(  # type: ignore[attr-defined]
+        topic=topic,
+        transcript=transcript,
+        personas=personas,
+    )
+
+    judgement_dict = judgement.model_dump()
+
+    consensus_pass = (
+        bool(judgement.consensus_reached)
+        and (not require_unanimity or judgement.n_agreeing == judgement.n_total)
+        and judgement.confidence >= min_judge_confidence
+    )
+
+    return ConsensusReport(
+        consensus_reached=consensus_pass,
+        signal=cheap.signal if consensus_pass else "none",
+        confidence=judgement.confidence if consensus_pass else 0.0,
+        rationale=judgement.rationale,
+        detected_at_turn=transcript[-1].turn_id if consensus_pass else None,
+        fired_signals=cheap.fired_signals,
+        llm_judgement=judgement_dict,
+    )
+
+
+__all__ = [
+    "ConsensusReport",
+    "ConsensusSignal",
+    "detect_consensus",
+    "detect_consensus_with_llm",
+]
