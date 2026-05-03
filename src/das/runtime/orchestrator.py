@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 from das.agents import DocumentAgent, ExtractionAgent, LinkingAgent
@@ -167,6 +169,47 @@ class Orchestrator:
             n_nodes=len(list(self._store.nodes())),
             n_edges=len(list(self._store.edges())),
         )
+        return self._store
+
+    async def run_live(
+        self,
+        stream: AsyncIterator[Utterance],
+        *,
+        stop_event: asyncio.Event | None = None,
+    ) -> GraphStore:
+        """ライブ入力 (例: マイク+ASR) から流れてくる発話を逐次処理する。
+
+        ``run_session`` のストリーム版。発話 1 件ごとにバスへ publish する。
+        バスは内部で ``asyncio.create_task`` するので、Extraction → Linking
+        → Web 検索 が背後で走り、次の発話の処理と並列に進む。
+
+        終了条件:
+          - ``stream`` が尽きる (StopAsyncIteration)
+          - ``stop_event.set()`` が呼ばれる (どちらが先でも OK)
+
+        ``stop`` 後はバスを drain して、すべての二次イベントが収まったら
+        store を返す。
+        """
+
+        n = 0
+        self._log.info("orchestrator.run_live.start")
+        try:
+            async for utterance in stream:
+                if stop_event is not None and stop_event.is_set():
+                    break
+                await self._bus.publish(utterance)
+                n += 1
+        except asyncio.CancelledError:
+            self._log.info("orchestrator.run_live.cancelled", n_utterances=n)
+            raise
+        finally:
+            await self._bus.drain()
+            self._log.info(
+                "orchestrator.run_live.done",
+                n_utterances=n,
+                n_nodes=len(list(self._store.nodes())),
+                n_edges=len(list(self._store.edges())),
+            )
         return self._store
 
 

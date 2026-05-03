@@ -32,9 +32,37 @@ uv run das ui
 uv run das version                    # バージョン
 uv run das ingest-docs data/docs/     # 文書を AF 化して保存
 uv run das run-session <file>.jsonl   # 議論ログを流して統合 AF を構築
+uv run das listen                     # マイクからのリアルタイム議論を AF 化 (asr extras)
 uv run das visualize <snapshot.json>  # snapshot を pyvis HTML に
 uv run das ui                         # Streamlit ビューア
 ```
+
+## リアルタイム音声入力 (`das listen`)
+
+WhisperLiveKit を使ってマイク音声を逐次文字起こしし、そのまま統合 AF を組み
+立てる。Apple Silicon 向けに mlx-whisper バックエンドを既定にしている。
+
+```bash
+# extras を入れる (PyTorch / mlx-whisper / sounddevice が入る、~3GB)
+uv sync --extra asr
+
+# 録音開始 (既定: large-v3 / 日本語)。Ctrl-C で停止し snapshot を保存。
+uv run das listen
+
+# モデル・言語の上書き
+uv run das listen --model large-v3-turbo --language ja
+```
+
+設定は `.env` でも上書きできる:
+
+```env
+DAS_ASR_BACKEND=mlx-whisper      # CUDA なら faster-whisper
+DAS_ASR_MODEL=large-v3
+DAS_ASR_LANGUAGE=ja
+```
+
+注意: 話者ダイアライゼーション (複数人の自動区別) は初期実装では無効。すべての
+発話が `speaker_1` で記録される。多人数議論サポートは追加予定。
 
 ## テスト
 

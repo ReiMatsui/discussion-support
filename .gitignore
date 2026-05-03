@@ -49,3 +49,6 @@ data/eval/
 data/runs/
 !data/eval/.gitkeep
 !data/runs/.gitkeep
+
+# 一時的な検証スペース (本体に組み込む前の実験置き場、後で削除する)
+experiments/

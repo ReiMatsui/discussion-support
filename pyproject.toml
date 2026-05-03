@@ -3,7 +3,7 @@ name = "discussion-support"
 version = "0.1.0"
 description = "Multi-agent argumentation-graph–integrated discussion support"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11,<3.13"
 authors = [{ name = "Rei Matsui" }]
 license = { text = "MIT" }
 dependencies = [
@@ -32,6 +32,17 @@ ui = [
     "streamlit>=1.40",
     "pandas>=2.0",
 ]
+asr = [
+    # WhisperLiveKit (Apple Silicon 向けに mlx-whisper バックエンド)。
+    # PyTorch / faster-whisper / mlx を引っ張るので、本体には入れず opt-in。
+    "whisperlivekit[mlx-whisper]>=0.2.20",
+    # WhisperLiveKit の OpenAI 互換エンドポイントが FastAPI Form を使うのに、
+    # 向こうの依存に python-multipart が入っていない (0.2.20.post1 時点での
+    # 依存漏れ)。明示的に補う。WhisperLiveKit 側で解消されたら削れる。
+    "python-multipart>=0.0.9",
+    # マイク入力 (PCM s16le 16kHz) を取り込むため
+    "sounddevice>=0.4",
+]
 
 [project.scripts]
 das = "das.cli:app"
@@ -56,7 +67,7 @@ module-root = "src"
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = [
@@ -87,7 +98,7 @@ markers = [
 ]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 strict = true
 warn_unused_ignores = true
 ignore_missing_imports = true

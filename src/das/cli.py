@@ -4,6 +4,7 @@
   - ``das version``          : バージョン表示
   - ``das ingest-docs``      : ``data/docs/`` を AF 化してスナップショット保存
   - ``das run-session``      : 発話 JSONL を流して統合 AF を構築
+  - ``das listen``           : マイクから音声を取り込みリアルタイムに統合 AF を構築 (asr extras)
 """
 
 from __future__ import annotations
@@ -220,6 +221,59 @@ def eval_cmd(
     )
 
 
+@app.command(name="listen")
+def listen(
+    docs: Path | None = typer.Option(
+        None,
+        "--docs",
+        help="議論前に取り込む文書ディレクトリ (省略時は data/docs)",
+    ),
+    run_id: str | None = typer.Option(
+        None,
+        "--run-id",
+        help="出力先サブディレクトリ名 (省略時は ISO タイムスタンプ)",
+    ),
+    threshold: float | None = typer.Option(
+        None,
+        "--threshold",
+        help="リンク採用の信頼度閾値 (省略時は設定値)",
+    ),
+    top_k: int = typer.Option(5, "--top-k", help="リンク候補の embedding top-k"),
+    skip_docs: bool = typer.Option(
+        False, "--skip-docs", help="ドキュメントの事前 AF 化をスキップ"
+    ),
+    model: str | None = typer.Option(
+        None,
+        "--model",
+        help="ASR モデル名 (省略時は DAS_ASR_MODEL = large-v3)",
+    ),
+    backend: str | None = typer.Option(
+        None,
+        "--backend",
+        help="ASR バックエンド (省略時は DAS_ASR_BACKEND = mlx-whisper)",
+    ),
+    language: str | None = typer.Option(
+        None,
+        "--language",
+        help="認識言語 (省略時は DAS_ASR_LANGUAGE = ja)",
+    ),
+) -> None:
+    """マイクからの音声をリアルタイム文字起こしして AF を構築する (asr extras 必須)。"""
+
+    asyncio.run(
+        _run_listen_async(
+            docs=docs,
+            run_id=run_id,
+            threshold=threshold,
+            top_k=top_k,
+            skip_docs=skip_docs,
+            model=model,
+            backend=backend,
+            language=language,
+        )
+    )
+
+
 @app.command(name="run-session")
 def run_session(
     transcript: Path = typer.Argument(
@@ -291,6 +345,145 @@ def _load_transcript(path: Path) -> list[Utterance]:
             payload = json.loads(line)
             utterances.append(Utterance.model_validate(payload))
     return utterances
+
+
+async def _run_listen_async(
+    *,
+    docs: Path | None,
+    run_id: str | None,
+    threshold: float | None,
+    top_k: int,
+    skip_docs: bool,
+    model: str | None,
+    backend: str | None,
+    language: str | None,
+) -> None:
+    """マイク → ASR → Orchestrator.run_live → snapshot 保存。
+
+    ``run-session`` のライブ版。設計のキモは:
+      - ASR 関連の重い import は **この関数の中まで遅延** させて、[asr] extras
+        が無い環境でも CLI 自体は import できるようにしておく
+      - マイク取り込みと utterance 消費を別タスクで走らせ、Ctrl-C 時には
+        EOS (空フレーム) を ASR に送って残りの確定行をフラッシュさせる
+    """
+
+    import contextlib
+    import signal
+    import sys
+    from collections.abc import AsyncIterator
+
+    settings = get_settings()
+    docs_dir = docs if docs is not None else settings.docs_dir
+    run_id = run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    run_dir = settings.runs_dir / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    typer.echo(f"[listen] run_dir={run_dir}")
+    typer.echo(f"[listen] docs_dir={docs_dir} (skip={skip_docs})")
+
+    # ASR モジュールは [asr] extras 経由でしか入らない。遅延 import で
+    # 「extras を入れていない人にもまともなエラーメッセージを出す」を実現。
+    try:
+        from das.asr import LiveAsrSession, build_engine
+        from das.asr.mic import iter_mic_chunks
+    except ImportError as exc:
+        typer.echo(f"[listen] ASR 依存が未インストールです: {exc}")
+        typer.echo("`uv sync --extra asr` を実行してください。")
+        raise typer.Exit(1) from exc
+
+    llm = OpenAIClient()
+    store = NetworkXGraphStore(db_path=run_dir / "graph.sqlite")
+    orch = Orchestrator.assemble(llm=llm, store=store, threshold=threshold, top_k=top_k)
+
+    if not skip_docs and docs_dir.exists():
+        typer.echo("[listen] ingesting documents...")
+        await orch.ingest_documents(docs_dir)
+
+    typer.echo(
+        "[listen] loading ASR engine "
+        "(初回はモデル DL で数十秒〜数分かかることがあります)..."
+    )
+    engine = build_engine(
+        model=model,
+        backend=backend,
+        language=language,
+        diarization=False,
+    )
+
+    stop_event = asyncio.Event()
+
+    def _on_partial(text: str) -> None:
+        # 同じ行を上書きで表示 (確定行は \n 付きで別行に出る)
+        sys.stdout.write(f"\r... {text[:120]}")
+        sys.stdout.flush()
+
+    session = LiveAsrSession(engine=engine, on_partial=_on_partial)
+    await session.start()
+
+    # Ctrl-C で停止フラグを立てる。再度押されたら強制中断 (default 挙動に戻す)。
+    loop = asyncio.get_running_loop()
+
+    def _on_sigint() -> None:
+        if not stop_event.is_set():
+            typer.echo("\n[listen] 停止要求 (Ctrl-C)。残りをフラッシュ中...")
+            stop_event.set()
+
+    try:
+        loop.add_signal_handler(signal.SIGINT, _on_sigint)
+    except NotImplementedError:  # pragma: no cover - Windows
+        pass
+
+    async def _pump_mic() -> None:
+        async for chunk in iter_mic_chunks(stop_event=stop_event):
+            await session.push_audio(chunk)
+        # 入力が止まったら EOS を投げて ASR ジェネレータを終わりに向かわせる
+        await session.stop()
+
+    async def _utt_stream() -> AsyncIterator[Utterance]:
+        async for utt in session.iter_utterances():
+            sys.stdout.write(f"\r[t{utt.turn_id}] {utt.speaker}: {utt.text}\n")
+            sys.stdout.flush()
+            yield utt
+
+    typer.echo("[listen] 録音開始。Ctrl-C で停止。")
+    mic_task = asyncio.create_task(_pump_mic())
+    try:
+        await orch.run_live(_utt_stream())
+    finally:
+        # 異常終了でもマイクを確実に止める
+        stop_event.set()
+        try:
+            await asyncio.wait_for(mic_task, timeout=10.0)
+        except TimeoutError:
+            mic_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await mic_task
+        await session.cleanup()
+
+    from das.viz import dump_snapshot
+
+    snapshot_path = dump_snapshot(store, run_dir / "snapshot.json")
+    n_nodes = len(list(store.nodes()))
+    n_edges = len(list(store.edges()))
+
+    html_path: Path | None = None
+    try:
+        from das.viz import render_html
+
+        html_path = render_html(store, run_dir / "graph.html")
+    except ImportError as exc:
+        typer.echo(
+            f"[listen] HTML 生成をスキップ (viz extras 未インストール: {exc}). "
+            f"`das visualize {snapshot_path}` で後から生成できます。"
+        )
+
+    summary = (
+        f"\n[listen] done. nodes={n_nodes} edges={n_edges}\n"
+        f"  snapshot -> {snapshot_path}"
+    )
+    if html_path is not None:
+        summary += f"\n  html     -> {html_path}"
+    typer.echo(summary)
 
 
 async def _run_session_async(

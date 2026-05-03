@@ -34,6 +34,13 @@ class Settings(BaseSettings):
     data_dir: Path = Field(default=Path("./data"), alias="DAS_DATA_DIR")
     linking_threshold: float = Field(default=0.6, alias="DAS_LINKING_THRESHOLD")
 
+    # ASR (リアルタイム音声認識)。`das listen` 用。
+    # backend は WhisperLiveKit の TranscriptionEngine に渡す。Apple Silicon なら
+    # mlx-whisper、CUDA マシンなら faster-whisper、CPU 専用なら whisper を選ぶ。
+    asr_backend: str = Field(default="mlx-whisper", alias="DAS_ASR_BACKEND")
+    asr_model: str = Field(default="large-v3", alias="DAS_ASR_MODEL")
+    asr_language: str = Field(default="ja", alias="DAS_ASR_LANGUAGE")
+
     @property
     def docs_dir(self) -> Path:
         return self.data_dir / "docs"
