@@ -573,25 +573,31 @@ async def _run_eval_cli(
         run_eval,
     )
 
-    presets = {
+    # (persona_factory, topic, default_docs_subdir)。
+    # preset ごとに docs サブディレクトリを分けることで、トピックを切り替えても
+    # 関係ない文書ノードが混じらないようにする。
+    presets: dict[str, tuple] = {
         "cafeteria": (
             cafeteria_personas,
             "大学のカフェテリアでプラスチック容器を廃止すべきか",
+            "docs",
         ),
         "policy_ai": (
             policy_ai_lecture_personas,
             "生成 AI を大学の講義・レポート作成で許容すべきか",
+            "docs_policy",
         ),
     }
     if preset not in presets:
         typer.echo(f"未知の preset: {preset}. 利用可能: {list(presets.keys())}")
         raise typer.Exit(1)
 
-    persona_factory, topic = presets[preset]
+    persona_factory, topic, default_docs_subdir = presets[preset]
     personas = persona_factory()
 
     settings = get_settings()
-    docs_dir = docs if docs is not None else settings.docs_dir
+    preset_docs_dir = settings.data_dir / default_docs_subdir
+    docs_dir = docs if docs is not None else preset_docs_dir
     target_eval_dir = eval_dir if eval_dir is not None else settings.data_dir / "eval"
 
     llm = OpenAIClient()
