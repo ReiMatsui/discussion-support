@@ -86,8 +86,8 @@ SUBJECTIVE_METRICS: list[tuple[str, str, str]] = [
 
 # トップに出す 4 ハイライトカード
 HEADLINE_METRICS: list[tuple[str, str, str]] = [
+    ("citation_overall_rate", "📚 提示情報が議論に使われた率", "citation"),
     ("intervention_transparency", "🎯 「なぜこの情報か」の納得感", "subjective"),
-    ("overall_satisfaction", "💬 議論の満足度", "subjective"),
     ("opposition_understanding", "🎓 相手の意見の理解", "subjective"),
     ("convergence_rate", "🤝 合意できた割合", "convergence"),
 ]
@@ -408,11 +408,23 @@ def _render_judge_panel(state: dict, *, key_prefix: str) -> None:
     df = pd.DataFrame(rows).set_index("参加者")
     st.dataframe(df, use_container_width=True)
 
-    with st.expander("ペルソナ別ラショナル", expanded=False):
-        for rep in judge:
-            rationale = rep.get("scores", {}).get("rationale")
-            if rationale:
-                st.markdown(f"**{rep['persona_name']}**: _{rationale}_")
+    # 各スコアの根拠を per-persona × per-metric で見せる (ご要望: 評価の理由を見える化)
+    st.markdown("**各スコアの根拠 (評価エージェントが何を見て判断したか)**")
+    for rep in judge:
+        scores = rep.get("scores", {})
+        with st.container(border=True):
+            st.markdown(f"**{rep['persona_name']}**")
+            for key, label, _ in SUBJECTIVE_METRICS:
+                value = scores.get(key, "-")
+                reason_key = f"{key}_reason"
+                reason = scores.get(reason_key, "")
+                if reason:
+                    st.markdown(f"- **{label}**: {value}  — _{reason}_")
+                else:
+                    st.markdown(f"- **{label}**: {value}")
+            overall = scores.get("rationale", "")
+            if overall:
+                st.caption(f"💭 総評: {overall}")
 
 
 def _verdict_emoji(diff: float, *, threshold: float, higher_better: bool = True) -> str:
@@ -433,6 +445,7 @@ def _proposed_vs_others(
     kind:
       - "subjective": payload[key] = [mean, std]
       - "convergence": payload["convergence"][key]  (rate は 0..1)
+      - "citation": payload["citation"][key] (overall_rate / by_kind…)
     """
 
     def _val(payload: dict) -> float | None:
@@ -444,6 +457,12 @@ def _proposed_vs_others(
         if kind == "convergence":
             conv = payload.get("convergence") or {}
             v = conv.get(key)
+            return float(v) if v is not None else None
+        if kind == "citation":
+            cit = payload.get("citation") or {}
+            # 'citation_overall_rate' エイリアス
+            actual_key = "overall_rate" if key == "citation_overall_rate" else key
+            v = cit.get(actual_key)
             return float(v) if v is not None else None
         return None
 
@@ -485,7 +504,7 @@ def _render_headline_summary(by_cond: dict) -> None:
                 st.caption("データ不足")
                 continue
 
-            if kind == "convergence":
+            if kind in ("convergence", "citation"):
                 # 0..1 → パーセント表示
                 st.metric("提案手法", f"{proposed * 100:.0f}%")
                 st.caption(f"他の手法 平均: {others_mean * 100:.0f}%")
@@ -594,6 +613,60 @@ def _render_cross_condition_panel() -> None:
             "中身のある議論。 **議論の深さ** は支持/反論のチェーンの平均長さ。"
         )
         st.dataframe(pd.DataFrame(struct_rows), use_container_width=True, hide_index=True)
+
+    # 提示情報の引用率 (RQ4 の直接 evidence)
+    citation_rows: list[dict] = []
+    for cond, payload in by_cond.items():
+        c = payload.get("citation") or {}
+        if not c or c.get("n_items_presented_total", 0) == 0:
+            continue
+        by_kind_cit = c.get("by_kind", {})
+        row = {
+            "手法": CONDITION_LABELS.get(cond, cond),
+            "提示総数": c.get("n_items_presented_total", 0),
+            "うち引用された数": c.get("n_items_cited_total", 0),
+            "引用率 (全体)": f"{c.get('overall_rate', 0) * 100:.0f}%",
+        }
+        # source 別カラム
+        for kind_name, jp in (("utterance", "発話由来"), ("document", "文書由来"), ("web", "Web由来")):
+            sk = by_kind_cit.get(kind_name, {})
+            if sk.get("n_items_presented", 0) > 0:
+                row[f"{jp} 引用率"] = f"{sk.get('rate', 0) * 100:.0f}%"
+            else:
+                row[f"{jp} 引用率"] = "-"
+        citation_rows.append(row)
+    if citation_rows:
+        st.markdown("### 提示情報の引用率 (RQ4 の核指標)")
+        st.caption(
+            "ファシリテータが提示した情報 (発話・文書・Web) のうち、その後の発話で実際に "
+            "参照されたものの割合。**関係ラベル付き提示 (FullProposal) が、関係ラベルなし "
+            "(FlatRAG) よりも高い引用率を示せば、貢献②が裏付けられる**。"
+        )
+        st.dataframe(pd.DataFrame(citation_rows), use_container_width=True, hide_index=True)
+
+    # 異種ソース間エッジ (貢献①の直接指標)
+    cross_rows: list[dict] = []
+    for cond, payload in by_cond.items():
+        s = payload.get("structural") or {}
+        if not s or "cross_source_edge_rate_mean" not in s:
+            continue
+        cross_rows.append(
+            {
+                "手法": CONDITION_LABELS.get(cond, cond),
+                "AF エッジ数 (平均)": round(s.get("n_total_edges_mean", 0), 1),
+                "うち異種ソース間": round(s.get("n_cross_source_edges_mean", 0), 1),
+                "異種ソース間の割合": f"{s.get('cross_source_edge_rate_mean', 0) * 100:.0f}%",
+                "未統合の外部知識": round(s.get("n_isolated_external_nodes_mean", 0), 1),
+            }
+        )
+    if cross_rows:
+        st.markdown("### 議論ログと外部知識の接続 (貢献①)")
+        st.caption(
+            "**異種ソース間の割合** は発話↔文書 / 発話↔Web を結ぶエッジの割合。"
+            "高いほど議論ログと外部知識が論証的に接続されている (= 統合 AF が機能している)。"
+            "**未統合の外部知識** は議論にどのエッジでも結ばれなかった文書/Web ノード数 (低いほど良い)。"
+        )
+        st.dataframe(pd.DataFrame(cross_rows), use_container_width=True, hide_index=True)
 
 
 # --- 実行ロジック -------------------------------------------------------

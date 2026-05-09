@@ -60,6 +60,16 @@ class DiscussionStructuralMetrics:
     n_support_edges: int = 0
     n_attack_edges: int = 0
 
+    # 異種ソース間エッジ (RQ4: 議論ログと外部知識の論証的接続)
+    n_cross_source_edges: int = 0
+    """source kind が異なる 2 ノードを結ぶエッジ数 (発話↔文書、発話↔Web 等)。"""
+
+    cross_source_edge_rate: float = 0.0
+    """全エッジに占める異種ソースエッジの割合 (0-1)。貢献①の直接指標。"""
+
+    n_isolated_external_nodes: int = 0
+    """文書/Web ノードのうち、どのエッジも持たない (= 議論に統合されなかった) ものの数。"""
+
 
 # --- 補助関数 ---------------------------------------------------------
 
@@ -233,6 +243,27 @@ def compute_structural_metrics(
         if not _incoming_edges(store, c.id) and not _outgoing_edges(store, c.id)
     )
 
+    # 異種ソース間エッジ (RQ4 / 貢献①: 議論↔外部知識の論証的接続)
+    nodes_by_id_dict = {n.id: n for n in nodes}
+    n_cross = 0
+    for e in edges:
+        s = nodes_by_id_dict.get(e.src_id)
+        d = nodes_by_id_dict.get(e.dst_id)
+        if s is None or d is None:
+            continue
+        if s.source != d.source:
+            n_cross += 1
+    cross_rate = (n_cross / len(edges)) if edges else 0.0
+
+    # 統合されなかった外部ノードの数 (孤立した文書/Web)
+    edge_node_ids: set = set()
+    for e in edges:
+        edge_node_ids.add(e.src_id)
+        edge_node_ids.add(e.dst_id)
+    n_isolated_external = sum(
+        1 for n in nodes if n.source in {"document", "web"} and n.id not in edge_node_ids
+    )
+
     return DiscussionStructuralMetrics(
         n_utterances=n_utts,
         n_speakers=n_speakers,
@@ -250,6 +281,9 @@ def compute_structural_metrics(
         n_total_edges=len(edges),
         n_support_edges=sum(1 for e in edges if e.relation == "support"),
         n_attack_edges=sum(1 for e in edges if e.relation == "attack"),
+        n_cross_source_edges=n_cross,
+        cross_source_edge_rate=cross_rate,
+        n_isolated_external_nodes=n_isolated_external,
     )
 
 
@@ -274,6 +308,10 @@ def aggregate_structural_metrics(
         "avg_argument_chain_length_mean": _mean("avg_argument_chain_length"),
         "n_isolated_claims_mean": _mean("n_isolated_claims"),
         "n_total_edges_mean": _mean("n_total_edges"),
+        # 貢献①の直接指標 (RQ4)
+        "n_cross_source_edges_mean": _mean("n_cross_source_edges"),
+        "cross_source_edge_rate_mean": _mean("cross_source_edge_rate"),
+        "n_isolated_external_nodes_mean": _mean("n_isolated_external_nodes"),
     }
 
 

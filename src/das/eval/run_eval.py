@@ -33,6 +33,11 @@ from das.eval.conditions import (
     InterventionLogEntry,
     write_intervention_log,
 )
+from das.eval.citation import (
+    CitationStats,
+    aggregate_citation_stats,
+    compute_citation_stats,
+)
 from das.eval.consensus import ConsensusReport, detect_consensus, detect_consensus_with_llm
 from das.eval.controller import SessionConfig, SessionRunner
 from das.eval.judge import (
@@ -87,6 +92,9 @@ class SingleRunResult:
 
     structural: DiscussionStructuralMetrics | None = None
     """AF + transcript から決定的に計算した構造指標 (DQI 風)。"""
+
+    citation: CitationStats | None = None
+    """提示情報の引用率 (source 別)。RQ4 の直接 evidence。"""
 
     @property
     def n_turns(self) -> int:
@@ -195,6 +203,8 @@ def _save_run(
         }
     if result.structural is not None:
         run_meta["structural_metrics"] = asdict(result.structural)
+    if result.citation is not None:
+        run_meta["citation"] = result.citation.to_dict()
     (run_dir / "run_meta.json").write_text(
         json.dumps(run_meta, ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -273,6 +283,9 @@ def _save_eval_result(eval_dir: Path, result: EvalResult) -> None:
                 "convergence": _convergence_stats(grouped.get(cond, [])),
                 "structural": aggregate_structural_metrics(
                     [r.structural for r in grouped.get(cond, []) if r.structural]
+                ),
+                "citation": aggregate_citation_stats(
+                    [r.citation for r in grouped.get(cond, []) if r.citation]
                 ),
             }
             for cond, agg in aggregates.items()
@@ -471,6 +484,28 @@ async def _run_single(
 
     structural = compute_structural_metrics(transcript, final_store)
 
+    # 引用率: 介入で提示された情報が次発話で使われた率 (RQ4 直接指標)
+    interventions_for_citation = (
+        [
+            {
+                "kind": e.kind,
+                "turn_id": e.turn_id,
+                "addressed_to": e.addressed_to,
+                "items": [
+                    {
+                        "source_text": it.get("source_text", ""),
+                        "source_kind": it.get("source_kind", "unknown"),
+                    }
+                    for it in e.items
+                ],
+            }
+            for e in intervention_log
+        ]
+        if intervention_log
+        else []
+    )
+    citation = compute_citation_stats(transcript, interventions_for_citation)
+
     return SingleRunResult(
         run_id=run_id,
         condition_name=condition_name,
@@ -483,6 +518,7 @@ async def _run_single(
         snapshot=snapshot,
         consensus=consensus_report,
         structural=structural,
+        citation=citation,
     )
 
 

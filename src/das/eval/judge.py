@@ -35,14 +35,23 @@ _STANCE_DESCRIPTION: dict[str, str] = {
 
 
 class JudgeScores(BaseModel):
-    """LLM が返す 1 ペルソナぶんのスコア。"""
+    """LLM が返す 1 ペルソナぶんのスコア。
+
+    各指標に **per-metric の根拠 (reason)** を持たせ、ジャッジが
+    なぜそのスコアを付けたかが UI / ログから直接読める設計。
+    """
 
     overall_satisfaction: int = Field(ge=1, le=7)
+    overall_satisfaction_reason: str = Field(default="", description="この点数を付けた具体的な根拠")
     information_usefulness: int = Field(ge=1, le=7)
+    information_usefulness_reason: str = Field(default="")
     opposition_understanding: int = Field(ge=1, le=7)
+    opposition_understanding_reason: str = Field(default="")
     confidence_change: int = Field(ge=-3, le=3)
+    confidence_change_reason: str = Field(default="")
     intervention_transparency: int = Field(ge=1, le=7)
-    rationale: str = Field(default="")
+    intervention_transparency_reason: str = Field(default="")
+    rationale: str = Field(default="", description="議論全体への総評")
 
 
 @dataclass(frozen=True)
