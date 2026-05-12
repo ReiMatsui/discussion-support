@@ -33,10 +33,12 @@ from das.eval.conditions import (
     InterventionLogEntry,
     write_intervention_log,
 )
+from das.agents.stance_agent import StanceAgent, StanceMeasurement
 from das.eval.citation import (
     CitationStats,
     aggregate_citation_stats,
     compute_citation_stats,
+    compute_citation_stats_with_embeddings,
 )
 from das.eval.consensus import ConsensusReport, detect_consensus, detect_consensus_with_llm
 from das.eval.controller import SessionConfig, SessionRunner
@@ -95,6 +97,11 @@ class SingleRunResult:
 
     citation: CitationStats | None = None
     """提示情報の引用率 (source 別)。RQ4 の直接 evidence。"""
+
+    stance: dict[str, dict[str, StanceMeasurement]] | None = None
+    """ペルソナ別 × phase 別 (pre/post) の立場測定 (DEBATE benchmark 流)。
+    形式: {persona_name: {"pre": StanceMeasurement, "post": StanceMeasurement}}
+    """
 
     @property
     def n_turns(self) -> int:
@@ -205,6 +212,20 @@ def _save_run(
         run_meta["structural_metrics"] = asdict(result.structural)
     if result.citation is not None:
         run_meta["citation"] = result.citation.to_dict()
+    if result.stance:
+        run_meta["stance"] = {
+            persona: {
+                phase: {
+                    "public_stance": m.public_stance,
+                    "private_stance": m.private_stance,
+                    "public_reason": m.public_reason,
+                    "private_reason": m.private_reason,
+                    "public_private_gap": m.public_private_gap,
+                }
+                for phase, m in phases.items()
+            }
+            for persona, phases in result.stance.items()
+        }
     (run_dir / "run_meta.json").write_text(
         json.dumps(run_meta, ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -250,6 +271,56 @@ def _convergence_stats(runs: list[SingleRunResult]) -> dict:
     }
 
 
+def _aggregate_stance(stance_runs: list[dict]) -> dict:
+    """ラン群の stance データから、公開/私的 × Pre/Post の平均と shift を集計。
+
+    DEBATE benchmark 流の指標:
+      - mean_public_shift: Post.public - Pre.public の平均 (議論で表明する立場の変化)
+      - mean_private_shift: Post.private - Pre.private の平均 (内心の変化)
+      - mean_pre_gap / mean_post_gap: |public - private| の平均 (見せかけの度合)
+      - mean_post_gap が 0 に近いほど真の合意、大きいほど表層的合意の懸念
+    """
+
+    if not stance_runs:
+        return {}
+    pre_publics: list[int] = []
+    pre_privates: list[int] = []
+    post_publics: list[int] = []
+    post_privates: list[int] = []
+    pre_gaps: list[int] = []
+    post_gaps: list[int] = []
+    for stance in stance_runs:
+        for _persona, phases in stance.items():
+            pre = phases.get("pre")
+            post = phases.get("post")
+            if pre is not None:
+                pre_publics.append(pre.public_stance)
+                pre_privates.append(pre.private_stance)
+                pre_gaps.append(abs(pre.public_stance - pre.private_stance))
+            if post is not None:
+                post_publics.append(post.public_stance)
+                post_privates.append(post.private_stance)
+                post_gaps.append(abs(post.public_stance - post.private_stance))
+
+    def _mean(xs: list[int]) -> float:
+        return sum(xs) / len(xs) if xs else 0.0
+
+    public_shift = _mean(post_publics) - _mean(pre_publics) if (pre_publics and post_publics) else 0.0
+    private_shift = _mean(post_privates) - _mean(pre_privates) if (pre_privates and post_privates) else 0.0
+
+    return {
+        "n_persona_runs": len(pre_publics) if pre_publics else 0,
+        "mean_pre_public": _mean(pre_publics),
+        "mean_pre_private": _mean(pre_privates),
+        "mean_post_public": _mean(post_publics),
+        "mean_post_private": _mean(post_privates),
+        "mean_public_shift": public_shift,
+        "mean_private_shift": private_shift,
+        "mean_pre_gap": _mean(pre_gaps),
+        "mean_post_gap": _mean(post_gaps),
+    }
+
+
 def _save_eval_result(eval_dir: Path, result: EvalResult) -> None:
     aggregates = result.aggregate()
     grouped = result.by_condition()
@@ -286,6 +357,9 @@ def _save_eval_result(eval_dir: Path, result: EvalResult) -> None:
                 ),
                 "citation": aggregate_citation_stats(
                     [r.citation for r in grouped.get(cond, []) if r.citation]
+                ),
+                "stance": _aggregate_stance(
+                    [r.stance for r in grouped.get(cond, []) if r.stance]
                 ),
             }
             for cond, agg in aggregates.items()
@@ -325,6 +399,7 @@ async def _run_single(
     event_emitter: EventEmitter | None = None,
     consensus_agent: object | None = None,
     consensus_min_interval: int = 4,
+    stance_agent: StanceAgent | None = None,
 ) -> SingleRunResult:
     await condition.setup(docs_dir=docs_dir)
 
@@ -348,6 +423,18 @@ async def _run_single(
             ],
         }
     )
+
+    # Pre-discussion stance polling (DEBATE benchmark 流)
+    stance_data: dict[str, dict[str, StanceMeasurement]] = {}
+    if stance_agent is not None:
+        for p in personas:
+            try:
+                pre = await stance_agent.measure(
+                    persona=p, topic=topic, phase="pre"
+                )
+                stance_data[p.name] = {"pre": pre}
+            except Exception as exc:  # pragma: no cover - 防御的
+                _log.warning("stance.pre.failed", persona=p.name, error=str(exc))
 
     # until_consensus=True のときのみ stop_condition を組み立てる。
     # FullProposal なら orchestrator.store を渡して構造シグナルも使う。
@@ -443,6 +530,12 @@ async def _run_single(
         snapshot = final_store.snapshot()
         if isinstance(condition, ConditionFullProposal):
             intervention_log = condition.intervention_log
+    # flat_rag も intervention_log を残せるようになったので、citation 計算で使う。
+    # (FullProposal でないので structural / snapshot は計算しない)
+    elif hasattr(condition, "intervention_log"):
+        log_attr = getattr(condition, "intervention_log", None)
+        if log_attr:
+            intervention_log = log_attr
 
     # 合意検出の最終レポート (until_consensus でない場合も「実際に合意していたか」を
     # 後付け判定して残すと分析しやすいので、常に算出する)。
@@ -484,6 +577,19 @@ async def _run_single(
 
     structural = compute_structural_metrics(transcript, final_store)
 
+    # Post-discussion stance polling
+    if stance_agent is not None:
+        for p in personas:
+            try:
+                post = await stance_agent.measure(
+                    persona=p, topic=topic, phase="post", transcript=transcript
+                )
+                if p.name not in stance_data:
+                    stance_data[p.name] = {}
+                stance_data[p.name]["post"] = post
+            except Exception as exc:  # pragma: no cover - 防御的
+                _log.warning("stance.post.failed", persona=p.name, error=str(exc))
+
     # 引用率: 介入で提示された情報が次発話で使われた率 (RQ4 直接指標)
     interventions_for_citation = (
         [
@@ -504,7 +610,14 @@ async def _run_single(
         if intervention_log
         else []
     )
-    citation = compute_citation_stats(transcript, interventions_for_citation)
+    # n-gram 一致 + embedding 類似度の両方で判定 (言い換え引用も捕捉)
+    try:
+        citation = await compute_citation_stats_with_embeddings(
+            transcript, interventions_for_citation, embedder=llm
+        )
+    except Exception as exc:  # pragma: no cover - 防御的: embedding 失敗時は n-gram のみ
+        _log.warning("citation.embedding_failed", error=str(exc))
+        citation = compute_citation_stats(transcript, interventions_for_citation)
 
     return SingleRunResult(
         run_id=run_id,
@@ -519,6 +632,7 @@ async def _run_single(
         consensus=consensus_report,
         structural=structural,
         citation=citation,
+        stance=stance_data if stance_data else None,
     )
 
 
@@ -542,6 +656,7 @@ async def run_eval(
     event_emitter: EventEmitter | None = None,
     consensus_agent: object | None = None,
     consensus_min_interval: int = 4,
+    stance_agent: StanceAgent | None = None,
 ) -> EvalResult:
     """N 本のランを条件 xトピックで回し、集計結果を返す。
 
@@ -599,6 +714,7 @@ async def run_eval(
                 event_emitter=event_emitter,
                 consensus_agent=consensus_agent,
                 consensus_min_interval=consensus_min_interval,
+                stance_agent=stance_agent,
             )
             if target_dir is not None:
                 run_dir = target_dir / cond_name / f"run_{run_idx:03d}"

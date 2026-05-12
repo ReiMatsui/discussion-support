@@ -154,6 +154,41 @@ def test_by_kind_breakdown() -> None:
     assert stats.by_kind["web"].n_items_cited == 0
 
 
+def test_is_cited_with_embedding_threshold() -> None:
+    """n-gram で外れても、embedding 類似度が高ければ引用とみなす。"""
+
+    src = "プラスチック容器のコスト負担"
+    target = "全く違う表現"
+    # n-gram は外れる
+    assert is_cited(src, target) is False
+    # 高類似度の embedding を渡せば True
+    assert (
+        is_cited(
+            src,
+            target,
+            source_embedding=[1.0, 0.0, 0.0],
+            utterance_embedding=[0.99, 0.1, 0.0],
+            embedding_threshold=0.65,
+        )
+        is True
+    )
+
+
+def test_is_cited_embedding_below_threshold_is_false() -> None:
+    src = "X"
+    target = "Y"
+    assert (
+        is_cited(
+            src,
+            target,
+            source_embedding=[1.0, 0.0, 0.0],
+            utterance_embedding=[0.0, 1.0, 0.0],  # 直交
+            embedding_threshold=0.65,
+        )
+        is False
+    )
+
+
 def test_aggregate_combines_runs() -> None:
     s1 = compute_citation_stats(
         _utts(["A", "A"], ["x", "提示テキストの再現"]),

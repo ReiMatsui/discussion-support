@@ -131,11 +131,20 @@ class ConditionFlatRAG:
         self._chunks: list[tuple[str, str]] = []
         self._embeddings: list[list[float]] = []
         self._last_items: list[FlatRAGItem] = []
+        # citation 計測のため、提示した chunk を介入ログとして残す
+        # (ConditionFullProposal と同じ形式で run_eval が読めるように)
+        self._intervention_log: list[InterventionLogEntry] = []
         self._log = get_logger("das.eval.condition.flat_rag")
 
     @property
     def last_items(self) -> list[FlatRAGItem]:
         return list(self._last_items)
+
+    @property
+    def intervention_log(self) -> list[InterventionLogEntry]:
+        """FlatRAG が提示した文書 chunk の履歴。citation_rate 計算用。"""
+
+        return list(self._intervention_log)
 
     async def setup(self, *, docs_dir: Path | None = None) -> None:
         if docs_dir is None or not docs_dir.exists():
@@ -175,6 +184,29 @@ class ConditionFlatRAG:
         self._last_items = [
             FlatRAGItem(doc_id=chunk[0], text=chunk[1], score=score) for chunk, score in top
         ]
+        # 介入ログ: FullProposal と同じ形式で残し、citation_rate を計算可能にする。
+        # FlatRAG は「関係ラベルなしの類似」しか提示しないので、relation 等は空文字。
+        self._intervention_log.append(
+            InterventionLogEntry(
+                turn_id=history[-1].turn_id,
+                persona_name=persona.name,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                items=[
+                    {
+                        "source_text": item.text,
+                        "source_kind": "document",
+                        "relation": "",  # FlatRAG は関係ラベル非対応
+                        "doc_id": item.doc_id,
+                        "confidence": item.score,
+                    }
+                    for item in self._last_items
+                ],
+                kind="l1",
+                addressed_to=persona.name,
+                brief="",
+                decision_reason="flat_rag: top-k embedding 類似度",
+            )
+        )
         return "\n\n".join(f"[{doc_id}] {text}" for (doc_id, text), _ in top)
 
 
