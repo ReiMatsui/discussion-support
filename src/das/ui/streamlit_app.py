@@ -37,6 +37,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import html as _html
+
 import altair as alt
 import pandas as pd
 import streamlit as st
@@ -44,6 +46,106 @@ import streamlit.components.v1 as components
 
 from das.settings import get_settings
 from das.viz import load_snapshot, render_html
+
+
+# --- チャット風スタイル (LINE / Slack 風) ----------------------------
+
+CHAT_CSS = """
+<style>
+.chat-row { display: flex; margin: 6px 0; }
+.chat-row.left { justify-content: flex-start; }
+.chat-row.right { justify-content: flex-end; }
+.chat-row.center { justify-content: center; }
+.chat-bubble {
+    max-width: 78%;
+    padding: 10px 14px;
+    border-radius: 16px;
+    border: 1px solid;
+    word-wrap: break-word;
+    line-height: 1.55;
+}
+.chat-bubble.pro {
+    background: #e6f4ea;
+    border-color: #34a853;
+    color: #1e1e1e;
+}
+.chat-bubble.con {
+    background: #fce8e6;
+    border-color: #ea4335;
+    color: #1e1e1e;
+}
+.chat-bubble.neutral {
+    background: #f1f3f4;
+    border-color: #9aa0a6;
+    color: #1e1e1e;
+}
+.chat-header {
+    font-weight: 600;
+    margin-bottom: 4px;
+    font-size: 0.88em;
+    opacity: 0.85;
+}
+.chat-turn {
+    color: #5f6368;
+    font-size: 0.75em;
+    margin-left: 6px;
+    font-weight: normal;
+}
+.intervention-l1 {
+    max-width: 78%;
+    background: #e3f2fd;
+    border: 1px dashed #1976d2;
+    padding: 8px 12px;
+    border-radius: 10px;
+    margin: 6px 0;
+    font-size: 0.92em;
+    color: #1a1a1a;
+}
+.intervention-l2 {
+    max-width: 88%;
+    background: #f3e5f5;
+    border: 1px dashed #7b1fa2;
+    padding: 10px 14px;
+    border-radius: 10px;
+    margin: 8px 0;
+    font-size: 0.94em;
+    color: #1a1a1a;
+}
+.intervention-l1 .iv-header {
+    font-weight: 600;
+    color: #0d47a1;
+    margin-bottom: 4px;
+}
+.intervention-l2 .iv-header {
+    font-weight: 600;
+    color: #4a148c;
+    margin-bottom: 4px;
+}
+.intervention-item {
+    margin-left: 6px;
+    font-size: 0.95em;
+    color: #1a1a1a;
+}
+.consensus-marker {
+    background: #fff9c4;
+    border: 2px solid #fbc02d;
+    padding: 10px;
+    text-align: center;
+    font-weight: 600;
+    margin: 10px 0;
+    border-radius: 8px;
+    color: #1a1a1a;
+}
+.timeline-legend {
+    padding: 8px 12px;
+    background: #fafafa;
+    border-left: 3px solid #757575;
+    font-size: 0.85em;
+    color: #424242;
+    margin-bottom: 10px;
+}
+</style>
+"""
 
 
 # --- 定数 ---------------------------------------------------------------
@@ -219,6 +321,7 @@ def _load_eval_into_state(eval_dir: Path) -> None:
                 "snap_stats": snap_stats,
                 "snapshot_path": str(snapshot_path) if snapshot_path.exists() else None,
                 "interventions_raw": interventions,
+                "stance": run_meta.get("stance") or {},
             }
 
     st.session_state.runs_state = runs_state
@@ -295,7 +398,42 @@ def _render_intervention_distribution(state: dict) -> None:
     ic[2].metric("助言なし", f"{n_skip}", help="ファシリテータが介入を見送ったターン")
 
 
-def _render_timeline(state: dict) -> None:
+def _stance_to_class(stance: str) -> str:
+    if stance == "pro":
+        return "pro"
+    if stance == "con":
+        return "con"
+    return "neutral"
+
+
+def _stance_to_align(stance: str) -> str:
+    """賛成=右 / 反対=左 / 中立=中央。"""
+
+    if stance == "pro":
+        return "right"
+    if stance == "con":
+        return "left"
+    return "center"
+
+
+def _truncate_for_chat(text: str, *, limit: int = 320) -> tuple[str, bool]:
+    if len(text) <= limit:
+        return text, False
+    return text[:limit].rstrip() + "…", True
+
+
+def _render_timeline(state: dict, *, compact: bool = False) -> None:
+    """チャット風タイムライン。立場で左右配置 + 色を変え、介入をシステム通知風に。"""
+
+    st.markdown(CHAT_CSS, unsafe_allow_html=True)
+    st.markdown(
+        '<div class="timeline-legend">'
+        "凡例: <b>賛成派</b>=右・緑　<b>反対派</b>=左・赤　<b>中立</b>=中央・グレー　"
+        "<b>🟦 個別助言</b>=水色　<b>🟪 全体整理</b>=紫"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
     personas = state.get("personas", [])
     cons = state.get("consensus") or {}
     consensus_turn = cons.get("at")
@@ -303,47 +441,112 @@ def _render_timeline(state: dict) -> None:
     for evt in state["timeline"]:
         if evt["type"] == "utterance":
             stance = _stance_for(evt["speaker"], personas)
-            with st.container(border=True):
-                c = st.columns([1, 9])
-                c[0].markdown(
-                    f"**t{evt['turn_id']}**\n\n"
-                    f"**{evt['speaker']}**\n\n{STANCE_BADGE.get(stance, '⚪')}"
-                )
-                c[1].markdown(evt["text"])
+            align = _stance_to_align(stance)
+            cls = _stance_to_class(stance)
+            badge = STANCE_BADGE.get(stance, "⚪")
+
+            text = evt["text"]
+            if compact:
+                # 1 文だけ取り出す (句点 / 改行 / 80 文字いずれか先)
+                stop = 200
+                for sep in ["。", "！", "？", "\n"]:
+                    p = text.find(sep)
+                    if p > 0:
+                        stop = min(stop, p + 1)
+                preview = text[:stop].rstrip()
+                if len(preview) < len(text):
+                    preview += "…"
+                display_text, truncated = preview, True
+            else:
+                display_text, truncated = _truncate_for_chat(text, limit=350)
+
+            # HTML エスケープ + 改行を <br>
+            safe = _html.escape(display_text).replace("\n", "<br>")
+            html = (
+                f'<div class="chat-row {align}">'
+                f'<div class="chat-bubble {cls}">'
+                f'<div class="chat-header">{_html.escape(evt["speaker"])} {badge}'
+                f'<span class="chat-turn">· t{evt["turn_id"]}</span></div>'
+                f"{safe}"
+                "</div></div>"
+            )
+            st.markdown(html, unsafe_allow_html=True)
+
+            # 切り詰めた場合の全文展開 (compact 以外でも長文時)
+            if truncated:
+                with st.expander(f"t{evt['turn_id']} の全文を見る", expanded=False):
+                    st.markdown(evt["text"])
+
             if consensus_turn and evt["turn_id"] == consensus_turn:
-                st.success(f"🎉 合意到達 (turn {consensus_turn})")
+                st.markdown(
+                    f'<div class="consensus-marker">🎉 合意到達 (turn {consensus_turn})</div>',
+                    unsafe_allow_html=True,
+                )
+
         elif evt["type"] == "intervention":
             kind = evt.get("kind", "l1")
             if kind == "skip":
                 continue
             if kind == "l2":
-                with st.container(border=True):
-                    st.markdown(
-                        f"🟪 **全体への整理** — _{evt.get('decision_reason', '')}_"
-                    )
-                    if evt.get("brief"):
-                        st.markdown(f"> {evt['brief']}")
+                brief = evt.get("brief", "")
+                reason = evt.get("decision_reason", "")
+                html = (
+                    '<div class="chat-row center"><div class="intervention-l2">'
+                    '<div class="iv-header">🟪 全体への整理</div>'
+                    f'{_html.escape(brief).replace(chr(10), "<br>")}'
+                )
+                if reason:
+                    html += f'<div style="margin-top:6px; font-size:0.82em; opacity:0.75;">理由: {_html.escape(reason)}</div>'
+                html += "</div></div>"
+                st.markdown(html, unsafe_allow_html=True)
             else:
-                items = evt.get("items", [])
+                items = evt.get("items") or []
                 if not items:
                     continue
                 addressed = evt.get("addressed_to") or "次の話者"
-                with st.container(border=True):
-                    st.markdown(
-                        f"🟦 **{addressed} さんへの個別助言** ({len(items)} 件)"
+                items_html_parts: list[str] = []
+                for it in items:
+                    rel = it.get("relation", "")
+                    if rel == "support":
+                        tag = "🟢 支持"
+                    elif rel == "attack":
+                        tag = "🔴 反論"
+                    else:
+                        tag = "📚 関連"
+                    kind_src = it.get("source_kind", "?")
+                    src_jp = {"document": "文書", "web": "Web", "utterance": "発言"}.get(
+                        kind_src, kind_src
                     )
-                    for it in items:
-                        tag = "🟢 支持" if it.get("relation") == "support" else "🔴 反論"
-                        kind_src = it.get("source_kind", "?")
-                        src_jp = {"document": "文書", "web": "Web", "utterance": "発言"}.get(kind_src, kind_src)
-                        st.markdown(f"- {tag} ({src_jp}): {it.get('source_text', '')}")
+                    txt = it.get("source_text", "")
+                    if len(txt) > 180:
+                        txt = txt[:180] + "…"
+                    items_html_parts.append(
+                        f'<div class="intervention-item">{tag} '
+                        f'<span style="opacity:0.7;">({src_jp})</span>: '
+                        f"{_html.escape(txt)}</div>"
+                    )
+                items_html = "".join(items_html_parts)
+                html = (
+                    '<div class="chat-row center"><div class="intervention-l1">'
+                    f'<div class="iv-header">🟦 {_html.escape(addressed)} さんへの助言 '
+                    f'<span style="font-weight:normal; opacity:0.7;">({len(items)} 件)</span></div>'
+                    f"{items_html}"
+                    "</div></div>"
+                )
+                st.markdown(html, unsafe_allow_html=True)
 
 
 def _render_run_detail(state: dict, *, key_prefix: str) -> None:
     _render_run_summary_bar(state)
     _render_intervention_distribution(state)
     st.markdown("#### 議論タイムライン")
-    _render_timeline(state)
+    compact = st.toggle(
+        "コンパクト表示 (1 文要約)",
+        value=False,
+        key=f"{key_prefix}-compact",
+        help="各発話の最初の 1 文だけ表示。全体像を素早く把握したいとき。",
+    )
+    _render_timeline(state, compact=compact)
 
     # 折りたたみ
     if state.get("snapshot_path"):
@@ -392,6 +595,41 @@ def _render_run_detail(state: dict, *, key_prefix: str) -> None:
                         f"- {tag} {item.get('source_text', '')} "
                         f"(選定理由: {reason_jp} / 信頼度 {item.get('confidence', 0):.0%})"
                     )
+
+
+def _render_stance_panel(stance: dict) -> None:
+    """Pre/Post × Public/Private の立場テーブル + ギャップを表示。"""
+
+    rows: list[dict] = []
+    for persona, phases in stance.items():
+        pre = phases.get("pre") or {}
+        post = phases.get("post") or {}
+        rows.append(
+            {
+                "参加者": persona,
+                "Pre 公開": pre.get("public_stance", "-"),
+                "Pre 私的": pre.get("private_stance", "-"),
+                "Pre ギャップ": pre.get("public_private_gap", "-"),
+                "Post 公開": post.get("public_stance", "-"),
+                "Post 私的": post.get("private_stance", "-"),
+                "Post ギャップ": post.get("public_private_gap", "-"),
+            }
+        )
+    if rows:
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    # 理由を expander で
+    with st.expander("立場判断の理由 (Public / Private それぞれ)", expanded=False):
+        for persona, phases in stance.items():
+            for phase_name in ("pre", "post"):
+                phase = phases.get(phase_name) or {}
+                if not phase:
+                    continue
+                phase_label = "議論前" if phase_name == "pre" else "議論後"
+                st.markdown(f"**{persona} ({phase_label})**")
+                if phase.get("public_reason"):
+                    st.markdown(f"- 公開立場 ({phase.get('public_stance')}): _{phase['public_reason']}_")
+                if phase.get("private_reason"):
+                    st.markdown(f"- 私的立場 ({phase.get('private_stance')}): _{phase['private_reason']}_")
 
 
 def _render_judge_panel(state: dict, *, key_prefix: str) -> None:
@@ -668,6 +906,33 @@ def _render_cross_condition_panel() -> None:
         )
         st.dataframe(pd.DataFrame(cross_rows), use_container_width=True, hide_index=True)
 
+    # 立場の変化と見せかけ合意 (DEBATE benchmark)
+    stance_rows: list[dict] = []
+    for cond, payload in by_cond.items():
+        s = payload.get("stance") or {}
+        if not s or not s.get("n_persona_runs"):
+            continue
+        stance_rows.append(
+            {
+                "手法": CONDITION_LABELS.get(cond, cond),
+                "公開立場の変化幅 (平均)": round(s.get("mean_public_shift", 0), 2),
+                "私的立場の変化幅 (平均)": round(s.get("mean_private_shift", 0), 2),
+                "Pre 見せかけ度": round(s.get("mean_pre_gap", 0), 2),
+                "Post 見せかけ度": round(s.get("mean_post_gap", 0), 2),
+            }
+        )
+    if stance_rows:
+        st.markdown("### 立場の変化と見せかけ合意 (DEBATE benchmark)")
+        st.caption(
+            "**公開立場の変化幅** は議論前→議論後の表明立場の変化量。"
+            " **私的立場の変化幅** は内心の変化量。"
+            " **見せかけ度** は |公開 - 私的| の平均。"
+            "**Post 見せかけ度が低いほど真の合意、高いほど表層的合意の懸念**。"
+            "提案手法が他より私的立場を動かせている / 見せかけ度が低いなら、"
+            "AF 介入が表層を超えて意見を更新できた証拠になる。"
+        )
+        st.dataframe(pd.DataFrame(stance_rows), use_container_width=True, hide_index=True)
+
 
 # --- 実行ロジック -------------------------------------------------------
 
@@ -816,11 +1081,15 @@ def _refresh_live_view(placeholder: Any) -> None:
             with tab:
                 for state in by_condition[cond]:
                     label = (
-                        f"run {state['run_idx']:02d} "
+                        f"ラン {state['run_idx']:02d} "
                         f"({'⏳ 進行中' if state['status'] == 'running' else '✅ 完了'})"
                     )
                     with st.expander(label, expanded=(state["status"] == "running")):
-                        _render_run_detail(state, key_prefix=f"live-{cond}-{state['run_idx']}")
+                        # ライブ中はコンパクト表示せず通常
+                        _render_run_summary_bar(state)
+                        _render_intervention_distribution(state)
+                        st.markdown("#### 議論タイムライン")
+                        _render_timeline(state, compact=False)
 
 
 # --- セッション初期化 ---------------------------------------------------
@@ -1039,6 +1308,15 @@ if cond_order:
                     "評価エージェントが各参加者をロールプレイし、議論を 5 軸で採点した結果です。"
                 )
                 _render_judge_panel(state, key_prefix=f"judge-{cond}-{state['run_idx']}")
+
+            # Stance trajectory (DEBATE benchmark 流: 公開 vs 私的)
+            if state.get("stance"):
+                st.markdown("#### 立場の変化 (議論前 → 議論後)")
+                st.caption(
+                    "**公開立場** = 議論で表明する立場 / **私的立場** = 内心で実際に思う立場。"
+                    " 両者のギャップが大きいほど **見せかけ合意** の可能性が高い (DEBATE benchmark)"
+                )
+                _render_stance_panel(state["stance"])
 
 
 # --- 詳しい指標 (折りたたみ、デフォルト閉) -----------------------------
