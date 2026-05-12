@@ -277,7 +277,10 @@ LLM シミュレーション → 対面実験への移行で同じ意味で測�
   - citation_rate (source 別: utterance/document/web) — `src/das/eval/citation.py`
   - per-metric judge rationale (各スコアごとに reason) + UI 改修
   - 異種ソース間エッジ密度 (貢献①の直接証拠) — `cross_source_edge_rate`
-- ⏳ Tier 2 (Planted Contradiction シナリオ + stance polling)
+- ✅ **Tier 2 — 完了**
+  - Stance polling (DEBATE benchmark 流: Pre/Post × Public/Private) — `src/das/agents/stance_agent.py`
+  - Planted Contradiction シナリオ (政策 AI トピック: `data/docs_policy/contradiction_planted_evidence.md`)
+  - 見せかけ合意 (public-private gap) を集計指標として表示
 - ⏳ 段階 A 技術検証 (手動アノテーションで extraction / linking の F1 測定)
 - ⏳ Stage 2 (DQI-inspired 主観評価)
 - ⏳ 段階 C: 対面参加者実験 (5-8 名 × 60 分)

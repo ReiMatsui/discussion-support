@@ -194,6 +194,12 @@ def eval_cmd(
         "--max-web-searches",
         help="セッションあたりの Web 検索回数の上限",
     ),
+    stance_polling: bool = typer.Option(
+        False,
+        "--stance-polling/--no-stance-polling",
+        help="DEBATE benchmark 流の Pre/Post × Public/Private 立場測定を有効化。"
+        "見せかけ合意 (public-private gap) を定量化",
+    ),
 ) -> None:
     """シミュレーション評価を一括実行する (3 条件比較 + LLM-as-judge)。"""
 
@@ -217,6 +223,7 @@ def eval_cmd(
             llm_consensus=llm_consensus,
             web_search=web_search,
             max_web_searches=max_web_searches,
+            stance_polling=stance_polling,
         )
     )
 
@@ -562,6 +569,7 @@ async def _run_eval_cli(
     llm_consensus: bool = True,
     web_search: bool = False,
     max_web_searches: int = 5,
+    stance_polling: bool = False,
 ) -> None:
     from das.eval import (
         ConditionFlatRAG,
@@ -626,6 +634,13 @@ async def _run_eval_cli(
 
         consensus_agent = ConsensusAgent(llm=llm)
 
+    # Stance polling agent (DEBATE benchmark 流)
+    stance_agent_obj = None
+    if stance_polling:
+        from das.agents.stance_agent import StanceAgent
+
+        stance_agent_obj = StanceAgent(llm=llm)
+
     typer.echo(
         f"[eval] preset={preset} topic='{topic}' "
         f"conditions={list(factories.keys())} n_runs={n_runs} "
@@ -673,6 +688,7 @@ async def _run_eval_cli(
         concurrency=concurrency,
         event_emitter=event_emitter,
         consensus_agent=consensus_agent,
+        stance_agent=stance_agent_obj,
     )
 
     typer.echo("")
