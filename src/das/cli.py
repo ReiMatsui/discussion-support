@@ -228,6 +228,42 @@ def eval_cmd(
     )
 
 
+@app.command(name="aqua-rescore")
+def aqua_rescore(
+    eval_dir: Path = typer.Argument(
+        ...,
+        exists=True,
+        file_okay=False,
+        help="既存の eval ディレクトリ (例: data/eval/tier12-smoke)",
+    ),
+    concurrency: int = typer.Option(
+        5,
+        "--concurrency",
+        "-j",
+        help="1 議論内で並列採点する発話数",
+    ),
+    n_context: int = typer.Option(
+        3,
+        "--n-context",
+        help="採点時に渡す直前文脈の発話数",
+    ),
+    model: str | None = typer.Option(
+        None,
+        "--model",
+        help="採点に使う LLM モデル (省略時はクライアント既定)",
+    ),
+) -> None:
+    """既存 eval ディレクトリ配下の全 transcript を AQuA で再採点する。
+
+    Behrendt et al. (DELITE @ LREC-COLING 2024) の 20 deliberation indicator を
+    LLM-judge で再現する (公開ドイツ語アダプタは使わない)。各 run ディレクトリに
+    ``aqua_report.json`` を追記し、``aqua_summary.json`` を eval_dir 直下に書く。
+    """
+
+    asyncio.run(_run_aqua_rescore(eval_dir=eval_dir, concurrency=concurrency,
+                                  n_context=n_context, model=model))
+
+
 @app.command(name="listen")
 def listen(
     docs: Path | None = typer.Option(
@@ -352,6 +388,86 @@ def _load_transcript(path: Path) -> list[Utterance]:
             payload = json.loads(line)
             utterances.append(Utterance.model_validate(payload))
     return utterances
+
+
+async def _run_aqua_rescore(
+    *,
+    eval_dir: Path,
+    concurrency: int,
+    n_context: int,
+    model: str | None,
+) -> None:
+    """既存 eval ディレクトリの全 transcript を AQuA で再採点する。"""
+
+    from collections import defaultdict
+
+    from das.eval.aqua import AQuAAgent, aggregate_aqua_reports
+
+    typer.echo(f"[aqua] scanning {eval_dir}")
+
+    # eval_dir/<condition>/run_*/transcript.jsonl を全部拾う
+    run_paths: list[tuple[str, str, Path]] = []  # (condition, run_id, transcript_path)
+    for cond_dir in sorted(eval_dir.iterdir()):
+        if not cond_dir.is_dir():
+            continue
+        # condition ディレクトリは "none" / "flat_rag" / "full_proposal" 等
+        for run_dir in sorted(cond_dir.iterdir()):
+            if not run_dir.is_dir():
+                continue
+            tpath = run_dir / "transcript.jsonl"
+            if tpath.exists():
+                run_paths.append((cond_dir.name, run_dir.name, tpath))
+
+    if not run_paths:
+        typer.echo("[aqua] no transcripts found", err=True)
+        raise typer.Exit(1)
+
+    typer.echo(f"[aqua] found {len(run_paths)} transcripts")
+
+    agent = AQuAAgent(llm=OpenAIClient())
+
+    by_condition: dict[str, list] = defaultdict(list)
+    for i, (condition, run_id, tpath) in enumerate(run_paths, start=1):
+        typer.echo(f"[aqua] ({i}/{len(run_paths)}) {condition}/{run_id}")
+        transcript = _load_transcript(tpath)
+        report = await agent.score_discussion(
+            transcript,
+            n_context=n_context,
+            concurrency=concurrency,
+            model=model,
+        )
+        out_path = tpath.parent / "aqua_report.json"
+        out_path.write_text(
+            json.dumps(report.to_dict(), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        by_condition[condition].append(report)
+        typer.echo(
+            f"[aqua]   mean={report.mean:.3f}  std={report.std:.3f}  "
+            f"n_utt={report.n_utterances}  -> {out_path.name}"
+        )
+
+    # 集約サマリ
+    summary = {
+        "eval_dir": str(eval_dir),
+        "n_runs_total": len(run_paths),
+        "n_context": n_context,
+        "by_condition": {
+            cond: aggregate_aqua_reports(reps) for cond, reps in by_condition.items()
+        },
+    }
+    summary_path = eval_dir / "aqua_summary.json"
+    summary_path.write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    typer.echo(f"[aqua] summary -> {summary_path}")
+
+    # コンソール表示
+    typer.echo("")
+    typer.echo("--- AQuA summary (mean ± std, 0-5 scale) ---")
+    for cond, agg in summary["by_condition"].items():
+        typer.echo(f"  {cond}: {agg['mean']:.3f} ± {agg['std']:.3f}  (n={agg['n_runs']} runs)")
 
 
 async def _run_listen_async(

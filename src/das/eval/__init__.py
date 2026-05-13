@@ -4,6 +4,15 @@ LLM 多人数エージェントによる議論シミュレーションと、3 �
 評価フレームワーク (M2 で構築)。
 """
 
+from das.eval.aqua import (
+    INDICATORS as AQUA_INDICATORS,
+    AQuAAgent,
+    AQuADiscussionReport,
+    AQuAIndicator,
+    AQuAScores,
+    AQuAUtteranceReport,
+    aggregate_aqua_reports,
+)
 from das.eval.conditions import (
     Condition,
     ConditionFlatRAG,
@@ -40,6 +49,12 @@ from das.eval.run_eval import (
 )
 
 __all__ = [
+    "AQUA_INDICATORS",
+    "AQuAAgent",
+    "AQuADiscussionReport",
+    "AQuAIndicator",
+    "AQuAScores",
+    "AQuAUtteranceReport",
     "AggregatedScores",
     "Condition",
     "ConditionFactory",
@@ -65,6 +80,7 @@ __all__ = [
     "Stance",
     "StopCondition",
     "TranscriptMetrics",
+    "aggregate_aqua_reports",
     "aggregate_reports",
     "build_persona",
     "cafeteria_personas",
