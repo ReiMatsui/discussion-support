@@ -357,3 +357,75 @@ async def test_run_eval_writes_run_meta_with_convergence(tmp_path: Path) -> None
     assert "convergence" in summary["by_condition"]["none"]
     conv = summary["by_condition"]["none"]["convergence"]
     assert conv["n_runs"] == 1
+
+
+# --- Stratified ordering と部分完了 (BudgetExceeded 互換) ----------
+
+
+async def test_run_eval_partial_completion_on_task_exception(tmp_path: Path) -> None:
+    """1 つの condition の task が例外で失敗しても、他 condition の結果は保存され、
+    最初の例外が末尾で再 raise される (= 部分結果を保ったまま CLI に通知される)。"""
+
+    class FailingCondition:
+        name = "failing"
+
+        async def setup(self, *, docs_dir: Path | None = None) -> None:
+            return None
+
+        async def info_provider(self, history, persona):  # type: ignore[no-untyped-def]
+            raise RuntimeError("simulated budget exceeded")
+
+    llm = _fake_llm("発言")
+    personas = [build_persona(name="A")]
+    factories = {"none": ConditionNone, "failing": FailingCondition}
+
+    with pytest.raises(RuntimeError, match="simulated budget exceeded"):
+        await run_eval(
+            topic="t",
+            personas=personas,
+            condition_factories=factories,
+            n_runs=2,
+            max_turns=2,
+            llm=llm,
+            eval_dir=tmp_path,
+            eval_id="partial",
+        )
+
+    # 部分結果として meta.json は保存されるはず (halted_by_exception フラグ付き)
+    meta = json.loads((tmp_path / "partial" / "meta.json").read_text())
+    assert meta["halted_by_exception"] is True
+    assert meta["first_exception"] == "RuntimeError"
+    # none condition は成功してるので少なくとも 1 件は保存されている
+    assert meta["n_runs_completed"] >= 1
+    none_runs = list((tmp_path / "partial" / "none").glob("run_*"))
+    assert len(none_runs) >= 1
+
+
+async def test_run_eval_stratified_order_creates_tasks_by_run_idx(
+    tmp_path: Path,
+) -> None:
+    """task が「各 run_idx の中で全 condition」順に作られている。
+
+    部分完了時に全 condition のサンプルが残るための条件。
+    """
+
+    llm = _fake_llm("発言")
+    personas = [build_persona(name="A")]
+    factories = {"cA": ConditionNone, "cB": ConditionNone, "cC": ConditionNone}
+
+    result = await run_eval(
+        topic="t",
+        personas=personas,
+        condition_factories=factories,
+        n_runs=3,
+        max_turns=1,
+        llm=llm,
+        eval_dir=tmp_path,
+        eval_id="stratified",
+    )
+
+    # 全部成功すれば 3 cond x 3 runs = 9 件
+    assert len(result.runs) == 9
+    # 各 condition ごとに 3 件ずつ
+    grouped = result.by_condition()
+    assert all(len(v) == 3 for v in grouped.values())

@@ -200,6 +200,12 @@ def eval_cmd(
         help="DEBATE benchmark 流の Pre/Post × Public/Private 立場測定を有効化。"
         "見せかけ合意 (public-private gap) を定量化",
     ),
+    budget: float | None = typer.Option(
+        None,
+        "--budget",
+        help="OpenAI 累積コスト上限 (USD)。超過すると BudgetExceeded で停止し、"
+        "それまでの部分結果を保存する。例: --budget 1.0",
+    ),
 ) -> None:
     """シミュレーション評価を一括実行する (3 条件比較 + LLM-as-judge)。"""
 
@@ -224,6 +230,7 @@ def eval_cmd(
             web_search=web_search,
             max_web_searches=max_web_searches,
             stance_polling=stance_polling,
+            budget=budget,
         )
     )
 
@@ -252,6 +259,11 @@ def aqua_rescore(
         "--model",
         help="採点に使う LLM モデル (省略時はクライアント既定)",
     ),
+    budget: float | None = typer.Option(
+        None,
+        "--budget",
+        help="OpenAI 累積コスト上限 (USD)。超過したら部分結果を保存して停止。例: --budget 0.5",
+    ),
 ) -> None:
     """既存 eval ディレクトリ配下の全 transcript を AQuA で再採点する。
 
@@ -261,7 +273,7 @@ def aqua_rescore(
     """
 
     asyncio.run(_run_aqua_rescore(eval_dir=eval_dir, concurrency=concurrency,
-                                  n_context=n_context, model=model))
+                                  n_context=n_context, model=model, budget=budget))
 
 
 @app.command(name="listen")
@@ -396,12 +408,14 @@ async def _run_aqua_rescore(
     concurrency: int,
     n_context: int,
     model: str | None,
+    budget: float | None = None,
 ) -> None:
     """既存 eval ディレクトリの全 transcript を AQuA で再採点する。"""
 
     from collections import defaultdict
 
     from das.eval.aqua import AQuAAgent, aggregate_aqua_reports
+    from das.llm import BudgetExceeded, CostTracker
 
     typer.echo(f"[aqua] scanning {eval_dir}")
 
@@ -424,18 +438,28 @@ async def _run_aqua_rescore(
 
     typer.echo(f"[aqua] found {len(run_paths)} transcripts")
 
-    agent = AQuAAgent(llm=OpenAIClient())
+    tracker = CostTracker(budget_usd=budget) if budget is not None else CostTracker()
+    if budget is not None:
+        typer.echo(f"[aqua] budget cap: ${budget:.4f}")
+    agent = AQuAAgent(llm=OpenAIClient(cost_tracker=tracker))
 
     by_condition: dict[str, list] = defaultdict(list)
+    halted = False
     for i, (condition, run_id, tpath) in enumerate(run_paths, start=1):
         typer.echo(f"[aqua] ({i}/{len(run_paths)}) {condition}/{run_id}")
         transcript = _load_transcript(tpath)
-        report = await agent.score_discussion(
-            transcript,
-            n_context=n_context,
-            concurrency=concurrency,
-            model=model,
-        )
+        try:
+            report = await agent.score_discussion(
+                transcript,
+                n_context=n_context,
+                concurrency=concurrency,
+                model=model,
+            )
+        except BudgetExceeded as exc:
+            typer.echo(f"[aqua] BUDGET EXCEEDED: {exc}", err=True)
+            typer.echo("[aqua] stopping. Partial results saved so far.", err=True)
+            halted = True
+            break  # 末尾の summary 保存に進むためここで停止
         out_path = tpath.parent / "aqua_report.json"
         out_path.write_text(
             json.dumps(report.to_dict(), ensure_ascii=False, indent=2),
@@ -444,14 +468,18 @@ async def _run_aqua_rescore(
         by_condition[condition].append(report)
         typer.echo(
             f"[aqua]   mean={report.mean:.3f}  std={report.std:.3f}  "
-            f"n_utt={report.n_utterances}  -> {out_path.name}"
+            f"n_utt={report.n_utterances}  -> {out_path.name}  "
+            f"[cost: {tracker.format_status()}]"
         )
 
     # 集約サマリ
     summary = {
         "eval_dir": str(eval_dir),
+        "n_runs_scored": sum(len(v) for v in by_condition.values()),
         "n_runs_total": len(run_paths),
         "n_context": n_context,
+        "halted_by_budget": halted,
+        "cost": tracker.snapshot(),
         "by_condition": {
             cond: aggregate_aqua_reports(reps) for cond, reps in by_condition.items()
         },
@@ -462,12 +490,58 @@ async def _run_aqua_rescore(
         encoding="utf-8",
     )
     typer.echo(f"[aqua] summary -> {summary_path}")
+    typer.echo(f"[aqua] total cost: {tracker.format_status()}")
+
+    if halted:
+        import sys as _sys
+
+        typer.echo("[aqua] halted by budget — exiting with code 2", err=True)
+        _sys.exit(2)
 
     # コンソール表示
     typer.echo("")
     typer.echo("--- AQuA summary (mean ± std, 0-5 scale) ---")
     for cond, agg in summary["by_condition"].items():
         typer.echo(f"  {cond}: {agg['mean']:.3f} ± {agg['std']:.3f}  (n={agg['n_runs']} runs)")
+
+    # 2 条件以上あるときは「指標別の条件差トップ」も出す (full_proposal vs none を優先)
+    cond_names = list(summary["by_condition"].keys())
+    if len(cond_names) >= 2:
+        from das.eval.aqua import INDICATORS
+
+        # 基準: full_proposal を 1 番手に、なければ最後を 1 番手に
+        primary = "full_proposal" if "full_proposal" in cond_names else cond_names[-1]
+        baseline = "none" if "none" in cond_names else cond_names[0]
+        if primary == baseline:
+            return
+
+        ind_by_name = {ind.name: ind for ind in INDICATORS}
+        primary_means = summary["by_condition"][primary]["per_indicator_mean"]
+        baseline_means = summary["by_condition"][baseline]["per_indicator_mean"]
+
+        # |差| × |重み| でソート (集計に効くもの順)
+        rows: list[tuple[str, float, float, float, float]] = []
+        for name, p_val in primary_means.items():
+            b_val = baseline_means.get(name, 0.0)
+            diff = p_val - b_val
+            weight = ind_by_name[name].weight
+            contribution = diff * weight
+            rows.append((name, p_val, b_val, diff, contribution))
+        rows.sort(key=lambda r: abs(r[4]), reverse=True)
+
+        typer.echo("")
+        typer.echo(
+            f"--- 指標別の条件差トップ 7 ({primary} - {baseline}, |diff×weight| 降順) ---"
+        )
+        typer.echo(
+            f"  {'indicator':<24} {primary:>14} {baseline:>10} {'diff':>8} {'weight':>8} {'集計寄与':>10}"
+        )
+        for name, p_val, b_val, diff, contribution in rows[:7]:
+            sign = "+" if contribution >= 0 else "-"
+            typer.echo(
+                f"  {name:<24} {p_val:>14.3f} {b_val:>10.3f} {diff:+8.3f} "
+                f"{ind_by_name[name].weight:+8.3f} {sign}{abs(contribution):>9.4f}"
+            )
 
 
 async def _run_listen_async(
@@ -686,6 +760,7 @@ async def _run_eval_cli(
     web_search: bool = False,
     max_web_searches: int = 5,
     stance_polling: bool = False,
+    budget: float | None = None,
 ) -> None:
     from das.eval import (
         ConditionFlatRAG,
@@ -696,6 +771,7 @@ async def _run_eval_cli(
         policy_ai_lecture_personas,
         run_eval,
     )
+    from das.llm import BudgetExceeded, CostTracker
 
     # (persona_factory, topic, default_docs_subdir)。
     # preset ごとに docs サブディレクトリを分けることで、トピックを切り替えても
@@ -724,7 +800,10 @@ async def _run_eval_cli(
     docs_dir = docs if docs is not None else preset_docs_dir
     target_eval_dir = eval_dir if eval_dir is not None else settings.data_dir / "eval"
 
-    llm = OpenAIClient()
+    tracker = CostTracker(budget_usd=budget) if budget is not None else CostTracker()
+    if budget is not None:
+        typer.echo(f"[eval] budget cap: ${budget:.4f} (BudgetExceeded で停止し部分結果は保存される)")
+    llm = OpenAIClient(cost_tracker=tracker)
     factories: dict = {}
     for name in (c.strip() for c in conditions.split(",") if c.strip()):
         if name == "none":
@@ -766,7 +845,9 @@ async def _run_eval_cli(
     )
 
     def _progress(cond: str, done: int, total: int) -> None:
-        typer.echo(f"  [{done}/{total}] condition={cond}")
+        typer.echo(
+            f"  [{done}/{total}] condition={cond}  [cost: {tracker.format_status()}]"
+        )
 
     consensus_kwargs = {
         "agreement_window": agreement_window,
@@ -786,31 +867,58 @@ async def _run_eval_cli(
 
         event_emitter = _emit
 
-    result = await run_eval(
-        topic=topic,
-        personas=personas,
-        condition_factories=factories,
-        n_runs=n_runs,
-        max_turns=max_turns,
-        temperature=temperature,
-        docs_dir=docs_dir if docs_dir.exists() else None,
-        llm=llm,
-        judge=judge,
-        eval_dir=target_eval_dir,
-        eval_id=eval_id,
-        progress=_progress,
-        until_consensus=until_consensus,
-        consensus_kwargs=consensus_kwargs,
-        concurrency=concurrency,
-        event_emitter=event_emitter,
-        consensus_agent=consensus_agent,
-        stance_agent=stance_agent_obj,
-    )
+    try:
+        result = await run_eval(
+            topic=topic,
+            personas=personas,
+            condition_factories=factories,
+            n_runs=n_runs,
+            max_turns=max_turns,
+            temperature=temperature,
+            docs_dir=docs_dir if docs_dir.exists() else None,
+            llm=llm,
+            judge=judge,
+            eval_dir=target_eval_dir,
+            eval_id=eval_id,
+            progress=_progress,
+            until_consensus=until_consensus,
+            consensus_kwargs=consensus_kwargs,
+            concurrency=concurrency,
+            event_emitter=event_emitter,
+            consensus_agent=consensus_agent,
+            stance_agent=stance_agent_obj,
+        )
+    except BudgetExceeded as exc:
+        import sys as _sys
+
+        typer.echo("")
+        typer.echo(f"[eval] BUDGET EXCEEDED: {exc}", err=True)
+        typer.echo("[eval] 既に保存された run_* は eval_dir 配下に残っています。", err=True)
+        # cost snapshot を eval_dir 直下に保存しておく (部分結果のサマリ用)
+        if eval_id is not None or target_eval_dir is not None:
+            actual_eval_id = eval_id or "eval-aborted"
+            cost_dir = target_eval_dir / actual_eval_id
+            cost_dir.mkdir(parents=True, exist_ok=True)
+            (cost_dir / "cost_snapshot.json").write_text(
+                json.dumps(tracker.snapshot(), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            typer.echo(f"[eval] cost snapshot -> {cost_dir / 'cost_snapshot.json'}")
+        typer.echo(f"[eval] final cost: {tracker.format_status()}")
+        # typer.Exit が asyncio.run を通すと exit code 0 になることがあるので
+        # sys.exit を直接使う (SystemExit は asyncio.run を確実に貫通する)
+        _sys.exit(2)
 
     typer.echo("")
     typer.echo(f"[eval] done. eval_id={result.eval_id}")
     if result.eval_dir is not None:
         typer.echo(f"[eval] saved to {result.eval_dir}")
+        # 通常終了時も cost_snapshot を保存して再現性を確保
+        (result.eval_dir / "cost_snapshot.json").write_text(
+            json.dumps(tracker.snapshot(), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    typer.echo(f"[eval] final cost: {tracker.format_status()}")
 
     # 収束統計 (until_consensus 関係なく常に表示: 後追い判定で意味がある)
     typer.echo("")

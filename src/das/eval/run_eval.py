@@ -729,12 +729,26 @@ async def run_eval(
 
     tasks: list[asyncio.Task] = []
     cond_order = list(condition_factories.keys())
-    for cond_name in cond_order:
-        factory = condition_factories[cond_name]
-        for run_idx in range(1, n_runs + 1):
+    # Stratified (round-robin) order: [cond1-r1, cond2-r1, cond3-r1, cond1-r2, ...]
+    # こうすることで予算切れや早期 abort 時でも、部分結果が **全条件をカバー**する。
+    # 逐次順 (全 cond1 → 全 cond2 → ...) だと最後の condition が常に犠牲になる
+    for run_idx in range(1, n_runs + 1):
+        for cond_name in cond_order:
+            factory = condition_factories[cond_name]
             tasks.append(asyncio.create_task(_job(cond_name, factory, run_idx)))
 
-    completed_results = await asyncio.gather(*tasks)
+    # 部分結果でも全条件の差分が見えるよう、gather は return_exceptions=True で
+    # 個別タスクの失敗 (BudgetExceeded など) を許容し、終わったぶんは保存しておく。
+    # 後でこの中に Exception があれば再 raise する (元のセマンティクスを保つ)。
+    gathered = await asyncio.gather(*tasks, return_exceptions=True)
+    completed_results: list[tuple[str, int, SingleRunResult]] = []
+    first_exception: BaseException | None = None
+    for item in gathered:
+        if isinstance(item, BaseException):
+            if first_exception is None:
+                first_exception = item
+            continue
+        completed_results.append(item)  # type: ignore[arg-type]
     # condition の順、run_idx の順に並べ直して再現性のある runs リストにする
     completed_results.sort(key=lambda triple: (cond_order.index(triple[0]), triple[1]))
     runs: list[SingleRunResult] = [t[2] for t in completed_results]
@@ -749,10 +763,18 @@ async def run_eval(
 
     if target_dir is not None:
         # メタ情報
+        n_completed = len(runs)
+        n_failed = len(gathered) - len(completed_results)
         meta = {
             "eval_id": eval_id,
             "topic": topic,
             "n_runs_per_condition": n_runs,
+            "n_runs_completed": n_completed,
+            "n_runs_failed": n_failed,
+            "halted_by_exception": first_exception is not None,
+            "first_exception": (
+                type(first_exception).__name__ if first_exception else None
+            ),
             "max_turns": max_turns,
             "temperature": temperature,
             "until_consensus": until_consensus,
@@ -767,6 +789,17 @@ async def run_eval(
             encoding="utf-8",
         )
         _save_eval_result(target_dir, eval_result)
+
+    # 部分結果の保存が終わったあと、最初の Exception を再 raise して CLI に通知する。
+    # CLI 側は catch して exit code を非 0 にする。
+    if first_exception is not None:
+        _log.warning(
+            "eval.partial_completion",
+            n_completed=len(completed_results),
+            n_failed=len(gathered) - len(completed_results),
+            first_exception=type(first_exception).__name__,
+        )
+        raise first_exception
 
     return eval_result
 

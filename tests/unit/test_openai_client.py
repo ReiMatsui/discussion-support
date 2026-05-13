@@ -332,3 +332,63 @@ async def test_embed_empty_returns_empty_without_calling() -> None:
     vectors = await client.embed([])
     assert vectors == []
     embeddings.assert_not_awaited()
+
+
+# --- CostTracker 連携 -----------------------------------------------
+
+
+async def test_chat_records_cost_when_tracker_attached() -> None:
+    """``CostTracker`` を渡すと、各 API 呼び出し後に record される。"""
+
+    from das.llm import CostTracker
+
+    create = AsyncMock(return_value=_completion_response("ok"))
+    fake = _fake_async_client(create=create)
+    tracker = CostTracker()
+    client = OpenAIClient(client=fake, cost_tracker=tracker)
+
+    await client.chat(
+        [{"role": "user", "content": "hi"}],
+        model="gpt-5-mini",
+    )
+
+    # _completion_response の prompt_tokens=10, completion_tokens=5
+    expected = (10 * 0.40e-6) + (5 * 1.60e-6)
+    assert tracker.total_usd == pytest.approx(expected)
+    assert tracker.n_calls == 1
+
+
+async def test_chat_raises_when_budget_exceeded_pre_call() -> None:
+    """``check_before_call`` で既に超過していたら API を呼ばずに止める。"""
+
+    from das.llm import BudgetExceeded, CostTracker
+
+    create = AsyncMock(return_value=_completion_response("ok"))
+    fake = _fake_async_client(create=create)
+    tracker = CostTracker(budget_usd=1e-6)
+    # 直接 record で超過状態を作る
+    tracker._total = 1.0  # type: ignore[attr-defined]
+    client = OpenAIClient(client=fake, cost_tracker=tracker)
+
+    with pytest.raises(BudgetExceeded):
+        await client.chat([{"role": "user", "content": "hi"}], model="gpt-5-mini")
+    # API は呼ばれない
+    create.assert_not_awaited()
+
+
+async def test_embed_records_cost_with_zero_output_tokens() -> None:
+    """embedding は output 0 トークン換算。"""
+
+    from das.llm import CostTracker
+
+    embeddings = AsyncMock(return_value=_embedding_response([[0.1, 0.2]]))
+    fake = _fake_async_client(embeddings=embeddings)
+    tracker = CostTracker()
+    client = OpenAIClient(client=fake, cost_tracker=tracker)
+
+    await client.embed(["hello"], model="text-embedding-3-small")
+
+    # _embedding_response の prompt_tokens=4, output=0
+    expected = 4 * 0.02e-6
+    assert tracker.total_usd == pytest.approx(expected)
+    assert tracker.n_calls == 1

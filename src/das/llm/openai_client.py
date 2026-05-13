@@ -20,6 +20,7 @@ from tenacity import (
     wait_exponential,
 )
 
+from das.llm.cost import CostTracker
 from das.logging import get_logger
 from das.settings import Settings, get_settings
 
@@ -59,11 +60,19 @@ class OpenAIClient:
         *,
         client: AsyncOpenAI | None = None,
         max_retries: int = 3,
+        cost_tracker: CostTracker | None = None,
     ) -> None:
         self._settings = settings or get_settings()
         self._client = client or AsyncOpenAI(api_key=self._settings.openai_api_key)
         self._log = get_logger("das.llm.openai")
         self._max_retries = max_retries
+        self._cost_tracker = cost_tracker
+
+    @property
+    def cost_tracker(self) -> CostTracker | None:
+        """予算追跡用の ``CostTracker`` (None なら追跡なし)。"""
+
+        return self._cost_tracker
 
     # --- モデル解決 -----------------------------------------------------
 
@@ -97,6 +106,8 @@ class OpenAIClient:
         """プレーンテキストの応答を返す。"""
 
         chosen_model = model or self.fast_model
+        if self._cost_tracker is not None:
+            self._cost_tracker.check_before_call()
         kwargs = self._build_chat_kwargs(chosen_model, temperature)
         response: Any = None
         async for attempt in self._retrier():
@@ -126,6 +137,8 @@ class OpenAIClient:
         """
 
         chosen_model = model or self.fast_model
+        if self._cost_tracker is not None:
+            self._cost_tracker.check_before_call()
         kwargs = self._build_chat_kwargs(chosen_model, temperature)
         response: Any = None
         async for attempt in self._retrier():
@@ -155,6 +168,8 @@ class OpenAIClient:
         if not texts:
             return []
         chosen_model = model or self.embedding_model
+        if self._cost_tracker is not None:
+            self._cost_tracker.check_before_call()
         response: Any = None
         async for attempt in self._retrier():
             with attempt:
@@ -207,23 +222,34 @@ class OpenAIClient:
         usage = getattr(response, "usage", None)
         if usage is None:
             return
+        prompt = int(getattr(usage, "prompt_tokens", 0) or 0)
+        completion = int(getattr(usage, "completion_tokens", 0) or 0)
+        total = getattr(usage, "total_tokens", None)
         self._log.info(
             "openai.usage",
             model=model,
-            prompt_tokens=getattr(usage, "prompt_tokens", None),
-            completion_tokens=getattr(usage, "completion_tokens", None),
-            total_tokens=getattr(usage, "total_tokens", None),
+            prompt_tokens=prompt,
+            completion_tokens=completion,
+            total_tokens=total,
         )
+        # cost 集計と budget enforcement。BudgetExceeded はそのまま伝播させる
+        if self._cost_tracker is not None:
+            self._cost_tracker.record(model, prompt, completion)
 
     def _log_embedding_usage(self, response: Any, model: str, n_inputs: int) -> None:
         usage = getattr(response, "usage", None)
+        prompt = int(getattr(usage, "prompt_tokens", 0) or 0) if usage else 0
+        total = getattr(usage, "total_tokens", None) if usage else None
         self._log.info(
             "openai.embedding_usage",
             model=model,
             n_inputs=n_inputs,
-            prompt_tokens=getattr(usage, "prompt_tokens", None) if usage else None,
-            total_tokens=getattr(usage, "total_tokens", None) if usage else None,
+            prompt_tokens=prompt,
+            total_tokens=total,
         )
+        # embedding は output 0 トークン換算 (公開料金もそうなっている)
+        if self._cost_tracker is not None:
+            self._cost_tracker.record(model, prompt, 0)
 
 
 __all__ = ["OpenAIClient"]
