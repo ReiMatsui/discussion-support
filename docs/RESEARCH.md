@@ -273,6 +273,7 @@ LLM シミュレーション → 対面実験への移行で同じ意味で測�
 - ✅ **M3** Web 検索エージェント
 
 進行中 / 次:
+- ✅ **AQuA-inspired 20-indicator (Behrendt et al. DELITE 2024) を LLM-judge で再実装** — `src/das/eval/aqua.py` + `das aqua-rescore` CLI
 - ✅ **Tier 1 (RQ4 を直接測る指標群) — 完了**
   - citation_rate (source 別: utterance/document/web) — `src/das/eval/citation.py`
   - per-metric judge rationale (各スコアごとに reason) + UI 改修
