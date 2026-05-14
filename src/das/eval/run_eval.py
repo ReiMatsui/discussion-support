@@ -400,7 +400,27 @@ async def _run_single(
     consensus_agent: object | None = None,
     consensus_min_interval: int = 4,
     stance_agent: StanceAgent | None = None,
+    incremental_save_dir: Path | None = None,
 ) -> SingleRunResult:
+    """1 ラン分のシミュレーションを実行する。
+
+    ``incremental_save_dir`` を指定すると、各発話・スナップショット・介入ログを
+    **turn ごとに**ディスクに書き出す。BudgetExceeded などで途中で死んでも
+    保存済みの部分結果が残る (= post-hoc 採点が可能になる)。
+    """
+
+    # incremental save: 出力先を準備し transcript.jsonl を空で初期化
+    transcript_path: Path | None = None
+    snapshot_path: Path | None = None
+    interventions_path: Path | None = None
+    if incremental_save_dir is not None:
+        incremental_save_dir.mkdir(parents=True, exist_ok=True)
+        transcript_path = incremental_save_dir / "transcript.jsonl"
+        snapshot_path = incremental_save_dir / "snapshot.json"
+        interventions_path = incremental_save_dir / "interventions.jsonl"
+        # 残骸があれば truncate (再ランの整合性確保)
+        transcript_path.write_text("", encoding="utf-8")
+
     await condition.setup(docs_dir=docs_dir)
 
     consensus_kwargs = consensus_kwargs or {}
@@ -518,6 +538,32 @@ async def _run_single(
                 "text": u.text,
             }
         )
+
+        # --- Incremental save (turn 単位) -------------------------------
+        # この時点で u は確定済み。直後の処理 (extraction/linking) が落ちても
+        # ここまでの transcript と AF snapshot は保存される。
+        if transcript_path is not None:
+            with transcript_path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(_serialize_utterance(u), ensure_ascii=False))
+                f.write("\n")
+        if snapshot_path is not None:
+            store_now = _store_for_condition(condition)
+            if store_now is not None:
+                with contextlib.suppress(Exception):  # 防御的: snapshot 失敗で続行を止めない
+                    snapshot_path.write_text(
+                        json.dumps(
+                            store_now.snapshot(),
+                            ensure_ascii=False,
+                            indent=2,
+                            default=str,
+                        ),
+                        encoding="utf-8",
+                    )
+        if interventions_path is not None:
+            iv_log_attr = getattr(condition, "intervention_log", None)
+            if iv_log_attr:
+                with contextlib.suppress(Exception):
+                    write_intervention_log(iv_log_attr, interventions_path)
 
     t_metrics = transcript_metrics(transcript)
 
@@ -657,6 +703,7 @@ async def run_eval(
     consensus_agent: object | None = None,
     consensus_min_interval: int = 4,
     stance_agent: StanceAgent | None = None,
+    condition_concurrency: dict[str, int] | None = None,
 ) -> EvalResult:
     """N 本のランを条件 xトピックで回し、集計結果を返す。
 
@@ -668,6 +715,11 @@ async def run_eval(
     ``concurrency`` (>=1) を上げると、(condition, run) 単位の独立タスクを
     並列実行する。LLM 呼び出しは asyncio で多重化されるが、API のレート制限を
     超えないよう適切な値 (例: 4〜8) に抑えることを推奨。
+
+    ``condition_concurrency`` で **condition 別の並列度上限** を指定できる。
+    例: ``{"full_proposal": 1}`` とすると full_proposal は同時 1 ran までに
+    絞る (他の light condition は global ``concurrency`` まで並列実行)。
+    予算 enforce 下で重い condition が in-flight 中に全滅するのを防ぐ。
     """
 
     if n_runs < 1:
@@ -676,6 +728,7 @@ async def run_eval(
         raise ValueError("condition_factories must not be empty")
     if concurrency < 1:
         raise ValueError("concurrency must be >= 1")
+    condition_concurrency = condition_concurrency or {}
 
     llm = llm or OpenAIClient()
     eval_id = eval_id or datetime.now(timezone.utc).strftime("eval-%Y%m%dT%H%M%SZ")
@@ -689,15 +742,27 @@ async def run_eval(
 
     total = n_runs * len(condition_factories)
     semaphore = asyncio.Semaphore(concurrency)
+    # condition 別 semaphore: 指定なしなら global concurrency と同じ (実質制限なし)
+    per_cond_semaphores: dict[str, asyncio.Semaphore] = {
+        cond_name: asyncio.Semaphore(
+            min(condition_concurrency.get(cond_name, concurrency), concurrency)
+        )
+        for cond_name in condition_factories
+    }
     completed_counter = {"n": 0}
 
     async def _job(
         cond_name: str, factory: ConditionFactory, run_idx: int
     ) -> tuple[str, int, SingleRunResult]:
-        async with semaphore:
+        # condition 別の制限 → global の制限 の順で取得 (deadlock 回避のため順序固定)
+        async with per_cond_semaphores[cond_name], semaphore:
             condition = factory()
             run_id = f"{cond_name}-run-{run_idx:03d}-{uuid4().hex[:6]}"
             _log.info("eval.run.start", run_id=run_id, condition=cond_name)
+            # 事前に run_dir を確定して _run_single に渡す (= incremental save 有効化)
+            run_dir: Path | None = None
+            if target_dir is not None:
+                run_dir = target_dir / cond_name / f"run_{run_idx:03d}"
             result = await _run_single(
                 condition_name=cond_name,
                 condition=condition,
@@ -715,9 +780,9 @@ async def run_eval(
                 consensus_agent=consensus_agent,
                 consensus_min_interval=consensus_min_interval,
                 stance_agent=stance_agent,
+                incremental_save_dir=run_dir,
             )
-            if target_dir is not None:
-                run_dir = target_dir / cond_name / f"run_{run_idx:03d}"
+            if run_dir is not None:
                 _save_run(run_dir, result)
             # asyncio は単一スレッドなので排他制御不要
             completed_counter["n"] += 1

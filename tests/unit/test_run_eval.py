@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -429,3 +430,123 @@ async def test_run_eval_stratified_order_creates_tasks_by_run_idx(
     # 各 condition ごとに 3 件ずつ
     grouped = result.by_condition()
     assert all(len(v) == 3 for v in grouped.values())
+
+
+async def test_run_eval_incremental_save_writes_transcript_per_turn(
+    tmp_path: Path,
+) -> None:
+    """``eval_dir`` 指定時、各 turn の直後に transcript.jsonl が更新される。
+
+    途中で BudgetExceeded などで中断しても、それまでの発話が残る。
+    """
+
+    llm = _fake_llm("発言")
+    personas = [build_persona(name="A")]
+    await run_eval(
+        topic="t",
+        personas=personas,
+        condition_factories={"none": ConditionNone},
+        n_runs=1,
+        max_turns=4,
+        llm=llm,
+        eval_dir=tmp_path,
+        eval_id="inc",
+    )
+
+    transcript_path = tmp_path / "inc" / "none" / "run_001" / "transcript.jsonl"
+    assert transcript_path.exists()
+    lines = [ln for ln in transcript_path.read_text(encoding="utf-8").splitlines() if ln]
+    assert len(lines) == 4
+    parsed = [json.loads(ln) for ln in lines]
+    assert all("turn_id" in p and "text" in p for p in parsed)
+    assert [p["turn_id"] for p in parsed] == [1, 2, 3, 4]
+
+
+async def test_run_eval_incremental_save_truncates_existing_file(
+    tmp_path: Path,
+) -> None:
+    """同じ run_dir で再ランしたとき、古い transcript.jsonl が残らない。"""
+
+    run_dir = tmp_path / "inc2" / "none" / "run_001"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    stale_path = run_dir / "transcript.jsonl"
+    stale_path.write_text('{"turn_id": 99, "speaker": "Z", "text": "stale"}\n')
+
+    llm = _fake_llm("発言")
+    personas = [build_persona(name="A")]
+    await run_eval(
+        topic="t",
+        personas=personas,
+        condition_factories={"none": ConditionNone},
+        n_runs=1,
+        max_turns=2,
+        llm=llm,
+        eval_dir=tmp_path,
+        eval_id="inc2",
+    )
+
+    lines = [ln for ln in stale_path.read_text(encoding="utf-8").splitlines() if ln]
+    assert len(lines) == 2  # 古い行は消えて、新規 2 turn のみ
+    parsed = [json.loads(ln) for ln in lines]
+    assert [p["turn_id"] for p in parsed] == [1, 2]
+
+
+async def test_run_eval_per_condition_concurrency_limits_active_runs(
+    tmp_path: Path,
+) -> None:
+    """``condition_concurrency`` で指定した condition は同時実行数が絞られる。
+
+    重い condition (full_proposal 想定) を sequential に走らせる用途。
+    各 task が semaphore を確認し、超過していないことを assert する。
+    """
+
+    # 各 ConditionNone factory が現在の active 数をカウントし、上限を超えていないか確認する
+    active_counts: dict[str, int] = {"heavy": 0, "light": 0}
+    max_observed: dict[str, int] = {"heavy": 0, "light": 0}
+    lock = asyncio.Lock()
+
+    class TrackingCondition:
+        def __init__(self, name: str) -> None:
+            self._name = name
+
+        name = "tracking"
+
+        async def setup(self, *, docs_dir: Path | None = None) -> None:
+            return None
+
+        async def info_provider(self, history, persona):  # type: ignore[no-untyped-def]
+            async with lock:
+                active_counts[self._name] += 1
+                max_observed[self._name] = max(
+                    max_observed[self._name], active_counts[self._name]
+                )
+            # わずかな await で並列性を作る
+            await asyncio.sleep(0.005)
+            async with lock:
+                active_counts[self._name] -= 1
+            return None
+
+    llm = _fake_llm("発言")
+    personas = [build_persona(name="A")]
+    factories = {
+        "heavy": lambda: TrackingCondition("heavy"),
+        "light": lambda: TrackingCondition("light"),
+    }
+
+    await run_eval(
+        topic="t",
+        personas=personas,
+        condition_factories=factories,
+        n_runs=3,
+        max_turns=2,
+        llm=llm,
+        eval_dir=tmp_path,
+        eval_id="per-cond-conc",
+        concurrency=5,  # global は緩い
+        condition_concurrency={"heavy": 1},  # heavy だけ 1 に絞る
+    )
+
+    # heavy は同時 1 までしか動いていないはず
+    assert max_observed["heavy"] == 1
+    # light は global=5 まで動ける (n_runs=3 なので最大 3 まで)
+    assert max_observed["light"] >= 1
