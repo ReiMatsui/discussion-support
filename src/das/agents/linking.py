@@ -78,13 +78,22 @@ class LinkingAgent(BaseAgent):
         threshold: float | None = None,
         top_k: int = 5,
         embedding_model: str | None = None,
+        model_override: str | None = None,
     ) -> None:
+        """
+        Args:
+            model_override: ``_judge_pair`` で使う LLM モデルを上書きする。
+                例: ``"gpt-5-nano"`` を渡すと judgment 呼び出しのコストを大幅削減できる。
+                None なら ``self.llm.fast_model`` (=既定モデル)。
+        """
+
         super().__init__(llm=llm)
         self._system_prompt = _load_system_prompt()
         settings = get_settings()
         self._threshold = threshold if threshold is not None else settings.linking_threshold
         self._top_k = top_k
         self._embedding_model = embedding_model
+        self._model_override = model_override
         self._embeddings: dict[UUID, list[float]] = {}
 
     # --- 公開 ---------------------------------------------------------
@@ -153,6 +162,7 @@ class LinkingAgent(BaseAgent):
         return await self.llm.chat_structured(
             messages,  # type: ignore[arg-type]
             response_format=_LinkJudgment,
+            model=self._model_override,
         )
 
     def _maybe_make_edge(self, target: Node, cand: Node, judgment: _LinkJudgment) -> Edge | None:

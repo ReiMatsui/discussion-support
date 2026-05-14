@@ -228,13 +228,23 @@ class ConditionFullProposal:
         facilitator: FacilitationAgent | None = None,
         enable_web_search: bool = False,
         max_web_searches: int = 5,
+        linking_model: str | None = None,
     ) -> None:
+        """
+        Args:
+            linking_model: LinkingAgent の judgment 呼び出しで使う軽量モデル名
+                (例: ``"gpt-5-nano"``)。None なら既定モデル。
+                Linking が全コストの 80-90% を占めるので、ここを cheap モデルに
+                するだけで full_proposal の per-run コストが 70-80% 削減される。
+        """
+
         self._llm = llm or OpenAIClient()
         self._threshold = threshold
         self._top_k = top_k
         self._max_info_items = max_info_items
         self._enable_web_search = enable_web_search
         self._max_web_searches = max_web_searches
+        self._linking_model = linking_model
         self._orchestrator: Orchestrator | None = None
         self._processed_turn_ids: set[int] = set()
         self._last_items: list[InfoItem] = []
@@ -296,6 +306,7 @@ class ConditionFullProposal:
             threshold=self._threshold,
             top_k=self._top_k,
             web_search=web_search,
+            linking_model=self._linking_model,
         )
         if docs_dir is not None and docs_dir.exists():
             await self._orchestrator.ingest_documents(docs_dir)

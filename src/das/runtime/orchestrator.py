@@ -57,11 +57,15 @@ class Orchestrator:
         threshold: float | None = None,
         top_k: int = 5,
         web_search: WebSearchAgent | None = None,
+        linking_model: str | None = None,
     ) -> Orchestrator:
         """既定構成のオーケストレータを 1 つ作る。
 
         ``web_search`` を渡すと、新しい utterance/claim ノードに対して
         既存エッジ数が少ないとき自動で Web 検索 → AF 化が走る。
+
+        ``linking_model`` を指定すると、LinkingAgent の判定呼び出し時のみ
+        その軽量モデル (例: ``gpt-5-nano``) を使う。コスト削減策。
         """
 
         llm = llm or OpenAIClient()
@@ -70,7 +74,12 @@ class Orchestrator:
 
         extraction = ExtractionAgent(llm=llm)
         document = DocumentAgent(llm=llm)
-        linking = LinkingAgent(llm=llm, threshold=threshold, top_k=top_k)
+        linking = LinkingAgent(
+            llm=llm,
+            threshold=threshold,
+            top_k=top_k,
+            model_override=linking_model,
+        )
 
         orch = cls(
             store=store,

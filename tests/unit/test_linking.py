@@ -295,3 +295,52 @@ async def test_embedding_cache_avoids_recomputation(
     assert llm.embed.await_count == 1
     called_texts = llm.embed.await_args.args[0]
     assert called_texts == [new_node.text]
+
+
+# --- model_override (cheap linking 用) ------------------------------
+
+
+async def test_linking_uses_model_override_when_set(store: NetworkXGraphStore) -> None:
+    """``model_override`` を指定すると judge の chat_structured に model 引数が渡る。"""
+
+    a = Node(text="主張1", node_type="claim", source="utterance", author="A")
+    b = Node(text="主張2", node_type="claim", source="utterance", author="B")
+    store.add_node(a)
+    store.add_node(b)
+
+    llm = _fake_llm()
+    llm.embed_one = AsyncMock(return_value=[1.0, 0.0])  # type: ignore[method-assign]
+    llm.embed = AsyncMock(return_value=[[0.9, 0.1]])  # type: ignore[method-assign]
+    captured = AsyncMock(return_value=_judgment("none", 0.9))
+    llm.chat_structured = captured  # type: ignore[method-assign]
+
+    agent = LinkingAgent(llm=llm, top_k=5, model_override="gpt-5-nano")
+    await agent.link_node(a, store)
+
+    # chat_structured に model="gpt-5-nano" が渡されている
+    captured.assert_awaited()
+    for call in captured.await_args_list:
+        assert call.kwargs.get("model") == "gpt-5-nano"
+
+
+async def test_linking_no_model_override_means_default_model(
+    store: NetworkXGraphStore,
+) -> None:
+    """``model_override`` 未指定なら chat_structured には model=None が渡る (=既定)。"""
+
+    a = Node(text="主張1", node_type="claim", source="utterance", author="A")
+    b = Node(text="主張2", node_type="claim", source="utterance", author="B")
+    store.add_node(a)
+    store.add_node(b)
+
+    llm = _fake_llm()
+    llm.embed_one = AsyncMock(return_value=[1.0, 0.0])  # type: ignore[method-assign]
+    llm.embed = AsyncMock(return_value=[[0.9, 0.1]])  # type: ignore[method-assign]
+    captured = AsyncMock(return_value=_judgment("none", 0.9))
+    llm.chat_structured = captured  # type: ignore[method-assign]
+
+    agent = LinkingAgent(llm=llm, top_k=5)
+    await agent.link_node(a, store)
+
+    for call in captured.await_args_list:
+        assert call.kwargs.get("model") is None
