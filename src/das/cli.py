@@ -206,8 +206,41 @@ def eval_cmd(
         help="OpenAI 累積コスト上限 (USD)。超過すると BudgetExceeded で停止し、"
         "それまでの部分結果を保存する。例: --budget 1.0",
     ),
+    cond_concurrency: str = typer.Option(
+        "",
+        "--cond-concurrency",
+        help="condition 別の並列度上限 (カンマ区切り)。例: "
+        "'full_proposal=1,flat_rag=2'。指定なしは global concurrency と同じ。"
+        "予算制約下で重い condition を sequential に走らせて部分結果を守る用途",
+    ),
+    linking_top_k: int = typer.Option(
+        5,
+        "--linking-top-k",
+        help="LinkingAgent の candidate 数。下げると per-node の LLM 呼び出しが減って "
+        "コスト減 (5→3 で 40% 削減)。recall は下がるが弱い候補を切るだけ",
+    ),
+    linking_model: str = typer.Option(
+        "",
+        "--linking-model",
+        help="LinkingAgent の judgment で使うモデルを上書き。例: 'gpt-5-nano'。"
+        "Linking が全コストの 80-90% を占めるので、ここを cheap モデルに替えると "
+        "full_proposal の per-run コストが 70-80% 削減される",
+    ),
 ) -> None:
     """シミュレーション評価を一括実行する (3 条件比較 + LLM-as-judge)。"""
+
+    # cond_concurrency をパース
+    parsed_cond_conc: dict[str, int] = {}
+    for token in (s.strip() for s in cond_concurrency.split(",") if s.strip()):
+        if "=" not in token:
+            typer.echo(f"--cond-concurrency の書式エラー: '{token}'。'name=N' 形式")
+            raise typer.Exit(1)
+        name, n_str = token.split("=", 1)
+        try:
+            parsed_cond_conc[name.strip()] = int(n_str.strip())
+        except ValueError:
+            typer.echo(f"--cond-concurrency の値が int でない: '{token}'")
+            raise typer.Exit(1)
 
     asyncio.run(
         _run_eval_cli(
@@ -231,6 +264,9 @@ def eval_cmd(
             max_web_searches=max_web_searches,
             stance_polling=stance_polling,
             budget=budget,
+            condition_concurrency=parsed_cond_conc,
+            linking_top_k=linking_top_k,
+            linking_model=linking_model.strip() or None,
         )
     )
 
@@ -761,6 +797,9 @@ async def _run_eval_cli(
     max_web_searches: int = 5,
     stance_polling: bool = False,
     budget: float | None = None,
+    condition_concurrency: dict[str, int] | None = None,
+    linking_top_k: int = 5,
+    linking_model: str | None = None,
 ) -> None:
     from das.eval import (
         ConditionFlatRAG,
@@ -811,10 +850,14 @@ async def _run_eval_cli(
         elif name == "flat_rag":
             factories[name] = lambda llm=llm: ConditionFlatRAG(llm=llm)
         elif name == "full_proposal":
-            factories[name] = lambda llm=llm: ConditionFullProposal(
-                llm=llm,
-                enable_web_search=web_search,
-                max_web_searches=max_web_searches,
+            factories[name] = lambda llm=llm, top_k=linking_top_k, lmodel=linking_model: (
+                ConditionFullProposal(
+                    llm=llm,
+                    enable_web_search=web_search,
+                    max_web_searches=max_web_searches,
+                    top_k=top_k,
+                    linking_model=lmodel,
+                )
             )
         else:
             typer.echo(f"未知の condition: {name}")
@@ -841,7 +884,9 @@ async def _run_eval_cli(
         f"conditions={list(factories.keys())} n_runs={n_runs} "
         f"max_turns={max_turns} concurrency={concurrency} "
         f"until_consensus={'on' if until_consensus else 'off'} "
-        f"judge={'on' if judge else 'off'}"
+        f"judge={'on' if judge else 'off'} "
+        f"linking_top_k={linking_top_k}"
+        + (f" linking_model={linking_model}" if linking_model else "")
     )
 
     def _progress(cond: str, done: int, total: int) -> None:
@@ -887,6 +932,7 @@ async def _run_eval_cli(
             event_emitter=event_emitter,
             consensus_agent=consensus_agent,
             stance_agent=stance_agent_obj,
+            condition_concurrency=condition_concurrency,
         )
     except BudgetExceeded as exc:
         import sys as _sys
