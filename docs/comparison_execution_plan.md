@@ -159,6 +159,7 @@ Phase 1 で固めた評価パイプラインをそのまま使う。**評価方�
 - 段階 A (Linking F1) は **Phase 1 最初の 1 週間**で必ず通す (citation_rate 解釈の保険)
 - n は **政策トピック × n=5** で固める ($1 制約のため n=10 から縮小)
 - **`--budget` (soft)** で実コストを enforce する: `das eval --budget 1.5` のように指定すると、累積 cost が 1.5 USD を超えた時点で **新規 run の開始だけが gate** される。**進行中の run は最後まで完走**するので部分結果が確実に残る (in-flight run の暴走防止に **`--hard-budget`** を併用するのが安全)
+- **`--linking-top-k 3 --linking-model gpt-5-nano`** の節約策で per-fp-run コストを $1.05 → ~$0.30 に削減
 
 ---
 
