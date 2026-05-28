@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<title>Live Transcriber - OpenAI Realtime</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", "Segoe UI", sans-serif;
+    background: #fafafa;
+    color: #1a1a1a;
+    line-height: 1.55;
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 16px; }
+  header {
+    background: #fff;
+    border: 1px solid #e5e5e5;
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 12px;
+    position: sticky;
+    top: 8px;
+    z-index: 10;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+  h1 {
+    font-size: 17px;
+    margin: 0 0 10px 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .badge {
+    font-size: 11px;
+    background: #eef;
+    color: #335;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-weight: 500;
+  }
+  .dot {
+    display: inline-block;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: #c0c0c0;
+  }
+  .dot.live { background: #e53935; animation: pulse 1.2s infinite; }
+  .dot.connecting { background: #ffc107; animation: pulse 0.8s infinite; }
+  @keyframes pulse { 0%,100% {opacity:1;} 50% {opacity:0.35;} }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  button {
+    font: inherit;
+    border: 1px solid #d0d0d0;
+    background: #fff;
+    color: #1a1a1a;
+    padding: 7px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background .15s;
+  }
+  button:hover { background: #f0f0f0; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  button.primary { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
+  button.primary:hover { background: #333; }
+  button.danger { background: #e53935; color: #fff; border-color: #e53935; }
+  button.danger:hover { background: #c62828; }
+  .status { margin-left: auto; font-size: 12px; color: #666; }
+  .panel {
+    background: #fff;
+    border: 1px solid #e5e5e5;
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 12px;
+  }
+  .panel h2 {
+    font-size: 13px;
+    margin: 0 0 8px 0;
+    color: #666;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+  }
+  #transcript {
+    min-height: 280px;
+    max-height: 55vh;
+    overflow-y: auto;
+    padding: 8px 4px;
+    font-size: 15px;
+  }
+  .seg {
+    padding: 7px 0;
+    border-bottom: 1px dashed #ececec;
+  }
+  .seg:last-child { border-bottom: none; }
+  .seg .ts { font-size: 11px; color: #888; margin-right: 8px; }
+  .seg .text { color: #1a1a1a; }
+  .seg.partial .text { color: #888; font-style: italic; }
+  .seg .translation {
+    margin-top: 4px;
+    padding: 4px 8px;
+    background: #f7f7f7;
+    border-left: 3px solid #b0b0b0;
+    color: #555;
+    font-size: 14px;
+  }
+  .meter { height: 4px; background: #eee; border-radius: 2px; overflow: hidden; margin-top: 8px; }
+  .meter > div {
+    height: 100%; width: 0%;
+    background: linear-gradient(90deg, #4caf50, #ffc107, #e53935);
+    transition: width .1s;
+  }
+  .err {
+    background: #fdecea; color: #b71c1c;
+    padding: 8px 12px; border-radius: 8px;
+    font-size: 13px; margin-top: 8px;
+  }
+  .hint { font-size: 12px; color: #777; margin-top: 6px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .panel-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin: 0 0 8px 0;
+  }
+  .panel-head h2 { margin: 0; }
+  .btn-sm {
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: 6px;
+  }
+  #summary { white-space: pre-wrap; font-size: 14px; color: #333; padding: 4px; min-height: 30px; }
+  select {
+    font: inherit;
+    padding: 7px 10px;
+    border-radius: 8px;
+    border: 1px solid #d0d0d0;
+    background: #fff;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>
+      <span id="liveDot" class="dot"></span>
+      Live Transcriber
+      <span class="badge">OpenAI Realtime</span>
+      <span style="font-weight:400;font-size:13px;color:#888;">英日混在 自動認識</span>
+    </h1>
+    <div class="controls">
+      <button id="startBtn" class="primary">▶ 開始</button>
+      <button id="stopBtn" class="danger" disabled>■ 停止</button>
+      <label style="font-size:13px;color:#555;">マイク:</label>
+      <select id="micSel"><option value="">既定</option></select>
+      <span class="status" id="status">待機中</span>
+    </div>
+    <div class="meter"><div id="meterBar"></div></div>
+    <div id="err"></div>
+  </header>
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>文字起こし(リアルタイム)</h2>
+      <button id="clearTranscriptBtn" class="btn-sm" title="文字起こしをクリア">クリア</button>
+    </div>
+    <div id="transcript"></div>
+    <div class="hint">英語と日本語が混ざっていてもそのまま認識します。確定したセグメントは黒文字、認識中は灰色で表示されます。</div>
+  </div>
+
+  <div class="panel">
+    <h2>翻訳 / 要約 (GPT-4o-mini)</h2>
+    <div class="row" style="margin-bottom:8px;">
+      <button id="translateBtn">未翻訳セグメントを翻訳</button>
+      <button id="summarizeBtn">議事録を要約</button>
+      <button id="clearSummaryBtn">クリア</button>
+    </div>
+    <div id="summary"></div>
+  </div>
+
+  <div class="panel">
+    <h2>保存</h2>
+    <div class="row">
+      <button id="downloadTxt">.txt をダウンロード</button>
+      <button id="downloadMd">.md をダウンロード(翻訳+要約付き)</button>
+      <button id="clearAll">全消去</button>
+    </div>
+    <div class="hint">セグメントは自動的にブラウザに保存されます (リロードで復元)。</div>
+  </div>
+
+</div>
+
+<script>
+(() => {
+  // ---- State ----------------------------------------------------------------
+  const STORAGE_KEY = "live_transcriber_rt_segments_v1";
+  let segments = [];           // {id, ts, text, translation?, completed: bool}
+  let partials = new Map();    // item_id -> running partial text
+  let ws = null;
+  let audioCtx = null;
+  let micStream = null;
+  let worklet = null;
+  let analyser = null;
+  let running = false;
+
+  // ---- DOM ------------------------------------------------------------------
+  const $ = id => document.getElementById(id);
+  const startBtn=$("startBtn"), stopBtn=$("stopBtn"), micSel=$("micSel");
+  const statusEl=$("status"), transcriptEl=$("transcript"), liveDot=$("liveDot");
+  const meterBar=$("meterBar"), errEl=$("err");
+  const translateBtn=$("translateBtn"), summarizeBtn=$("summarizeBtn"), clearSummaryBtn=$("clearSummaryBtn");
+  const summaryEl=$("summary");
+  const downloadTxt=$("downloadTxt"), downloadMd=$("downloadMd"), clearAllBtn=$("clearAll");
+  const clearTranscriptBtn=$("clearTranscriptBtn");
+
+  // ---- Storage --------------------------------------------------------------
+  function load() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) segments = JSON.parse(raw);
+    } catch {}
+    render();
+  }
+  function save() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(segments)); } catch {}
+  }
+
+  // ---- Render ---------------------------------------------------------------
+  function fmtTime(ts) {
+    return new Date(ts).toLocaleTimeString("ja-JP", { hour12: false });
+  }
+  function escapeHtml(s) {
+    return (s || "").replace(/[&<>"']/g, c =>
+      ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])
+    );
+  }
+  function render() {
+    const out = [];
+    for (const s of segments) {
+      out.push(`
+        <div class="seg" data-id="${s.id}">
+          <span class="ts">${fmtTime(s.ts)}</span>
+          <span class="text">${escapeHtml(s.text)}</span>
+          ${s.translation ? `<div class="translation">↳ ${escapeHtml(s.translation)}</div>` : ""}
+        </div>
+      `);
+    }
+    // active partials (not yet committed to segments)
+    for (const [id, text] of partials) {
+      if (!text) continue;
+      out.push(`
+        <div class="seg partial" data-pid="${id}">
+          <span class="ts">…</span>
+          <span class="text">${escapeHtml(text)}</span>
+        </div>
+      `);
+    }
+    transcriptEl.innerHTML = out.join("");
+    transcriptEl.scrollTop = transcriptEl.scrollHeight;
+  }
+
+  function setStatus(msg, mode = "") {
+    statusEl.textContent = msg;
+    liveDot.className = "dot " + mode;
+  }
+  function showErr(msg) {
+    errEl.innerHTML = msg ? `<div class="err">${escapeHtml(msg)}</div>` : "";
+  }
+
+  // ---- Mic devices ----------------------------------------------------------
+  async function listMics() {
+    try {
+      const devs = await navigator.mediaDevices.enumerateDevices();
+      const mics = devs.filter(d => d.kind === "audioinput");
+      const current = micSel.value;
+      micSel.innerHTML = `<option value="">既定</option>` +
+        mics.map(d => `<option value="${d.deviceId}">${escapeHtml(d.label || "Microphone")}</option>`).join("");
+      if (current) micSel.value = current;
+    } catch {}
+  }
+
+  // ---- Audio capture + PCM16 24kHz worklet ----------------------------------
+  const workletSrc = `
+    class PCM16Processor extends AudioWorkletProcessor {
+      constructor() {
+        super();
+        // Target 24kHz mono. sampleRate is the global in worklet (source rate).
+        this.target = 24000;
+        this.ratio = sampleRate / this.target;
+        this.bufLen = 0;
+        this.buffer = [];
+        // emit every ~100ms worth of 24kHz samples = 2400 samples
+        this.emitEvery = 2400;
+        this.acc = new Float32Array(this.emitEvery);
+        this.accIdx = 0;
+        this.fracIdx = 0; // source-domain pointer
+      }
+      process(inputs) {
+        const ch = inputs[0] && inputs[0][0];
+        if (!ch) return true;
+        // Resample by linear stepping; collect downsampled mono float32
+        let srcPos = this.fracIdx;
+        while (srcPos < ch.length) {
+          const i0 = Math.floor(srcPos);
+          if (i0 >= ch.length) break;
+          this.acc[this.accIdx++] = ch[i0];
+          if (this.accIdx >= this.emitEvery) {
+            // convert to Int16
+            const out = new Int16Array(this.emitEvery);
+            for (let i = 0; i < this.emitEvery; i++) {
+              let v = Math.max(-1, Math.min(1, this.acc[i]));
+              out[i] = v < 0 ? v * 0x8000 : v * 0x7FFF;
+            }
+            this.port.postMessage(out, [out.buffer]);
+            this.acc = new Float32Array(this.emitEvery);
+            this.accIdx = 0;
+          }
+          srcPos += this.ratio;
+        }
+        this.fracIdx = srcPos - ch.length;
+        return true;
+      }
+    }
+    registerProcessor('pcm16-processor', PCM16Processor);
+  `;
+
+  function int16ToBase64(int16) {
+    const bytes = new Uint8Array(int16.buffer);
+    let bin = "";
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+    }
+    return btoa(bin);
+  }
+
+  async function startAudio() {
+    const constraints = {
+      audio: {
+        deviceId: micSel.value ? { exact: micSel.value } : undefined,
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    };
+    micStream = await navigator.mediaDevices.getUserMedia(constraints);
+    // Some browsers ignore the requested sampleRate, that's fine—worklet handles it.
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const src = audioCtx.createMediaStreamSource(micStream);
+
+    // VU meter
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+    src.connect(analyser);
+    const data = new Uint8Array(analyser.frequencyBinCount);
+    function tick() {
+      if (!analyser) return;
+      analyser.getByteTimeDomainData(data);
+      let max = 0;
+      for (let i = 0; i < data.length; i++) {
+        const v = Math.abs(data[i] - 128);
+        if (v > max) max = v;
+      }
+      meterBar.style.width = Math.min(100, (max / 64) * 100) + "%";
+      requestAnimationFrame(tick);
+    }
+    tick();
+
+    // PCM16 worklet
+    const blob = new Blob([workletSrc], { type: "application/javascript" });
+    await audioCtx.audioWorklet.addModule(URL.createObjectURL(blob));
+    worklet = new AudioWorkletNode(audioCtx, "pcm16-processor");
+    src.connect(worklet);
+    worklet.port.onmessage = (e) => {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const b64 = int16ToBase64(e.data);
+      ws.send(JSON.stringify({
+        type: "input_audio_buffer.append",
+        audio: b64,
+      }));
+    };
+  }
+
+  function stopAudio() {
+    if (worklet) { try { worklet.disconnect(); } catch {} worklet = null; }
+    if (analyser) { try { analyser.disconnect(); } catch {} analyser = null; }
+    if (audioCtx) { try { audioCtx.close(); } catch {} audioCtx = null; }
+    if (micStream) {
+      micStream.getTracks().forEach(t => t.stop());
+      micStream = null;
+    }
+    meterBar.style.width = "0%";
+  }
+
+  // ---- WebSocket to server -> OpenAI ----------------------------------------
+  function connectWS() {
+    return new Promise((resolve, reject) => {
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+      ws = new WebSocket(`${proto}://${location.host}/ws`);
+      ws.onopen = () => resolve();
+      ws.onerror = (e) => reject(new Error("WebSocket connection error"));
+      ws.onclose = () => {
+        if (running) {
+          showErr("接続が切れました。停止して再開してください。");
+          setStatus("切断", "");
+        }
+      };
+      ws.onmessage = (ev) => {
+        let m;
+        try { m = JSON.parse(ev.data); } catch { return; }
+        handleServerEvent(m);
+      };
+    });
+  }
+
+  function handleServerEvent(m) {
+    const t = m.type || "";
+
+    // Errors from our proxy or OpenAI
+    if (t === "proxy.error" || t === "error") {
+      const msg = (m.error && (m.error.message || m.error.code)) || JSON.stringify(m);
+      showErr("エラー: " + msg);
+      return;
+    }
+
+    // Session readiness
+    if (t.startsWith("transcription_session.") || t.startsWith("session.")) {
+      // OK; could update UI based on session info
+      return;
+    }
+
+    // Streaming partial
+    if (t === "conversation.item.input_audio_transcription.delta") {
+      const id = m.item_id || m.id || "_active";
+      const prev = partials.get(id) || "";
+      partials.set(id, prev + (m.delta || ""));
+      render();
+      return;
+    }
+
+    // Final transcript for a committed item
+    if (t === "conversation.item.input_audio_transcription.completed") {
+      const id = m.item_id || m.id;
+      const text = (m.transcript || "").trim();
+      partials.delete(id);
+      if (text) {
+        segments.push({
+          id: id || (Date.now() + "_" + Math.random().toString(36).slice(2, 7)),
+          ts: Date.now(),
+          text,
+          completed: true,
+        });
+        save();
+      }
+      render();
+      return;
+    }
+
+    if (t === "conversation.item.input_audio_transcription.failed") {
+      const id = m.item_id || m.id;
+      partials.delete(id);
+      render();
+      return;
+    }
+
+    // Server-side VAD speech boundary events: nothing to do for UI here
+    // input_audio_buffer.speech_started / .speech_stopped / .committed
+  }
+
+  // ---- Start / Stop ---------------------------------------------------------
+  async function start() {
+    showErr("");
+    setStatus("接続中…", "connecting");
+    try {
+      await connectWS();
+    } catch (e) {
+      showErr("サーバーに接続できません: " + e.message);
+      setStatus("待機中");
+      return;
+    }
+    try {
+      await startAudio();
+    } catch (e) {
+      showErr("マイクが使えません: " + e.message);
+      try { ws.close(); } catch {}
+      setStatus("待機中");
+      return;
+    }
+    running = true;
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+    setStatus("認識中", "live");
+    // Refresh mic labels (now that permission was granted)
+    listMics();
+  }
+
+  function stop() {
+    running = false;
+    stopAudio();
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try { ws.send(JSON.stringify({ type: "input_audio_buffer.commit" })); } catch {}
+      try { ws.close(); } catch {}
+    }
+    ws = null;
+    partials.clear();
+    render();
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+    setStatus("停止中");
+  }
+
+  // ---- Translate / Summarize via /complete ----------------------------------
+  async function callComplete(prompt, model = "gpt-4o-mini") {
+    const res = await fetch("/complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, model }),
+    });
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      throw new Error(e.error?.message || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    return data.text || "";
+  }
+
+  async function translatePending() {
+    const pending = segments.filter(s => !s.translation && s.text);
+    if (!pending.length) {
+      summaryEl.textContent = "翻訳が必要なセグメントはありません。";
+      return;
+    }
+    summaryEl.textContent = `翻訳中... (${pending.length}件)`;
+    try {
+      const payload = pending.map(s => ({ id: s.id, text: s.text }));
+      const prompt =
+        "以下のセグメントを各言語の相手側に翻訳してください。" +
+        "英語のものは日本語に、日本語のものは英語に。" +
+        "出力は厳密に次のJSON配列のみ(コードフェンス不要): " +
+        `[{"id":"...","translation":"..."}]\n\nセグメント:\n${JSON.stringify(payload)}`;
+      const text = await callComplete(prompt, "gpt-4o-mini");
+      const m = text.match(/\[[\s\S]*\]/);
+      if (!m) throw new Error("応答をJSONとして解析できませんでした");
+      const arr = JSON.parse(m[0]);
+      const byId = new Map(arr.map(x => [x.id, x.translation]));
+      let n = 0;
+      for (const s of segments) {
+        if (byId.has(s.id)) { s.translation = byId.get(s.id); n++; }
+      }
+      save();
+      render();
+      summaryEl.textContent = `${n}件のセグメントを翻訳しました。`;
+    } catch (e) {
+      summaryEl.textContent = "翻訳に失敗しました: " + e.message;
+    }
+  }
+
+  async function summarize() {
+    if (!segments.length) {
+      summaryEl.textContent = "まだ文字起こしがありません。";
+      return;
+    }
+    summaryEl.textContent = "要約中...";
+    try {
+      const full = segments.map(s => `[${fmtTime(s.ts)}] ${s.text}`).join("\n");
+      const prompt =
+`以下は英語と日本語が混在する会議の文字起こしです。日本語で簡潔に要約してください。
+
+出力フォーマット:
+## 要約
+(3-5行で全体像)
+
+## 主な論点
+- ...
+
+## 決定事項
+- (なければ「なし」)
+
+## ToDo / Action Items
+- (なければ「なし」)
+
+文字起こし:
+${full}`;
+      const text = await callComplete(prompt, "gpt-4o-mini");
+      summaryEl.textContent = text;
+    } catch (e) {
+      summaryEl.textContent = "要約に失敗しました: " + e.message;
+    }
+  }
+
+  // ---- Save -----------------------------------------------------------------
+  function download(filename, content, mime = "text/plain") {
+    const blob = new Blob([content], { type: mime + ";charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 0);
+  }
+  function exportTxt() {
+    const lines = segments.map(s => `[${fmtTime(s.ts)}] ${s.text}`);
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
+    download(`transcript_${stamp}.txt`, lines.join("\n") + "\n");
+  }
+  function exportMd() {
+    const lines = ["# Meeting Transcript", "", `_Generated: ${new Date().toLocaleString("ja-JP")}_`, ""];
+    for (const s of segments) {
+      lines.push(`**[${fmtTime(s.ts)}]**`, "", `> ${s.text}`);
+      if (s.translation) lines.push("", `> ↳ ${s.translation}`);
+      lines.push("");
+    }
+    const sum = summaryEl.textContent || "";
+    if (sum && !sum.startsWith("要約中") && !sum.startsWith("翻訳")) {
+      lines.push("---", "", "# Summary", "", sum);
+    }
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
+    download(`transcript_${stamp}.md`, lines.join("\n"), "text/markdown");
+  }
+
+  // ---- Wire -----------------------------------------------------------------
+  startBtn.addEventListener("click", start);
+  stopBtn.addEventListener("click", stop);
+  translateBtn.addEventListener("click", translatePending);
+  summarizeBtn.addEventListener("click", summarize);
+  clearSummaryBtn.addEventListener("click", () => { summaryEl.textContent = ""; });
+  downloadTxt.addEventListener("click", exportTxt);
+  downloadMd.addEventListener("click", exportMd);
+  function clearTranscript() {
+    if (segments.length === 0 && partials.size === 0) return;
+    if (confirm("文字起こしをすべて削除しますか? (ダウンロード済みファイルには影響しません)")) {
+      segments = []; partials.clear(); save(); render();
+    }
+  }
+  clearAllBtn.addEventListener("click", () => {
+    clearTranscript();
+    summaryEl.textContent = "";
+  });
+  clearTranscriptBtn.addEventListener("click", clearTranscript);
+
+  // Init
+  load();
+  setStatus("待機中");
+  listMics();
+  navigator.mediaDevices?.addEventListener?.("devicechange", listMics);
+})();
+</script>
+</body>
+</html>

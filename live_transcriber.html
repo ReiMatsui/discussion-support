@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<title>Live Transcriber - 英日リアルタイム文字起こし</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", "Segoe UI", sans-serif;
+    background: #fafafa;
+    color: #1a1a1a;
+    line-height: 1.55;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 16px; }
+  header {
+    background: #fff;
+    border: 1px solid #e5e5e5;
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 12px;
+    position: sticky;
+    top: 8px;
+    z-index: 10;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+  }
+  h1 {
+    font-size: 17px;
+    margin: 0 0 10px 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .dot {
+    display: inline-block;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: #c0c0c0;
+  }
+  .dot.live { background: #e53935; animation: pulse 1.2s infinite; }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+  }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  button {
+    font: inherit;
+    border: 1px solid #d0d0d0;
+    background: #fff;
+    color: #1a1a1a;
+    padding: 7px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  button:hover { background: #f0f0f0; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  button.primary {
+    background: #1a1a1a;
+    color: #fff;
+    border-color: #1a1a1a;
+  }
+  button.primary:hover { background: #333; }
+  button.danger {
+    background: #e53935;
+    color: #fff;
+    border-color: #e53935;
+  }
+  button.danger:hover { background: #c62828; }
+  select {
+    font: inherit;
+    padding: 7px 10px;
+    border-radius: 8px;
+    border: 1px solid #d0d0d0;
+    background: #fff;
+  }
+  .status {
+    margin-left: auto;
+    font-size: 12px;
+    color: #666;
+  }
+  .panel {
+    background: #fff;
+    border: 1px solid #e5e5e5;
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 12px;
+  }
+  .panel h2 {
+    font-size: 13px;
+    margin: 0 0 8px 0;
+    color: #666;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  #transcript {
+    min-height: 240px;
+    max-height: 50vh;
+    overflow-y: auto;
+    padding: 8px 4px;
+    font-size: 15px;
+  }
+  .seg {
+    padding: 6px 0;
+    border-bottom: 1px dashed #ececec;
+  }
+  .seg:last-child { border-bottom: none; }
+  .seg .ts {
+    font-size: 11px;
+    color: #888;
+    margin-right: 8px;
+  }
+  .seg .lang {
+    display: inline-block;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-right: 6px;
+    background: #eee;
+    color: #555;
+  }
+  .seg .lang.en { background: #e3f2fd; color: #1565c0; }
+  .seg .lang.ja { background: #fce4ec; color: #ad1457; }
+  .seg .text { color: #1a1a1a; }
+  .seg .translation {
+    margin-top: 4px;
+    margin-left: 0;
+    padding: 4px 8px;
+    background: #f7f7f7;
+    border-left: 3px solid #b0b0b0;
+    color: #555;
+    font-size: 14px;
+  }
+  .interim {
+    color: #888;
+    font-style: italic;
+  }
+  #summary {
+    white-space: pre-wrap;
+    font-size: 14px;
+    color: #333;
+    padding: 4px;
+    min-height: 30px;
+  }
+  .hint {
+    font-size: 12px;
+    color: #777;
+    margin-top: 6px;
+  }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .grow { flex: 1; }
+  .meter {
+    height: 4px;
+    background: #eee;
+    border-radius: 2px;
+    overflow: hidden;
+    margin-top: 8px;
+  }
+  .meter > div {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #4caf50, #ffc107, #e53935);
+    transition: width 0.1s;
+  }
+  .err {
+    background: #fdecea;
+    color: #b71c1c;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    margin-top: 8px;
+  }
+  kbd {
+    background: #eee;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-size: 11px;
+    font-family: inherit;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1><span id="liveDot" class="dot"></span> Live Transcriber <span style="font-weight:400;font-size:13px;color:#888;">英日リアルタイム文字起こし</span></h1>
+    <div class="controls">
+      <button id="startBtn" class="primary">▶ 開始</button>
+      <button id="stopBtn" class="danger" disabled>■ 停止</button>
+      <label style="font-size:13px;color:#555;">認識言語:</label>
+      <select id="langSel">
+        <option value="en-US">English (US)</option>
+        <option value="en-GB">English (UK)</option>
+        <option value="ja-JP">日本語</option>
+      </select>
+      <button id="swapLang" title="認識言語をトグル切替">⇄ 言語切替</button>
+      <span class="status" id="status">待機中</span>
+    </div>
+    <div class="meter"><div id="meterBar"></div></div>
+    <div id="err"></div>
+  </header>
+
+  <div class="panel">
+    <h2>文字起こし</h2>
+    <div id="transcript"></div>
+    <div class="hint">
+      話している言語に合わせて <b>言語切替</b> を押してください。発話中の文字は薄く表示され、確定すると黒くなります。
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>翻訳 / 要約 (Claude)</h2>
+    <div class="row" style="margin-bottom:8px;">
+      <button id="translateBtn">未翻訳セグメントを翻訳</button>
+      <button id="summarizeBtn">議事録を要約</button>
+      <button id="clearSummary">クリア</button>
+    </div>
+    <div id="summary"></div>
+  </div>
+
+  <div class="panel">
+    <h2>保存</h2>
+    <div class="row">
+      <button id="downloadTxt">.txt をダウンロード</button>
+      <button id="downloadMd">.md をダウンロード(翻訳付き)</button>
+      <button id="clearAll">全消去</button>
+    </div>
+    <div class="hint">セグメントとタイムスタンプは自動的にブラウザに保存されます (リロードしても復元)。</div>
+  </div>
+
+</div>
+
+<script>
+(() => {
+  // ---- State ------------------------------------------------------------
+  const STORAGE_KEY = "live_transcriber_segments_v1";
+  let segments = []; // {id, ts, lang, text, translation?}
+  let recognition = null;
+  let running = false;
+  let restartTimer = null;
+  let audioCtx = null;
+  let analyser = null;
+  let micStream = null;
+
+  // ---- DOM --------------------------------------------------------------
+  const $ = (id) => document.getElementById(id);
+  const startBtn = $("startBtn");
+  const stopBtn = $("stopBtn");
+  const langSel = $("langSel");
+  const swapLang = $("swapLang");
+  const statusEl = $("status");
+  const transcriptEl = $("transcript");
+  const liveDot = $("liveDot");
+  const meterBar = $("meterBar");
+  const errEl = $("err");
+  const translateBtn = $("translateBtn");
+  const summarizeBtn = $("summarizeBtn");
+  const clearSummary = $("clearSummary");
+  const summaryEl = $("summary");
+  const downloadTxt = $("downloadTxt");
+  const downloadMd = $("downloadMd");
+  const clearAll = $("clearAll");
+
+  // ---- Persistence ------------------------------------------------------
+  function load() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) segments = JSON.parse(raw);
+    } catch (e) { segments = []; }
+    render();
+  }
+  function save() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(segments)); } catch (e) {}
+  }
+
+  // ---- Render -----------------------------------------------------------
+  function fmtTime(ts) {
+    const d = new Date(ts);
+    return d.toLocaleTimeString("ja-JP", { hour12: false });
+  }
+  function langChip(lang) {
+    const code = (lang || "").startsWith("ja") ? "ja" : "en";
+    const label = code === "ja" ? "日本語" : "EN";
+    return `<span class="lang ${code}">${label}</span>`;
+  }
+  function escapeHtml(s) {
+    return (s || "").replace(/[&<>"']/g, c =>
+      ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])
+    );
+  }
+  function render(interimText = "", interimLang = "") {
+    const parts = segments.map(s => `
+      <div class="seg" data-id="${s.id}">
+        <span class="ts">${fmtTime(s.ts)}</span>
+        ${langChip(s.lang)}
+        <span class="text">${escapeHtml(s.text)}</span>
+        ${s.translation ? `<div class="translation">↳ ${escapeHtml(s.translation)}</div>` : ""}
+      </div>
+    `).join("");
+    const interim = interimText
+      ? `<div class="seg interim"><span class="ts">…</span>${langChip(interimLang)}<span class="text">${escapeHtml(interimText)}</span></div>`
+      : "";
+    transcriptEl.innerHTML = parts + interim;
+    transcriptEl.scrollTop = transcriptEl.scrollHeight;
+  }
+
+  // ---- Recognition ------------------------------------------------------
+  function getSR() {
+    return window.SpeechRecognition || window.webkitSpeechRecognition;
+  }
+
+  function setRunning(v) {
+    running = v;
+    startBtn.disabled = v;
+    stopBtn.disabled = !v;
+    liveDot.classList.toggle("live", v);
+    statusEl.textContent = v ? `認識中 (${langSel.value})` : "停止中";
+  }
+
+  function showErr(msg) {
+    errEl.innerHTML = msg ? `<div class="err">${escapeHtml(msg)}</div>` : "";
+  }
+
+  async function startMic() {
+    try {
+      micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const src = audioCtx.createMediaStreamSource(micStream);
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 512;
+      src.connect(analyser);
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      function tick() {
+        if (!analyser) return;
+        analyser.getByteTimeDomainData(data);
+        let max = 0;
+        for (let i = 0; i < data.length; i++) {
+          const v = Math.abs(data[i] - 128);
+          if (v > max) max = v;
+        }
+        const pct = Math.min(100, (max / 64) * 100);
+        meterBar.style.width = pct + "%";
+        requestAnimationFrame(tick);
+      }
+      tick();
+    } catch (e) {
+      showErr("マイクへのアクセスが拒否されました: " + e.message);
+      throw e;
+    }
+  }
+
+  function stopMic() {
+    if (micStream) {
+      micStream.getTracks().forEach(t => t.stop());
+      micStream = null;
+    }
+    if (audioCtx) { audioCtx.close(); audioCtx = null; }
+    analyser = null;
+    meterBar.style.width = "0%";
+  }
+
+  function startRecognition() {
+    const SR = getSR();
+    if (!SR) {
+      showErr("このブラウザは Web Speech API に対応していません。Chrome か Safari でお試しください。");
+      return;
+    }
+    recognition = new SR();
+    recognition.lang = langSel.value;
+    recognition.continuous = true;
+    recognition.interimResults = true;
+
+    recognition.onresult = (ev) => {
+      let interim = "";
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        const res = ev.results[i];
+        const text = res[0].transcript.trim();
+        if (!text) continue;
+        if (res.isFinal) {
+          segments.push({
+            id: Date.now() + "_" + Math.random().toString(36).slice(2,7),
+            ts: Date.now(),
+            lang: recognition.lang,
+            text,
+          });
+          save();
+          render();
+        } else {
+          interim += text + " ";
+        }
+      }
+      if (interim) render(interim.trim(), recognition.lang);
+    };
+
+    recognition.onerror = (e) => {
+      if (e.error === "no-speech" || e.error === "aborted") return;
+      showErr("認識エラー: " + e.error);
+    };
+
+    recognition.onend = () => {
+      // Auto restart while running (continuous mode often stops itself after silence)
+      if (running) {
+        clearTimeout(restartTimer);
+        restartTimer = setTimeout(() => {
+          try { recognition.start(); } catch (e) {}
+        }, 150);
+      }
+    };
+
+    try {
+      recognition.start();
+    } catch (e) {
+      showErr("認識を開始できませんでした: " + e.message);
+    }
+  }
+
+  function stopRecognition() {
+    clearTimeout(restartTimer);
+    if (recognition) {
+      try { recognition.onend = null; recognition.stop(); } catch (e) {}
+      recognition = null;
+    }
+  }
+
+  // ---- Translate / Summarize via Cowork ---------------------------------
+  function hasCowork() {
+    return typeof window !== "undefined" && window.cowork && typeof window.cowork.askClaude === "function";
+  }
+
+  async function translatePending() {
+    const pending = segments.filter(s => !s.translation);
+    if (pending.length === 0) {
+      summaryEl.textContent = "翻訳が必要なセグメントはありません。";
+      return;
+    }
+    if (!hasCowork()) {
+      summaryEl.textContent = "Claudeが利用できない環境です(Cowork外)。代わりに、保存した .md ファイルを Claude に貼って翻訳してください。";
+      return;
+    }
+    summaryEl.textContent = `翻訳中... (${pending.length}件)`;
+    try {
+      const payload = pending.map(s => ({
+        id: s.id,
+        lang: s.lang.startsWith("ja") ? "ja" : "en",
+        text: s.text,
+      }));
+      const prompt = `以下は会議の文字起こしセグメントです。各セグメントを、英語のものは日本語に、日本語のものは英語に翻訳してください。
+出力は厳密に以下のJSON形式のみ(コードブロック不要):
+[{"id":"...","translation":"..."}]
+セグメント:
+${JSON.stringify(payload)}`;
+      const res = await window.cowork.askClaude(prompt, payload);
+      // res could be a string; parse JSON
+      const text = typeof res === "string" ? res : (res && res.text) || JSON.stringify(res);
+      const match = text.match(/\[[\s\S]*\]/);
+      if (!match) throw new Error("Claudeの応答をパースできませんでした");
+      const arr = JSON.parse(match[0]);
+      const byId = new Map(arr.map(x => [x.id, x.translation]));
+      for (const s of segments) {
+        if (byId.has(s.id)) s.translation = byId.get(s.id);
+      }
+      save();
+      render();
+      summaryEl.textContent = `${arr.length}件のセグメントを翻訳しました。`;
+    } catch (e) {
+      summaryEl.textContent = "翻訳に失敗しました: " + e.message;
+    }
+  }
+
+  async function summarize() {
+    if (segments.length === 0) {
+      summaryEl.textContent = "まだ文字起こしがありません。";
+      return;
+    }
+    if (!hasCowork()) {
+      summaryEl.textContent = "Claudeが利用できない環境です(Cowork外)。";
+      return;
+    }
+    summaryEl.textContent = "要約中...";
+    try {
+      const fullText = segments.map(s => `[${fmtTime(s.ts)}] (${s.lang}) ${s.text}`).join("\n");
+      const prompt = `以下は英語と日本語が混在する会議の文字起こしです。日本語で要約してください。
+
+出力形式:
+## 要約
+(3-5行で全体像)
+
+## 主な論点
+- ...
+
+## 決定事項
+- (なければ「なし」)
+
+## ToDo / Action Items
+- (なければ「なし」)
+
+文字起こし:
+${fullText}`;
+      const res = await window.cowork.askClaude(prompt, segments);
+      const text = typeof res === "string" ? res : (res && res.text) || JSON.stringify(res);
+      summaryEl.textContent = text;
+    } catch (e) {
+      summaryEl.textContent = "要約に失敗しました: " + e.message;
+    }
+  }
+
+  // ---- Download ---------------------------------------------------------
+  function download(filename, content, mime = "text/plain") {
+    const blob = new Blob([content], { type: mime + ";charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 0);
+  }
+
+  function exportTxt() {
+    const lines = segments.map(s => `[${fmtTime(s.ts)}] ${s.text}`);
+    const stamp = new Date().toISOString().slice(0,16).replace(/[:T]/g, "-");
+    download(`transcript_${stamp}.txt`, lines.join("\n") + "\n");
+  }
+
+  function exportMd() {
+    const lines = ["# Meeting Transcript", "", `_Generated: ${new Date().toLocaleString("ja-JP")}_`, ""];
+    for (const s of segments) {
+      lines.push(`**[${fmtTime(s.ts)}]** \`${s.lang}\``);
+      lines.push("");
+      lines.push("> " + s.text);
+      if (s.translation) {
+        lines.push("");
+        lines.push("> ↳ " + s.translation);
+      }
+      lines.push("");
+    }
+    if (summaryEl.textContent && !summaryEl.textContent.startsWith("翻訳") && !summaryEl.textContent.startsWith("要約中")) {
+      lines.push("---", "", "# Summary", "", summaryEl.textContent);
+    }
+    const stamp = new Date().toISOString().slice(0,16).replace(/[:T]/g, "-");
+    download(`transcript_${stamp}.md`, lines.join("\n"), "text/markdown");
+  }
+
+  // ---- Wire events ------------------------------------------------------
+  startBtn.addEventListener("click", async () => {
+    showErr("");
+    try {
+      await startMic();
+    } catch (e) { return; }
+    startRecognition();
+    setRunning(true);
+  });
+
+  stopBtn.addEventListener("click", () => {
+    stopRecognition();
+    stopMic();
+    setRunning(false);
+  });
+
+  langSel.addEventListener("change", () => {
+    if (running) {
+      // restart with new language
+      stopRecognition();
+      startRecognition();
+      statusEl.textContent = `認識中 (${langSel.value})`;
+    }
+  });
+
+  swapLang.addEventListener("click", () => {
+    const cur = langSel.value;
+    langSel.value = cur.startsWith("ja") ? "en-US" : "ja-JP";
+    langSel.dispatchEvent(new Event("change"));
+  });
+
+  translateBtn.addEventListener("click", translatePending);
+  summarizeBtn.addEventListener("click", summarize);
+  clearSummary.addEventListener("click", () => { summaryEl.textContent = ""; });
+  downloadTxt.addEventListener("click", exportTxt);
+  downloadMd.addEventListener("click", exportMd);
+  clearAll.addEventListener("click", () => {
+    if (confirm("全ての文字起こしを削除しますか? (保存済みファイルには影響しません)")) {
+      segments = [];
+      save();
+      render();
+      summaryEl.textContent = "";
+    }
+  });
+
+  // Keyboard shortcut: space (when not in input) to swap language
+  document.addEventListener("keydown", (e) => {
+    if (e.code === "Space" && e.target === document.body) {
+      e.preventDefault();
+      swapLang.click();
+    }
+  });
+
+  // Init
+  load();
+  if (!getSR()) {
+    showErr("このブラウザは Web Speech API に対応していません。Chromeでお試しください(Safariは制限あり)。");
+    startBtn.disabled = true;
+  }
+})();
+</script>
+</body>
+</html>
