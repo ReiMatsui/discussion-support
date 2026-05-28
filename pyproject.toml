@@ -18,6 +18,10 @@ dependencies = [
     "structlog>=24.1",
     "rich>=13.7",
     "anyio>=4.4",
+    "opencv-python>=4.13.0.92",
+    "mediapipe>=0.10.35",
+    "faster-whisper>=1.2.1",
+    "sounddevice>=0.5.5",
 ]
 
 [project.optional-dependencies]
