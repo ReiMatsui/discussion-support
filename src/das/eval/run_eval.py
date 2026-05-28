@@ -753,9 +753,27 @@ async def run_eval(
 
     async def _job(
         cond_name: str, factory: ConditionFactory, run_idx: int
-    ) -> tuple[str, int, SingleRunResult]:
+    ) -> tuple[str, int, SingleRunResult] | None:
         # condition 別の制限 → global の制限 の順で取得 (deadlock 回避のため順序固定)
         async with per_cond_semaphores[cond_name], semaphore:
+            # **soft budget gate**: 新規 run 開始前にチェック。
+            # 超過していたら新規 run はスキップして None を返す (= 進行中の run は完走)
+            tracker = getattr(llm, "cost_tracker", None) if llm is not None else None
+            if tracker is not None and tracker.should_skip_new_run():
+                _log.info(
+                    "eval.run.skipped_budget",
+                    condition=cond_name,
+                    run_idx=run_idx,
+                    cumulative_usd=round(tracker.total_usd, 4),
+                    budget_usd=tracker.budget_usd,
+                )
+                completed_counter["n"] += 1
+                if progress is not None:
+                    ret = progress(cond_name, completed_counter["n"], total)
+                    if hasattr(ret, "__await__"):
+                        await ret  # type: ignore[func-returns-value]
+                return None
+
             condition = factory()
             run_id = f"{cond_name}-run-{run_idx:03d}-{uuid4().hex[:6]}"
             _log.info("eval.run.start", run_id=run_id, condition=cond_name)
@@ -805,15 +823,24 @@ async def run_eval(
     # 部分結果でも全条件の差分が見えるよう、gather は return_exceptions=True で
     # 個別タスクの失敗 (BudgetExceeded など) を許容し、終わったぶんは保存しておく。
     # 後でこの中に Exception があれば再 raise する (元のセマンティクスを保つ)。
+    #
+    # 戻り値 3 種:
+    #   - tuple[str, int, SingleRunResult]: 正常完了
+    #   - None                              : soft budget で意図的にスキップ
+    #   - BaseException                     : hard budget や予期せぬ例外
     gathered = await asyncio.gather(*tasks, return_exceptions=True)
     completed_results: list[tuple[str, int, SingleRunResult]] = []
+    n_skipped = 0
     first_exception: BaseException | None = None
     for item in gathered:
         if isinstance(item, BaseException):
             if first_exception is None:
                 first_exception = item
             continue
-        completed_results.append(item)  # type: ignore[arg-type]
+        if item is None:
+            n_skipped += 1
+            continue
+        completed_results.append(item)
     # condition の順、run_idx の順に並べ直して再現性のある runs リストにする
     completed_results.sort(key=lambda triple: (cond_order.index(triple[0]), triple[1]))
     runs: list[SingleRunResult] = [t[2] for t in completed_results]
@@ -829,12 +856,13 @@ async def run_eval(
     if target_dir is not None:
         # メタ情報
         n_completed = len(runs)
-        n_failed = len(gathered) - len(completed_results)
+        n_failed = len(gathered) - len(completed_results) - n_skipped
         meta = {
             "eval_id": eval_id,
             "topic": topic,
             "n_runs_per_condition": n_runs,
             "n_runs_completed": n_completed,
+            "n_runs_skipped_budget": n_skipped,
             "n_runs_failed": n_failed,
             "halted_by_exception": first_exception is not None,
             "first_exception": (

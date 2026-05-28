@@ -491,6 +491,40 @@ async def test_run_eval_incremental_save_truncates_existing_file(
     assert [p["turn_id"] for p in parsed] == [1, 2]
 
 
+async def test_run_eval_soft_budget_gates_new_runs_but_completes_inflight(
+    tmp_path: Path,
+) -> None:
+    """soft budget が超過した時点で、新規 run は skip。既に始まった run は完走。"""
+
+    from das.llm import CostTracker
+
+    llm = _fake_llm("発言")
+    personas = [build_persona(name="A")]
+
+    # tracker を仕込んで client に紐付ける
+    tracker = CostTracker(budget_usd=1e-6)  # ほぼゼロの soft budget
+    tracker._total = 1.0  # type: ignore[attr-defined]  # 開始時点で既に超過
+    llm._cost_tracker = tracker  # type: ignore[attr-defined]
+
+    await run_eval(
+        topic="t",
+        personas=personas,
+        condition_factories={"none": ConditionNone},
+        n_runs=3,
+        max_turns=1,
+        llm=llm,
+        eval_dir=tmp_path,
+        eval_id="soft-gate",
+    )
+
+    meta = json.loads((tmp_path / "soft-gate" / "meta.json").read_text())
+    # 3 run すべて skip されているはず (= 既に超過、新規開始しない)
+    assert meta["n_runs_skipped_budget"] == 3
+    assert meta["n_runs_completed"] == 0
+    # exception は無い (skip は意図的な動作)
+    assert meta["halted_by_exception"] is False
+
+
 async def test_run_eval_per_condition_concurrency_limits_active_runs(
     tmp_path: Path,
 ) -> None:

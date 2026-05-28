@@ -158,7 +158,7 @@ Phase 1 で固めた評価パイプラインをそのまま使う。**評価方�
 - PTFA / Empty Chair は **本筋とは別表**で扱う (engine が違うので交絡)
 - 段階 A (Linking F1) は **Phase 1 最初の 1 週間**で必ず通す (citation_rate 解釈の保険)
 - n は **政策トピック × n=5** で固める ($1 制約のため n=10 から縮小)
-- **`--budget` で実コストを enforce する**: `das eval --budget 1.0` のように指定すると、累積 cost が 1 USD を超えた時点で `BudgetExceeded` で停止し、それまでの run 結果は eval_dir に保存される。`cost_snapshot.json` も自動保存
+- **`--budget` (soft)** で実コストを enforce する: `das eval --budget 1.5` のように指定すると、累積 cost が 1.5 USD を超えた時点で **新規 run の開始だけが gate** される。**進行中の run は最後まで完走**するので部分結果が確実に残る (in-flight run の暴走防止に **`--hard-budget`** を併用するのが安全)
 
 ---
 

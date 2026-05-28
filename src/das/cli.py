@@ -203,8 +203,15 @@ def eval_cmd(
     budget: float | None = typer.Option(
         None,
         "--budget",
-        help="OpenAI 累積コスト上限 (USD)。超過すると BudgetExceeded で停止し、"
-        "それまでの部分結果を保存する。例: --budget 1.0",
+        help="OpenAI 累積コストの **ソフト上限** (USD)。超過後、"
+        "新規 run の開始は gate されるが、進行中の run は最後まで完走する。例: --budget 1.5",
+    ),
+    hard_budget: float | None = typer.Option(
+        None,
+        "--hard-budget",
+        help="OpenAI 累積コストの **ハード上限** (USD)。超過すると **進行中の "
+        "API 呼び出しごと**即停止 (BudgetExceeded)。--budget の 1.5〜2x を推奨。"
+        "省略すると hard cap なし (in-flight は際限なく完走)",
     ),
     cond_concurrency: str = typer.Option(
         "",
@@ -264,6 +271,7 @@ def eval_cmd(
             max_web_searches=max_web_searches,
             stance_polling=stance_polling,
             budget=budget,
+            hard_budget=hard_budget,
             condition_concurrency=parsed_cond_conc,
             linking_top_k=linking_top_k,
             linking_model=linking_model.strip() or None,
@@ -298,7 +306,13 @@ def aqua_rescore(
     budget: float | None = typer.Option(
         None,
         "--budget",
-        help="OpenAI 累積コスト上限 (USD)。超過したら部分結果を保存して停止。例: --budget 0.5",
+        help="累積コストの **ソフト上限** (USD)。超過後の新規 transcript の "
+        "scoring は skip、進行中は完走。例: --budget 0.5",
+    ),
+    hard_budget: float | None = typer.Option(
+        None,
+        "--hard-budget",
+        help="累積コストの **ハード上限** (USD)。進行中の API 呼び出しごと即停止。",
     ),
 ) -> None:
     """既存 eval ディレクトリ配下の全 transcript を AQuA で再採点する。
@@ -309,7 +323,8 @@ def aqua_rescore(
     """
 
     asyncio.run(_run_aqua_rescore(eval_dir=eval_dir, concurrency=concurrency,
-                                  n_context=n_context, model=model, budget=budget))
+                                  n_context=n_context, model=model,
+                                  budget=budget, hard_budget=hard_budget))
 
 
 @app.command(name="listen")
@@ -445,6 +460,7 @@ async def _run_aqua_rescore(
     n_context: int,
     model: str | None,
     budget: float | None = None,
+    hard_budget: float | None = None,
 ) -> None:
     """既存 eval ディレクトリの全 transcript を AQuA で再採点する。"""
 
@@ -474,14 +490,30 @@ async def _run_aqua_rescore(
 
     typer.echo(f"[aqua] found {len(run_paths)} transcripts")
 
-    tracker = CostTracker(budget_usd=budget) if budget is not None else CostTracker()
+    tracker = (
+        CostTracker(budget_usd=budget, hard_budget_usd=hard_budget)
+        if (budget is not None or hard_budget is not None)
+        else CostTracker()
+    )
     if budget is not None:
-        typer.echo(f"[aqua] budget cap: ${budget:.4f}")
+        typer.echo(f"[aqua] soft budget: ${budget:.4f} (in-flight transcript は完走)")
+    if hard_budget is not None:
+        typer.echo(f"[aqua] hard budget: ${hard_budget:.4f}")
     agent = AQuAAgent(llm=OpenAIClient(cost_tracker=tracker))
 
     by_condition: dict[str, list] = defaultdict(list)
     halted = False
+    n_skipped = 0
     for i, (condition, run_id, tpath) in enumerate(run_paths, start=1):
+        # soft budget gate: 新規 transcript の scoring 開始前にチェック
+        if tracker.should_skip_new_run():
+            n_skipped += 1
+            typer.echo(
+                f"[aqua] ({i}/{len(run_paths)}) skipped {condition}/{run_id} "
+                f"(soft budget reached: {tracker.format_status()})"
+            )
+            halted = True
+            continue
         typer.echo(f"[aqua] ({i}/{len(run_paths)}) {condition}/{run_id}")
         transcript = _load_transcript(tpath)
         try:
@@ -492,7 +524,7 @@ async def _run_aqua_rescore(
                 model=model,
             )
         except BudgetExceeded as exc:
-            typer.echo(f"[aqua] BUDGET EXCEEDED: {exc}", err=True)
+            typer.echo(f"[aqua] HARD BUDGET EXCEEDED: {exc}", err=True)
             typer.echo("[aqua] stopping. Partial results saved so far.", err=True)
             halted = True
             break  # 末尾の summary 保存に進むためここで停止
@@ -513,6 +545,7 @@ async def _run_aqua_rescore(
         "eval_dir": str(eval_dir),
         "n_runs_scored": sum(len(v) for v in by_condition.values()),
         "n_runs_total": len(run_paths),
+        "n_runs_skipped_budget": n_skipped,
         "n_context": n_context,
         "halted_by_budget": halted,
         "cost": tracker.snapshot(),
@@ -797,6 +830,7 @@ async def _run_eval_cli(
     max_web_searches: int = 5,
     stance_polling: bool = False,
     budget: float | None = None,
+    hard_budget: float | None = None,
     condition_concurrency: dict[str, int] | None = None,
     linking_top_k: int = 5,
     linking_model: str | None = None,
@@ -839,9 +873,21 @@ async def _run_eval_cli(
     docs_dir = docs if docs is not None else preset_docs_dir
     target_eval_dir = eval_dir if eval_dir is not None else settings.data_dir / "eval"
 
-    tracker = CostTracker(budget_usd=budget) if budget is not None else CostTracker()
+    tracker = (
+        CostTracker(budget_usd=budget, hard_budget_usd=hard_budget)
+        if (budget is not None or hard_budget is not None)
+        else CostTracker()
+    )
     if budget is not None:
-        typer.echo(f"[eval] budget cap: ${budget:.4f} (BudgetExceeded で停止し部分結果は保存される)")
+        typer.echo(
+            f"[eval] soft budget: ${budget:.4f} "
+            f"(超過後の新規 run は skip、in-flight は完走)"
+        )
+    if hard_budget is not None:
+        typer.echo(
+            f"[eval] hard budget: ${hard_budget:.4f} "
+            f"(超過したら API 呼び出しごと即停止)"
+        )
     llm = OpenAIClient(cost_tracker=tracker)
     factories: dict = {}
     for name in (c.strip() for c in conditions.split(",") if c.strip()):
