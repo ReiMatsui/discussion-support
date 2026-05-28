@@ -224,6 +224,7 @@ class ConditionFullProposal:
         *,
         threshold: float | None = None,
         top_k: int = 5,
+        top_k_per_source: int | None = None,
         max_info_items: int = 2,
         facilitator: FacilitationAgent | None = None,
         enable_web_search: bool = False,
@@ -232,6 +233,9 @@ class ConditionFullProposal:
     ) -> None:
         """
         Args:
+            top_k_per_source: LinkingAgent の候補選定で source 別 top-N を使う場合の値。
+                指定すると utterance / document / web の各バケットから top-N を取る。
+                未指定なら従来通りの混合 top-k。
             linking_model: LinkingAgent の judgment 呼び出しで使う軽量モデル名
                 (例: ``"gpt-5-nano"``)。None なら既定モデル。
                 Linking が全コストの 80-90% を占めるので、ここを cheap モデルに
@@ -241,6 +245,7 @@ class ConditionFullProposal:
         self._llm = llm or OpenAIClient()
         self._threshold = threshold
         self._top_k = top_k
+        self._top_k_per_source = top_k_per_source
         self._max_info_items = max_info_items
         self._enable_web_search = enable_web_search
         self._max_web_searches = max_web_searches
@@ -305,6 +310,7 @@ class ConditionFullProposal:
             store=store,
             threshold=self._threshold,
             top_k=self._top_k,
+            top_k_per_source=self._top_k_per_source,
             web_search=web_search,
             linking_model=self._linking_model,
         )

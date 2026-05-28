@@ -56,6 +56,7 @@ class Orchestrator:
         store: GraphStore | None = None,
         threshold: float | None = None,
         top_k: int = 5,
+        top_k_per_source: int | None = None,
         web_search: WebSearchAgent | None = None,
         linking_model: str | None = None,
     ) -> Orchestrator:
@@ -66,6 +67,10 @@ class Orchestrator:
 
         ``linking_model`` を指定すると、LinkingAgent の判定呼び出し時のみ
         その軽量モデル (例: ``gpt-5-nano``) を使う。コスト削減策。
+
+        ``top_k_per_source`` を指定すると、LinkingAgent の候補選定が source 別
+        モード (utterance / document / web の各バケットから top-N) になる。
+        指定しなければ従来通り混合 top-k。
         """
 
         llm = llm or OpenAIClient()
@@ -78,6 +83,7 @@ class Orchestrator:
             llm=llm,
             threshold=threshold,
             top_k=top_k,
+            top_k_per_source=top_k_per_source,
             model_override=linking_model,
         )
 

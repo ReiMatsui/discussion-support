@@ -223,8 +223,16 @@ def eval_cmd(
     linking_top_k: int = typer.Option(
         5,
         "--linking-top-k",
-        help="LinkingAgent の candidate 数。下げると per-node の LLM 呼び出しが減って "
-        "コスト減 (5→3 で 40% 削減)。recall は下がるが弱い候補を切るだけ",
+        help="LinkingAgent の candidate 数 (混合 top-k モード)。"
+        "``--linking-top-k-per-source`` を指定するとそちらが優先される。"
+        "下げると per-node の LLM 呼び出しが減ってコスト減 (5→3 で 40% 削減)",
+    ),
+    linking_top_k_per_source: int = typer.Option(
+        0,
+        "--linking-top-k-per-source",
+        help="source 別 top-k モード。0 (= 既定) なら混合 top-k を使う。"
+        "正の値を指定すると utterance / document / web の各バケットから top-N を取る。"
+        "発話どうしの類似が高い議論で文書/Web 枠が押し出される問題を防ぐ (Fix A)",
     ),
     linking_model: str = typer.Option(
         "",
@@ -274,6 +282,9 @@ def eval_cmd(
             hard_budget=hard_budget,
             condition_concurrency=parsed_cond_conc,
             linking_top_k=linking_top_k,
+            linking_top_k_per_source=(
+                linking_top_k_per_source if linking_top_k_per_source > 0 else None
+            ),
             linking_model=linking_model.strip() or None,
         )
     )
@@ -344,7 +355,13 @@ def listen(
         "--threshold",
         help="リンク採用の信頼度閾値 (省略時は設定値)",
     ),
-    top_k: int = typer.Option(5, "--top-k", help="リンク候補の embedding top-k"),
+    top_k: int = typer.Option(5, "--top-k", help="リンク候補の embedding top-k (混合)"),
+    top_k_per_source: int = typer.Option(
+        0,
+        "--top-k-per-source",
+        help="source 別 top-k モード。0 (= 既定) なら混合 top-k を使う。"
+        "正の値で utterance / document / web の各バケットから top-N を取る (Fix A)",
+    ),
     skip_docs: bool = typer.Option(
         False, "--skip-docs", help="ドキュメントの事前 AF 化をスキップ"
     ),
@@ -372,6 +389,7 @@ def listen(
             run_id=run_id,
             threshold=threshold,
             top_k=top_k,
+            top_k_per_source=top_k_per_source if top_k_per_source > 0 else None,
             skip_docs=skip_docs,
             model=model,
             backend=backend,
@@ -403,7 +421,13 @@ def run_session(
         "--threshold",
         help="リンク採用の信頼度閾値 (省略時は設定値)",
     ),
-    top_k: int = typer.Option(5, "--top-k", help="リンク候補の embedding top-k"),
+    top_k: int = typer.Option(5, "--top-k", help="リンク候補の embedding top-k (混合)"),
+    top_k_per_source: int = typer.Option(
+        0,
+        "--top-k-per-source",
+        help="source 別 top-k モード。0 (= 既定) なら混合 top-k を使う。"
+        "正の値で utterance / document / web の各バケットから top-N を取る (Fix A)",
+    ),
     skip_docs: bool = typer.Option(False, "--skip-docs", help="ドキュメントの事前 AF 化をスキップ"),
 ) -> None:
     """テキスト議論ログを流して統合 AF を構築する。"""
@@ -415,6 +439,7 @@ def run_session(
             run_id=run_id,
             threshold=threshold,
             top_k=top_k,
+            top_k_per_source=top_k_per_source if top_k_per_source > 0 else None,
             skip_docs=skip_docs,
         )
     )
@@ -619,6 +644,7 @@ async def _run_listen_async(
     run_id: str | None,
     threshold: float | None,
     top_k: int,
+    top_k_per_source: int | None,
     skip_docs: bool,
     model: str | None,
     backend: str | None,
@@ -659,7 +685,13 @@ async def _run_listen_async(
 
     llm = OpenAIClient()
     store = NetworkXGraphStore(db_path=run_dir / "graph.sqlite")
-    orch = Orchestrator.assemble(llm=llm, store=store, threshold=threshold, top_k=top_k)
+    orch = Orchestrator.assemble(
+        llm=llm,
+        store=store,
+        threshold=threshold,
+        top_k=top_k,
+        top_k_per_source=top_k_per_source,
+    )
 
     if not skip_docs and docs_dir.exists():
         typer.echo("[listen] ingesting documents...")
@@ -759,6 +791,7 @@ async def _run_session_async(
     run_id: str | None,
     threshold: float | None,
     top_k: int,
+    top_k_per_source: int | None,
     skip_docs: bool,
 ) -> None:
     settings = get_settings()
@@ -773,7 +806,13 @@ async def _run_session_async(
 
     llm = OpenAIClient()
     store = NetworkXGraphStore(db_path=run_dir / "graph.sqlite")
-    orch = Orchestrator.assemble(llm=llm, store=store, threshold=threshold, top_k=top_k)
+    orch = Orchestrator.assemble(
+        llm=llm,
+        store=store,
+        threshold=threshold,
+        top_k=top_k,
+        top_k_per_source=top_k_per_source,
+    )
 
     if not skip_docs and docs_dir.exists():
         typer.echo("[run-session] ingesting documents...")
@@ -833,6 +872,7 @@ async def _run_eval_cli(
     hard_budget: float | None = None,
     condition_concurrency: dict[str, int] | None = None,
     linking_top_k: int = 5,
+    linking_top_k_per_source: int | None = None,
     linking_model: str | None = None,
 ) -> None:
     from das.eval import (
@@ -896,12 +936,13 @@ async def _run_eval_cli(
         elif name == "flat_rag":
             factories[name] = lambda llm=llm: ConditionFlatRAG(llm=llm)
         elif name == "full_proposal":
-            factories[name] = lambda llm=llm, top_k=linking_top_k, lmodel=linking_model: (
+            factories[name] = lambda llm=llm, top_k=linking_top_k, top_k_ps=linking_top_k_per_source, lmodel=linking_model: (  # noqa: E501
                 ConditionFullProposal(
                     llm=llm,
                     enable_web_search=web_search,
                     max_web_searches=max_web_searches,
                     top_k=top_k,
+                    top_k_per_source=top_k_ps,
                     linking_model=lmodel,
                 )
             )
@@ -932,6 +973,11 @@ async def _run_eval_cli(
         f"until_consensus={'on' if until_consensus else 'off'} "
         f"judge={'on' if judge else 'off'} "
         f"linking_top_k={linking_top_k}"
+        + (
+            f" linking_top_k_per_source={linking_top_k_per_source}"
+            if linking_top_k_per_source is not None
+            else ""
+        )
         + (f" linking_model={linking_model}" if linking_model else "")
     )
 
