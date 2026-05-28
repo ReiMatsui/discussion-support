@@ -84,9 +84,34 @@ def test_tracker_separates_by_model() -> None:
 # --- CostTracker (budget) -------------------------------------------
 
 
-def test_tracker_raises_when_over_budget() -> None:
-    t = CostTracker(budget_usd=1e-3)  # 約 $0.001
-    # gpt-5-mini で 1000 input + 500 output = $0.0012 → 上限超過
+def test_tracker_soft_budget_does_not_raise_but_flags_skip() -> None:
+    """soft budget 単独: 超過しても raise しない。should_skip_new_run が True になる。"""
+
+    t = CostTracker(budget_usd=1e-3)
+    # gpt-5-mini で 1000+500 = $0.0012 → soft budget 超過
+    t.record("gpt-5-mini", 1000, 500)  # raise しない
+    assert t.is_over_budget()
+    assert t.should_skip_new_run()
+
+
+def test_tracker_hard_budget_raises_when_exceeded() -> None:
+    """hard budget 超過時のみ BudgetExceeded を raise。"""
+
+    t = CostTracker(hard_budget_usd=1e-3)
+    with pytest.raises(BudgetExceeded):
+        t.record("gpt-5-mini", 1000, 500)
+
+
+def test_tracker_soft_and_hard_combined() -> None:
+    """soft で gate、hard で raise の組み合わせ。"""
+
+    t = CostTracker(budget_usd=1e-3, hard_budget_usd=2e-3)
+    # 1 回目: $0.0012 → soft 超過するが hard は超えない (gate のみ)
+    t.record("gpt-5-mini", 1000, 500)
+    assert t.is_over_budget()
+    assert t.should_skip_new_run()
+    assert not t.is_over_hard_budget()
+    # 2 回目: 追加 $0.0012 → 累計 $0.0024 で hard 超過、raise する
     with pytest.raises(BudgetExceeded):
         t.record("gpt-5-mini", 1000, 500)
 
@@ -95,22 +120,28 @@ def test_tracker_no_raise_when_under_budget() -> None:
     t = CostTracker(budget_usd=1.0)
     t.record("gpt-5-mini", 100, 50)  # ≈ $0.00012、はるかに下
     assert not t.is_over_budget()
+    assert not t.should_skip_new_run()
 
 
-def test_tracker_check_before_call_raises_if_already_over() -> None:
-    t = CostTracker(budget_usd=1e-3)
+def test_tracker_check_before_call_only_raises_for_hard() -> None:
+    """check_before_call は hard budget のみで raise。"""
+
+    # soft だけ → 超過していても raise しない
+    t_soft = CostTracker(budget_usd=1e-3)
+    t_soft.record("gpt-5-mini", 1000, 500)  # soft 超過
+    t_soft.check_before_call()  # raise しない
+    # hard だけ → 超過すると raise
+    t_hard = CostTracker(hard_budget_usd=1e-3)
     with pytest.raises(BudgetExceeded):
-        t.record("gpt-5-mini", 10000, 10000)
-    # その後の check_before_call も raise する
+        t_hard.record("gpt-5-mini", 1000, 500)
     with pytest.raises(BudgetExceeded):
-        t.check_before_call()
+        t_hard.check_before_call()
 
 
 def test_tracker_check_before_call_ok_when_under_budget() -> None:
-    t = CostTracker(budget_usd=1.0)
+    t = CostTracker(budget_usd=1.0, hard_budget_usd=2.0)
     t.record("gpt-5-mini", 100, 50)
-    # 余裕があるので raise しない
-    t.check_before_call()
+    t.check_before_call()  # 余裕があるので raise しない
 
 
 def test_tracker_invalid_budget() -> None:
@@ -118,6 +149,11 @@ def test_tracker_invalid_budget() -> None:
         CostTracker(budget_usd=0)
     with pytest.raises(ValueError):
         CostTracker(budget_usd=-1.0)
+    with pytest.raises(ValueError):
+        CostTracker(hard_budget_usd=0)
+    with pytest.raises(ValueError):
+        # hard < soft はエラー
+        CostTracker(budget_usd=1.0, hard_budget_usd=0.5)
 
 
 # --- snapshot --------------------------------------------------------
@@ -171,11 +207,11 @@ async def test_tracker_safe_under_concurrent_record() -> None:
     assert t.total_usd == pytest.approx(expected)
 
 
-async def test_tracker_concurrent_budget_exceeded() -> None:
-    """並列 record で 1 つでも budget を超えたら BudgetExceeded が伝播する。"""
+async def test_tracker_concurrent_hard_budget_exceeded() -> None:
+    """並列 record で hard budget を超えたら BudgetExceeded が伝播する。"""
 
-    # 1 call で $0.00012 程度。budget $0.0005 なら 4-5 回で超える
-    t = CostTracker(budget_usd=5e-4)
+    # 1 call で $0.00012 程度。hard $0.0005 なら 4-5 回で超える
+    t = CostTracker(hard_budget_usd=5e-4)
     n_tasks = 50
 
     async def _bump() -> None:
@@ -185,8 +221,8 @@ async def test_tracker_concurrent_budget_exceeded() -> None:
             pass  # 最初に超えたタスク以降は止まる
 
     await asyncio.gather(*[_bump() for _ in range(n_tasks)])
-    # 全 task が実行されるが、budget は最終的に超過状態
-    assert t.is_over_budget()
+    # 全 task が実行されるが、hard budget は最終的に超過状態
+    assert t.is_over_hard_budget()
 
 
 # --- warning ---------------------------------------------------------

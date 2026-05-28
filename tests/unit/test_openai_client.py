@@ -358,14 +358,14 @@ async def test_chat_records_cost_when_tracker_attached() -> None:
     assert tracker.n_calls == 1
 
 
-async def test_chat_raises_when_budget_exceeded_pre_call() -> None:
-    """``check_before_call`` で既に超過していたら API を呼ばずに止める。"""
+async def test_chat_raises_when_hard_budget_exceeded_pre_call() -> None:
+    """``check_before_call`` で hard budget 超過なら API を呼ばずに止める。"""
 
     from das.llm import BudgetExceeded, CostTracker
 
     create = AsyncMock(return_value=_completion_response("ok"))
     fake = _fake_async_client(create=create)
-    tracker = CostTracker(budget_usd=1e-6)
+    tracker = CostTracker(hard_budget_usd=1e-6)
     # 直接 record で超過状態を作る
     tracker._total = 1.0  # type: ignore[attr-defined]
     client = OpenAIClient(client=fake, cost_tracker=tracker)
@@ -374,6 +374,23 @@ async def test_chat_raises_when_budget_exceeded_pre_call() -> None:
         await client.chat([{"role": "user", "content": "hi"}], model="gpt-5-mini")
     # API は呼ばれない
     create.assert_not_awaited()
+
+
+async def test_chat_does_not_raise_when_only_soft_budget_exceeded() -> None:
+    """soft budget だけ超過してても API 呼び出しは止めない (= in-flight 完走を実現)。"""
+
+    from das.llm import CostTracker
+
+    create = AsyncMock(return_value=_completion_response("ok"))
+    fake = _fake_async_client(create=create)
+    tracker = CostTracker(budget_usd=1e-6)  # soft のみ、hard なし
+    tracker._total = 1.0  # type: ignore[attr-defined]
+    client = OpenAIClient(client=fake, cost_tracker=tracker)
+
+    # 例外なく完走する
+    result = await client.chat([{"role": "user", "content": "hi"}], model="gpt-5-mini")
+    assert result == "ok"
+    create.assert_awaited_once()
 
 
 async def test_embed_records_cost_with_zero_output_tokens() -> None:

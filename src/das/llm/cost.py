@@ -104,22 +104,44 @@ def resolve_pricing(model: str) -> ModelPricing:
 class CostTracker:
     """OpenAI 使用量と推定コストの集計 + 予算 enforcement。
 
+    2 段の予算ゲート:
+      - **soft budget** (``budget_usd``): 超過すると ``should_skip_new_run()`` が True
+        を返す。**進行中の API 呼び出しは止めない**。run_eval は新規 run の開始だけを
+        gate するため、in-flight run は最後まで完走する。
+      - **hard budget** (``hard_budget_usd``): 超過すると ``record()`` / ``check_before_call()``
+        が ``BudgetExceeded`` を即 raise する。暴走防止用の絶対上限。
+
     Args:
-      budget_usd: 上限 USD。``None`` なら enforcement なし (集計のみ)。
-      warn_at_pct: 残り何 % で warning ログを出すか (0-1)。例: 0.8 で 80% 到達時
+      budget_usd: soft 上限 USD。``None`` なら gate なし。
+      hard_budget_usd: hard 絶対上限 USD。``None`` なら hard cap なし。
+      warn_at_pct: soft budget の何 % で warning ログを出すか (0-1)。
+
+    Notes:
+      ``hard_budget_usd`` だけ指定して ``budget_usd`` を省略すると、
+      従来挙動 (= 上限超過で即停止) と同じ動きになる。
     """
 
     def __init__(
         self,
         budget_usd: float | None = None,
         *,
+        hard_budget_usd: float | None = None,
         warn_at_pct: float = 0.8,
     ) -> None:
         if budget_usd is not None and budget_usd <= 0:
             raise ValueError("budget_usd must be > 0 or None")
+        if hard_budget_usd is not None and hard_budget_usd <= 0:
+            raise ValueError("hard_budget_usd must be > 0 or None")
+        if (
+            budget_usd is not None
+            and hard_budget_usd is not None
+            and hard_budget_usd < budget_usd
+        ):
+            raise ValueError("hard_budget_usd must be >= budget_usd")
         if not (0.0 <= warn_at_pct <= 1.0):
             raise ValueError("warn_at_pct must be in [0, 1]")
         self._budget = budget_usd
+        self._hard_budget = hard_budget_usd
         self._warn_at_pct = warn_at_pct
         self._total = 0.0
         self._by_model: dict[str, ModelUsage] = {}
@@ -146,8 +168,27 @@ class CostTracker:
 
         return dict(self._by_model)
 
+    @property
+    def hard_budget_usd(self) -> float | None:
+        return self._hard_budget
+
     def is_over_budget(self) -> bool:
+        """soft budget を超過しているか (新規 run 開始の gate 判定用)。"""
+
         return self._budget is not None and self._total > self._budget
+
+    def is_over_hard_budget(self) -> bool:
+        """hard budget を超過しているか (record/check で raise する判定用)。"""
+
+        return self._hard_budget is not None and self._total > self._hard_budget
+
+    def should_skip_new_run(self) -> bool:
+        """**新規 run を開始すべきでない**か (= soft budget 超過)。
+
+        進行中の run は止めない。run_eval が job 入口でこれをチェックする。
+        """
+
+        return self.is_over_budget()
 
     def remaining_usd(self) -> float | None:
         if self._budget is None:
@@ -200,31 +241,41 @@ class CostTracker:
                 pct=round(100.0 * self._total / self._budget, 1),
             )
 
-        if self.is_over_budget():
-            self._log.error(
-                "cost.budget_exceeded",
+        # soft budget 超過時はログのみ (新規 run は run_eval 側で gate)
+        if self.is_over_budget() and not self._warning_emitted:
+            self._log.info(
+                "cost.soft_budget_exceeded",
                 cumulative_usd=round(self._total, 4),
                 budget_usd=round(self._budget, 4) if self._budget else None,
+                note="new runs will be skipped; in-flight runs continue",
+            )
+
+        # hard budget 超過時のみ即停止 (絶対上限の暴走防止)
+        if self.is_over_hard_budget():
+            self._log.error(
+                "cost.hard_budget_exceeded",
+                cumulative_usd=round(self._total, 4),
+                hard_budget_usd=round(self._hard_budget, 4) if self._hard_budget else None,
                 n_calls=self.n_calls,
             )
             raise BudgetExceeded(
-                f"Budget exceeded: ${self._total:.4f} > ${self._budget:.4f} "
-                f"after {self.n_calls} API calls"
+                f"Hard budget exceeded: ${self._total:.4f} > "
+                f"${self._hard_budget:.4f} after {self.n_calls} API calls"
             )
 
         return self._total
 
     def check_before_call(self) -> None:
-        """新しい API 呼び出しの直前チェック。すでに超過していたら raise する。
+        """新しい API 呼び出しの直前チェック。hard budget 超過時のみ raise。
 
-        並列で走る他 task が record で raise してから停止が伝播する間に
-        新しい呼び出しが入ってしまうのを防ぐ第二防衛線。
+        soft budget は run_eval 側で「新規 run の gate」として扱うため、
+        in-flight な API 呼び出しはここでは止めない。
         """
 
-        if self.is_over_budget():
+        if self.is_over_hard_budget():
             raise BudgetExceeded(
-                f"Budget already exceeded: ${self._total:.4f} > "
-                f"${self._budget:.4f} (call refused before issue)"
+                f"Hard budget already exceeded: ${self._total:.4f} > "
+                f"${self._hard_budget:.4f} (call refused before issue)"
             )
 
     # --- スナップショット ------------------------------------------
@@ -235,11 +286,13 @@ class CostTracker:
         return {
             "total_usd": round(self._total, 6),
             "budget_usd": self._budget,
+            "hard_budget_usd": self._hard_budget,
             "remaining_usd": (
                 round(self.remaining_usd(), 6) if self._budget is not None else None
             ),
             "n_calls": self.n_calls,
             "over_budget": self.is_over_budget(),
+            "over_hard_budget": self.is_over_hard_budget(),
             "by_model": {
                 name: {
                     "n_calls": u.n_calls,
