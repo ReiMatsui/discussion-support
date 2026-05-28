@@ -230,6 +230,7 @@ class ConditionFullProposal:
         enable_web_search: bool = False,
         max_web_searches: int = 5,
         linking_model: str | None = None,
+        linking_judge_timeout: float | None = 30.0,
     ) -> None:
         """
         Args:
@@ -240,6 +241,8 @@ class ConditionFullProposal:
                 (例: ``"gpt-5-nano"``)。None なら既定モデル。
                 Linking が全コストの 80-90% を占めるので、ここを cheap モデルに
                 するだけで full_proposal の per-run コストが 70-80% 削減される。
+            linking_judge_timeout: 1 ペアの linking judge LLM 呼び出しの秒数上限
+                (既定 30 秒)。並列バッチ内の hang 防止。``None`` で無効化。
         """
 
         self._llm = llm or OpenAIClient()
@@ -250,6 +253,7 @@ class ConditionFullProposal:
         self._enable_web_search = enable_web_search
         self._max_web_searches = max_web_searches
         self._linking_model = linking_model
+        self._linking_judge_timeout = linking_judge_timeout
         self._orchestrator: Orchestrator | None = None
         self._processed_turn_ids: set[int] = set()
         self._last_items: list[InfoItem] = []
@@ -313,6 +317,7 @@ class ConditionFullProposal:
             top_k_per_source=self._top_k_per_source,
             web_search=web_search,
             linking_model=self._linking_model,
+            linking_judge_timeout=self._linking_judge_timeout,
         )
         if docs_dir is not None and docs_dir.exists():
             await self._orchestrator.ingest_documents(docs_dir)

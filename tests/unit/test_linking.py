@@ -489,3 +489,81 @@ async def test_link_node_runs_judges_in_parallel(store: NetworkXGraphStore) -> N
         f"(逐次想定 {delay * 4:.3f}s / 並列想定 {delay:.3f}s)"
     )
     assert llm.chat_structured.await_count == 4
+
+
+# --- judge timeout (hang 保護) ---------------------------------------
+
+
+async def test_hung_judge_times_out_and_yields_none_edge(
+    store: NetworkXGraphStore,
+) -> None:
+    """1 件の judge が hang してもバッチ全体は timeout で復帰、その候補は edge にならない。
+
+    並列バッチの中の 1 件が long-hang する OpenAI 障害シナリオを模擬する。
+    対象が 3 つあり、うち 1 つだけ無限待ち、残り 2 つは即座に support を返す。
+    judge_timeout=0.1 を設定すると、hang した 1 件のみ none 化され、
+    他 2 件は通常通り edge が作られる。
+    """
+
+    import asyncio as _asyncio
+
+    target = Node(text="t", node_type="claim", source="utterance", author="A")
+    fast1 = Node(text="fast1", node_type="claim", source="utterance", author="B")
+    fast2 = Node(text="fast2", node_type="claim", source="utterance", author="C")
+    slow = Node(text="slow", node_type="claim", source="utterance", author="D")
+    for n in (fast1, fast2, slow):
+        store.add_node(n)
+    store.add_node(target)
+
+    llm = _fake_llm()
+    llm.embed_one = AsyncMock(return_value=[1.0, 0.0])  # type: ignore[method-assign]
+    llm.embed = AsyncMock(  # type: ignore[method-assign]
+        return_value=[[0.9, 0.1], [0.9, 0.1], [0.9, 0.1]]
+    )
+
+    async def judge_dispatch(messages: list[dict], **kwargs: object) -> _LinkJudgment:
+        user_content = messages[1]["content"]
+        if "slow" in user_content:
+            # 永久に終わらない (timeout でキャンセルされる想定)
+            await _asyncio.sleep(60.0)
+            return _judgment("a_supports_b", 0.9)  # ここには到達しない
+        return _judgment("a_supports_b", 0.9)
+
+    llm.chat_structured = AsyncMock(side_effect=judge_dispatch)  # type: ignore[method-assign]
+
+    agent = LinkingAgent(llm=llm, top_k=10, threshold=0.6, judge_timeout=0.1)
+
+    import time
+
+    t0 = time.monotonic()
+    edges = await agent.link_node(target, store)
+    elapsed = time.monotonic() - t0
+
+    # hang した 1 件が timeout=0.1 で打ち切られ、バッチ全体も 1 秒未満で抜ける
+    assert elapsed < 1.0, f"timeout が効いていない。elapsed={elapsed:.3f}s"
+    # fast 2 件だけ edge になり、slow は edge にならない
+    assert len(edges) == 2
+    edge_dsts = {e.dst_id for e in edges}
+    assert fast1.id in edge_dsts
+    assert fast2.id in edge_dsts
+    assert slow.id not in edge_dsts
+
+
+async def test_judge_timeout_none_passes_through(store: NetworkXGraphStore) -> None:
+    """``judge_timeout=None`` なら従来通り wait_for ラップなしで動く (回帰防止)。"""
+
+    target = Node(text="t", node_type="claim", source="utterance", author="A")
+    cand = Node(text="c", node_type="claim", source="utterance", author="B")
+    store.add_node(cand)
+    store.add_node(target)
+
+    llm = _fake_llm()
+    llm.embed_one = AsyncMock(return_value=[1.0, 0.0])  # type: ignore[method-assign]
+    llm.embed = AsyncMock(return_value=[[0.9, 0.1]])  # type: ignore[method-assign]
+    llm.chat_structured = AsyncMock(  # type: ignore[method-assign]
+        return_value=_judgment("a_supports_b", 0.9)
+    )
+
+    agent = LinkingAgent(llm=llm, top_k=10, threshold=0.6, judge_timeout=None)
+    edges = await agent.link_node(target, store)
+    assert len(edges) == 1

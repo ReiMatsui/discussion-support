@@ -86,6 +86,7 @@ class LinkingAgent(BaseAgent):
         top_k_per_source: int | None = None,
         embedding_model: str | None = None,
         model_override: str | None = None,
+        judge_timeout: float | None = 30.0,
     ) -> None:
         """
         Args:
@@ -97,6 +98,11 @@ class LinkingAgent(BaseAgent):
             model_override: ``_judge_pair`` で使う LLM モデルを上書きする。
                 例: ``"gpt-5-nano"`` を渡すと judgment 呼び出しのコストを大幅削減できる。
                 None なら ``self.llm.fast_model`` (=既定モデル)。
+            judge_timeout: 1 ペアの judge 呼び出しに対する秒数タイムアウト。
+                ``asyncio.gather`` で並列実行しているため、1 件が hang するとバッチ全体が
+                blocking してしまう。``asyncio.wait_for`` でラップし、超過したら
+                relation=none / confidence=0 として次に進む。
+                既定 30.0 秒 (gpt-5-nano は通常 5 秒以内に応答)。``None`` で無効化。
         """
 
         super().__init__(llm=llm)
@@ -107,6 +113,7 @@ class LinkingAgent(BaseAgent):
         self._top_k_per_source = top_k_per_source
         self._embedding_model = embedding_model
         self._model_override = model_override
+        self._judge_timeout = judge_timeout
         self._embeddings: dict[UUID, list[float]] = {}
 
     # --- 公開 ---------------------------------------------------------
@@ -117,6 +124,9 @@ class LinkingAgent(BaseAgent):
         判定は ``asyncio.gather`` で並列に走らせる (候補ごとに独立)。リアルタイム
         運用では候補数を増やしてもレイテンシが一定になるため、source 別 top-k と
         相性が良い。
+
+        個別の judge 呼び出しは ``_judge_pair_or_timeout`` で ``asyncio.wait_for``
+        ラップし、1 件が hang してもバッチ全体を待たせないようにする。
         """
 
         candidates = await self._select_candidates(target, store)
@@ -130,11 +140,14 @@ class LinkingAgent(BaseAgent):
             return []
 
         judgments = await asyncio.gather(
-            *(self._judge_pair(target, cand) for cand in candidates)
+            *(self._judge_pair_or_timeout(target, cand) for cand in candidates)
         )
 
         edges: list[Edge] = []
+        n_timeouts = 0
         for cand, judgment in zip(candidates, judgments, strict=True):
+            if judgment.rationale.startswith("judge_timeout"):
+                n_timeouts += 1
             edge = self._maybe_make_edge(target, cand, judgment)
             if edge is not None:
                 store.add_edge(edge)
@@ -145,8 +158,36 @@ class LinkingAgent(BaseAgent):
             target_id=str(target.id),
             n_candidates=len(candidates),
             n_edges=len(edges),
+            n_timeouts=n_timeouts,
         )
         return edges
+
+    async def _judge_pair_or_timeout(self, target: Node, cand: Node) -> _LinkJudgment:
+        """``_judge_pair`` を ``asyncio.wait_for`` でラップして hang を防ぐ。
+
+        ``self._judge_timeout`` が ``None`` のときは保護なしの素呼び出し。
+        タイムアウト時は relation="none" / confidence=0 を返し、エッジは作られない。
+        """
+
+        if self._judge_timeout is None:
+            return await self._judge_pair(target, cand)
+        try:
+            return await asyncio.wait_for(
+                self._judge_pair(target, cand),
+                timeout=self._judge_timeout,
+            )
+        except (TimeoutError, asyncio.TimeoutError):
+            self.log.warning(
+                "linking.judge_timeout",
+                target_id=str(target.id),
+                cand_id=str(cand.id),
+                timeout_seconds=self._judge_timeout,
+            )
+            return _LinkJudgment(
+                relation="none",
+                confidence=0.0,
+                rationale=f"judge_timeout_after_{self._judge_timeout}s",
+            )
 
     # --- 候補選定 -----------------------------------------------------
 

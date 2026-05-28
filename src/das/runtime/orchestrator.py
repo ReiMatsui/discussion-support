@@ -59,6 +59,7 @@ class Orchestrator:
         top_k_per_source: int | None = None,
         web_search: WebSearchAgent | None = None,
         linking_model: str | None = None,
+        linking_judge_timeout: float | None = 30.0,
     ) -> Orchestrator:
         """既定構成のオーケストレータを 1 つ作る。
 
@@ -71,6 +72,9 @@ class Orchestrator:
         ``top_k_per_source`` を指定すると、LinkingAgent の候補選定が source 別
         モード (utterance / document / web の各バケットから top-N) になる。
         指定しなければ従来通り混合 top-k。
+
+        ``linking_judge_timeout`` は 1 ペアあたりの judge LLM 呼び出しの秒数上限。
+        既定 30 秒。並列バッチの中の 1 件が hang してもバッチ全体を待たせない。
         """
 
         llm = llm or OpenAIClient()
@@ -85,6 +89,7 @@ class Orchestrator:
             top_k=top_k,
             top_k_per_source=top_k_per_source,
             model_override=linking_model,
+            judge_timeout=linking_judge_timeout,
         )
 
         orch = cls(
