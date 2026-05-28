@@ -344,3 +344,148 @@ async def test_linking_no_model_override_means_default_model(
 
     for call in captured.await_args_list:
         assert call.kwargs.get("model") is None
+
+
+# --- source 別 top-k (Fix A) ----------------------------------------
+
+
+async def test_top_k_per_source_picks_n_from_each_bucket(
+    store: NetworkXGraphStore,
+) -> None:
+    """``top_k_per_source=1`` のとき、utterance / document / web から 1 件ずつ取る。
+
+    混合 top-k なら utterance だけで埋まる配置でも、source 別なら文書・Web も拾う。
+    """
+
+    target = Node(text="新しい発話", node_type="claim", source="utterance", author="A")
+    utt1 = Node(text="他の発話1", node_type="claim", source="utterance", author="B")
+    utt2 = Node(text="他の発話2", node_type="claim", source="utterance", author="C")
+    doc1 = Node(text="文書1", node_type="premise", source="document", author="d1")
+    doc2 = Node(text="文書2", node_type="premise", source="document", author="d2")
+    web1 = Node(text="Web1", node_type="premise", source="web", author="example.com")
+    for n in (utt1, utt2, doc1, doc2, web1):
+        store.add_node(n)
+    store.add_node(target)
+
+    # target に対する類似度: utterance >> document >> web の順に高く設計
+    # 混合 top_k=3 なら utt1, utt2, doc1 を取るが doc2, web1 は落ちる
+    # 一方 top_k_per_source=1 なら utt1, doc1, web1 を取り「各 source 1 件」になる
+    llm = _fake_llm()
+    llm.embed_one = AsyncMock(return_value=[1.0, 0.0, 0.0, 0.0])  # type: ignore[method-assign]
+    embeddings_by_text = {
+        utt1.text: [0.99, 0.10, 0.0, 0.0],
+        utt2.text: [0.95, 0.20, 0.0, 0.0],
+        doc1.text: [0.50, 0.50, 0.50, 0.0],
+        doc2.text: [0.40, 0.50, 0.50, 0.0],
+        web1.text: [0.20, 0.0, 0.0, 0.80],
+    }
+
+    async def fake_embed(texts: list[str], **kwargs: object) -> list[list[float]]:
+        return [embeddings_by_text[t] for t in texts]
+
+    llm.embed = AsyncMock(side_effect=fake_embed)  # type: ignore[method-assign]
+
+    judged_texts: list[str] = []
+
+    async def fake_judge(messages: list[dict], **kwargs: object) -> _LinkJudgment:
+        user_content = messages[1]["content"]
+        for text in embeddings_by_text:
+            if text in user_content:
+                judged_texts.append(text)
+        return _LinkJudgment(relation="none", confidence=0.9, rationale="-")
+
+    llm.chat_structured = AsyncMock(side_effect=fake_judge)  # type: ignore[method-assign]
+
+    agent = LinkingAgent(llm=llm, top_k_per_source=1, threshold=0.6)
+    await agent.link_node(target, store)
+
+    # source 別に各 1 件ずつ取れているはず: utt1 (最高 utterance), doc1 (最高 document), web1 (唯一 web)
+    assert sorted(judged_texts) == sorted([utt1.text, doc1.text, web1.text])
+
+
+async def test_top_k_per_source_overrides_top_k(store: NetworkXGraphStore) -> None:
+    """``top_k_per_source`` を指定すると ``top_k`` は無視される。"""
+
+    target = Node(text="新発話", node_type="claim", source="utterance", author="A")
+    utts = [
+        Node(text=f"u{i}", node_type="claim", source="utterance", author=f"S{i}")
+        for i in range(5)
+    ]
+    doc = Node(text="d1", node_type="premise", source="document", author="d1")
+    for n in utts + [doc]:
+        store.add_node(n)
+    store.add_node(target)
+
+    llm = _fake_llm()
+    llm.embed_one = AsyncMock(return_value=[1.0, 0.0])  # type: ignore[method-assign]
+
+    async def fake_embed(texts: list[str], **kwargs: object) -> list[list[float]]:
+        # すべてのノードに類似度を返す。utterance を高く、document を低くしておく。
+        out = []
+        for t in texts:
+            if t == "d1":
+                out.append([0.3, 0.7])
+            else:
+                out.append([0.9, 0.1])
+        return out
+
+    llm.embed = AsyncMock(side_effect=fake_embed)  # type: ignore[method-assign]
+    llm.chat_structured = AsyncMock(  # type: ignore[method-assign]
+        return_value=_judgment("none", 0.9)
+    )
+
+    # top_k=100 だが top_k_per_source=2 が優先される
+    agent = LinkingAgent(llm=llm, top_k=100, top_k_per_source=2, threshold=0.6)
+    await agent.link_node(target, store)
+
+    # 候補数 = utterance 2 + document 1 = 3 (web は無いので skip)
+    assert llm.chat_structured.await_count == 3
+
+
+async def test_link_node_runs_judges_in_parallel(store: NetworkXGraphStore) -> None:
+    """``link_node`` が候補の judge を並列に走らせることを確認する。
+
+    候補ノードを 4 つ用意し、各 judge が遅延を持つようにしておいて、
+    逐次なら 4×delay、並列なら 1×delay 程度で終わることを観測する。
+    """
+
+    import time
+
+    target = Node(text="t", node_type="claim", source="utterance", author="A")
+    cands = [
+        Node(text=f"c{i}", node_type="claim", source="utterance", author=f"S{i}")
+        for i in range(4)
+    ]
+    for n in cands:
+        store.add_node(n)
+    store.add_node(target)
+
+    llm = _fake_llm()
+    llm.embed_one = AsyncMock(return_value=[1.0, 0.0])  # type: ignore[method-assign]
+    llm.embed = AsyncMock(  # type: ignore[method-assign]
+        return_value=[[0.9, 0.1] for _ in cands]
+    )
+
+    delay = 0.05  # 50ms
+
+    async def slow_judge(*args: object, **kwargs: object) -> _LinkJudgment:
+        import asyncio as _asyncio
+
+        await _asyncio.sleep(delay)
+        return _judgment("none", 0.9)
+
+    llm.chat_structured = AsyncMock(side_effect=slow_judge)  # type: ignore[method-assign]
+
+    agent = LinkingAgent(llm=llm, top_k=10, threshold=0.6)
+
+    t0 = time.monotonic()
+    await agent.link_node(target, store)
+    elapsed = time.monotonic() - t0
+
+    # 4 並列ならおおむね delay の 2 倍未満で終わる (overhead を考慮しても 4×delay の半分)。
+    # 逐次なら 4×delay = 0.20s かかる。
+    assert elapsed < delay * 3, (
+        f"判定が並列化されていない可能性。elapsed={elapsed:.3f}s "
+        f"(逐次想定 {delay * 4:.3f}s / 並列想定 {delay:.3f}s)"
+    )
+    assert llm.chat_structured.await_count == 4

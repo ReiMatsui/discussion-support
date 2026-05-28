@@ -9,10 +9,16 @@
 
 埋め込みはエージェント内のメモリキャッシュで管理し、同じノードを 2 度
 embed しないようにする。M1 段階では十分。
+
+候補選定モード:
+  - 既定 (``top_k_per_source=None``): 全 source 混合で cosine top-k
+  - source 別 (``top_k_per_source=N``): utterance / document / web の各 source ごとに
+    cosine top-N を取り、結合して候補とする (貢献①「異種ソースの統合」を構造的に保証)
 """
 
 from __future__ import annotations
 
+import asyncio
 import math
 from pathlib import Path
 from typing import Literal
@@ -21,7 +27,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 from das.agents.base import BaseAgent
-from das.graph.schema import Edge, Node, Relation
+from das.graph.schema import Edge, Node, NodeSource, Relation
 from das.graph.store import GraphStore
 from das.llm import OpenAIClient
 from das.settings import get_settings
@@ -77,11 +83,17 @@ class LinkingAgent(BaseAgent):
         *,
         threshold: float | None = None,
         top_k: int = 5,
+        top_k_per_source: int | None = None,
         embedding_model: str | None = None,
         model_override: str | None = None,
     ) -> None:
         """
         Args:
+            top_k: 混合 top-k モード時の候補上限 (``top_k_per_source`` 未設定時のみ有効)。
+            top_k_per_source: source 別 top-k モード。``utterance`` / ``document`` /
+                ``web`` の各バケットから cosine top-N を取り、結合して候補とする。
+                指定すると ``top_k`` は無視される。発話どうしの類似度が高い議論で
+                文書/Web ノードが top-k から押し出される問題を防ぐ。
             model_override: ``_judge_pair`` で使う LLM モデルを上書きする。
                 例: ``"gpt-5-nano"`` を渡すと judgment 呼び出しのコストを大幅削減できる。
                 None なら ``self.llm.fast_model`` (=既定モデル)。
@@ -92,6 +104,7 @@ class LinkingAgent(BaseAgent):
         settings = get_settings()
         self._threshold = threshold if threshold is not None else settings.linking_threshold
         self._top_k = top_k
+        self._top_k_per_source = top_k_per_source
         self._embedding_model = embedding_model
         self._model_override = model_override
         self._embeddings: dict[UUID, list[float]] = {}
@@ -99,12 +112,29 @@ class LinkingAgent(BaseAgent):
     # --- 公開 ---------------------------------------------------------
 
     async def link_node(self, target: Node, store: GraphStore) -> list[Edge]:
-        """``target`` と既存ノード群との関係を推定し、閾値超のエッジを書き込む。"""
+        """``target`` と既存ノード群との関係を推定し、閾値超のエッジを書き込む。
+
+        判定は ``asyncio.gather`` で並列に走らせる (候補ごとに独立)。リアルタイム
+        運用では候補数を増やしてもレイテンシが一定になるため、source 別 top-k と
+        相性が良い。
+        """
 
         candidates = await self._select_candidates(target, store)
+        if not candidates:
+            self.log.info(
+                "linking.done",
+                target_id=str(target.id),
+                n_candidates=0,
+                n_edges=0,
+            )
+            return []
+
+        judgments = await asyncio.gather(
+            *(self._judge_pair(target, cand) for cand in candidates)
+        )
+
         edges: list[Edge] = []
-        for cand in candidates:
-            judgment = await self._judge_pair(target, cand)
+        for cand, judgment in zip(candidates, judgments, strict=True):
             edge = self._maybe_make_edge(target, cand, judgment)
             if edge is not None:
                 store.add_edge(edge)
@@ -137,9 +167,42 @@ class LinkingAgent(BaseAgent):
             for n, v in zip(uncached, vectors, strict=True):
                 self._embeddings[n.id] = v
 
+        if self._top_k_per_source is not None:
+            return self._select_per_source(target_vec, others)
+
+        # 既定: 混合 top-k
         scored = [(n, cosine_similarity(target_vec, self._embeddings[n.id])) for n in others]
         scored.sort(key=lambda pair: pair[1], reverse=True)
         return [n for n, _ in scored[: self._top_k]]
+
+    def _select_per_source(
+        self,
+        target_vec: list[float],
+        others: list[Node],
+    ) -> list[Node]:
+        """source 別に cosine top-N を取り結合する。
+
+        各バケット (utterance / document / web) 内で独立に類似度を並べるため、
+        発話どうしの類似が高い議論でも文書/Web 枠が押し出されない。
+        """
+
+        assert self._top_k_per_source is not None
+        buckets: dict[NodeSource, list[Node]] = {
+            "utterance": [],
+            "document": [],
+            "web": [],
+        }
+        for n in others:
+            buckets[n.source].append(n)
+
+        candidates: list[Node] = []
+        for nodes in buckets.values():
+            if not nodes:
+                continue
+            scored = [(n, cosine_similarity(target_vec, self._embeddings[n.id])) for n in nodes]
+            scored.sort(key=lambda pair: pair[1], reverse=True)
+            candidates.extend(n for n, _ in scored[: self._top_k_per_source])
+        return candidates
 
     async def _ensure_embedding(self, node: Node) -> list[float]:
         if node.id in self._embeddings:
