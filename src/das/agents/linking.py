@@ -256,8 +256,8 @@ class LinkingAgent(BaseAgent):
 
     async def _judge_pair(self, a: Node, b: Node) -> _LinkJudgment:
         user_content = (
-            f"A:\n  text: {a.text}\n  source: {a.source}\n  author: {a.author}\n\n"
-            f"B:\n  text: {b.text}\n  source: {b.source}\n  author: {b.author}"
+            f"A:\n  text: {a.text}\n  type: {a.node_type}\n  source: {a.source}\n  author: {a.author}\n\n"
+            f"B:\n  text: {b.text}\n  type: {b.node_type}\n  source: {b.source}\n  author: {b.author}"
         )
         messages = [
             {"role": "system", "content": self._system_prompt},

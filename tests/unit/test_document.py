@@ -21,10 +21,8 @@ def _fake_llm() -> OpenAIClient:
     return OpenAIClient(client=MagicMock())
 
 
-def _result(*units: tuple[str, str]) -> _DocumentExtraction:
-    return _DocumentExtraction(
-        units=[_DocumentUnit(text=t, node_type=nt) for t, nt in units]  # type: ignore[arg-type]
-    )
+def _result(*texts: str) -> _DocumentExtraction:
+    return _DocumentExtraction(units=[_DocumentUnit(text=t) for t in texts])
 
 
 @pytest.fixture
@@ -39,8 +37,8 @@ async def test_ingest_text_creates_document_nodes(store: NetworkXGraphStore) -> 
     llm = _fake_llm()
     llm.chat_structured = AsyncMock(  # type: ignore[method-assign]
         return_value=_result(
-            ("X 大学では紙容器導入初年度に容器コストが約 3 倍になった", "premise"),
-            ("紙容器への移行は長期的に持続可能である", "claim"),
+            "X 大学では紙容器導入初年度に容器コストが約 3 倍になった",
+            "X 大学では紙容器導入 3 年目に学食価格を維持できた",
         )
     )
     agent = DocumentAgent(llm=llm)
@@ -53,12 +51,13 @@ async def test_ingest_text_creates_document_nodes(store: NetworkXGraphStore) -> 
     )
 
     assert len(nodes) == 2
-    premise = nodes[0]
-    assert premise.source == "document"
-    assert premise.author == "x_univ_case"
-    assert premise.metadata["doc_id"] == "x_univ_case"
-    assert premise.metadata["source_path"] == "data/docs/x_univ_case.md"
-    assert {n.node_type for n in nodes} == {"premise", "claim"}
+    fact = nodes[0]
+    assert fact.source == "document"
+    assert fact.author == "x_univ_case"
+    assert fact.metadata["doc_id"] == "x_univ_case"
+    assert fact.metadata["source_path"] == "data/docs/x_univ_case.md"
+    # 文書ノードはすべて中立な事実 (evidence)
+    assert {n.node_type for n in nodes} == {"evidence"}
     assert {n.id for n in store.nodes()} == {n.id for n in nodes}
 
 
@@ -66,14 +65,14 @@ async def test_ingest_text_skips_blank_units(store: NetworkXGraphStore) -> None:
     llm = _fake_llm()
     llm.chat_structured = AsyncMock(  # type: ignore[method-assign]
         return_value=_result(
-            ("", "claim"),
-            ("   ", "premise"),
-            ("有効な前提", "premise"),
+            "",
+            "   ",
+            "有効な事実",
         )
     )
     agent = DocumentAgent(llm=llm)
     nodes = await agent.ingest_text("...", doc_id="d1", store=store)
-    assert [n.text for n in nodes] == ["有効な前提"]
+    assert [n.text for n in nodes] == ["有効な事実"]
 
 
 # --- ingest_directory ----------------------------------------------------
@@ -88,15 +87,15 @@ async def test_ingest_directory_reads_md_and_txt(tmp_path: Path, store: NetworkX
     # 各 ingest_text 呼び出しで 1 件ずつ返す副作用
     llm.chat_structured = AsyncMock(  # type: ignore[method-assign]
         side_effect=[
-            _result(("a-claim", "claim")),
-            _result(("b-premise", "premise")),
+            _result("a-fact"),
+            _result("b-fact"),
         ]
     )
     agent = DocumentAgent(llm=llm)
 
     nodes = await agent.ingest_directory(tmp_path, store=store)
 
-    assert {n.text for n in nodes} == {"a-claim", "b-premise"}
+    assert {n.text for n in nodes} == {"a-fact", "b-fact"}
     assert {n.author for n in nodes} == {"alpha", "beta"}
     # json は読まれない
     assert llm.chat_structured.await_count == 2
@@ -109,7 +108,7 @@ async def test_ingest_directory_passes_source_path(
     file.write_text("body", encoding="utf-8")
     llm = _fake_llm()
     llm.chat_structured = AsyncMock(  # type: ignore[method-assign]
-        return_value=_result(("c", "claim"))
+        return_value=_result("c")
     )
     agent = DocumentAgent(llm=llm)
 
@@ -122,9 +121,9 @@ async def test_ingest_directory_passes_source_path(
 
 
 def test_retrieve_returns_only_document_nodes(store: NetworkXGraphStore) -> None:
-    doc_node = Node(text="doc", node_type="claim", source="document", author="d1")
+    doc_node = Node(text="doc", node_type="evidence", source="document", author="d1")
     utt_node = Node(text="utt", node_type="claim", source="utterance", author="A")
-    web_node = Node(text="web", node_type="premise", source="web", author="example.com")
+    web_node = Node(text="web", node_type="evidence", source="web", author="example.com")
     for n in (doc_node, utt_node, web_node):
         store.add_node(n)
 
@@ -136,7 +135,7 @@ def test_retrieve_returns_only_document_nodes(store: NetworkXGraphStore) -> None
 
 def test_retrieve_respects_limit(store: NetworkXGraphStore) -> None:
     for i in range(5):
-        store.add_node(Node(text=f"d{i}", node_type="premise", source="document", author=f"d{i}"))
+        store.add_node(Node(text=f"d{i}", node_type="evidence", source="document", author=f"d{i}"))
     agent = DocumentAgent(llm=OpenAIClient(client=MagicMock()))
     target = Node(text="target", node_type="claim", source="utterance", author="A")
     result = agent.retrieve(target, store, limit=2)

@@ -50,7 +50,7 @@ async def test_search_returns_web_nodes_from_tavily_results() -> None:
     nodes = await agent.search("プラスチック容器の廃止")
     assert len(nodes) == 2
     assert all(n.source == "web" for n in nodes)
-    assert all(n.node_type == "premise" for n in nodes)
+    assert all(n.node_type == "evidence" for n in nodes)
     assert nodes[0].metadata.get("url") == "https://example.com/page1"
     assert nodes[0].author == "example.com"
 
@@ -97,7 +97,7 @@ async def test_maybe_search_skips_when_node_has_enough_edges() -> None:
 
     store = NetworkXGraphStore()
     target = Node(text="主張", node_type="claim", source="utterance", author="A")
-    other = Node(text="文書", node_type="premise", source="document", author="d1")
+    other = Node(text="文書", node_type="evidence", source="document", author="d1")
     store.add_node(target)
     store.add_node(other)
     # 既に 2 エッジ → 検索不要

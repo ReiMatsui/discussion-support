@@ -1,8 +1,10 @@
 """ドキュメント知識エージェント。
 
-`data/docs/` 配下の事前文書を論証単位に分解し、``source="document"`` の
-``Node`` として ``GraphStore`` に書き込む。議論進行中は対象ノードに対して
-関連する文書ノードを返す。
+`data/docs/` 配下の事前文書を **中立な事実 (evidence)** の最小単位に分解し、
+``source="document"`` / ``node_type="evidence"`` の ``Node`` として
+``GraphStore`` に書き込む。文書は立場を持つ主張ではなく事実なので claim/premise には
+分解しない。事実が特定の主張を支持/攻撃するかは連結エージェントがエッジ
+(対象主張ごと) として判定する。議論進行中は対象ノードに対して関連する文書ノードを返す。
 
 M1 段階では retrieve は単純に「ストア内の全文書ノード」を返す。
 embedding 類似度による絞り込みは将来拡張。
@@ -11,7 +13,6 @@ embedding 類似度による絞り込みは将来拡張。
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -25,8 +26,7 @@ _PROMPTS_DIR = Path(__file__).parent / "prompts"
 
 
 class _DocumentUnit(BaseModel):
-    text: str = Field(description="抽出された論証文")
-    node_type: Literal["claim", "premise"]
+    text: str = Field(description="抽出された事実 (evidence) 文")
 
 
 class _DocumentExtraction(BaseModel):
@@ -78,7 +78,7 @@ class DocumentAgent(BaseAgent):
                 metadata["source_path"] = source_path
             node = Node(
                 text=cleaned,
-                node_type=unit.node_type,
+                node_type="evidence",
                 source="document",
                 author=doc_id,
                 metadata=metadata,

@@ -1,10 +1,15 @@
 """議論グラフ (Argumentation Framework) のノード・エッジ定義。
 
 ノード:
-  発話・文献・Web 由来の論証単位 (claim / premise) を統一的に保持する。
+  発話・文献・Web 由来のノードを統一的に保持する。
+  - 議論側 (source="utterance") は立場を持つ論証単位なので claim / premise。
+  - 知識側 (source="document" / "web") は中立な事実なので evidence。
+    事実が「支持」か「攻撃」かは対象主張ごとに相対的なので、スタンスは
+    ノード自体ではなくエッジ (対象主張ごと) に持たせる。
 
 エッジ:
   ノード間の支持 (support) / 攻撃 (attack) 関係を、推定信頼度と理由付きで保持する。
+  中立 (どちらでもない) は「エッジを張らない」で表現する (新しい relation は足さない)。
 
 設計上の決め事:
   - 両者とも frozen にして、変更したい場合は新しいオブジェクトを作る (履歴性を担保)。
@@ -20,7 +25,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
-NodeType = Literal["claim", "premise"]
+NodeType = Literal["claim", "premise", "evidence"]
 NodeSource = Literal["utterance", "document", "web"]
 Relation = Literal["support", "attack"]
 EdgeCreator = Literal["extraction", "linking", "manual"]

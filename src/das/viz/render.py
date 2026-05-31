@@ -5,8 +5,9 @@
 
 色とシェイプの規約:
   - source: utterance=楕円/青, document=四角/緑, web=ダイヤ/オレンジ
+    (議論側=utterance は claim/premise、知識側=document/web は中立な事実 evidence)
   - relation: support=緑, attack=赤、太さは confidence に比例
-  - hover (title) には全文・author・rationale を表示
+  - hover (title) には全文・node_type・author・rationale を表示
 """
 
 from __future__ import annotations

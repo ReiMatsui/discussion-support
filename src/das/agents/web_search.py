@@ -12,8 +12,10 @@
   - クエリのキャッシュで重複検索を防ぐ
   - Tavily 未インストール / API キー欠如のときは静かに no-op
 
-検索結果は **そのまま渡さず**、``Node(source="web", node_type="premise")``
-として AF に整形して入れる (=「広い知識」も同じ AF 上で扱える)。
+検索結果は **そのまま渡さず**、``Node(source="web", node_type="evidence")``
+として AF に整形して入れる (=「広い知識」も同じ AF 上で扱える)。Web 結果は
+立場を持つ主張ではなく中立な事実なので evidence 扱いとし、特定の主張への
+支持/攻撃 (スタンス) は連結エージェントが対象主張ごとにエッジで判定する。
 """
 
 from __future__ import annotations
@@ -140,7 +142,7 @@ class WebSearchAgent(BaseAgent):
             nodes.append(
                 Node(
                     text=text[:500],
-                    node_type="premise",
+                    node_type="evidence",
                     source="web",
                     author=domain,
                     metadata={
