@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from das.agents.extraction import _ExtractedUnit, _ExtractionResult
-from das.agents.linking import _LinkJudgment
+from das.agents.linking import _BatchJudgment, _IndexedJudgment
 from das.graph.schema import Node
 from das.graph.store import NetworkXGraphStore
 from das.llm import OpenAIClient
@@ -63,10 +63,9 @@ async def test_run_session_creates_nodes_for_each_utterance(
     orch, llm = _make_orchestrator()
 
     extraction_results = {1: _extraction_for(1), 2: _extraction_for(2)}
-    judgments = [_LinkJudgment(relation="none", confidence=0.9, rationale="-")]
 
     async def fake_chat_structured(messages: list[dict], response_format, **kwargs):
-        # extraction か linking かを response_format で判定
+        # extraction か linking (バッチ) かを response_format で判定
         if response_format is _ExtractionResult:
             user = messages[1]["content"]
             if "発話番号: 1" in user:
@@ -74,8 +73,15 @@ async def test_run_session_creates_nodes_for_each_utterance(
             if "発話番号: 2" in user:
                 return extraction_results[2]
             return _ExtractionResult(units=[])
-        if response_format is _LinkJudgment:
-            return judgments[0]
+        if response_format is _BatchJudgment:
+            # 候補数ぶんの none 判定をまとめて返す ("  text:" 行数 - 1 = 候補数)
+            n = messages[1]["content"].count("  text:") - 1
+            return _BatchJudgment(
+                judgments=[
+                    _IndexedJudgment(index=i, relation="none", confidence=0.9, rationale="-")
+                    for i in range(n)
+                ]
+            )
         raise AssertionError("unexpected schema")
 
     llm.chat_structured = AsyncMock(side_effect=fake_chat_structured)  # type: ignore[method-assign]

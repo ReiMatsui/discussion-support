@@ -3,7 +3,9 @@
 新しいノード ``target`` がストアに加わったとき:
 
   1. embedding 類似度で候補ノードを top-k 件に絞る (検索コスト削減)
-  2. 各候補と ``target`` の論証関係を LLM に判定させる
+  2. top-k 候補と ``target`` の論証関係を LLM に判定させる
+       - 既定では候補をまとめて 1 回の呼び出しで判定し、ノードあたりの判定
+         呼び出しを O(top_k)→O(1) に抑える (``_judge_batch``)
        - 5 値: a_supports_b / a_attacks_b / b_supports_a / b_attacks_a / none
   3. confidence が閾値以上のものだけエッジとしてストアに書き込む
 
@@ -51,6 +53,21 @@ class _LinkJudgment(BaseModel):
     rationale: str = Field(default="")
 
 
+class _IndexedJudgment(BaseModel):
+    """バッチ判定で 1 候補ぶんの判定結果。``index`` で候補と対応付ける。"""
+
+    index: int = Field(ge=0)
+    relation: _RelationLabel
+    confidence: float = Field(ge=0.0, le=1.0)
+    rationale: str = Field(default="")
+
+
+class _BatchJudgment(BaseModel):
+    """target と複数候補をまとめて判定した結果のリスト。"""
+
+    judgments: list[_IndexedJudgment]
+
+
 def _load_system_prompt() -> str:
     return (_PROMPTS_DIR / "linking.md").read_text(encoding="utf-8")
 
@@ -87,6 +104,7 @@ class LinkingAgent(BaseAgent):
         embedding_model: str | None = None,
         model_override: str | None = None,
         judge_timeout: float | None = 30.0,
+        batch: bool = True,
     ) -> None:
         """
         Args:
@@ -103,6 +121,11 @@ class LinkingAgent(BaseAgent):
                 blocking してしまう。``asyncio.wait_for`` でラップし、超過したら
                 relation=none / confidence=0 として次に進む。
                 既定 30.0 秒 (gpt-5-nano は通常 5 秒以内に応答)。``None`` で無効化。
+                バッチモードでは「バッチ呼び出し 1 回」全体に対するタイムアウト。
+            batch: True (既定) なら top-k 候補を 1 回の LLM 呼び出しでまとめて判定する
+                (``_judge_batch``)。ノードあたりの関係判定呼び出しを O(top_k)→O(1) に
+                抑え、リアルタイム運用のコスト/レート制限を削減する。False なら従来の
+                候補 1 件 1 呼び出し (``_judge_pair`` を ``asyncio.gather`` で並列) に戻す。
         """
 
         super().__init__(llm=llm)
@@ -114,6 +137,7 @@ class LinkingAgent(BaseAgent):
         self._embedding_model = embedding_model
         self._model_override = model_override
         self._judge_timeout = judge_timeout
+        self._batch = batch
         self._embeddings: dict[UUID, list[float]] = {}
 
     # --- 公開 ---------------------------------------------------------
@@ -121,12 +145,13 @@ class LinkingAgent(BaseAgent):
     async def link_node(self, target: Node, store: GraphStore) -> list[Edge]:
         """``target`` と既存ノード群との関係を推定し、閾値超のエッジを書き込む。
 
-        判定は ``asyncio.gather`` で並列に走らせる (候補ごとに独立)。リアルタイム
-        運用では候補数を増やしてもレイテンシが一定になるため、source 別 top-k と
-        相性が良い。
+        既定 (``batch=True``) では top-k 候補を **1 回の LLM 呼び出し**でまとめて
+        判定する (``_judge_batch``)。ノードあたりの関係判定呼び出しを O(top_k)→O(1)
+        に抑える。``asyncio.wait_for`` はバッチ呼び出し 1 回全体に対してラップし、
+        超過時は全候補 none 扱いとする。
 
-        個別の judge 呼び出しは ``_judge_pair_or_timeout`` で ``asyncio.wait_for``
-        ラップし、1 件が hang してもバッチ全体を待たせないようにする。
+        ``batch=False`` のときは従来挙動 (候補ごとに ``_judge_pair_or_timeout`` を
+        ``asyncio.gather`` で並列実行) に戻る。
         """
 
         candidates = await self._select_candidates(target, store)
@@ -139,9 +164,16 @@ class LinkingAgent(BaseAgent):
             )
             return []
 
-        judgments = await asyncio.gather(
-            *(self._judge_pair_or_timeout(target, cand) for cand in candidates)
-        )
+        if self._batch:
+            judgments: list[_LinkJudgment] = await self._judge_batch_or_timeout(
+                target, candidates
+            )
+        else:
+            judgments = list(
+                await asyncio.gather(
+                    *(self._judge_pair_or_timeout(target, cand) for cand in candidates)
+                )
+            )
 
         edges: list[Edge] = []
         n_timeouts = 0
@@ -161,6 +193,39 @@ class LinkingAgent(BaseAgent):
             n_timeouts=n_timeouts,
         )
         return edges
+
+    async def _judge_batch_or_timeout(
+        self, target: Node, candidates: list[Node]
+    ) -> list[_LinkJudgment]:
+        """``_judge_batch`` を ``asyncio.wait_for`` でラップして hang を防ぐ。
+
+        タイムアウトは「バッチ呼び出し 1 回」全体に対して適用する。超過時は全候補を
+        relation="none" / confidence=0 で返し (既存の per-pair timeout 挙動と整合)、
+        エッジは作られない。``self._judge_timeout`` が ``None`` のときは素呼び出し。
+        """
+
+        if self._judge_timeout is None:
+            return await self._judge_batch(target, candidates)
+        try:
+            return await asyncio.wait_for(
+                self._judge_batch(target, candidates),
+                timeout=self._judge_timeout,
+            )
+        except (TimeoutError, asyncio.TimeoutError):
+            self.log.warning(
+                "linking.judge_timeout",
+                target_id=str(target.id),
+                n_candidates=len(candidates),
+                timeout_seconds=self._judge_timeout,
+            )
+            return [
+                _LinkJudgment(
+                    relation="none",
+                    confidence=0.0,
+                    rationale=f"judge_timeout_after_{self._judge_timeout}s",
+                )
+                for _ in candidates
+            ]
 
     async def _judge_pair_or_timeout(self, target: Node, cand: Node) -> _LinkJudgment:
         """``_judge_pair`` を ``asyncio.wait_for`` でラップして hang を防ぐ。
@@ -253,6 +318,61 @@ class LinkingAgent(BaseAgent):
         return vec
 
     # --- 判定 ---------------------------------------------------------
+
+    async def _judge_batch(
+        self, target: Node, candidates: list[Node]
+    ) -> list[_LinkJudgment]:
+        """target と全候補の関係を 1 回の LLM 呼び出しでまとめて判定する。
+
+        候補を ``[0] … [k-1]`` と番号付けして渡し、各候補 (B) と target (A) の
+        関係を candidate ごとに返させる。判定の意味づけ・5 値 relation の向きは
+        ``_judge_pair`` と同一 (A=target, B=candidate)。
+
+        LLM が一部候補を省略したり順序が入れ替わっても、``index`` で対応付け、
+        欠けた分は ``relation="none" / confidence=0`` で補完して candidate 数と
+        アラインさせる (順序ズレ・欠落に頑健)。
+        """
+
+        lines = [
+            "A (基準ノード):",
+            f"  text: {target.text}",
+            f"  type: {target.node_type}",
+            f"  source: {target.source}",
+            f"  author: {target.author}",
+            "",
+            "B 候補ノード群 (各 [i] について A との関係を 5 値で判定):",
+        ]
+        for i, cand in enumerate(candidates):
+            lines.append(f"[{i}]")
+            lines.append(f"  text: {cand.text}")
+            lines.append(f"  type: {cand.node_type}")
+            lines.append(f"  source: {cand.source}")
+            lines.append(f"  author: {cand.author}")
+        user_content = "\n".join(lines)
+
+        messages = [
+            {"role": "system", "content": self._system_prompt},
+            {"role": "user", "content": user_content},
+        ]
+        batch = await self.llm.chat_structured(
+            messages,  # type: ignore[arg-type]
+            response_format=_BatchJudgment,
+            model=self._model_override,
+        )
+
+        # 既定 none で埋めてから index で上書き (欠落・順序ズレ・重複・範囲外に頑健)
+        judgments = [
+            _LinkJudgment(relation="none", confidence=0.0, rationale="")
+            for _ in candidates
+        ]
+        for item in batch.judgments:
+            if 0 <= item.index < len(candidates):
+                judgments[item.index] = _LinkJudgment(
+                    relation=item.relation,
+                    confidence=item.confidence,
+                    rationale=item.rationale,
+                )
+        return judgments
 
     async def _judge_pair(self, a: Node, b: Node) -> _LinkJudgment:
         user_content = (

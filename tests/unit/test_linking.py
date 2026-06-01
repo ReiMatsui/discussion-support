@@ -10,7 +10,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from das.agents.linking import LinkingAgent, _LinkJudgment, cosine_similarity
+from das.agents.linking import (
+    _BatchJudgment,
+    _IndexedJudgment,
+    _LinkJudgment,
+    LinkingAgent,
+    cosine_similarity,
+)
 from das.graph.schema import Node
 from das.graph.store import NetworkXGraphStore
 from das.llm import OpenAIClient
@@ -117,20 +123,23 @@ async def test_top_k_filters_by_embedding_similarity(
     llm.embed = AsyncMock(side_effect=fake_embed)  # type: ignore[method-assign]
     judged: list[tuple[str, str]] = []
 
-    async def fake_judge(messages: list[dict], **kwargs: object) -> _LinkJudgment:
-        # メッセージ内容に含まれるテキストから候補を抽出
+    async def fake_judge(messages: list[dict], **kwargs: object) -> _BatchJudgment:
+        # バッチ 1 回の呼び出し。メッセージ内容に含まれるテキストから候補を抽出
         user_content = messages[1]["content"]
-        for text in (nodes["a2"].text, nodes["a3"].text, nodes["a4"].text):
-            if text in user_content:
-                judged.append((target.text, text))
-        return _LinkJudgment(relation="none", confidence=0.9, rationale="-")
+        matched = [
+            text
+            for text in (nodes["a2"].text, nodes["a3"].text, nodes["a4"].text)
+            if text in user_content
+        ]
+        judged.extend((target.text, text) for text in matched)
+        return _batch_none(len(matched))
 
     llm.chat_structured = AsyncMock(side_effect=fake_judge)  # type: ignore[method-assign]
 
     agent = LinkingAgent(llm=llm, top_k=1, threshold=0.6)
     await agent.link_node(target, store)
 
-    # 1 件だけ判定が呼ばれ、それは a2 (最も近い)
+    # 候補は 1 件 (a2) だけ判定に渡される
     assert len(judged) == 1
     assert judged[0][1] == nodes["a2"].text
 
@@ -140,6 +149,27 @@ async def test_top_k_filters_by_embedding_similarity(
 
 def _judgment(rel: str, conf: float = 0.9) -> _LinkJudgment:
     return _LinkJudgment(relation=rel, confidence=conf, rationale="rationale")  # type: ignore[arg-type]
+
+
+def _batch1(rel: str, conf: float = 0.9) -> _BatchJudgment:
+    """単一候補ぶんのバッチ結果 (index=0)。バッチ既定の judge 戻り値に使う。"""
+
+    return _BatchJudgment(
+        judgments=[
+            _IndexedJudgment(index=0, relation=rel, confidence=conf, rationale="rationale")  # type: ignore[arg-type]
+        ]
+    )
+
+
+def _batch_none(n: int) -> _BatchJudgment:
+    """候補 n 件すべてを relation="none" で返すバッチ結果。"""
+
+    return _BatchJudgment(
+        judgments=[
+            _IndexedJudgment(index=i, relation="none", confidence=0.9, rationale="-")
+            for i in range(n)
+        ]
+    )
 
 
 async def test_a_attacks_b_creates_edge_target_to_candidate(
@@ -154,7 +184,7 @@ async def test_a_attacks_b_creates_edge_target_to_candidate(
     llm = _fake_llm()
     llm.embed_one = AsyncMock(return_value=[1.0, 0.0])  # type: ignore[method-assign]
     llm.embed = AsyncMock(return_value=[[1.0, 0.0]])  # type: ignore[method-assign]
-    llm.chat_structured = AsyncMock(return_value=_judgment("a_attacks_b", 0.9))  # type: ignore[method-assign]
+    llm.chat_structured = AsyncMock(return_value=_batch1("a_attacks_b", 0.9))  # type: ignore[method-assign]
 
     agent = LinkingAgent(llm=llm, top_k=5, threshold=0.6)
     edges = await agent.link_node(target, store)
@@ -182,7 +212,7 @@ async def test_b_attacks_a_creates_edge_candidate_to_target(
     llm = _fake_llm()
     llm.embed_one = AsyncMock(return_value=[1.0, 0.0])  # type: ignore[method-assign]
     llm.embed = AsyncMock(return_value=[[1.0, 0.0]])  # type: ignore[method-assign]
-    llm.chat_structured = AsyncMock(return_value=_judgment("b_attacks_a", 0.85))  # type: ignore[method-assign]
+    llm.chat_structured = AsyncMock(return_value=_batch1("b_attacks_a", 0.85))  # type: ignore[method-assign]
 
     agent = LinkingAgent(llm=llm, top_k=5, threshold=0.6)
     edges = await agent.link_node(target, store)
@@ -212,7 +242,7 @@ async def test_b_supports_a_creates_support_edge(
     llm = _fake_llm()
     llm.embed_one = AsyncMock(return_value=[1.0, 0.0])  # type: ignore[method-assign]
     llm.embed = AsyncMock(return_value=[[1.0, 0.0]])  # type: ignore[method-assign]
-    llm.chat_structured = AsyncMock(return_value=_judgment("b_supports_a", 0.7))  # type: ignore[method-assign]
+    llm.chat_structured = AsyncMock(return_value=_batch1("b_supports_a", 0.7))  # type: ignore[method-assign]
 
     agent = LinkingAgent(llm=llm, top_k=5, threshold=0.6)
     edges = await agent.link_node(target, store)
@@ -234,7 +264,7 @@ async def test_none_relation_creates_no_edge(
     llm = _fake_llm()
     llm.embed_one = AsyncMock(return_value=[1.0, 0.0])  # type: ignore[method-assign]
     llm.embed = AsyncMock(return_value=[[1.0, 0.0]])  # type: ignore[method-assign]
-    llm.chat_structured = AsyncMock(return_value=_judgment("none", 0.95))  # type: ignore[method-assign]
+    llm.chat_structured = AsyncMock(return_value=_batch1("none", 0.95))  # type: ignore[method-assign]
 
     agent = LinkingAgent(llm=llm, top_k=5, threshold=0.6)
     edges = await agent.link_node(target, store)
@@ -252,7 +282,7 @@ async def test_below_threshold_creates_no_edge(
     llm = _fake_llm()
     llm.embed_one = AsyncMock(return_value=[1.0, 0.0])  # type: ignore[method-assign]
     llm.embed = AsyncMock(return_value=[[1.0, 0.0]])  # type: ignore[method-assign]
-    llm.chat_structured = AsyncMock(return_value=_judgment("a_attacks_b", 0.3))  # type: ignore[method-assign]
+    llm.chat_structured = AsyncMock(return_value=_batch1("a_attacks_b", 0.3))  # type: ignore[method-assign]
 
     agent = LinkingAgent(llm=llm, top_k=5, threshold=0.6)
     edges = await agent.link_node(target, store)
@@ -274,7 +304,7 @@ async def test_embedding_cache_avoids_recomputation(
     llm = _fake_llm()
     llm.embed_one = AsyncMock(return_value=[1.0, 0.0])  # type: ignore[method-assign]
     llm.embed = AsyncMock(return_value=[[0.9, 0.1], [0.1, 0.9]])  # type: ignore[method-assign]
-    llm.chat_structured = AsyncMock(return_value=_judgment("none", 0.9))  # type: ignore[method-assign]
+    llm.chat_structured = AsyncMock(return_value=_batch1("none", 0.9))  # type: ignore[method-assign]
 
     agent = LinkingAgent(llm=llm, top_k=5)
     await agent.link_node(target, store)
@@ -311,7 +341,7 @@ async def test_linking_uses_model_override_when_set(store: NetworkXGraphStore) -
     llm = _fake_llm()
     llm.embed_one = AsyncMock(return_value=[1.0, 0.0])  # type: ignore[method-assign]
     llm.embed = AsyncMock(return_value=[[0.9, 0.1]])  # type: ignore[method-assign]
-    captured = AsyncMock(return_value=_judgment("none", 0.9))
+    captured = AsyncMock(return_value=_batch1("none", 0.9))
     llm.chat_structured = captured  # type: ignore[method-assign]
 
     agent = LinkingAgent(llm=llm, top_k=5, model_override="gpt-5-nano")
@@ -336,7 +366,7 @@ async def test_linking_no_model_override_means_default_model(
     llm = _fake_llm()
     llm.embed_one = AsyncMock(return_value=[1.0, 0.0])  # type: ignore[method-assign]
     llm.embed = AsyncMock(return_value=[[0.9, 0.1]])  # type: ignore[method-assign]
-    captured = AsyncMock(return_value=_judgment("none", 0.9))
+    captured = AsyncMock(return_value=_batch1("none", 0.9))
     llm.chat_structured = captured  # type: ignore[method-assign]
 
     agent = LinkingAgent(llm=llm, top_k=5)
@@ -387,12 +417,11 @@ async def test_top_k_per_source_picks_n_from_each_bucket(
 
     judged_texts: list[str] = []
 
-    async def fake_judge(messages: list[dict], **kwargs: object) -> _LinkJudgment:
+    async def fake_judge(messages: list[dict], **kwargs: object) -> _BatchJudgment:
         user_content = messages[1]["content"]
-        for text in embeddings_by_text:
-            if text in user_content:
-                judged_texts.append(text)
-        return _LinkJudgment(relation="none", confidence=0.9, rationale="-")
+        matched = [text for text in embeddings_by_text if text in user_content]
+        judged_texts.extend(matched)
+        return _batch_none(len(matched))
 
     llm.chat_structured = AsyncMock(side_effect=fake_judge)  # type: ignore[method-assign]
 
@@ -430,23 +459,34 @@ async def test_top_k_per_source_overrides_top_k(store: NetworkXGraphStore) -> No
         return out
 
     llm.embed = AsyncMock(side_effect=fake_embed)  # type: ignore[method-assign]
-    llm.chat_structured = AsyncMock(  # type: ignore[method-assign]
-        return_value=_judgment("none", 0.9)
-    )
+
+    captured_contents: list[str] = []
+
+    async def fake_judge(messages: list[dict], **kwargs: object) -> _BatchJudgment:
+        content = messages[1]["content"]
+        captured_contents.append(content)
+        # 候補数 = "  text:" 行数 - 1 (A=target ぶんを差し引く)
+        n_candidates = content.count("  text:") - 1
+        return _batch_none(n_candidates)
+
+    llm.chat_structured = AsyncMock(side_effect=fake_judge)  # type: ignore[method-assign]
 
     # top_k=100 だが top_k_per_source=2 が優先される
     agent = LinkingAgent(llm=llm, top_k=100, top_k_per_source=2, threshold=0.6)
     await agent.link_node(target, store)
 
+    # バッチなので候補数によらず chat completion は 1 回だけ
+    assert llm.chat_structured.await_count == 1
     # 候補数 = utterance 2 + document 1 = 3 (web は無いので skip)
-    assert llm.chat_structured.await_count == 3
+    assert captured_contents[0].count("  text:") - 1 == 3
 
 
 async def test_link_node_runs_judges_in_parallel(store: NetworkXGraphStore) -> None:
-    """``link_node`` が候補の judge を並列に走らせることを確認する。
+    """``batch=False`` のレガシー経路で候補の judge を並列に走らせることを確認する。
 
     候補ノードを 4 つ用意し、各 judge が遅延を持つようにしておいて、
     逐次なら 4×delay、並列なら 1×delay 程度で終わることを観測する。
+    (バッチ既定では呼び出しが 1 回に集約されるため、この回帰は per-pair 経路向け。)
     """
 
     import time
@@ -476,7 +516,7 @@ async def test_link_node_runs_judges_in_parallel(store: NetworkXGraphStore) -> N
 
     llm.chat_structured = AsyncMock(side_effect=slow_judge)  # type: ignore[method-assign]
 
-    agent = LinkingAgent(llm=llm, top_k=10, threshold=0.6)
+    agent = LinkingAgent(llm=llm, top_k=10, threshold=0.6, batch=False)
 
     t0 = time.monotonic()
     await agent.link_node(target, store)
@@ -497,12 +537,13 @@ async def test_link_node_runs_judges_in_parallel(store: NetworkXGraphStore) -> N
 async def test_hung_judge_times_out_and_yields_none_edge(
     store: NetworkXGraphStore,
 ) -> None:
-    """1 件の judge が hang してもバッチ全体は timeout で復帰、その候補は edge にならない。
+    """``batch=False`` の per-pair 経路で 1 件が hang しても他候補は edge になる。
 
     並列バッチの中の 1 件が long-hang する OpenAI 障害シナリオを模擬する。
     対象が 3 つあり、うち 1 つだけ無限待ち、残り 2 つは即座に support を返す。
     judge_timeout=0.1 を設定すると、hang した 1 件のみ none 化され、
-    他 2 件は通常通り edge が作られる。
+    他 2 件は通常通り edge が作られる。(バッチ既定では呼び出しが 1 回なので、
+    per-pair の粒度で timeout を切れるのはこの経路のみ。)
     """
 
     import asyncio as _asyncio
@@ -531,7 +572,7 @@ async def test_hung_judge_times_out_and_yields_none_edge(
 
     llm.chat_structured = AsyncMock(side_effect=judge_dispatch)  # type: ignore[method-assign]
 
-    agent = LinkingAgent(llm=llm, top_k=10, threshold=0.6, judge_timeout=0.1)
+    agent = LinkingAgent(llm=llm, top_k=10, threshold=0.6, judge_timeout=0.1, batch=False)
 
     import time
 
@@ -561,9 +602,154 @@ async def test_judge_timeout_none_passes_through(store: NetworkXGraphStore) -> N
     llm.embed_one = AsyncMock(return_value=[1.0, 0.0])  # type: ignore[method-assign]
     llm.embed = AsyncMock(return_value=[[0.9, 0.1]])  # type: ignore[method-assign]
     llm.chat_structured = AsyncMock(  # type: ignore[method-assign]
-        return_value=_judgment("a_supports_b", 0.9)
+        return_value=_batch1("a_supports_b", 0.9)
     )
 
     agent = LinkingAgent(llm=llm, top_k=10, threshold=0.6, judge_timeout=None)
     edges = await agent.link_node(target, store)
     assert len(edges) == 1
+
+
+# --- バッチ判定 (top-k 候補をまとめて 1 回) -----------------------------
+
+
+def _parse_index_to_text(content: str) -> dict[int, str]:
+    """バッチ user メッセージから ``index -> candidate text`` の対応を抜き出す。"""
+
+    import re
+
+    mapping: dict[int, str] = {}
+    cur: int | None = None
+    for line in content.splitlines():
+        stripped = line.strip()
+        m = re.fullmatch(r"\[(\d+)\]", stripped)
+        if m:
+            cur = int(m.group(1))
+        elif cur is not None and stripped.startswith("text:"):
+            mapping[cur] = stripped[len("text:") :].strip()
+            cur = None
+    return mapping
+
+
+async def test_batch_single_chat_call_for_k_candidates(store: NetworkXGraphStore) -> None:
+    """候補 k 件に対し chat completion 呼び出しは 1 回だけ (O(top_k)→O(1))。"""
+
+    target = Node(text="t", node_type="claim", source="utterance", author="A")
+    cands = [
+        Node(text=f"c{i}", node_type="claim", source="utterance", author=f"S{i}")
+        for i in range(6)
+    ]
+    for n in cands:
+        store.add_node(n)
+    store.add_node(target)
+
+    llm = _fake_llm()
+    llm.embed_one = AsyncMock(return_value=[1.0, 0.0])  # type: ignore[method-assign]
+    llm.embed = AsyncMock(  # type: ignore[method-assign]
+        return_value=[[0.9, 0.1] for _ in cands]
+    )
+    llm.chat_structured = AsyncMock(return_value=_batch_none(6))  # type: ignore[method-assign]
+
+    agent = LinkingAgent(llm=llm, top_k=6, threshold=0.6)
+    await agent.link_node(target, store)
+
+    assert llm.chat_structured.await_count == 1
+
+
+async def test_batch_aligns_judgments_despite_missing_and_reordered(
+    store: NetworkXGraphStore,
+) -> None:
+    """LLM が一部候補を省略 / 順序を入れ替えても index で正しくアラインする。
+
+    候補 3 件 (hi / mid / lo) に対し、バッチ応答は順序を逆転させ mid を省略する。
+    欠けた mid は none 扱いでエッジ無し、hi / lo は index 経由で正しくエッジ化される。
+    """
+
+    target = Node(text="target", node_type="claim", source="utterance", author="A")
+    hi = Node(text="hi", node_type="claim", source="utterance", author="B")
+    mid = Node(text="mid", node_type="claim", source="utterance", author="C")
+    lo = Node(text="lo", node_type="premise", source="web", author="example.com")
+    for n in (hi, mid, lo):
+        store.add_node(n)
+    store.add_node(target)
+
+    llm = _fake_llm()
+    llm.embed_one = AsyncMock(return_value=[1.0, 0.0])  # type: ignore[method-assign]
+    embeddings_by_text = {
+        hi.text: [1.0, 0.0],
+        mid.text: [0.8, 0.6],
+        lo.text: [0.6, 0.8],
+    }
+
+    async def fake_embed(texts: list[str], **kwargs: object) -> list[list[float]]:
+        return [embeddings_by_text[t] for t in texts]
+
+    llm.embed = AsyncMock(side_effect=fake_embed)  # type: ignore[method-assign]
+
+    async def fake_judge(messages: list[dict], **kwargs: object) -> _BatchJudgment:
+        mapping = _parse_index_to_text(messages[1]["content"])
+        out: list[_IndexedJudgment] = []
+        for idx, text in mapping.items():
+            if text == hi.text:
+                out.append(
+                    _IndexedJudgment(index=idx, relation="a_attacks_b", confidence=0.9)
+                )
+            elif text == lo.text:
+                out.append(
+                    _IndexedJudgment(index=idx, relation="b_supports_a", confidence=0.9)
+                )
+            # mid は意図的に省略
+        out.reverse()  # 順序ズレを模擬
+        return _BatchJudgment(judgments=out)
+
+    llm.chat_structured = AsyncMock(side_effect=fake_judge)  # type: ignore[method-assign]
+
+    agent = LinkingAgent(llm=llm, top_k=5, threshold=0.6)
+    edges = await agent.link_node(target, store)
+
+    assert llm.chat_structured.await_count == 1
+    by_pair = {(e.src_id, e.dst_id): e for e in edges}
+    # hi: a_attacks_b → target -> hi (attack)
+    assert by_pair[(target.id, hi.id)].relation == "attack"
+    # lo: b_supports_a → lo -> target (support)
+    assert by_pair[(lo.id, target.id)].relation == "support"
+    # mid は省略されたので none 扱い、エッジ無し
+    assert mid.id not in {e.src_id for e in edges} | {e.dst_id for e in edges}
+    assert len(edges) == 2
+
+
+async def test_batch_timeout_yields_no_edges(store: NetworkXGraphStore) -> None:
+    """バッチ呼び出しが hang したら全候補 none 扱いでエッジ無し、即座に復帰する。"""
+
+    import asyncio as _asyncio
+    import time
+
+    target = Node(text="t", node_type="claim", source="utterance", author="A")
+    cands = [
+        Node(text=f"c{i}", node_type="claim", source="utterance", author=f"S{i}")
+        for i in range(3)
+    ]
+    for n in cands:
+        store.add_node(n)
+    store.add_node(target)
+
+    llm = _fake_llm()
+    llm.embed_one = AsyncMock(return_value=[1.0, 0.0])  # type: ignore[method-assign]
+    llm.embed = AsyncMock(  # type: ignore[method-assign]
+        return_value=[[0.9, 0.1] for _ in cands]
+    )
+
+    async def hang(*args: object, **kwargs: object) -> _BatchJudgment:
+        await _asyncio.sleep(60.0)
+        return _batch_none(3)  # 到達しない
+
+    llm.chat_structured = AsyncMock(side_effect=hang)  # type: ignore[method-assign]
+
+    agent = LinkingAgent(llm=llm, top_k=10, threshold=0.6, judge_timeout=0.1)
+
+    t0 = time.monotonic()
+    edges = await agent.link_node(target, store)
+    elapsed = time.monotonic() - t0
+
+    assert elapsed < 1.0, f"batch timeout が効いていない。elapsed={elapsed:.3f}s"
+    assert edges == []
