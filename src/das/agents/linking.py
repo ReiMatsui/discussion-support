@@ -610,6 +610,35 @@ class LinkingAgent(BaseAgent):
         else:  # pragma: no cover - 防御的
             return None
 
+        # --- エッジ方向バリデーション ---
+        # 確定ルール:
+        #   1. evidence は常に src 側のみ (dst にならない)
+        #   2. evidence → evidence は禁止
+        #   3. claim/premise 同士は自由 (双方向・両関係 OK)
+        src_node = target if src_id == target.id else cand
+        dst_node = cand if dst_id == cand.id else target
+
+        # ルール 2: evidence → evidence は禁止 (ルール 1 より先にチェックしログで区別)
+        if src_node.node_type == "evidence" and dst_node.node_type == "evidence":
+            self.log.info(
+                "linking.edge_rejected",
+                reason="evidence_to_evidence",
+                src_id=str(src_id),
+                dst_id=str(dst_id),
+            )
+            return None
+
+        # ルール 1: evidence は dst になれない (claim/premise → evidence は禁止)
+        if dst_node.node_type == "evidence":
+            self.log.info(
+                "linking.edge_rejected",
+                reason="dst_is_evidence",
+                src_id=str(src_id),
+                dst_id=str(dst_id),
+                src_type=src_node.node_type,
+            )
+            return None
+
         return Edge(
             src_id=src_id,
             dst_id=dst_id,

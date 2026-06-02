@@ -718,6 +718,79 @@ async def test_batch_aligns_judgments_despite_missing_and_reordered(
     assert len(edges) == 2
 
 
+# --- エッジ方向バリデーション ------------------------------------------
+
+
+async def test_edge_to_evidence_rejected(
+    store: NetworkXGraphStore,
+) -> None:
+    """claim → evidence は禁止 (evidence は dst になれない)。
+
+    LLM が ``a_supports_b`` を返しても、target=claim → cand=evidence の向きになる
+    ため、バリデーションで弾かれてエッジが作られないことを確認する。
+    """
+
+    target = Node(text="プラ容器を廃止すべき", node_type="claim", source="utterance", author="A")
+    ev = Node(text="プラごみは年間 2 トン", node_type="evidence", source="document", author="d1")
+    store.add_node(ev)
+    store.add_node(target)
+
+    llm = _fake_llm()
+    llm.embed_one = AsyncMock(return_value=[1.0, 0.0])  # type: ignore[method-assign]
+    llm.embed = AsyncMock(return_value=[[1.0, 0.0]])  # type: ignore[method-assign]
+    # a_supports_b → src=target(claim), dst=cand(evidence) → dst が evidence なので禁止
+    llm.chat_structured = AsyncMock(return_value=_batch1("a_supports_b", 0.9))  # type: ignore[method-assign]
+
+    agent = LinkingAgent(llm=llm, top_k=5, threshold=0.6)
+    edges = await agent.link_node(target, store)
+    assert edges == []
+
+
+async def test_edge_evidence_to_claim_allowed(
+    store: NetworkXGraphStore,
+) -> None:
+    """evidence → claim は許可 (evidence が src 側)。"""
+
+    target = Node(text="プラ容器を廃止すべき", node_type="claim", source="utterance", author="A")
+    ev = Node(text="プラごみは年間 2 トン", node_type="evidence", source="document", author="d1")
+    store.add_node(ev)
+    store.add_node(target)
+
+    llm = _fake_llm()
+    llm.embed_one = AsyncMock(return_value=[1.0, 0.0])  # type: ignore[method-assign]
+    llm.embed = AsyncMock(return_value=[[1.0, 0.0]])  # type: ignore[method-assign]
+    # b_supports_a → src=cand(evidence), dst=target(claim) → evidence が src なので OK
+    llm.chat_structured = AsyncMock(return_value=_batch1("b_supports_a", 0.9))  # type: ignore[method-assign]
+
+    agent = LinkingAgent(llm=llm, top_k=5, threshold=0.6)
+    edges = await agent.link_node(target, store)
+    assert len(edges) == 1
+    assert edges[0].src_id == ev.id
+    assert edges[0].dst_id == target.id
+    assert edges[0].relation == "support"
+
+
+async def test_edge_evidence_to_evidence_rejected(
+    store: NetworkXGraphStore,
+) -> None:
+    """evidence → evidence は禁止 (中立事実同士は論証関係を持たない)。"""
+
+    target = Node(text="紙容器出荷量は前年比 12% 増", node_type="evidence", source="document", author="d1")
+    ev = Node(text="X 市のプラごみ回収量は年間 2 トン", node_type="evidence", source="web", author="example.com")
+    store.add_node(ev)
+    store.add_node(target)
+
+    llm = _fake_llm()
+    llm.embed_one = AsyncMock(return_value=[1.0, 0.0])  # type: ignore[method-assign]
+    llm.embed = AsyncMock(return_value=[[1.0, 0.0]])  # type: ignore[method-assign]
+    # LLM が誤って関係を返しても evidence×evidence なので弾かれる
+    llm.chat_structured = AsyncMock(return_value=_batch1("a_supports_b", 0.9))  # type: ignore[method-assign]
+
+    agent = LinkingAgent(llm=llm, top_k=5, threshold=0.6)
+    edges = await agent.link_node(target, store)
+    assert edges == []
+
+
 async def test_batch_timeout_yields_no_edges(store: NetworkXGraphStore) -> None:
     """バッチ呼び出しが hang したら全候補 none 扱いでエッジ無し、即座に復帰する。"""
 
