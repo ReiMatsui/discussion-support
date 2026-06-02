@@ -2,7 +2,7 @@
 
 新しいノード ``target`` がストアに加わったとき:
 
-  1. embedding 類似度で候補ノードを top-k 件に絞る (検索コスト削減)
+  1. hybrid retrieval (embedding + BM25) で候補ノードを top-k 件に絞る (検索コスト削減)
   2. top-k 候補と ``target`` の論証関係を LLM に判定させる
        - 既定では候補をまとめて 1 回の呼び出しで判定し、ノードあたりの判定
          呼び出しを O(top_k)→O(1) に抑える (``_judge_batch``)
@@ -16,12 +16,20 @@ embed しないようにする。M1 段階では十分。
   - 既定 (``top_k_per_source=None``): 全 source 混合で cosine top-k
   - source 別 (``top_k_per_source=N``): utterance / document / web の各 source ごとに
     cosine top-N を取り、結合して候補とする (貢献①「異種ソースの統合」を構造的に保証)
+
+Retrieval 品質ログ:
+  - 各 ``link_node`` 呼び出しで、top-k 候補の判定結果 (support/attack/none の内訳)
+    を ``RetrievalQualityLog`` として記録する。事後分析で retrieval が論証的関連を
+    拾えているかを検証できる。
 """
 
 from __future__ import annotations
 
 import asyncio
 import math
+import re
+from collections import Counter
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 from uuid import UUID
@@ -89,6 +97,119 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot / (math.sqrt(na) * math.sqrt(nb))
 
 
+# --- BM25 (軽量インメモリ実装) -----------------------------------------
+
+_TOKEN_RE = re.compile(r"[\w]+", re.UNICODE)
+
+
+def _tokenize(text: str) -> list[str]:
+    """Unicode 単語トークナイザ (日本語は文字 unigram にフォールバック)。"""
+    tokens = _TOKEN_RE.findall(text.lower())
+    # 日本語テキスト: 1文字の漢字/ひらがな/カタカナが多い場合は文字分割を追加
+    if not tokens or (len(tokens) == 1 and len(text) > 4):
+        tokens = list(text.lower().replace(" ", ""))
+    return tokens
+
+
+def bm25_score(
+    query_tokens: list[str],
+    doc_tokens: list[str],
+    avg_dl: float,
+    df: dict[str, int],
+    n_docs: int,
+    *,
+    k1: float = 1.5,
+    b: float = 0.75,
+) -> float:
+    """単一文書に対する BM25 スコア。"""
+    if not query_tokens or not doc_tokens or n_docs == 0:
+        return 0.0
+    dl = len(doc_tokens)
+    doc_tf: Counter[str] = Counter(doc_tokens)
+    score = 0.0
+    for term in query_tokens:
+        if term not in doc_tf:
+            continue
+        tf = doc_tf[term]
+        d = df.get(term, 0)
+        idf = math.log((n_docs - d + 0.5) / (d + 0.5) + 1.0)
+        numerator = tf * (k1 + 1)
+        denominator = tf + k1 * (1 - b + b * dl / max(avg_dl, 1.0))
+        score += idf * numerator / denominator
+    return score
+
+
+# --- Retrieval 品質ログ -------------------------------------------------
+
+
+@dataclass
+class RetrievalQualityEntry:
+    """1 回の link_node 呼び出しで得られた retrieval 品質情報。"""
+
+    target_id: str
+    target_text: str
+    target_source: str
+    n_candidates: int
+    n_support: int = 0
+    n_attack: int = 0
+    n_none: int = 0
+    retrieval_mode: str = "hybrid"
+    """'embedding' | 'bm25' | 'hybrid' | 'per_source'"""
+    candidate_sources: dict[str, int] = field(default_factory=dict)
+    """source 別の候補数内訳 (utterance/document/web)。"""
+
+
+@dataclass
+class RetrievalQualityLog:
+    """セッション全体の retrieval 品質記録。事後分析用。"""
+
+    entries: list[RetrievalQualityEntry] = field(default_factory=list)
+
+    @property
+    def total_candidates(self) -> int:
+        return sum(e.n_candidates for e in self.entries)
+
+    @property
+    def total_support(self) -> int:
+        return sum(e.n_support for e in self.entries)
+
+    @property
+    def total_attack(self) -> int:
+        return sum(e.n_attack for e in self.entries)
+
+    @property
+    def total_none(self) -> int:
+        return sum(e.n_none for e in self.entries)
+
+    @property
+    def hit_rate(self) -> float:
+        """top-k のうち support or attack と判定された割合。"""
+        total = self.total_candidates
+        if total == 0:
+            return 0.0
+        return (self.total_support + self.total_attack) / total
+
+    @property
+    def attack_ratio(self) -> float:
+        """有効候補 (support+attack) のうち attack の割合。反論の拾い具合の指標。"""
+        hits = self.total_support + self.total_attack
+        if hits == 0:
+            return 0.0
+        return self.total_attack / hits
+
+    def summary(self) -> dict:
+        """集計サマリ辞書。"""
+        return {
+            "n_link_calls": len(self.entries),
+            "total_candidates": self.total_candidates,
+            "total_support": self.total_support,
+            "total_attack": self.total_attack,
+            "total_none": self.total_none,
+            "hit_rate": round(self.hit_rate, 4),
+            "attack_ratio": round(self.attack_ratio, 4),
+        }
+
+
 class LinkingAgent(BaseAgent):
     """対象ノードの近傍を埋め込みで絞り込み、LLM で支持/攻撃を判定する。"""
 
@@ -105,6 +226,7 @@ class LinkingAgent(BaseAgent):
         model_override: str | None = None,
         judge_timeout: float | None = 30.0,
         batch: bool = True,
+        hybrid_alpha: float = 0.7,
     ) -> None:
         """
         Args:
@@ -126,6 +248,12 @@ class LinkingAgent(BaseAgent):
                 (``_judge_batch``)。ノードあたりの関係判定呼び出しを O(top_k)→O(1) に
                 抑え、リアルタイム運用のコスト/レート制限を削減する。False なら従来の
                 候補 1 件 1 呼び出し (``_judge_pair`` を ``asyncio.gather`` で並列) に戻す。
+            hybrid_alpha: embedding スコアと BM25 スコアの混合比率 (0-1)。
+                ``alpha * embedding + (1-alpha) * bm25_normalized`` で最終スコアを算出する。
+                alpha=1.0 で従来の embedding-only、alpha=0.0 で BM25-only。
+                既定 0.7 (embedding 重視だが BM25 でキーワード一致も考慮)。
+                BM25 を混ぜることで、embedding では遠いが論証的に関連する候補
+                (反論など意味が対立するもの) を拾いやすくする。
         """
 
         super().__init__(llm=llm)
@@ -138,9 +266,16 @@ class LinkingAgent(BaseAgent):
         self._model_override = model_override
         self._judge_timeout = judge_timeout
         self._batch = batch
+        self._hybrid_alpha = hybrid_alpha
         self._embeddings: dict[UUID, list[float]] = {}
+        self._quality_log = RetrievalQualityLog()
 
     # --- 公開 ---------------------------------------------------------
+
+    @property
+    def quality_log(self) -> RetrievalQualityLog:
+        """Retrieval 品質ログ。事後分析用。"""
+        return self._quality_log
 
     async def link_node(self, target: Node, store: GraphStore) -> list[Edge]:
         """``target`` と既存ノード群との関係を推定し、閾値超のエッジを書き込む。
@@ -177,13 +312,41 @@ class LinkingAgent(BaseAgent):
 
         edges: list[Edge] = []
         n_timeouts = 0
+        n_support = 0
+        n_attack = 0
+        n_none = 0
         for cand, judgment in zip(candidates, judgments, strict=True):
             if judgment.rationale.startswith("judge_timeout"):
                 n_timeouts += 1
+            if judgment.relation == "none":
+                n_none += 1
+            elif "support" in judgment.relation:
+                n_support += 1
+            elif "attack" in judgment.relation:
+                n_attack += 1
             edge = self._maybe_make_edge(target, cand, judgment)
             if edge is not None:
                 store.add_edge(edge)
                 edges.append(edge)
+
+        # Retrieval 品質ログ
+        source_counts: dict[str, int] = {}
+        for c in candidates:
+            source_counts[c.source] = source_counts.get(c.source, 0) + 1
+        retrieval_mode = "per_source" if self._top_k_per_source else "hybrid"
+        self._quality_log.entries.append(
+            RetrievalQualityEntry(
+                target_id=str(target.id),
+                target_text=target.text[:100],
+                target_source=target.source,
+                n_candidates=len(candidates),
+                n_support=n_support,
+                n_attack=n_attack,
+                n_none=n_none,
+                retrieval_mode=retrieval_mode,
+                candidate_sources=source_counts,
+            )
+        )
 
         self.log.info(
             "linking.done",
@@ -191,6 +354,9 @@ class LinkingAgent(BaseAgent):
             n_candidates=len(candidates),
             n_edges=len(edges),
             n_timeouts=n_timeouts,
+            n_support=n_support,
+            n_attack=n_attack,
+            n_none=n_none,
         )
         return edges
 
@@ -266,7 +432,7 @@ class LinkingAgent(BaseAgent):
         if not others:
             return []
 
-        # 未キャッシュのものをまとめて 1 リクエストで埋め込み
+        # 未キャッシュのものをまとめて 1 リクエ���トで埋め込み
         uncached = [n for n in others if n.id not in self._embeddings]
         if uncached:
             vectors = await self.llm.embed([n.text for n in uncached], model=self._embedding_model)
@@ -276,10 +442,46 @@ class LinkingAgent(BaseAgent):
         if self._top_k_per_source is not None:
             return self._select_per_source(target_vec, others)
 
-        # 既定: 混合 top-k
-        scored = [(n, cosine_similarity(target_vec, self._embeddings[n.id])) for n in others]
-        scored.sort(key=lambda pair: pair[1], reverse=True)
-        return [n for n, _ in scored[: self._top_k]]
+        # --- Hybrid retrieval (embedding + BM25) ---
+        # Embedding スコア
+        emb_scores = [
+            (n, cosine_similarity(target_vec, self._embeddings[n.id])) for n in others
+        ]
+
+        alpha = self._hybrid_alpha
+        if alpha >= 1.0:
+            # Pure embedding mode (従来互換)
+            emb_scores.sort(key=lambda pair: pair[1], reverse=True)
+            return [n for n, _ in emb_scores[: self._top_k]]
+
+        # BM25 スコア
+        query_tokens = _tokenize(target.text)
+        doc_tokens_list = [_tokenize(n.text) for n in others]
+        avg_dl = sum(len(t) for t in doc_tokens_list) / max(len(doc_tokens_list), 1)
+        # DF 計算
+        df: dict[str, int] = {}
+        for tokens in doc_tokens_list:
+            for term in set(tokens):
+                df[term] = df.get(term, 0) + 1
+        n_docs = len(others)
+        bm25_scores = [
+            bm25_score(query_tokens, doc_tokens, avg_dl, df, n_docs)
+            for doc_tokens in doc_tokens_list
+        ]
+
+        # 正規化 (0-1) して混合
+        emb_max = max((s for _, s in emb_scores), default=1.0) or 1.0
+        bm25_max = max(bm25_scores, default=1.0) or 1.0
+
+        hybrid_scored: list[tuple[Node, float]] = []
+        for i, (node, emb_s) in enumerate(emb_scores):
+            emb_norm = emb_s / emb_max
+            bm25_norm = bm25_scores[i] / bm25_max
+            combined = alpha * emb_norm + (1 - alpha) * bm25_norm
+            hybrid_scored.append((node, combined))
+
+        hybrid_scored.sort(key=lambda pair: pair[1], reverse=True)
+        return [n for n, _ in hybrid_scored[: self._top_k]]
 
     def _select_per_source(
         self,
@@ -418,4 +620,10 @@ class LinkingAgent(BaseAgent):
         )
 
 
-__all__ = ["LinkingAgent", "cosine_similarity"]
+__all__ = [
+    "LinkingAgent",
+    "RetrievalQualityEntry",
+    "RetrievalQualityLog",
+    "bm25_score",
+    "cosine_similarity",
+]

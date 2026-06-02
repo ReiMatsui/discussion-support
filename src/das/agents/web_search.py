@@ -10,6 +10,8 @@
     (既に十分な根拠があれば追加検索しない = コスト抑制)
   - グローバルキャップ ``max_searches_per_session`` でコスト爆発を防ぐ
   - クエリのキャッシュで重複検索を防ぐ
+  - **cooldown**: 直近 N 秒以内に検索済みなら発火しない (レイテンシ制御)
+  - **lazy モード**: stalled シグナルが来たときだけ検索する (対面議論用)
   - Tavily 未インストール / API キー欠如のときは静かに no-op
 
 検索結果は **そのまま渡さず**、``Node(source="web", node_type="evidence")``
@@ -21,13 +23,20 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+import time
+from typing import Any, Literal
 
 from das.agents.base import BaseAgent
 from das.graph.schema import Node
 from das.graph.store import GraphStore
 from das.llm import OpenAIClient
 from das.settings import get_settings
+
+SearchPolicy = Literal["eager", "lazy"]
+"""検索ポリシー。
+- eager: claim がエッジ不足なら即検索 (シミュレーション向け)
+- lazy: stalled シグナルが来たときだけ検索 (対面リアルタイム向け)
+"""
 
 
 class WebSearchAgent(BaseAgent):
@@ -43,6 +52,8 @@ class WebSearchAgent(BaseAgent):
         min_existing_edges: int = 1,
         max_results_per_query: int = 3,
         api_key: str | None = None,
+        cooldown_seconds: float = 0.0,
+        policy: SearchPolicy = "eager",
     ) -> None:
         """
         Parameters:
@@ -51,6 +62,13 @@ class WebSearchAgent(BaseAgent):
             だけ検索 (= 既存知識で議論が回っているなら検索しない)
           - ``max_results_per_query``: 1 検索あたりに採用する web ノード数
           - ``api_key``: Tavily API キー。省略時は ``Settings.tavily_api_key``
+          - ``cooldown_seconds``: 連続検索を抑制する秒数。直近の検索からこの秒数以内は
+            ``maybe_search_for_node`` が no-op になる。対面リアルタイム向けに 10-30 秒
+            程度を設定するとレイテンシが改善する。既定 0 (無制限)。
+          - ``policy``: 検索発火ポリシー。
+            - "eager": claim がエッジ不足なら即検索 (従来動作、シミュレーション向け)
+            - "lazy": ``signal_stalled()`` が呼ばれたときだけ検索を許可する
+              (対面リアルタイム向け)。FacilitationAgent の stalled 検知と組み合わせる。
         """
 
         super().__init__(llm=llm)
@@ -59,6 +77,11 @@ class WebSearchAgent(BaseAgent):
         self._max_results = max_results_per_query
         self._n_searches_done = 0
         self._cache: dict[str, list[Node]] = {}
+        self._cooldown_seconds = cooldown_seconds
+        self._last_search_time: float = 0.0
+        self._policy = policy
+        self._stalled_signal: bool = False
+        self._pending_queries: list[tuple[Node, GraphStore]] = []
 
         settings = get_settings()
         resolved_key = api_key or settings.tavily_api_key
@@ -91,6 +114,34 @@ class WebSearchAgent(BaseAgent):
 
         self._n_searches_done = 0
         self._cache.clear()
+        self._last_search_time = 0.0
+        self._stalled_signal = False
+        self._pending_queries.clear()
+
+    def signal_stalled(self) -> None:
+        """lazy ポリシー時に「議論が停滞した」シグナルを受け取る。
+
+        FacilitationAgent が stalled を検知したとき呼ぶことで、
+        pending_queries に溜まった検索を次の ``flush_pending()`` で実行する。
+        eager ポリシーでは no-op。
+        """
+        self._stalled_signal = True
+
+    async def flush_pending(self) -> list[Node]:
+        """lazy ポリシーで溜めた pending queries を実行する。
+
+        ``signal_stalled()`` の後に orchestrator / facilitation が呼ぶ。
+        戻り値は新しく作られた web ノード群。
+        """
+        if not self._stalled_signal or not self._pending_queries:
+            return []
+        self._stalled_signal = False
+        all_nodes: list[Node] = []
+        for node, store in self._pending_queries:
+            new_nodes = await self._do_search_for_node(node, store)
+            all_nodes.extend(new_nodes)
+        self._pending_queries.clear()
+        return all_nodes
 
     # --- 検索本体 ----------------------------------------------------
 
@@ -170,6 +221,8 @@ class WebSearchAgent(BaseAgent):
           - node が utterance/claim (= 議論側の主張)
           - 既存の隣接エッジ数 ≤ ``min_existing_edges``
           - 検索キャップ未達
+          - cooldown 経過済み
+          - policy が eager、または lazy で stalled シグナル受信済み
 
         戻り値は store に追加された web ノードのリスト (Linking 側がさらに処理する)。
         """
@@ -185,10 +238,37 @@ class WebSearchAgent(BaseAgent):
         if existing_edges > self._min_edges:
             return []
 
+        # Lazy policy: キューに溜めて signal_stalled() 後に flush する
+        if self._policy == "lazy":
+            self._pending_queries.append((node, store))
+            self.log.info(
+                "web_search.lazy_queued",
+                node_id=str(node.id),
+                pending=len(self._pending_queries),
+            )
+            return []
+
+        # Cooldown check
+        if self._cooldown_seconds > 0:
+            elapsed = time.monotonic() - self._last_search_time
+            if elapsed < self._cooldown_seconds:
+                self.log.info(
+                    "web_search.cooldown_skip",
+                    elapsed=round(elapsed, 1),
+                    cooldown=self._cooldown_seconds,
+                )
+                return []
+
+        return await self._do_search_for_node(node, store)
+
+    async def _do_search_for_node(self, node: Node, store: GraphStore) -> list[Node]:
+        """実際に検索を実行して store に追加する内部メソッド。"""
+
         new_nodes = await self.search(node.text)
+        self._last_search_time = time.monotonic()
         for n in new_nodes:
             store.add_node(n)
         return new_nodes
 
 
-__all__ = ["WebSearchAgent"]
+__all__ = ["SearchPolicy", "WebSearchAgent"]

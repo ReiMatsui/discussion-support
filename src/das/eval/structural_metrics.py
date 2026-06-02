@@ -70,6 +70,16 @@ class DiscussionStructuralMetrics:
     n_isolated_external_nodes: int = 0
     """文書/Web ノードのうち、どのエッジも持たない (= 議論に統合されなかった) ものの数。"""
 
+    # 介入の負の影響指標 (ファシリテーション有効性の検証)
+    speaker_dropout_count: int = 0
+    """議論途中で発話が途絶えた話者数 (最後の 1/3 で発話 0)。介入萎縮の指標。"""
+
+    utterance_length_decline_rate: float = 0.0
+    """前半と後半の平均発話文字数の差 / 前半平均。負なら短縮化 (萎縮の可能性)。"""
+
+    longest_silence_turns: int = 0
+    """最も長く沈黙した話者の連続非発話ターン数。"""
+
 
 # --- 補助関数 ---------------------------------------------------------
 
@@ -264,6 +274,40 @@ def compute_structural_metrics(
         1 for n in nodes if n.source in {"document", "web"} and n.id not in edge_node_ids
     )
 
+    # --- 介入の負の影響指標 ---
+    # speaker_dropout: 最後の 1/3 で発話が 0 の話者数
+    speaker_dropout = 0
+    if n_utts >= 3 and n_speakers > 1:
+        cutoff = n_utts - n_utts // 3
+        late_speakers = {u.speaker for u in transcript[cutoff:]}
+        speaker_dropout = sum(1 for s in speakers if s not in late_speakers)
+
+    # utterance_length_decline_rate: 前半 vs 後半の平均文字数変化率
+    length_decline = 0.0
+    if n_utts >= 4:
+        mid = n_utts // 2
+        first_half_avg = sum(len(u.text) for u in transcript[:mid]) / mid
+        second_half_avg = sum(len(u.text) for u in transcript[mid:]) / (n_utts - mid)
+        if first_half_avg > 0:
+            length_decline = (second_half_avg - first_half_avg) / first_half_avg
+
+    # longest_silence_turns: 最も長く連続で発話しなかった話者のターン数
+    longest_silence = 0
+    if n_speakers > 1:
+        for speaker in speakers:
+            max_gap = 0
+            last_turn = -1
+            for i, u in enumerate(transcript):
+                if u.speaker == speaker:
+                    if last_turn >= 0:
+                        gap = i - last_turn - 1
+                        max_gap = max(max_gap, gap)
+                    last_turn = i
+            # 最後の発話以降の沈黙も含む
+            if last_turn >= 0:
+                max_gap = max(max_gap, n_utts - 1 - last_turn)
+            longest_silence = max(longest_silence, max_gap)
+
     return DiscussionStructuralMetrics(
         n_utterances=n_utts,
         n_speakers=n_speakers,
@@ -284,6 +328,9 @@ def compute_structural_metrics(
         n_cross_source_edges=n_cross,
         cross_source_edge_rate=cross_rate,
         n_isolated_external_nodes=n_isolated_external,
+        speaker_dropout_count=speaker_dropout,
+        utterance_length_decline_rate=length_decline,
+        longest_silence_turns=longest_silence,
     )
 
 
@@ -312,6 +359,10 @@ def aggregate_structural_metrics(
         "n_cross_source_edges_mean": _mean("n_cross_source_edges"),
         "cross_source_edge_rate_mean": _mean("cross_source_edge_rate"),
         "n_isolated_external_nodes_mean": _mean("n_isolated_external_nodes"),
+        # 介入の負の影響 (ファシリテーション有効性)
+        "speaker_dropout_count_mean": _mean("speaker_dropout_count"),
+        "utterance_length_decline_rate_mean": _mean("utterance_length_decline_rate"),
+        "longest_silence_turns_mean": _mean("longest_silence_turns"),
     }
 
 

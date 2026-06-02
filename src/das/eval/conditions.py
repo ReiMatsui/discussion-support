@@ -1,15 +1,17 @@
-"""3 つの比較条件 (None / FlatRAG / FullProposal)。
+"""4 つの比較条件 (None / FlatRAG / GraphlessFacilitation / FullProposal)。
 
 各 ``Condition`` は ``SessionRunner.info_provider`` として注入できる。
 
 - :class:`ConditionNone`: 常に ``None`` を返す (情報提供なし)
 - :class:`ConditionFlatRAG`: 文書を段落単位で embed しておき、直近発話に類似する
   チャンクを top-k 件、生テキストで連結して返す
+- :class:`ConditionGraphlessFacilitation`: 外部知識は FlatRAG と同等に取得するが、
+  介入判断を LLM に直接生成させる (グラフなし)。FullProposal の ablation 条件。
 - :class:`ConditionFullProposal`: 内部で :class:`Orchestrator` を 1 つ持ち、
   履歴の発話を逐次バスに流して統合議論グラフを構築。直近発話に対して張られた
   支持・攻撃エッジを参加者向けの短い通知として整形して返す
 
-研究計画書 §5.2 の段階 B (シミュレーション評価) で 3 条件比較を行うときの
+研究計画書 §5.2 の段階 B (シミュレーション評価) で条件比較を行うときの
 基本コンポーネント。
 """
 
@@ -210,11 +212,133 @@ class ConditionFlatRAG:
         return "\n\n".join(f"[{doc_id}] {text}" for (doc_id, text), _ in top)
 
 
+# --- GraphlessFacilitation (ablation) ------------------------------------
+
+
+class ConditionGraphlessFacilitation:
+    """Ablation 条件: グラフなしで LLM に直接ファシリテーションを生成させる。
+
+    提案手法 (ConditionFullProposal) からグラフ構築・構造的介入判断を除去し、
+    「LLM に議論履歴をまとめて渡してファシリ発言を生成させるだけ」の条件。
+
+    グラフの貢献を切り分けるための ablation:
+      - グラフ: なし (構造的偏り検知・攻撃エッジ追跡なし)
+      - 外部知識: FlatRAG と同じ embedding 検索で提供 (top-k)
+      - 介入判断: LLM が「今提示すべきか」「何を提示すべきか」を直接生成
+
+    これにより「グラフがあることで何が改善されるか」を実験的に分離できる。
+    """
+
+    name = "graphless_facilitation"
+
+    def __init__(
+        self,
+        llm: OpenAIClient | None = None,
+        *,
+        top_k: int = 3,
+    ) -> None:
+        self._llm = llm or OpenAIClient()
+        self._top_k = top_k
+        self._chunks: list[tuple[str, str]] = []
+        self._embeddings: list[list[float]] = []
+        self._intervention_log: list[InterventionLogEntry] = []
+        self._log = get_logger("das.eval.condition.graphless")
+
+    @property
+    def intervention_log(self) -> list[InterventionLogEntry]:
+        return list(self._intervention_log)
+
+    async def setup(self, *, docs_dir: Path | None = None) -> None:
+        if docs_dir is None or not docs_dir.exists():
+            return
+        chunks: list[tuple[str, str]] = []
+        for path in sorted(docs_dir.iterdir()):
+            if path.is_dir() or path.suffix.lower() not in {".md", ".txt"}:
+                continue
+            text = path.read_text(encoding="utf-8")
+            for paragraph in _chunk_document(text):
+                chunks.append((path.stem, paragraph))
+        if not chunks:
+            return
+        texts = [t for _, t in chunks]
+        vectors = await self._llm.embed(texts)
+        self._chunks = chunks
+        self._embeddings = vectors
+        self._log.info("graphless.setup", n_chunks=len(chunks))
+
+    async def info_provider(self, history: list[Utterance], persona: PersonaSpec) -> str | None:
+        if not history:
+            return None
+
+        # 外部知識の取得 (FlatRAG と同じ)
+        context_text = ""
+        if self._chunks:
+            query_vec = await self._llm.embed_one(history[-1].text)
+            scored = [
+                (chunk, cosine_similarity(query_vec, vec))
+                for chunk, vec in zip(self._chunks, self._embeddings, strict=True)
+            ]
+            scored.sort(key=lambda pair: pair[1], reverse=True)
+            top = scored[: self._top_k]
+            if top:
+                context_text = "\n".join(f"- {text}" for (_, text), _ in top)
+
+        # LLM に直接ファシリテーション生成を依頼 (グラフなし)
+        recent = history[-6:]
+        history_text = "\n".join(
+            f"{u.speaker}: {u.text[:200]}" for u in recent
+        )
+        prompt = (
+            "あなたは議論のファシリテーターです。以下の議論履歴と参考情報を踏まえ、"
+            f"次に発言する {persona.name} に提示すべき参考情報を生成してください。\n\n"
+            "提示すべきものがなければ「なし」とだけ返してください。\n"
+            "提示する場合は、2件以内で簡潔に書いてください。\n\n"
+            f"## 議論履歴\n{history_text}\n\n"
+        )
+        if context_text:
+            prompt += f"## 関連する外部情報\n{context_text}\n\n"
+        prompt += "## 出力 (「なし」または 1〜2 件の提示情報)"
+
+        response = await self._llm.chat(
+            [{"role": "user", "content": prompt}],
+            temperature=0.3,
+        )
+        response = response.strip()
+
+        # 「なし」系の応答は skip
+        if response in ("なし", "なし。", "None", "none", ""):
+            self._intervention_log.append(
+                InterventionLogEntry(
+                    turn_id=history[-1].turn_id,
+                    persona_name=persona.name,
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    items=[],
+                    kind="skip",
+                    addressed_to=persona.name,
+                    decision_reason="graphless: LLM judged no intervention needed",
+                )
+            )
+            return None
+
+        self._intervention_log.append(
+            InterventionLogEntry(
+                turn_id=history[-1].turn_id,
+                persona_name=persona.name,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                items=[{"source_text": response, "source_kind": "llm_generated", "relation": ""}],
+                kind="l1",
+                addressed_to=persona.name,
+                decision_reason="graphless: LLM direct facilitation",
+            )
+        )
+        return f"[ファシリテーターからの情報提供]\n{response}"
+
+
 # --- FullProposal -------------------------------------------------------
 
 
 class ConditionFullProposal:
-    """提案手法。Orchestrator が AF を育てつつ、直近発話への支持/攻撃を返す。"""
+    """提案手法。Orchestrator が AF を育てつつ、直���発話への支持/攻撃を返す。"""
 
     name = "full_proposal"
 
@@ -418,6 +542,7 @@ __all__ = [
     "Condition",
     "ConditionFlatRAG",
     "ConditionFullProposal",
+    "ConditionGraphlessFacilitation",
     "ConditionNone",
     "FlatRAGItem",
     "InfoItem",
