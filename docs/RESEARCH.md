@@ -17,7 +17,9 @@
 
 **① 議論ログと外部知識を「同じ AF」に統合する**
 
-発話・事前文書・Web 検索結果のいずれも論証単位 (claim / premise) のノードとして同一グラフに置き、それらの間に支持/攻撃エッジを張る。「議論」と「外部知識」が論証的に連続する。
+議論側の発話は立場を持つ論証単位 (claim / premise)、事前文書・Web 検索結果は中立な**事実ノード (evidence)** として同一グラフに置き、それらの間に支持/攻撃エッジを張る。外部知識を「主張」に分解するのではなく事実として扱い、ある事実が主張 A を支持し主張 B を攻撃しうるという相対性を、**ノードではなく対象主張ごとのエッジ**で表現する。これにより「議論」と「外部知識」が論証的に連続する。
+
+> **ノード型の設計**: 議論側は `claim` / `premise`、知識側 (文書 / Web) は中立な事実を表す `evidence`。スタンス (支持 / 攻撃 / 中立) は事実ノードそのものではなく、対象主張ごとのエッジに付与し、根拠 (warrant) を添える。中立はエッジを張らないことで表現する。理論的裏づけは Toulmin の data/warrant、FEVER の SUPPORTS/REFUTES/NEI、evidence-based argumentation。
 
 **② 関係ラベル (支持/攻撃) を持って情報を提示する**
 
@@ -77,16 +79,18 @@ LLM シミュレーションは proxy であり、論文の主軸ではない。
         └──────────────┬───────────────┘
                        │ NodeAdded
                        ▼
-        ┌──────────────────────────────┐       ┌─────────────────────┐
-        │  連結エージェント             │ ←──→ │ 文書知識エージェント │
-        │  (cosine top-k → LLM 5値判定)│       │ (事前文書を AF 化)   │
-        └──────────────┬───────────────┘       └─────────────────────┘
+        ┌──────────────────────────────┐       ┌──────────────────────────┐
+        │  連結エージェント             │ ←──→ │ 文書知識エージェント      │
+        │  (cosine top-k → LLM 5値判定)│       │ (事前文書を evidence 化)  │
+        │  (事実 → 対象主張ごとに判定) │       │                          │
+        └──────────────┬───────────────┘       └──────────────────────────┘
                        │ Edge 追加
                        ▼
         ┌────────────────────────────────────────────┐
         │     統合議論グラフ (AF, NetworkX + SQLite)  │
-        │     - utterance / document / web ノード     │
-        │     - support / attack エッジ              │
+        │     - claim / premise (議論側, utterance)    │
+        │     - evidence (知識側, document / web)      │
+        │     - support / attack エッジ (中立=エッジなし) │
         └──────────────┬─────────────────────────────┘
                        │
                        ▼
@@ -110,10 +114,10 @@ LLM シミュレーションは proxy であり、論文の主軸ではない。
 
 | エージェント | 責務 | 実装 |
 |---|---|---|
-| 論証抽出 (Extraction) | 発話を claim/premise に分解 | `agents/extraction.py` |
-| 文書知識 (Document) | 事前資料を AF 化 | `agents/document.py` |
-| Web 検索 | リアルタイム検索 (M3 予定) | 未実装 |
-| 連結 (Linking) | embedding top-k → 5 値関係判定 (a_supports_b / a_attacks_b / b_supports_a / b_attacks_a / none) | `agents/linking.py` |
+| 論証抽出 (Extraction) | 発話を claim/premise に分解 (議論側、立場あり) | `agents/extraction.py` |
+| 文書知識 (Document) | 事前資料を中立な事実 (evidence) に分解 | `agents/document.py` |
+| Web 検索 | リアルタイム検索 → 事実 (evidence) ノード化 | `agents/web_search.py` |
+| 連結 (Linking) | embedding top-k → 5 値関係判定 (a_supports_b / a_attacks_b / b_supports_a / b_attacks_a / none)。evidence↔claim は事実が対象主張を支持/攻撃/中立のいずれかを判定 | `agents/linking.py` |
 | ファシリテーション | グラフ全体を読み「**いつ・誰に・何を**」提示するか中央調停 | `agents/facilitation.py` |
 
 ### 評価エージェント (シミュレーション専用)

@@ -4,7 +4,7 @@
 担当: Rei
 
 研究方針の確認 (2026-05-13 合意):
-- **engine は固定**: AF 構築 (発話 + 文書 + Web をすべて claim/premise 化)、LinkingAgent、FacilitationAgent はそのまま
+- **engine は固定**: AF 構築 (発話は claim/premise、文書 + Web は中立な事実 evidence として生成)、LinkingAgent、FacilitationAgent はそのまま
 - **動かすのは「情報の使い方」だけ**: LLM ペルソナへの渡し方、対面会議の人間への見せ方
 - **まず「比較できる状態」を作る**: 関連研究と同じ指標で同じ実験を回せるところまで持っていく
 - **その後で presentation の variation を系統的に動かす** (= 論文の主結果)

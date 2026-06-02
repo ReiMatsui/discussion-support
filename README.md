@@ -2,9 +2,20 @@
 
 マルチエージェントによる議論グラフ統合型 議論支援システム (das = Discussion Argumentation Support).
 
-議論ログ側 AF と外部知識側 AF を支持・攻撃エッジで連結した「統合議論グラフ」を、
-複数の専門エージェント (論証抽出 / ドキュメント知識 / Web 検索 / 連結 / ファシリテーション) が
+議論ログ側 (立場を持つ claim / premise) と外部知識側 (中立な事実 = evidence) を
+支持・攻撃エッジで連結した「統合議論グラフ」を、複数の専門エージェント
+(論証抽出 / ドキュメント知識 / Web 検索 / 連結 / ファシリテーション) が
 分業して構築・運用する研究プロトタイプ。
+
+ノード型は議論側の `claim` / `premise` と知識側の `evidence` の 2 系統。外部の文書・Web
+は「主張」に分解せず中立な事実として扱い、その事実が各主張を支持するか攻撃するかは
+**対象主張ごとのエッジ** で表現する (同じ事実が主張 A を支持し主張 B を攻撃しうる)。
+
+- **論証抽出 (Extraction)**: 発話を claim / premise に分解 (議論側、立場あり)
+- **ドキュメント知識 (Document)**: 事前文書を中立な事実 (evidence) に分解
+- **Web 検索 (WebSearch)**: リアルタイム検索結果を事実 (evidence) ノード化
+- **連結 (Linking)**: 事実 → 主張の関係を対象主張ごとに支持/攻撃/中立で判定しエッジ化
+- **ファシリテーション (Facilitation)**: グラフ全体を読み「いつ・誰に・何を」提示するか中央調停
 
 ## クイックスタート
 
@@ -30,7 +41,7 @@ uv run das ui
 
 ```bash
 uv run das version                    # バージョン
-uv run das ingest-docs data/docs/     # 文書を AF 化して保存
+uv run das ingest-docs data/docs/     # 文書を evidence ノード化して保存
 uv run das run-session <file>.jsonl   # 議論ログを流して統合 AF を構築
 uv run das listen                     # マイクからのリアルタイム議論を AF 化 (asr extras)
 uv run das visualize <snapshot.json>  # snapshot を pyvis HTML に

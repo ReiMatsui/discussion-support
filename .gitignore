@@ -33,9 +33,11 @@ htmlcov/
 # Notebooks
 .ipynb_checkpoints/
 
-# IDE
+# IDE / Editor
 .idea/
 .vscode/
+.claude/
+.cursor-recovery-backup*/
 *.swp
 .DS_Store
 
