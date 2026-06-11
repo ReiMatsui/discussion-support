@@ -48,6 +48,13 @@ import time
 import numpy as np
 
 ON_UTTERANCE = None   # das連携: 確定発話ごとに (話者表示名, テキスト) で呼ばれる
+_SYS_HOOK = None      # main()実行中のみ登録される(add_sys+saveへの橋)
+
+
+def post_system(text: str) -> None:
+    """das連携: ライブ議事録のタイムラインにシステム行(💡介入など)を外部から追加する."""
+    if _SYS_HOOK is not None:
+        _SYS_HOOK(text)
 
 SR = 16000
 WS_URL = "wss://stt-rt.soniox.com/transcribe-websocket"
@@ -692,6 +699,13 @@ def main(argv=None):
         with state_lock:
             records.append({"ms": ms, "sys": text})
 
+    global _SYS_HOOK
+
+    def _sys_hook(text: str) -> None:   # das介入をライブHTML/MDに反映
+        add_sys(None, text)
+        save()
+    _SYS_HOOK = _sys_hook
+
     def write_md(recs=None, path=None):
         with state_lock:
             rs = records if recs is None else recs
@@ -1004,6 +1018,7 @@ def main(argv=None):
         except KeyboardInterrupt:
             pass
         finally:
+            globals()["_SYS_HOOK"] = None
             stop.set()
             flush()
             save(live=False)

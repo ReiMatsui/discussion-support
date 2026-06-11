@@ -413,11 +413,23 @@ def listen_soniox(
         "--soniox-args",
         help="文字起こし側へ渡す追加引数 (空白区切り。例: '--stt speechmatics --no-polish')",
     ),
+    min_utt_chars: int = typer.Option(
+        7,
+        "--min-utt-chars",
+        help="この文字数未満の発話(相槌等)は AF 構築に流さない (議事録側には残る)",
+    ),
+    facilitate_interval: float = typer.Option(
+        3.0,
+        "--facilitate-interval",
+        help="介入判定の周期(秒)。0 で介入無効",
+    ),
 ) -> None:
-    """Soniox+声紋プロファイルで「誰が何を」をライブ取得し統合 AF を構築する。
+    """Soniox+声紋プロファイルで「誰が何を」をライブ取得し、統合 AF 構築＋ライブ介入を行う。
 
     speaker-attribution 由来の話者特定つき文字起こし (das.asr.soniox_live) を
     別スレッドで走らせ、確定発話を Orchestrator.run_live に流す。
+    FacilitationAgent が周期的に介入を判定し、ターミナルとライブ議事録 HTML
+    (💡システム行) に提示する。
     要: SONIOX_API_KEY (.env) / `uv sync --extra soniox`。
     話者の実名登録は文字起こし側の標準入力で「1=松井」。
     """
@@ -430,6 +442,8 @@ def listen_soniox(
             top_k_per_source=top_k_per_source if top_k_per_source > 0 else None,
             skip_docs=skip_docs,
             soniox_args=soniox_args,
+            min_utt_chars=min_utt_chars,
+            facilitate_interval=facilitate_interval,
         )
     )
 
@@ -443,11 +457,16 @@ async def _run_listen_soniox_async(
     top_k_per_source: int | None,
     skip_docs: bool,
     soniox_args: str,
+    min_utt_chars: int = 7,
+    facilitate_interval: float = 3.0,
 ) -> None:
-    """soniox_live を別スレッドで回し、確定発話キュー → run_live の最小ブリッジ."""
+    """soniox_live を別スレッドで回し、確定発話キュー → run_live ＋ 周期介入判定."""
 
+    import contextlib
     import threading
     from collections.abc import AsyncIterator
+
+    from das.agents.facilitation import FacilitationAgent, InterventionDecision
 
     settings = get_settings()
     docs_dir = docs if docs is not None else settings.docs_dir
@@ -496,7 +515,11 @@ async def _run_listen_soniox_async(
 
     threading.Thread(target=_runner, daemon=True).start()
 
+    history: list[Utterance] = []
+    n_filtered = 0
+
     async def _utt_stream() -> AsyncIterator[Utterance]:
+        nonlocal n_filtered
         turn = 0
         while True:
             item = await queue.get()
@@ -504,13 +527,75 @@ async def _run_listen_soniox_async(
                 break
             speaker, text = item
             turn += 1
-            yield Utterance(turn_id=turn, speaker=speaker, text=text)
+            utt = Utterance(turn_id=turn, speaker=speaker, text=text)
+            if len(text.strip()) < min_utt_chars:   # 相槌等はAFに流さない(コスト/ノイズ削減)
+                n_filtered += 1
+                continue
+            history.append(utt)
+            yield utt
+
+    # --- ライブ介入: FacilitationAgent を周期的に呼び、ターミナル+議事録HTMLに提示 ---
+    facilitator = FacilitationAgent(llm=llm)
+
+    def _present(decision: InterventionDecision) -> None:
+        if decision.kind == "skip":
+            return
+        if decision.kind == "l2":
+            body = decision.brief or decision.reason
+            head = "💡介入(全体)"
+        else:
+            to = decision.addressed_to or "発言者"
+            parts = []
+            for it in decision.items:
+                tag = "支持" if it.relation == "support" else "反論"
+                parts.append(f"[{tag}] {it.source_text}")
+            body = " / ".join(parts) or decision.brief or decision.reason
+            head = f"💡介入({to}さん宛)"
+        msg = f"{head}: {body}"
+        typer.echo(f"\n{msg}")
+        with contextlib.suppress(Exception):
+            from das.asr import soniox_live as _sl
+
+            _sl.post_system(msg)   # ライブ議事録(2秒自動更新HTML)に表示
+
+    async def _facilitate_loop() -> None:
+        while True:
+            await asyncio.sleep(facilitate_interval)
+            if not history:
+                continue
+            try:
+                decision = facilitator.decide_intervention(list(history), store)
+                if decision.kind == "l2":
+                    with contextlib.suppress(Exception):
+                        better = await facilitator.compose_l2_brief(list(history), store)
+                        if better:
+                            decision = InterventionDecision(
+                                kind=decision.kind,
+                                items=decision.items,
+                                brief=better,
+                                addressed_to=decision.addressed_to,
+                                reason=decision.reason,
+                            )
+                _present(decision)
+            except Exception as exc:  # noqa: BLE001 - 介入失敗で本流を止めない
+                typer.echo(f"[listen-soniox] 介入判定エラー: {exc!r}")
+
+    fac_task = (
+        asyncio.create_task(_facilitate_loop()) if facilitate_interval > 0 else None
+    )
 
     typer.echo("[listen-soniox] 録音開始。実名登録は「1=松井」と入力。Ctrl-C で停止。")
     try:
         await orch.run_live(_utt_stream())
     except KeyboardInterrupt:
         typer.echo("\n[listen-soniox] 停止。スナップショットを保存します...")
+    finally:
+        if fac_task is not None:
+            fac_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await fac_task
+        if n_filtered:
+            typer.echo(f"[listen-soniox] 相槌等のフィルタ: {n_filtered}発話をAF構築から除外")
 
     from das.viz import dump_snapshot
 
