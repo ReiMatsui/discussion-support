@@ -47,6 +47,15 @@ asr = [
     # マイク入力 (PCM s16le 16kHz) を取り込むため
     "sounddevice>=0.4",
 ]
+soniox = [
+    # speaker-attribution 由来の Soniox+声紋プロファイル文字起こし (das.asr.soniox_live)
+    "websockets>=12",
+    "sounddevice>=0.4",
+    # 声紋モデル (ReDimNet via torch.hub / ECAPA via speechbrain)
+    "torch>=2.0",
+    "torchaudio>=2.0",
+    "speechbrain>=1.0",
+]
 
 [project.scripts]
 das = "das.cli:app"

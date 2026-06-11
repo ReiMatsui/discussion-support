@@ -37,6 +37,19 @@ uv run das run-session tests/fixtures/cafeteria_transcript.jsonl
 uv run das ui
 ```
 
+## 対面議論のライブ入力 (Soniox + 声紋プロファイル)
+
+speaker-attribution 由来の「誰が何を言ったか」文字起こしを統合済み (`das/asr/soniox_live.py`)。
+
+```bash
+uv sync --extra soniox
+echo "SONIOX_API_KEY=..." >> .env
+uv run das listen-soniox            # 録音→話者特定→統合AF構築をライブで
+# 実行中: 「1=松井」で話者の実名登録 / Ctrl-C で停止
+# 議事録(MD/HTML/turns.jsonl)は transcripts/ に自動保存
+# バッチでも可: uv run das run-session transcripts/<日時>.turns.jsonl
+```
+
 ## CLI
 
 ```bash

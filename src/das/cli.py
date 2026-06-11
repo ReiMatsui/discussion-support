@@ -398,6 +398,141 @@ def listen(
     )
 
 
+@app.command(name="listen-soniox")
+def listen_soniox(
+    docs: Path | None = typer.Option(
+        None, "--docs", help="議論前に取り込む文書ディレクトリ (省略時は data/docs)"
+    ),
+    run_id: str | None = typer.Option(None, "--run-id", help="出力先サブディレクトリ名"),
+    threshold: float | None = typer.Option(None, "--threshold", help="リンク採用の信頼度閾値"),
+    top_k: int = typer.Option(5, "--top-k", help="リンク候補の embedding top-k (混合)"),
+    top_k_per_source: int = typer.Option(0, "--top-k-per-source", help="source 別 top-k (0=混合)"),
+    skip_docs: bool = typer.Option(False, "--skip-docs", help="ドキュメントの事前 AF 化をスキップ"),
+    soniox_args: str = typer.Option(
+        "",
+        "--soniox-args",
+        help="文字起こし側へ渡す追加引数 (空白区切り。例: '--stt speechmatics --no-polish')",
+    ),
+) -> None:
+    """Soniox+声紋プロファイルで「誰が何を」をライブ取得し統合 AF を構築する。
+
+    speaker-attribution 由来の話者特定つき文字起こし (das.asr.soniox_live) を
+    別スレッドで走らせ、確定発話を Orchestrator.run_live に流す。
+    要: SONIOX_API_KEY (.env) / `uv sync --extra soniox`。
+    話者の実名登録は文字起こし側の標準入力で「1=松井」。
+    """
+    asyncio.run(
+        _run_listen_soniox_async(
+            docs=docs,
+            run_id=run_id,
+            threshold=threshold,
+            top_k=top_k,
+            top_k_per_source=top_k_per_source if top_k_per_source > 0 else None,
+            skip_docs=skip_docs,
+            soniox_args=soniox_args,
+        )
+    )
+
+
+async def _run_listen_soniox_async(
+    *,
+    docs: Path | None,
+    run_id: str | None,
+    threshold: float | None,
+    top_k: int,
+    top_k_per_source: int | None,
+    skip_docs: bool,
+    soniox_args: str,
+) -> None:
+    """soniox_live を別スレッドで回し、確定発話キュー → run_live の最小ブリッジ."""
+
+    import threading
+    from collections.abc import AsyncIterator
+
+    settings = get_settings()
+    docs_dir = docs if docs is not None else settings.docs_dir
+    run_id = run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    run_dir = settings.runs_dir / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    typer.echo(f"[listen-soniox] run_dir={run_dir}")
+
+    try:
+        from das.asr import soniox_live
+    except ImportError as exc:
+        typer.echo(f"[listen-soniox] 依存が未インストールです: {exc}")
+        typer.echo("`uv sync --extra soniox` を実行してください。")
+        raise typer.Exit(1) from exc
+
+    llm = OpenAIClient()
+    store = NetworkXGraphStore(db_path=run_dir / "graph.sqlite")
+    orch = Orchestrator.assemble(
+        llm=llm,
+        store=store,
+        threshold=threshold,
+        top_k=top_k,
+        top_k_per_source=top_k_per_source,
+    )
+
+    if not skip_docs and docs_dir.exists():
+        typer.echo("[listen-soniox] ingesting documents...")
+        await orch.ingest_documents(docs_dir)
+
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue = asyncio.Queue()
+
+    def _on_utt(speaker: str, text: str) -> None:
+        loop.call_soon_threadsafe(queue.put_nowait, (speaker, text))
+
+    soniox_live.ON_UTTERANCE = _on_utt
+    argv = ["--no-open"] + (soniox_args.split() if soniox_args else [])
+
+    def _runner() -> None:
+        try:
+            soniox_live.main(argv)
+        except BaseException as exc:  # noqa: BLE001 - スレッド境界で握って通知する
+            typer.echo(f"\n[listen-soniox] 文字起こしスレッド終了: {exc!r}")
+        finally:
+            loop.call_soon_threadsafe(queue.put_nowait, None)
+
+    threading.Thread(target=_runner, daemon=True).start()
+
+    async def _utt_stream() -> AsyncIterator[Utterance]:
+        turn = 0
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            speaker, text = item
+            turn += 1
+            yield Utterance(turn_id=turn, speaker=speaker, text=text)
+
+    typer.echo("[listen-soniox] 録音開始。実名登録は「1=松井」と入力。Ctrl-C で停止。")
+    try:
+        await orch.run_live(_utt_stream())
+    except KeyboardInterrupt:
+        typer.echo("\n[listen-soniox] 停止。スナップショットを保存します...")
+
+    from das.viz import dump_snapshot
+
+    snapshot_path = dump_snapshot(store, run_dir / "snapshot.json")
+    n_nodes = len(list(store.nodes()))
+    n_edges = len(list(store.edges()))
+    html_path: Path | None = None
+    try:
+        from das.viz import render_html
+
+        html_path = render_html(store, run_dir / "graph.html")
+    except ImportError as exc:
+        typer.echo(f"[listen-soniox] HTML 生成をスキップ (viz extras 未導入: {exc})")
+    summary = (
+        f"\n[listen-soniox] done. nodes={n_nodes} edges={n_edges}\n"
+        f"  snapshot -> {snapshot_path}"
+    )
+    if html_path is not None:
+        summary += f"\n  html     -> {html_path}"
+    typer.echo(summary)
+
+
 @app.command(name="run-session")
 def run_session(
     transcript: Path = typer.Argument(
