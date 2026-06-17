@@ -48,7 +48,30 @@ uv run python -m das.asr.soniox_live --no-vp
 
 ---
 
-## 2. AIファシリテータ付きモード
+## 2. AIエージェント参加モード（Realtime API v2）
+
+AIファシリテーターが会議に音声で参加する。`--agent` フラグで有効化。
+
+```bash
+# マイクライブ + AIエージェント
+uv run python -m das.asr.soniox_live --agent
+
+# 声を変える（alloy/ash/ballad/coral/echo/sage/shimmer/verse）
+uv run python -m das.asr.soniox_live --agent --agent-voice sage
+
+# 応答頻度を調整（既定10発話ごと）
+uv run python -m das.asr.soniox_live --agent --agent-trigger 5
+```
+
+エコー防止方式（E+B）:
+- **E**: AIのテキストはSTTを経由せず直接議事録に挿入
+- **B**: AI音声をマイクが拾った場合、話者ラベルで自動除去
+
+ブラウザ上で🤖トグルからON/OFFを切り替え可能。
+
+---
+
+## 3. AIファシリテータ付きモード（dasオーケストレータ）
 
 議論をAIがリアルタイム分析し、介入提案を出す統合モード。
 
@@ -71,7 +94,7 @@ uv run das listen-soniox --skip-docs --soniox-args "--wav data/overlap_test/C_he
 
 ---
 
-## 3. ファイル再生テスト
+## 4. ファイル再生テスト
 
 ### 直接注入（観戦モード）— パイプラインの実力測定
 
@@ -105,7 +128,7 @@ wavをスピーカー再生しつつ、自分のマイクも同時に拾う。**
 
 ---
 
-## 4. テストセット生成・採点
+## 5. テストセット生成・採点
 
 ### TTS討論音声の生成
 
@@ -130,7 +153,7 @@ uv run python scripts/score_overlap_test.py data/overlap_test/C_heavy.answer.jso
 
 ---
 
-## 5. その他のCLIコマンド
+## 6. その他のCLIコマンド
 
 ```bash
 uv run das version              # バージョン表示

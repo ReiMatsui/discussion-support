@@ -36,6 +36,7 @@ Sonioxのストリーミング(WebSocket)に音声を流し、speaker付きト�
 from __future__ import annotations
 
 import argparse
+import base64
 import datetime
 import json
 import os
@@ -158,6 +159,17 @@ h1 {{ font-size: 1.2rem; }} .meta {{ color: #6b7280; font-size: .85rem; }}
               border-left: 3px solid #8b5cf6; }}
 .topic-text {{ color: #1f2937; }}
 .topic-by {{ font-size: .68rem; color: #9ca3af; }}
+.agent-section {{ margin-top: .6rem; padding: .5em; background: #f0f9ff; border-radius: 8px;
+                 border: 1px solid #bae6fd; }}
+.agent-header {{ display: flex; align-items: center; justify-content: space-between; }}
+.agent-label {{ font-size: .82rem; font-weight: 600; color: #0369a1; }}
+.agent-toggle {{ appearance: none; width: 36px; height: 20px; background: #d1d5db; border-radius: 10px;
+                position: relative; cursor: pointer; transition: background .2s; border: none; }}
+.agent-toggle:checked {{ background: #0ea5e9; }}
+.agent-toggle::after {{ content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+                       background: #fff; border-radius: 50%; transition: transform .2s; }}
+.agent-toggle:checked::after {{ transform: translateX(16px); }}
+.agent-status {{ font-size: .7rem; color: #6b7280; margin-top: .2rem; }}
 </style></head><body>
 <h1>議事録 {title}</h1>
 <p class="meta">{status}</p>
@@ -170,10 +182,21 @@ h1 {{ font-size: 1.2rem; }} .meta {{ color: #6b7280; font-size: .85rem; }}
 {speaker_panel}
 {stats_panel}
 {topics_panel}
+{agent_panel}
 </div>
 </div>
 <script>
 if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+async function toggleAgent(cb) {{
+  try {{
+    var res = await fetch('/agent', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{enabled: cb.checked}})
+    }});
+    if (!res.ok) {{ cb.checked = !cb.checked; }}
+  }} catch(e) {{ cb.checked = !cb.checked; }}
+}}
 async function toggleProfile(el) {{
   var name = el.dataset.name;
   var isActive = el.classList.contains('active');
@@ -292,6 +315,198 @@ def _extract_topics(utterances: list[dict], existing: list[str],
         return json.loads(text)
     except Exception:
         return []
+
+
+# ---------- AIエージェント（Realtime API v2） ----------
+
+_AGENT_PROMPT = """\
+あなたは会議のファシリテーターAIです。
+参加者の議論を聞いて、必要な時だけ介入してください。
+
+介入すべき場面:
+- 議論が行き詰まった時（新しい視点を提案）
+- 重要な論点が見落とされている時
+- 議論が脱線した時（元のテーマに戻す提案）
+- 合意形成が必要な時（要約して確認）
+
+不必要に発言しないでください。人間の議論を尊重し、
+本当に価値ある貢献ができる時だけ簡潔に発言してください。
+発言は日本語で、30秒以内に収まる長さにしてください。
+
+もし介入が不要だと判断した場合は、「（介入不要）」とだけ返してください。"""
+
+REALTIME_URL = "wss://api.openai.com/v1/realtime?model=gpt-realtime-2"
+AGENT_SPEAKER = "AI"          # recordsに使うスピーカーキー
+_AGENT_TRIGGER = 10           # N発話ごとに応答検討
+_AGENT_SILENCE = 5.0          # N秒沈黙で応答検討
+
+
+class RealtimeAgent:
+    """OpenAI Realtime API v2 WebSocket で会議に参加するAIエージェント.
+
+    E+B方式:
+      E = AIの生成テキストをrecordsに直接挿入（STTを経由しない）
+      B = AI音声再生中にSonioxが拾ったAIの声を話者ラベルで破棄
+    """
+
+    def __init__(self, api_key: str, voice: str = "alloy",
+                 system_prompt: str | None = None):
+        self.api_key = api_key
+        self.voice = voice
+        self.system_prompt = system_prompt or _AGENT_PROMPT
+        self.ws = None
+        self._stop = threading.Event()
+        self._lock = threading.Lock()
+        self._pending: list[dict] = []     # 送信待ち発話
+        self.ai_speaking = False           # AI音声再生中フラグ (B用)
+        self._ai_text_buf = ""             # ストリーミング転写バッファ
+        self._audio_buf = bytearray()      # PCM 24kHz バッファ
+        self._ai_speaker_ids: set[str] = set()  # Soniox側でAI声と判定した話者ID
+        self._connected = False
+        self._enabled = True               # UI ON/OFF
+        self.on_ai_utterance = None        # callback(text: str) AI発話確定時
+
+    def connect(self):
+        """WebSocket接続を開始し、受信スレッドを起動."""
+        try:
+            from websockets.sync.client import connect
+        except ImportError:
+            print("# AI Agent: websockets がインストールされていません", flush=True)
+            return
+        try:
+            self.ws = connect(
+                REALTIME_URL,
+                additional_headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "OpenAI-Beta": "realtime=v1",
+                },
+            )
+        except Exception as e:
+            print(f"# AI Agent: 接続失敗 ({e})", flush=True)
+            return
+        self._connected = True
+        # セッション設定
+        self.ws.send(json.dumps({
+            "type": "session.update",
+            "session": {
+                "instructions": self.system_prompt,
+                "voice": self.voice,
+                "output_modalities": ["audio"],
+                "turn_detection": None,
+            },
+        }))
+        threading.Thread(target=self._recv_loop, daemon=True).start()
+        print(f"# AI Agent: 接続完了（voice={self.voice}）", flush=True)
+
+    def _recv_loop(self):
+        """サーバーイベントの受信ループ."""
+        while not self._stop.is_set():
+            try:
+                raw = self.ws.recv()
+                ev = json.loads(raw)
+            except Exception:
+                break
+            self._handle(ev)
+        self._connected = False
+
+    def _handle(self, ev: dict):
+        etype = ev.get("type", "")
+
+        if etype == "response.output_audio.delta":
+            chunk = ev.get("delta", "")
+            if chunk:
+                self._audio_buf.extend(base64.b64decode(chunk))
+                self.ai_speaking = True
+
+        elif etype == "response.output_audio_transcript.delta":
+            self._ai_text_buf += ev.get("delta", "")
+
+        elif etype == "response.output_audio_transcript.done":
+            transcript = ev.get("transcript", "") or self._ai_text_buf
+            self._ai_text_buf = ""
+            if transcript and "（介入不要）" not in transcript:
+                if self.on_ai_utterance:
+                    self.on_ai_utterance(transcript)
+
+        elif etype == "response.output_audio.done":
+            self._play_audio()
+
+        elif etype == "response.done":
+            self._ai_text_buf = ""
+
+        elif etype == "error":
+            msg = ev.get("error", {}).get("message", "unknown")
+            print(f"# AI Agent エラー: {msg}", flush=True)
+
+    def _play_audio(self):
+        """蓄積したPCM音声(24kHz)を別スレッドでスピーカー再生."""
+        data = bytes(self._audio_buf)
+        self._audio_buf.clear()
+        if not data:
+            self.ai_speaking = False
+            return
+
+        def _do_play():
+            try:
+                import sounddevice as sd
+                pcm = np.frombuffer(data, dtype="<i2").astype(np.float32) / 32768.0
+                sd.play(pcm, samplerate=24000, blocking=True)
+            except Exception as e:
+                print(f"# AI音声再生エラー: {e}", flush=True)
+            finally:
+                self.ai_speaking = False
+
+        threading.Thread(target=_do_play, daemon=True).start()
+
+    def feed(self, speaker: str, text: str):
+        """人間の確定発話をエージェントに蓄積."""
+        if not self._connected or not self._enabled:
+            return
+        with self._lock:
+            self._pending.append({"speaker": speaker, "text": text})
+
+    def trigger(self):
+        """蓄積した発話をRealtimeAPIに送信し応答を要求."""
+        if not self._connected or not self._enabled or not self.ws:
+            return
+        with self._lock:
+            if not self._pending:
+                return
+            conv = "\n".join(f"{u['speaker']}: {u['text']}" for u in self._pending)
+            self._pending.clear()
+        try:
+            self.ws.send(json.dumps({
+                "type": "conversation.item.create",
+                "item": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": conv}],
+                },
+            }))
+            self.ws.send(json.dumps({"type": "response.create"}))
+        except Exception as e:
+            print(f"# AI Agent 送信エラー: {e}", flush=True)
+
+    @property
+    def pending_count(self) -> int:
+        with self._lock:
+            return len(self._pending)
+
+    def is_ai_echo(self, speaker_id: str) -> bool:
+        """Soniox側の話者IDがAIのエコーかどうか."""
+        return speaker_id in self._ai_speaker_ids
+
+    def mark_ai_echo(self, speaker_id: str):
+        """AI音声再生中に新出した話者IDをAI声として記録."""
+        self._ai_speaker_ids.add(speaker_id)
+
+    def close(self):
+        self._stop.set()
+        if self.ws:
+            try:
+                self.ws.close()
+            except Exception:
+                pass
 
 
 # ---------- 清書（会議後の非同期再処理） ----------
@@ -787,6 +1002,13 @@ def main(argv=None):
                          "（話者分離の評判が良い代替。声紋層など他の機能は不変）")
     ap.add_argument("--port", type=int, default=8231,
                     help="UIサーバーのポート番号（ブラウザからの話者リネームに必要。0で無効）")
+    ap.add_argument("--agent", action="store_true",
+                    help="AIエージェント（ファシリテーター）を有効化。OPENAI_API_KEYが必要。"
+                         "Realtime API v2 WebSocketで会議に参加する")
+    ap.add_argument("--agent-voice", default="alloy",
+                    help="AIエージェントの声（alloy/ash/ballad/coral/echo/sage/shimmer/verse）")
+    ap.add_argument("--agent-trigger", type=int, default=_AGENT_TRIGGER,
+                    help=f"AIの応答を検討する発話間隔（既定{_AGENT_TRIGGER}）")
     args = ap.parse_args(argv)
     _serve = args.port > 0
 
@@ -878,6 +1100,15 @@ def main(argv=None):
         else:
             print(f"# 声紋プロファイル: なし。未知の声は「人物N」として自動追跡、"
                   f"「1=松井」で実名化すると次回から自動表示（{args.voices}）", flush=True)
+
+    # --- AIエージェント ---
+    agent: RealtimeAgent | None = None
+    _agent_oai_key = os.environ.get("OPENAI_API_KEY", "")
+    if args.agent:
+        if not _agent_oai_key:
+            print("# AI Agent: OPENAI_API_KEY が未設定です。--agent は無効になります。", flush=True)
+        else:
+            agent = RealtimeAgent(api_key=_agent_oai_key, voice=args.agent_voice)
 
     pcm_buf = bytearray()               # 送信済み音声の全バッファ（声紋切り出し用, 16bit）
     buf_lock = threading.Lock()
@@ -1085,6 +1316,20 @@ def main(argv=None):
                     topics_panel = ('<div class="topics-section">'
                                    '<p class="sidebar-title">論点</p>'
                                    + ''.join(items) + '</div>')
+            # AIエージェントパネル
+            agent_panel = ''
+            if agent is not None:
+                checked = 'checked' if agent._enabled else ''
+                conn = '接続中' if agent._connected else '未接続'
+                agent_panel = (
+                    f'<div class="agent-section">'
+                    f'<div class="agent-header">'
+                    f'<span class="agent-label">🤖 AI Agent</span>'
+                    f'<input type="checkbox" class="agent-toggle" {checked} '
+                    f'onchange="toggleAgent(this)">'
+                    f'</div>'
+                    f'<div class="agent-status">{conn} / voice: {agent.voice}</div>'
+                    f'</div>')
             doc = HTML_TMPL.format(
                 refresh='<meta http-equiv="refresh" content="2">' if live else "",
                 title=started.strftime("%Y-%m-%d %H:%M"),
@@ -1094,6 +1339,7 @@ def main(argv=None):
                 profile_panel=profile_panel,
                 stats_panel=stats_panel,
                 topics_panel=topics_panel,
+                agent_panel=agent_panel,
                 body="\n".join(parts) or '<p class="meta">（まだ発話なし）</p>',
             )
             dst = path or html_path
@@ -1171,6 +1417,49 @@ def main(argv=None):
                         print_line(f"# 💡論点: {t['topic']}（{t.get('speaker', '?')}）")
             _topic_cursor = n
 
+    # --- AIエージェント: コールバック + ワーカースレッド ---
+    def _on_agent_text(text: str):
+        """E: AIの生成テキストをrecordsに直接挿入（STTバイパス）."""
+        with state_lock:
+            records.append({"ms": None, "end_ms": None,
+                            "speaker": AGENT_SPEAKER, "text": text.strip()})
+            color_of(AGENT_SPEAKER)
+        if ON_UTTERANCE is not None:
+            try:
+                ON_UTTERANCE("AI", text.strip())
+            except Exception:
+                pass
+        print_line(f"\x1b[96m[AI] AI\x1b[0m: {text.strip()}")
+        save()
+
+    _agent_cursor = 0
+    _last_utt_time = [time.monotonic()]   # mutableで非ローカル参照
+
+    def _agent_worker():
+        """バックグラウンドでAI応答のトリガーを管理."""
+        nonlocal _agent_cursor
+        while not stop.is_set():
+            time.sleep(1)
+            if agent is None or not agent._connected or not agent._enabled:
+                continue
+            with state_lock:
+                talk_rs = [r for r in records
+                           if "speaker" in r and r.get("text")
+                           and r.get("speaker") != AGENT_SPEAKER]
+            n = len(talk_rs)
+            if n > _agent_cursor:
+                # 新発話あり
+                _last_utt_time[0] = time.monotonic()
+                for r in talk_rs[_agent_cursor:]:
+                    agent.feed(disp_name(r["speaker"]), r["text"])
+                _agent_cursor = n
+            # トリガー判定: N発話蓄積 or 沈黙
+            if agent.pending_count >= args.agent_trigger:
+                agent.trigger()
+            elif (agent.pending_count > 0
+                  and time.monotonic() - _last_utt_time[0] > _AGENT_SILENCE):
+                agent.trigger()
+
     # --- UIサーバー（ブラウザからの話者リネーム用）---
     _httpd = None
     if _serve:
@@ -1243,6 +1532,17 @@ def main(argv=None):
                         print_line(f"# {name} を無効化（UIから）")
                         save()
                     self._json(200, {"ok": True, "name": name, "active": active})
+                elif self.path == "/agent":
+                    length = int(self.headers.get("Content-Length", 0))
+                    body = json.loads(self.rfile.read(length))
+                    enabled = bool(body.get("enabled", True))
+                    if agent is None:
+                        self._json(400, {"error": "AIエージェントが無効です（--agent で起動してください）"})
+                        return
+                    agent._enabled = enabled
+                    status = "有効" if enabled else "無効"
+                    print_line(f"# AI Agent: {status}（UIから）")
+                    self._json(200, {"ok": True, "enabled": enabled})
                 else:
                     self.send_error(404)
 
@@ -1385,6 +1685,12 @@ def main(argv=None):
             print("# 論点抽出: 有効（5発話ごとにLLMで分析）", flush=True)
         else:
             print("# 論点抽出: 無効（OPENAI_API_KEYが未設定）", flush=True)
+        if agent is not None:
+            agent.on_ai_utterance = _on_agent_text
+            agent.connect()
+            threading.Thread(target=_agent_worker, daemon=True).start()
+            print(f"# AI Agent: 有効（{args.agent_trigger}発話 or {_AGENT_SILENCE}秒沈黙で応答検討）",
+                  flush=True)
 
         def sender():
             seq = 0
@@ -1464,6 +1770,26 @@ def main(argv=None):
                 else:
                     sp_id = "#" + str(cur_speaker)
                     rec_extra = {}
+                # --- B: AIエコー除去 ---
+                # AI音声再生中に新出した話者IDはAIの声とみなし破棄
+                if agent is not None:
+                    if agent.is_ai_echo(sp_id):
+                        cur_text = ""
+                        cur_ms = None
+                        cur_end = None
+                        return
+                    if agent.ai_speaking:
+                        # AI再生中に出現した未知の話者IDを記録
+                        with state_lock:
+                            known = {r.get("speaker") for r in records if "speaker" in r}
+                        if sp_id not in known:
+                            agent.mark_ai_echo(sp_id)
+                            if args.vp_debug:
+                                print_line(f"# B: {sp_id} をAIエコーとしてマーク")
+                            cur_text = ""
+                            cur_ms = None
+                            cur_end = None
+                            return
                 if cur_ms is not None and cur_end is not None:
                     recent_segs.append((cur_ms, cur_end, label))
                     del recent_segs[:-12]
@@ -1532,6 +1858,8 @@ def main(argv=None):
         finally:
             globals()["_SYS_HOOK"] = None
             stop.set()
+            if agent is not None:
+                agent.close()
             flush()
             save(live=False)
             if tracker is not None:
