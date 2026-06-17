@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import collections
 import datetime
 import json
 import os
@@ -163,7 +164,7 @@ h1 {{ font-size: 1.2rem; }} .meta {{ color: #6b7280; font-size: .85rem; }}
                  border: 1px solid #bae6fd; }}
 .agent-header {{ display: flex; align-items: center; justify-content: space-between; }}
 .agent-label {{ font-size: .82rem; font-weight: 600; color: #0369a1; }}
-.agent-conn {{ font-size: .68rem; color: #6b7280; }}
+.agent-conn {{ font-size: .68rem; color: #6b7280; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }}
 .agent-modes {{ display: flex; gap: .25em; margin-top: .35em; }}
 .agent-mode-btn {{ font-size: .72rem; padding: .2em .5em; border: 1px solid #93c5fd;
                   border-radius: 5px; background: #fff; color: #1e40af; cursor: pointer;
@@ -374,12 +375,138 @@ _AGENT_SILENCE = 5.0          # N秒沈黙で応答検討
 AGENT_VOICES = ["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"]
 
 
+# ---------- 信号レベルAEC（エコーキャンセレーション） ----------
+
+
+def _resample_24_to_16(pcm_24k: np.ndarray) -> np.ndarray:
+    """24kHz float32 → 16kHz float32 リサンプル（線形補間）。AEC参照信号用。"""
+    n_in = len(pcm_24k)
+    n_out = int(n_in * 2 / 3)
+    if n_out < 2:
+        return np.empty(0, dtype=np.float32)
+    idx = np.linspace(0, n_in - 1, n_out)
+    return np.interp(idx, np.arange(n_in), pcm_24k).astype(np.float32)
+
+
+class _EchoCanceller:
+    """信号レベルAEC: AI再生音声（参照信号）をマイク入力から減算。
+
+    AI音声のPCMデータを完全に保持しているので、FFT相互相関で遅延を推定し、
+    ゲインを合わせて減算する。人間の声は参照に含まれないのでそのまま通る。
+    電話やビデオ会議ソフトと同じ原理。
+    """
+
+    def __init__(self, sr: int = 16000, max_delay_s: float = 0.5):
+        self.sr = sr
+        self.max_delay = int(max_delay_s * sr)   # 最大探索遅延（サンプル）
+        # リングバッファ: 参照信号を10秒分保持
+        self._buf_len = sr * 10
+        self._ref = np.zeros(self._buf_len, dtype=np.float32)
+        self._wpos = 0
+        self._lock = threading.Lock()
+        # 推定パラメータ
+        self._delay = 0
+        self._gain = 0.0
+        self._estimated = False
+        self._n_frames = 0
+        self._re_est_every = 20     # N フレームごとに再推定
+
+    def feed_reference(self, pcm_16k: np.ndarray):
+        """16kHzリサンプル済み参照音声をバッファに追加。再生スレッドから呼ぶ。"""
+        with self._lock:
+            n = len(pcm_16k)
+            if n == 0:
+                return
+            L = self._buf_len
+            w = self._wpos
+            end = w + n
+            if end <= L:
+                self._ref[w:end] = pcm_16k
+            else:
+                first = L - w
+                self._ref[w:] = pcm_16k[:first]
+                self._ref[:n - first] = pcm_16k[first:]
+            self._wpos = end % L
+
+    def _get_ref_unlocked(self, length: int) -> np.ndarray:
+        """直近 length サンプルを取得。_lock 保持下で呼ぶこと。"""
+        L = self._buf_len
+        w = self._wpos
+        length = min(length, L)
+        start = (w - length) % L
+        if start + length <= L:
+            return self._ref[start:start + length].copy()
+        first = L - start
+        return np.concatenate([self._ref[start:], self._ref[:length - first]])
+
+    def process(self, mic: np.ndarray) -> np.ndarray:
+        """マイクフレームからAIエコーを除去して返す。senderスレッドから呼ぶ。"""
+        flen = len(mic)
+        need = flen + self.max_delay
+
+        with self._lock:
+            ref_seg = self._get_ref_unlocked(need)
+
+        # 参照にエネルギーがなければスキップ（AI無音中）
+        if np.mean(ref_seg ** 2) < 1e-8:
+            self._estimated = False
+            return mic
+
+        self._n_frames += 1
+
+        # 定期的に遅延・ゲインを再推定
+        if not self._estimated or self._n_frames % self._re_est_every == 0:
+            self._estimate(mic, ref_seg)
+
+        if not self._estimated:
+            return mic
+
+        # 推定遅延で参照を切り出し
+        # ref_seg[k : k+flen] が delay = max_delay - k に対応
+        k = self.max_delay - self._delay
+        if k < 0 or k + flen > len(ref_seg):
+            return mic
+        ref_aligned = ref_seg[k: k + flen]
+
+        # ゲイン適応（エコーの相対音量）
+        rp = np.dot(ref_aligned, ref_aligned)
+        if rp > 1e-8:
+            g = float(np.clip(np.dot(mic, ref_aligned) / rp, 0.0, 3.0))
+            self._gain = 0.7 * self._gain + 0.3 * g
+
+        # 減算
+        return mic - self._gain * ref_aligned
+
+    def _estimate(self, mic: np.ndarray, ref_seg: np.ndarray):
+        """FFT相互相関で遅延を推定。"""
+        flen = len(mic)
+        N = 1
+        while N < len(ref_seg) + flen:
+            N *= 2
+        MIC = np.fft.rfft(mic, N)
+        REF = np.fft.rfft(ref_seg, N)
+        # xcorr[k] = sum_i mic[i] * ref_seg[i+k]
+        xcorr = np.fft.irfft(np.conj(MIC) * REF, N)
+        search = np.abs(xcorr[: self.max_delay + 1])
+        best_k = int(np.argmax(search))
+        # 相関が弱すぎる場合はスキップ
+        mic_energy = np.dot(mic, mic)
+        if mic_energy < 1e-8:
+            return
+        ncc = search[best_k] / (np.sqrt(mic_energy * np.dot(ref_seg, ref_seg)) + 1e-8)
+        if ncc < 0.01:
+            return
+        self._delay = self.max_delay - best_k
+        self._estimated = True
+
+
 class RealtimeAgent:
     """OpenAI Realtime API v2 WebSocket で会議に参加するAIエージェント.
 
-    E+B方式:
-      E = AIの生成テキストをrecordsに直接挿入（STTを経由しない）
-      B = AI音声再生中にSonioxが拾ったAIの声を話者ラベルで破棄
+    エコー防止3層:
+      1. 信号レベルAEC — AI再生音声を参照信号としてマイク入力から減算
+      2. テキスト類似度 — STT出力がAI生成テキストと類似していれば破棄
+      3. 応答状態ガード — 応答生成中は新規triggerを抑止
 
     モード:
       off          = 無効
@@ -399,13 +526,18 @@ class RealtimeAgent:
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._pending: list[dict] = []     # 送信待ち発話
-        self.ai_speaking = False           # AI音声再生中フラグ (B用)
+        self.ai_speaking = False           # AI音声再生中フラグ
         self._ai_text_buf = ""             # ストリーミング転写バッファ
         self._audio_q: "queue.Queue[bytes | None]" = queue.Queue()  # ストリーミング再生用
         self._ai_speaker_ids: set[str] = set()
         self._connected = False
+        self._conn_error = ""              # 接続エラーメッセージ（UI表示用）
         self.on_ai_utterance = None        # callback(text: str) AI発話確定時
         self._playback_thread: threading.Thread | None = None
+        # --- エコー防止 ---
+        self._responding = False           # response生成中フラグ
+        self._echo_canceller = _EchoCanceller()
+        self._recent_ai_texts: collections.deque = collections.deque(maxlen=20)
 
     @property
     def _prompt(self) -> str:
@@ -420,6 +552,7 @@ class RealtimeAgent:
         try:
             from websockets.sync.client import connect
         except ImportError:
+            self._conn_error = "websockets未インストール"
             print("# AI Agent: websockets がインストールされていません", flush=True)
             return
         try:
@@ -427,13 +560,14 @@ class RealtimeAgent:
                 REALTIME_URL,
                 additional_headers={
                     "Authorization": f"Bearer {self.api_key}",
-                    "OpenAI-Beta": "realtime=v1",
                 },
             )
         except Exception as e:
+            self._conn_error = str(e)[:80]
             print(f"# AI Agent: 接続失敗 ({e})", flush=True)
             return
         self._connected = True
+        self._conn_error = ""
         self._send_session_update()
         threading.Thread(target=self._recv_loop, daemon=True).start()
         self._start_playback_thread()
@@ -474,7 +608,7 @@ class RealtimeAgent:
     # --- ストリーミング音声再生 ---
 
     def _start_playback_thread(self):
-        """PCMキューから読み出して逐次再生するスレッド."""
+        """PCMキューから読み出して逐次再生するスレッド。AEC参照信号も同時にバッファ。"""
         def _player():
             try:
                 import sounddevice as sd
@@ -488,6 +622,10 @@ class RealtimeAgent:
                         continue
                     pcm = np.frombuffer(chunk, dtype="<i2").astype(np.float32) / 32768.0
                     stream.write(pcm.reshape(-1, 1))
+                    # AEC: 再生音声を16kHzにリサンプルして参照バッファに蓄積
+                    ref16 = _resample_24_to_16(pcm)
+                    if len(ref16) > 0:
+                        self._echo_canceller.feed_reference(ref16)
                 stream.stop()
                 stream.close()
             except Exception as e:
@@ -503,7 +641,10 @@ class RealtimeAgent:
             try:
                 raw = self.ws.recv()
                 ev = json.loads(raw)
-            except Exception:
+            except Exception as e:
+                if not self._stop.is_set():
+                    self._conn_error = f"切断: {e}"[:80]
+                    print(f"# AI Agent: WebSocket切断 ({e})", flush=True)
                 break
             self._handle(ev)
         self._connected = False
@@ -524,6 +665,7 @@ class RealtimeAgent:
             transcript = ev.get("transcript", "") or self._ai_text_buf
             self._ai_text_buf = ""
             if transcript and "（介入不要）" not in transcript:
+                self._recent_ai_texts.append(transcript)
                 if self.on_ai_utterance:
                     self.on_ai_utterance(transcript)
 
@@ -532,6 +674,7 @@ class RealtimeAgent:
 
         elif etype == "response.done":
             self._ai_text_buf = ""
+            self._responding = False
 
         elif etype == "error":
             msg = ev.get("error", {}).get("message", "unknown")
@@ -550,6 +693,8 @@ class RealtimeAgent:
         """蓄積した発話をRealtimeAPIに送信し応答を要求."""
         if not self._connected or not self.enabled or not self.ws:
             return
+        if self._responding:
+            return  # 応答生成中は新規リクエストを抑止
         with self._lock:
             if not self._pending:
                 return
@@ -565,6 +710,7 @@ class RealtimeAgent:
                 },
             }))
             self.ws.send(json.dumps({"type": "response.create"}))
+            self._responding = True
         except Exception as e:
             print(f"# AI Agent 送信エラー: {e}", flush=True)
 
@@ -572,6 +718,23 @@ class RealtimeAgent:
     def pending_count(self) -> int:
         with self._lock:
             return len(self._pending)
+
+    def cancel_echo(self, mic_float: np.ndarray) -> np.ndarray:
+        """マイク入力(float32, 16kHz)からAIエコーを除去。senderスレッドから呼ぶ。"""
+        return self._echo_canceller.process(mic_float)
+
+    def is_likely_echo(self, text: str) -> bool:
+        """テキスト類似度でAIエコーか判定（AEC漏れの安全網）。"""
+        if not text or not self._recent_ai_texts:
+            return False
+        from difflib import SequenceMatcher
+        text_c = text.strip()
+        if len(text_c) < 5:
+            return False
+        for ai_text in self._recent_ai_texts:
+            if SequenceMatcher(None, text_c, ai_text).ratio() > 0.4:
+                return True
+        return False
 
     def is_ai_echo(self, speaker_id: str) -> bool:
         return speaker_id in self._ai_speaker_ids
@@ -1401,7 +1564,12 @@ def main(argv=None):
             agent_panel = ''
             if agent is not None:
                 cur_mode = agent.mode
-                conn = '接続中' if agent._connected else '未接続'
+                if agent._connected:
+                    conn = '接続中'
+                elif agent._conn_error:
+                    conn = f'エラー: {_html.escape(agent._conn_error)}'
+                else:
+                    conn = '未接続'
                 # モード選択ボタン
                 mode_btns = []
                 for m, lbl in [("off", "OFF"), ("facilitator", "進行役"),
@@ -1544,6 +1712,9 @@ def main(argv=None):
             time.sleep(0.5)
             if agent is None or not agent._connected or not agent.enabled:
                 continue
+            # 応答生成中は蓄積もトリガーもスキップ
+            if agent._responding:
+                continue
             with state_lock:
                 talk_rs = [r for r in records
                            if "speaker" in r and r.get("text")
@@ -1653,6 +1824,7 @@ def main(argv=None):
                     agent.apply_config(mode=mode, voice=voice, trigger_n=trigger_n)
                     print_line(f"# AI Agent 設定変更: mode={agent.mode} voice={agent.voice}"
                                f" trigger={agent.trigger_n}（UIから）")
+                    save()   # HTMLを即時更新（meta-refreshで古い状態が表示されるのを防止）
                     self._json(200, {"ok": True, "mode": agent.mode,
                                      "voice": agent.voice, "trigger_n": agent.trigger_n})
                 else:
@@ -1816,6 +1988,14 @@ def main(argv=None):
                     break
                 with buf_lock:
                     pcm_buf.extend(pcm)   # STTの時刻軸と完全一致する位置で蓄積
+                # AEC: AI再生音声をマイク入力から減算してからSTTへ送信
+                if agent is not None and agent._connected:
+                    try:
+                        mic_f = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768.0
+                        cleaned = agent.cancel_echo(mic_f)
+                        pcm = (np.clip(cleaned, -1, 1) * 32767).astype("<i2").tobytes()
+                    except Exception:
+                        pass  # AEC失敗時は元のpcmをそのまま送信
                 ws.send(pcm)
                 seq += 1
         threading.Thread(target=sender, daemon=True).start()
@@ -1882,26 +2062,16 @@ def main(argv=None):
                 else:
                     sp_id = "#" + str(cur_speaker)
                     rec_extra = {}
-                # --- B: AIエコー除去 ---
-                # AI音声再生中に新出した話者IDはAIの声とみなし破棄
-                if agent is not None:
-                    if agent.is_ai_echo(sp_id):
-                        cur_text = ""
-                        cur_ms = None
-                        cur_end = None
-                        return
-                    if agent.ai_speaking:
-                        # AI再生中に出現した未知の話者IDを記録
-                        with state_lock:
-                            known = {r.get("speaker") for r in records if "speaker" in r}
-                        if sp_id not in known:
-                            agent.mark_ai_echo(sp_id)
-                            if args.vp_debug:
-                                print_line(f"# B: {sp_id} をAIエコーとしてマーク")
-                            cur_text = ""
-                            cur_ms = None
-                            cur_end = None
-                            return
+                # --- エコー安全網: テキスト類似度チェック ---
+                # AEC で除去しきれなかったAIエコーをテキストレベルで検出
+                if agent is not None and agent.is_likely_echo(cur_text):
+                    if args.vp_debug:
+                        print_line(f"# エコー安全網: テキスト類似度で除去"
+                                   f" ({cur_text.strip()[:40]}...)")
+                    cur_text = ""
+                    cur_ms = None
+                    cur_end = None
+                    return
                 if cur_ms is not None and cur_end is not None:
                     recent_segs.append((cur_ms, cur_end, label))
                     del recent_segs[:-12]
