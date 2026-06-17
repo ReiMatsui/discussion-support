@@ -143,6 +143,15 @@ h1 {{ font-size: 1.2rem; }} .meta {{ color: #6b7280; font-size: .85rem; }}
 .profile-toggle {{ width: 14px; height: 14px; border-radius: 50%;
                   border: 2px solid #d1d5db; flex-shrink: 0; transition: all .15s; }}
 .profile-item.active .profile-toggle {{ background: #2563eb; border-color: #2563eb; }}
+.stats-section {{ margin-bottom: .8rem; }}
+.stats-group {{ margin-bottom: .6rem; }}
+.stats-label {{ font-size: .7rem; color: #9ca3af; margin-bottom: .2rem; }}
+.stats-row {{ display: flex; align-items: center; gap: .4em; font-size: .78rem; margin-bottom: .2em; }}
+.stats-name {{ width: 3.5em; flex-shrink: 0; text-align: right; overflow: hidden;
+              text-overflow: ellipsis; white-space: nowrap; }}
+.stats-bar-bg {{ flex: 1; height: 10px; background: #e5e7eb; border-radius: 5px; overflow: hidden; }}
+.stats-bar {{ height: 100%; border-radius: 5px; transition: width .3s; }}
+.stats-pct {{ width: 2.8em; flex-shrink: 0; font-size: .72rem; color: #6b7280; font-variant-numeric: tabular-nums; }}
 </style></head><body>
 <h1>議事録 {title}</h1>
 <p class="meta">{status}</p>
@@ -153,6 +162,7 @@ h1 {{ font-size: 1.2rem; }} .meta {{ color: #6b7280; font-size: .85rem; }}
 <div class="sidebar-wrap">
 {profile_panel}
 {speaker_panel}
+{stats_panel}
 </div>
 </div>
 <script>
@@ -943,6 +953,61 @@ def main(argv=None):
                     profile_panel = ('<div class="profile-section">'
                                      '<p class="sidebar-title">プロファイル</p>'
                                      + ''.join(items) + '</div>')
+            # 発言量統計パネル（発話時間・文字数・発話回数の割合）
+            stats_panel = ''
+            talk_rs = [r for r in rs if "speaker" in r and r.get("text")]
+            if talk_rs:
+                # 話者ごとに集計
+                sp_dur: dict[str, float] = {}   # 発話時間(秒)
+                sp_chars: dict[str, int] = {}   # 文字数
+                sp_turns: dict[str, int] = {}   # 発話回数
+                for r in talk_rs:
+                    s = r["speaker"]
+                    ms, end = r.get("ms"), r.get("end_ms")
+                    dur = (end - ms) / 1000.0 if ms is not None and end is not None and end > ms else 0.0
+                    sp_dur[s] = sp_dur.get(s, 0.0) + dur
+                    sp_chars[s] = sp_chars.get(s, 0) + len(r["text"])
+                    sp_turns[s] = sp_turns.get(s, 0) + 1
+                total_dur = sum(sp_dur.values()) or 1.0
+                total_chars = sum(sp_chars.values()) or 1
+                total_turns = sum(sp_turns.values()) or 1
+                # 発話時間順でソート（最も話した人が上）
+                ranked = sorted(sp_dur.keys(), key=lambda s: sp_dur[s], reverse=True)
+
+                def _bar_rows(data, total, unit=""):
+                    rows = []
+                    for s in ranked:
+                        v = data.get(s, 0)
+                        pct = v / total * 100 if total else 0
+                        idx_s = list(colors).index(s) if s in colors else 0
+                        c = HTML_PALETTE[idx_s % len(HTML_PALETTE)]
+                        dn = _html.escape(disp_name(s))
+                        # 短い名前の先頭2文字
+                        short = dn[:2] if len(dn) > 3 else dn
+                        rows.append(
+                            f'<div class="stats-row">'
+                            f'<span class="stats-name" title="{dn}">{short}</span>'
+                            f'<div class="stats-bar-bg">'
+                            f'<div class="stats-bar" style="width:{pct:.0f}%;background:{c}"></div>'
+                            f'</div>'
+                            f'<span class="stats-pct">{pct:.0f}%</span>'
+                            f'</div>')
+                    return ''.join(rows)
+
+                groups = []
+                if total_dur > 0.5:   # 発話時間は十分なデータがある時だけ
+                    groups.append(f'<div class="stats-group">'
+                                  f'<div class="stats-label">発話時間</div>'
+                                  + _bar_rows(sp_dur, total_dur) + '</div>')
+                groups.append(f'<div class="stats-group">'
+                              f'<div class="stats-label">文字数</div>'
+                              + _bar_rows(sp_chars, total_chars) + '</div>')
+                groups.append(f'<div class="stats-group">'
+                              f'<div class="stats-label">発話回数</div>'
+                              + _bar_rows(sp_turns, total_turns) + '</div>')
+                stats_panel = ('<div class="stats-section">'
+                               '<p class="sidebar-title">発言量</p>'
+                               + ''.join(groups) + '</div>')
             doc = HTML_TMPL.format(
                 refresh='<meta http-equiv="refresh" content="2">' if live else "",
                 title=started.strftime("%Y-%m-%d %H:%M"),
@@ -950,6 +1015,7 @@ def main(argv=None):
                                   if live else "終了"),
                 speaker_panel=speaker_panel,
                 profile_panel=profile_panel,
+                stats_panel=stats_panel,
                 body="\n".join(parts) or '<p class="meta">（まだ発話なし）</p>',
             )
             dst = path or html_path
@@ -973,7 +1039,8 @@ def main(argv=None):
                     continue
                 tid += 1
                 lines.append(json.dumps({"turn_id": tid, "speaker": disp_name(r["speaker"]),
-                                         "text": r["text"], "ms": r.get("ms")},
+                                         "text": r["text"], "ms": r.get("ms"),
+                                         "end_ms": r.get("end_ms")},
                                         ensure_ascii=False))
             dst = path or turns_path
             tmp = dst + ".tmp"
@@ -1287,7 +1354,8 @@ def main(argv=None):
                     except OSError:
                         pass
                 with state_lock:   # colorsの変更も保存処理との競合を避けるためロック内で
-                    records.append({"ms": cur_ms, "speaker": sp_id, "text": cur_text.strip(),
+                    records.append({"ms": cur_ms, "end_ms": cur_end,
+                                    "speaker": sp_id, "text": cur_text.strip(),
                                     **rec_extra})
                     c = color_of(sp_id)
                 if ON_UTTERANCE is not None:
