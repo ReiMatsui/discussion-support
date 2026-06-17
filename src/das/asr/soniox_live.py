@@ -163,13 +163,21 @@ h1 {{ font-size: 1.2rem; }} .meta {{ color: #6b7280; font-size: .85rem; }}
                  border: 1px solid #bae6fd; }}
 .agent-header {{ display: flex; align-items: center; justify-content: space-between; }}
 .agent-label {{ font-size: .82rem; font-weight: 600; color: #0369a1; }}
-.agent-toggle {{ appearance: none; width: 36px; height: 20px; background: #d1d5db; border-radius: 10px;
-                position: relative; cursor: pointer; transition: background .2s; border: none; }}
-.agent-toggle:checked {{ background: #0ea5e9; }}
-.agent-toggle::after {{ content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
-                       background: #fff; border-radius: 50%; transition: transform .2s; }}
-.agent-toggle:checked::after {{ transform: translateX(16px); }}
-.agent-status {{ font-size: .7rem; color: #6b7280; margin-top: .2rem; }}
+.agent-conn {{ font-size: .68rem; color: #6b7280; }}
+.agent-modes {{ display: flex; gap: .25em; margin-top: .35em; }}
+.agent-mode-btn {{ font-size: .72rem; padding: .2em .5em; border: 1px solid #93c5fd;
+                  border-radius: 5px; background: #fff; color: #1e40af; cursor: pointer;
+                  transition: all .15s; flex: 1; text-align: center; }}
+.agent-mode-btn:hover {{ background: #dbeafe; }}
+.agent-mode-btn.active {{ background: #2563eb; color: #fff; border-color: #2563eb; }}
+.agent-opts {{ display: flex; gap: .5em; margin-top: .35em; align-items: center; }}
+.agent-opt-label {{ font-size: .7rem; color: #6b7280; display: flex; align-items: center; gap: .25em; }}
+.agent-select {{ font-size: .7rem; border: 1px solid #d1d5db; border-radius: 4px;
+                padding: .15em .25em; background: #fff; }}
+.agent-num {{ width: 2.5em; font-size: .7rem; border: 1px solid #d1d5db; border-radius: 4px;
+             padding: .15em .25em; text-align: center; }}
+.agent-trigger-row {{ display: none; }}
+.agent-section[data-mode="facilitator"] .agent-trigger-row {{ display: flex; }}
 </style></head><body>
 <h1>議事録 {title}</h1>
 <p class="meta">{status}</p>
@@ -187,15 +195,33 @@ h1 {{ font-size: 1.2rem; }} .meta {{ color: #6b7280; font-size: .85rem; }}
 </div>
 <script>
 if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
-async function toggleAgent(cb) {{
+async function _agentCfg(data) {{
   try {{
     var res = await fetch('/agent', {{
       method: 'POST',
       headers: {{'Content-Type': 'application/json'}},
-      body: JSON.stringify({{enabled: cb.checked}})
+      body: JSON.stringify(data)
     }});
-    if (!res.ok) {{ cb.checked = !cb.checked; }}
-  }} catch(e) {{ cb.checked = !cb.checked; }}
+    if (res.ok) {{ var d = await res.json(); _updateAgentUI(d); }}
+  }} catch(e) {{}}
+}}
+function _updateAgentUI(d) {{
+  var sec = document.querySelector('.agent-section');
+  if (!sec) return;
+  sec.dataset.mode = d.mode || 'off';
+  sec.querySelectorAll('.agent-mode-btn').forEach(function(b) {{
+    b.classList.toggle('active', b.dataset.mode === d.mode);
+  }});
+}}
+function setAgentMode(btn) {{
+  _agentCfg({{mode: btn.dataset.mode}});
+}}
+function setAgentVoice(sel) {{
+  _agentCfg({{voice: sel.value}});
+}}
+function setAgentTrigger(inp) {{
+  var v = parseInt(inp.value);
+  if (v > 0) _agentCfg({{trigger_n: v}});
 }}
 async function toggleProfile(el) {{
   var name = el.dataset.name;
@@ -319,7 +345,7 @@ def _extract_topics(utterances: list[dict], existing: list[str],
 
 # ---------- AIエージェント（Realtime API v2） ----------
 
-_AGENT_PROMPT = """\
+_PROMPT_FACILITATOR = """\
 あなたは会議のファシリテーターAIです。
 参加者の議論を聞いて、必要な時だけ介入してください。
 
@@ -335,10 +361,17 @@ _AGENT_PROMPT = """\
 
 もし介入が不要だと判断した場合は、「（介入不要）」とだけ返してください。"""
 
+_PROMPT_CONVERSATION = """\
+あなたは会議に参加しているAIアシスタントです。
+参加者と自然に会話してください。質問されたら必ず答えてください。
+簡潔に、日本語で返答してください（15秒以内に収まる長さ）。
+会議の文脈を踏まえた上で、役に立つ回答を心がけてください。"""
+
 REALTIME_URL = "wss://api.openai.com/v1/realtime?model=gpt-realtime-2"
 AGENT_SPEAKER = "AI"          # recordsに使うスピーカーキー
-_AGENT_TRIGGER = 10           # N発話ごとに応答検討
+_AGENT_TRIGGER = 10           # N発話ごとに応答検討(facilitator)
 _AGENT_SILENCE = 5.0          # N秒沈黙で応答検討
+AGENT_VOICES = ["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"]
 
 
 class RealtimeAgent:
@@ -347,24 +380,40 @@ class RealtimeAgent:
     E+B方式:
       E = AIの生成テキストをrecordsに直接挿入（STTを経由しない）
       B = AI音声再生中にSonioxが拾ったAIの声を話者ラベルで破棄
+
+    モード:
+      off          = 無効
+      facilitator  = N発話 or 沈黙でトリガー、介入不要なら黙る
+      conversation = 毎発話でトリガー、必ず返答する
     """
 
+    MODES = ("off", "facilitator", "conversation")
+
     def __init__(self, api_key: str, voice: str = "alloy",
-                 system_prompt: str | None = None):
+                 mode: str = "facilitator", trigger_n: int = _AGENT_TRIGGER):
         self.api_key = api_key
         self.voice = voice
-        self.system_prompt = system_prompt or _AGENT_PROMPT
+        self.mode = mode                   # off / facilitator / conversation
+        self.trigger_n = trigger_n
         self.ws = None
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._pending: list[dict] = []     # 送信待ち発話
         self.ai_speaking = False           # AI音声再生中フラグ (B用)
         self._ai_text_buf = ""             # ストリーミング転写バッファ
-        self._audio_buf = bytearray()      # PCM 24kHz バッファ
-        self._ai_speaker_ids: set[str] = set()  # Soniox側でAI声と判定した話者ID
+        self._audio_q: "queue.Queue[bytes | None]" = queue.Queue()  # ストリーミング再生用
+        self._ai_speaker_ids: set[str] = set()
         self._connected = False
-        self._enabled = True               # UI ON/OFF
         self.on_ai_utterance = None        # callback(text: str) AI発話確定時
+        self._playback_thread: threading.Thread | None = None
+
+    @property
+    def _prompt(self) -> str:
+        return _PROMPT_CONVERSATION if self.mode == "conversation" else _PROMPT_FACILITATOR
+
+    @property
+    def enabled(self) -> bool:
+        return self.mode != "off"
 
     def connect(self):
         """WebSocket接続を開始し、受信スレッドを起動."""
@@ -385,21 +434,71 @@ class RealtimeAgent:
             print(f"# AI Agent: 接続失敗 ({e})", flush=True)
             return
         self._connected = True
-        # セッション設定
-        self.ws.send(json.dumps({
-            "type": "session.update",
-            "session": {
-                "instructions": self.system_prompt,
-                "voice": self.voice,
-                "output_modalities": ["audio"],
-                "turn_detection": None,
-            },
-        }))
+        self._send_session_update()
         threading.Thread(target=self._recv_loop, daemon=True).start()
-        print(f"# AI Agent: 接続完了（voice={self.voice}）", flush=True)
+        self._start_playback_thread()
+        print(f"# AI Agent: 接続完了（voice={self.voice}, mode={self.mode}）", flush=True)
+
+    def _send_session_update(self):
+        """現在の設定でsession.updateを送信."""
+        if not self.ws:
+            return
+        try:
+            self.ws.send(json.dumps({
+                "type": "session.update",
+                "session": {
+                    "instructions": self._prompt,
+                    "voice": self.voice,
+                    "output_modalities": ["audio"],
+                    "turn_detection": None,
+                },
+            }))
+        except Exception:
+            pass
+
+    def apply_config(self, mode: str | None = None, voice: str | None = None,
+                     trigger_n: int | None = None):
+        """動的に設定変更（UIから呼ばれる）."""
+        changed = False
+        if mode is not None and mode in self.MODES and mode != self.mode:
+            self.mode = mode
+            changed = True
+        if voice is not None and voice in AGENT_VOICES and voice != self.voice:
+            self.voice = voice
+            changed = True
+        if trigger_n is not None and trigger_n > 0:
+            self.trigger_n = trigger_n
+        if changed and self._connected:
+            self._send_session_update()
+
+    # --- ストリーミング音声再生 ---
+
+    def _start_playback_thread(self):
+        """PCMキューから読み出して逐次再生するスレッド."""
+        def _player():
+            try:
+                import sounddevice as sd
+                stream = sd.OutputStream(samplerate=24000, channels=1,
+                                         dtype="float32", blocksize=2400)
+                stream.start()
+                while not self._stop.is_set():
+                    chunk = self._audio_q.get()
+                    if chunk is None:          # 1応答の終端
+                        self.ai_speaking = False
+                        continue
+                    pcm = np.frombuffer(chunk, dtype="<i2").astype(np.float32) / 32768.0
+                    stream.write(pcm.reshape(-1, 1))
+                stream.stop()
+                stream.close()
+            except Exception as e:
+                print(f"# AI音声再生スレッド異常: {e}", flush=True)
+
+        self._playback_thread = threading.Thread(target=_player, daemon=True)
+        self._playback_thread.start()
+
+    # --- WebSocket受信 ---
 
     def _recv_loop(self):
-        """サーバーイベントの受信ループ."""
         while not self._stop.is_set():
             try:
                 raw = self.ws.recv()
@@ -415,7 +514,7 @@ class RealtimeAgent:
         if etype == "response.output_audio.delta":
             chunk = ev.get("delta", "")
             if chunk:
-                self._audio_buf.extend(base64.b64decode(chunk))
+                self._audio_q.put(base64.b64decode(chunk))
                 self.ai_speaking = True
 
         elif etype == "response.output_audio_transcript.delta":
@@ -429,7 +528,7 @@ class RealtimeAgent:
                     self.on_ai_utterance(transcript)
 
         elif etype == "response.output_audio.done":
-            self._play_audio()
+            self._audio_q.put(None)   # 再生終端マーカー
 
         elif etype == "response.done":
             self._ai_text_buf = ""
@@ -438,36 +537,18 @@ class RealtimeAgent:
             msg = ev.get("error", {}).get("message", "unknown")
             print(f"# AI Agent エラー: {msg}", flush=True)
 
-    def _play_audio(self):
-        """蓄積したPCM音声(24kHz)を別スレッドでスピーカー再生."""
-        data = bytes(self._audio_buf)
-        self._audio_buf.clear()
-        if not data:
-            self.ai_speaking = False
-            return
-
-        def _do_play():
-            try:
-                import sounddevice as sd
-                pcm = np.frombuffer(data, dtype="<i2").astype(np.float32) / 32768.0
-                sd.play(pcm, samplerate=24000, blocking=True)
-            except Exception as e:
-                print(f"# AI音声再生エラー: {e}", flush=True)
-            finally:
-                self.ai_speaking = False
-
-        threading.Thread(target=_do_play, daemon=True).start()
+    # --- 発話送信 ---
 
     def feed(self, speaker: str, text: str):
         """人間の確定発話をエージェントに蓄積."""
-        if not self._connected or not self._enabled:
+        if not self._connected or not self.enabled:
             return
         with self._lock:
             self._pending.append({"speaker": speaker, "text": text})
 
     def trigger(self):
         """蓄積した発話をRealtimeAPIに送信し応答を要求."""
-        if not self._connected or not self._enabled or not self.ws:
+        if not self._connected or not self.enabled or not self.ws:
             return
         with self._lock:
             if not self._pending:
@@ -493,15 +574,14 @@ class RealtimeAgent:
             return len(self._pending)
 
     def is_ai_echo(self, speaker_id: str) -> bool:
-        """Soniox側の話者IDがAIのエコーかどうか."""
         return speaker_id in self._ai_speaker_ids
 
     def mark_ai_echo(self, speaker_id: str):
-        """AI音声再生中に新出した話者IDをAI声として記録."""
         self._ai_speaker_ids.add(speaker_id)
 
     def close(self):
         self._stop.set()
+        self._audio_q.put(None)
         if self.ws:
             try:
                 self.ws.close()
@@ -1108,7 +1188,8 @@ def main(argv=None):
         if not _agent_oai_key:
             print("# AI Agent: OPENAI_API_KEY が未設定です。--agent は無効になります。", flush=True)
         else:
-            agent = RealtimeAgent(api_key=_agent_oai_key, voice=args.agent_voice)
+            agent = RealtimeAgent(api_key=_agent_oai_key, voice=args.agent_voice,
+                                  mode="facilitator", trigger_n=args.agent_trigger)
 
     pcm_buf = bytearray()               # 送信済み音声の全バッファ（声紋切り出し用, 16bit）
     buf_lock = threading.Lock()
@@ -1319,17 +1400,38 @@ def main(argv=None):
             # AIエージェントパネル
             agent_panel = ''
             if agent is not None:
-                checked = 'checked' if agent._enabled else ''
+                cur_mode = agent.mode
                 conn = '接続中' if agent._connected else '未接続'
+                # モード選択ボタン
+                mode_btns = []
+                for m, lbl in [("off", "OFF"), ("facilitator", "進行役"),
+                               ("conversation", "会話")]:
+                    cls = "agent-mode-btn active" if m == cur_mode else "agent-mode-btn"
+                    mode_btns.append(f'<button class="{cls}" data-mode="{m}" '
+                                     f'onclick="setAgentMode(this)">{lbl}</button>')
+                # 声選択
+                voice_opts = []
+                for v in AGENT_VOICES:
+                    sel = 'selected' if v == agent.voice else ''
+                    voice_opts.append(f'<option value="{v}" {sel}>{v}</option>')
+                # トリガー間隔(facilitatorのみ)
+                trigger_val = agent.trigger_n
                 agent_panel = (
-                    f'<div class="agent-section">'
+                    f'<div class="agent-section" data-mode="{cur_mode}">'
                     f'<div class="agent-header">'
                     f'<span class="agent-label">🤖 AI Agent</span>'
-                    f'<input type="checkbox" class="agent-toggle" {checked} '
-                    f'onchange="toggleAgent(this)">'
+                    f'<span class="agent-conn">{conn}</span>'
                     f'</div>'
-                    f'<div class="agent-status">{conn} / voice: {agent.voice}</div>'
-                    f'</div>')
+                    f'<div class="agent-modes">{"".join(mode_btns)}</div>'
+                    f'<div class="agent-opts">'
+                    f'<label class="agent-opt-label">声'
+                    f'<select class="agent-select" onchange="setAgentVoice(this)">'
+                    f'{"".join(voice_opts)}</select></label>'
+                    f'<label class="agent-opt-label agent-trigger-row">'
+                    f'間隔 <input type="number" class="agent-num" value="{trigger_val}" '
+                    f'min="1" max="50" onchange="setAgentTrigger(this)">発話'
+                    f'</label>'
+                    f'</div></div>')
             doc = HTML_TMPL.format(
                 refresh='<meta http-equiv="refresh" content="2">' if live else "",
                 title=started.strftime("%Y-%m-%d %H:%M"),
@@ -1439,8 +1541,8 @@ def main(argv=None):
         """バックグラウンドでAI応答のトリガーを管理."""
         nonlocal _agent_cursor
         while not stop.is_set():
-            time.sleep(1)
-            if agent is None or not agent._connected or not agent._enabled:
+            time.sleep(0.5)
+            if agent is None or not agent._connected or not agent.enabled:
                 continue
             with state_lock:
                 talk_rs = [r for r in records
@@ -1448,17 +1550,22 @@ def main(argv=None):
                            and r.get("speaker") != AGENT_SPEAKER]
             n = len(talk_rs)
             if n > _agent_cursor:
-                # 新発話あり
                 _last_utt_time[0] = time.monotonic()
                 for r in talk_rs[_agent_cursor:]:
                     agent.feed(disp_name(r["speaker"]), r["text"])
                 _agent_cursor = n
-            # トリガー判定: N発話蓄積 or 沈黙
-            if agent.pending_count >= args.agent_trigger:
-                agent.trigger()
-            elif (agent.pending_count > 0
-                  and time.monotonic() - _last_utt_time[0] > _AGENT_SILENCE):
-                agent.trigger()
+            # モード別トリガー判定
+            if agent.mode == "conversation":
+                # 会話モード: 新発話があったら即trigger（0.5秒以内）
+                if agent.pending_count > 0:
+                    agent.trigger()
+            else:
+                # ファシリテーター: N発話蓄積 or 沈黙
+                if agent.pending_count >= agent.trigger_n:
+                    agent.trigger()
+                elif (agent.pending_count > 0
+                      and time.monotonic() - _last_utt_time[0] > _AGENT_SILENCE):
+                    agent.trigger()
 
     # --- UIサーバー（ブラウザからの話者リネーム用）---
     _httpd = None
@@ -1535,14 +1642,19 @@ def main(argv=None):
                 elif self.path == "/agent":
                     length = int(self.headers.get("Content-Length", 0))
                     body = json.loads(self.rfile.read(length))
-                    enabled = bool(body.get("enabled", True))
                     if agent is None:
                         self._json(400, {"error": "AIエージェントが無効です（--agent で起動してください）"})
                         return
-                    agent._enabled = enabled
-                    status = "有効" if enabled else "無効"
-                    print_line(f"# AI Agent: {status}（UIから）")
-                    self._json(200, {"ok": True, "enabled": enabled})
+                    mode = body.get("mode")
+                    voice = body.get("voice")
+                    trigger_n = body.get("trigger_n")
+                    if trigger_n is not None:
+                        trigger_n = int(trigger_n)
+                    agent.apply_config(mode=mode, voice=voice, trigger_n=trigger_n)
+                    print_line(f"# AI Agent 設定変更: mode={agent.mode} voice={agent.voice}"
+                               f" trigger={agent.trigger_n}（UIから）")
+                    self._json(200, {"ok": True, "mode": agent.mode,
+                                     "voice": agent.voice, "trigger_n": agent.trigger_n})
                 else:
                     self.send_error(404)
 
@@ -1689,8 +1801,8 @@ def main(argv=None):
             agent.on_ai_utterance = _on_agent_text
             agent.connect()
             threading.Thread(target=_agent_worker, daemon=True).start()
-            print(f"# AI Agent: 有効（{args.agent_trigger}発話 or {_AGENT_SILENCE}秒沈黙で応答検討）",
-                  flush=True)
+            print(f"# AI Agent: mode={agent.mode} voice={agent.voice}"
+                  f" trigger={agent.trigger_n}（ブラウザから変更可能）", flush=True)
 
         def sender():
             seq = 0
