@@ -538,6 +538,8 @@ class RealtimeAgent:
         self._responding = False           # response生成中フラグ
         self._echo_canceller = _EchoCanceller()
         self._recent_ai_texts: collections.deque = collections.deque(maxlen=20)
+        self._last_speech_end = 0.0        # ai_speaking が False になった時刻
+        self._echo_cooldown = 5.0          # AI発話終了後のクールダウン秒数
 
     @property
     def _prompt(self) -> str:
@@ -574,21 +576,26 @@ class RealtimeAgent:
         print(f"# AI Agent: 接続完了（voice={self.voice}, mode={self.mode}）", flush=True)
 
     def _send_session_update(self):
-        """現在の設定でsession.updateを送信."""
+        """現在の設定でsession.updateを送信（GA API形式）."""
         if not self.ws:
             return
         try:
             self.ws.send(json.dumps({
                 "type": "session.update",
                 "session": {
+                    "type": "realtime",
+                    "modalities": ["audio"],
                     "instructions": self._prompt,
-                    "voice": self.voice,
-                    "output_modalities": ["audio"],
+                    "audio": {
+                        "output": {
+                            "voice": self.voice,
+                        },
+                    },
                     "turn_detection": None,
                 },
             }))
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"# AI Agent: session.update失敗 ({e})", flush=True)
 
     def apply_config(self, mode: str | None = None, voice: str | None = None,
                      trigger_n: int | None = None):
@@ -619,6 +626,7 @@ class RealtimeAgent:
                     chunk = self._audio_q.get()
                     if chunk is None:          # 1応答の終端
                         self.ai_speaking = False
+                        self._last_speech_end = time.monotonic()
                         continue
                     pcm = np.frombuffer(chunk, dtype="<i2").astype(np.float32) / 32768.0
                     stream.write(pcm.reshape(-1, 1))
@@ -719,6 +727,13 @@ class RealtimeAgent:
         with self._lock:
             return len(self._pending)
 
+    @property
+    def in_echo_cooldown(self) -> bool:
+        """AI発話中、またはAI発話終了後のクールダウン期間中か。"""
+        if self.ai_speaking or self._responding:
+            return True
+        return time.monotonic() - self._last_speech_end < self._echo_cooldown
+
     def cancel_echo(self, mic_float: np.ndarray) -> np.ndarray:
         """マイク入力(float32, 16kHz)からAIエコーを除去。senderスレッドから呼ぶ。"""
         return self._echo_canceller.process(mic_float)
@@ -729,10 +744,14 @@ class RealtimeAgent:
             return False
         from difflib import SequenceMatcher
         text_c = text.strip()
-        if len(text_c) < 5:
+        if len(text_c) < 3:
             return False
         for ai_text in self._recent_ai_texts:
-            if SequenceMatcher(None, text_c, ai_text).ratio() > 0.4:
+            # 部分一致: STTがAIテキストの一部を拾った場合
+            if len(text_c) >= 5 and text_c in ai_text:
+                return True
+            # 類似度チェック（日本語STTの揺れを考慮して閾値低め）
+            if SequenceMatcher(None, text_c, ai_text).ratio() > 0.3:
                 return True
         return False
 
@@ -1712,8 +1731,8 @@ def main(argv=None):
             time.sleep(0.5)
             if agent is None or not agent._connected or not agent.enabled:
                 continue
-            # 応答生成中は蓄積もトリガーもスキップ
-            if agent._responding:
+            # 応答生成中 or エコー到達待ちクールダウン中はスキップ
+            if agent.in_echo_cooldown:
                 continue
             with state_lock:
                 talk_rs = [r for r in records
