@@ -152,6 +152,12 @@ h1 {{ font-size: 1.2rem; }} .meta {{ color: #6b7280; font-size: .85rem; }}
 .stats-bar-bg {{ flex: 1; height: 10px; background: #e5e7eb; border-radius: 5px; overflow: hidden; }}
 .stats-bar {{ height: 100%; border-radius: 5px; transition: width .3s; }}
 .stats-pct {{ width: 2.8em; flex-shrink: 0; font-size: .72rem; color: #6b7280; font-variant-numeric: tabular-nums; }}
+.topics-section {{ margin-top: .4rem; }}
+.topic-item {{ font-size: .78rem; padding: .3em .5em; margin-bottom: .25em;
+              background: #fff; border-radius: 6px; border: 1px solid #e5e7eb;
+              border-left: 3px solid #8b5cf6; }}
+.topic-text {{ color: #1f2937; }}
+.topic-by {{ font-size: .68rem; color: #9ca3af; }}
 </style></head><body>
 <h1>議事録 {title}</h1>
 <p class="meta">{status}</p>
@@ -163,6 +169,7 @@ h1 {{ font-size: 1.2rem; }} .meta {{ color: #6b7280; font-size: .85rem; }}
 {profile_panel}
 {speaker_panel}
 {stats_panel}
+{topics_panel}
 </div>
 </div>
 <script>
@@ -229,6 +236,62 @@ def fmt_ts(ms: int | None) -> str:
         return "--:--"
     s = ms // 1000
     return f"{s // 60:02d}:{s % 60:02d}"
+
+
+# ---------- 論点抽出（非同期LLM処理） ----------
+
+OPENAI_API = "https://api.openai.com/v1/chat/completions"
+
+_TOPIC_PROMPT = """\
+あなたは会議の論点を抽出するアシスタントです。
+
+## 既存の論点
+{existing}
+
+## 直近の発話
+{utterances}
+
+## 指示
+直近の発話の中に、既存の論点リストに**まだ含まれていない新しい論点**があれば抽出してください。
+各論点について、最初にその論点を提起した発話者名を特定してください。
+
+出力はJSON配列のみ（説明不要）。新しい論点がなければ空配列 [] を返してください。
+形式: [{{"topic": "論点の短い要約", "speaker": "発話者名"}}]"""
+
+
+def _extract_topics(utterances: list[dict], existing: list[str],
+                    api_key: str, model: str) -> list[dict]:
+    """OpenAI APIで新論点を抽出する（同期呼び出し、バックグラウンドスレッド用）."""
+    if not utterances or not api_key:
+        return []
+    utt_text = "\n".join(f"- {u['speaker']}: {u['text']}" for u in utterances)
+    ex_text = "\n".join(f"- {t}" for t in existing) if existing else "（まだなし）"
+    prompt = _TOPIC_PROMPT.format(existing=ex_text, utterances=utt_text)
+    # GPT-5系/o系はtemperature指定不可、max_tokensはmax_completion_tokensに改名
+    name = model.lower()
+    is_new = name.startswith(("gpt-5", "o1", "o3", "o4"))
+    params: dict = {"model": model,
+                    "messages": [{"role": "user", "content": prompt}]}
+    if not is_new:
+        params["temperature"] = 0.3
+        params["max_tokens"] = 512
+    else:
+        params["max_completion_tokens"] = 512
+    body = json.dumps(params).encode()
+    import urllib.request
+    req = urllib.request.Request(OPENAI_API, data=body, method="POST")
+    req.add_header("Authorization", f"Bearer {api_key}")
+    req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            resp = json.loads(r.read())
+        text = resp["choices"][0]["message"]["content"].strip()
+        # JSON配列を抽出（前後にmarkdownコードブロックがある場合も対応）
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        return json.loads(text)
+    except Exception:
+        return []
 
 
 # ---------- 清書（会議後の非同期再処理） ----------
@@ -1008,6 +1071,20 @@ def main(argv=None):
                 stats_panel = ('<div class="stats-section">'
                                '<p class="sidebar-title">発言量</p>'
                                + ''.join(groups) + '</div>')
+            # 論点パネル
+            topics_panel = ''
+            with topics_lock:
+                if topics:
+                    items = []
+                    for t in topics:
+                        tt = _html.escape(t.get("topic", ""))
+                        ts = _html.escape(t.get("speaker", ""))
+                        items.append(f'<div class="topic-item">'
+                                     f'<div class="topic-text">{tt}</div>'
+                                     f'<div class="topic-by">{ts}</div></div>')
+                    topics_panel = ('<div class="topics-section">'
+                                   '<p class="sidebar-title">論点</p>'
+                                   + ''.join(items) + '</div>')
             doc = HTML_TMPL.format(
                 refresh='<meta http-equiv="refresh" content="2">' if live else "",
                 title=started.strftime("%Y-%m-%d %H:%M"),
@@ -1016,6 +1093,7 @@ def main(argv=None):
                 speaker_panel=speaker_panel,
                 profile_panel=profile_panel,
                 stats_panel=stats_panel,
+                topics_panel=topics_panel,
                 body="\n".join(parts) or '<p class="meta">（まだ発話なし）</p>',
             )
             dst = path or html_path
@@ -1052,6 +1130,46 @@ def main(argv=None):
         write_md()
         write_html(live)
         write_turns()
+
+    # --- 論点抽出（非同期バックグラウンド処理）---
+    topics: list[dict] = []          # {"topic": "...", "speaker": "...", "ms": ...}
+    topics_lock = threading.Lock()
+    _topic_cursor = 0                # recordsの何番目まで処理済みか
+    _TOPIC_WINDOW = 10               # LLMに渡す直近発話数
+    _TOPIC_TRIGGER = 5               # 新発話がこの数たまったらLLM呼び出し
+    _oai_key = os.environ.get("OPENAI_API_KEY", "")
+    _oai_model = os.environ.get("OPENAI_MODEL_FAST", "gpt-5-mini")
+
+    def _topic_worker():
+        nonlocal _topic_cursor
+        while not stop.is_set():
+            time.sleep(3)
+            if not _oai_key:
+                continue
+            with state_lock:
+                talk_rs = [r for r in records if "speaker" in r and r.get("text")]
+            n = len(talk_rs)
+            if n - _topic_cursor < _TOPIC_TRIGGER:
+                continue
+            # 直近ウィンドウを取得
+            window = talk_rs[max(0, n - _TOPIC_WINDOW):]
+            utts = [{"speaker": disp_name(r["speaker"]), "text": r["text"]} for r in window]
+            with topics_lock:
+                existing = [t["topic"] for t in topics]
+            new_topics = _extract_topics(utts, existing, _oai_key, _oai_model)
+            if new_topics:
+                ms = window[-1].get("ms")
+                with topics_lock:
+                    for t in new_topics:
+                        if isinstance(t, dict) and "topic" in t:
+                            topics.append({"topic": t["topic"],
+                                           "speaker": t.get("speaker", "?"),
+                                           "ms": ms})
+                save()
+                for t in new_topics:
+                    if isinstance(t, dict) and "topic" in t:
+                        print_line(f"# 💡論点: {t['topic']}（{t.get('speaker', '?')}）")
+            _topic_cursor = n
 
     # --- UIサーバー（ブラウザからの話者リネーム用）---
     _httpd = None
@@ -1262,6 +1380,11 @@ def main(argv=None):
         ws.send(json.dumps(start_msg))
         threading.Thread(target=from_wav if args.wav else from_mic, daemon=True).start()
         threading.Thread(target=stdin_commands, daemon=True).start()
+        if _oai_key:
+            threading.Thread(target=_topic_worker, daemon=True).start()
+            print("# 論点抽出: 有効（5発話ごとにLLMで分析）", flush=True)
+        else:
+            print("# 論点抽出: 無効（OPENAI_API_KEYが未設定）", flush=True)
 
         def sender():
             seq = 0
