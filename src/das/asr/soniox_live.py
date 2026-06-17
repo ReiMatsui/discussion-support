@@ -111,7 +111,8 @@ body {{ font-family: -apple-system, "Hiragino Sans", sans-serif;
 h1 {{ font-size: 1.2rem; }} .meta {{ color: #6b7280; font-size: .85rem; }}
 .container {{ display: flex; gap: 1.2rem; align-items: flex-start; }}
 .main {{ flex: 1; min-width: 0; }}
-.sidebar {{ width: 180px; flex-shrink: 0; position: sticky; top: 1rem; }}
+.sidebar-wrap {{ width: 200px; flex-shrink: 0; position: sticky; top: 1rem; }}
+.sidebar {{ }}
 .sidebar-title {{ font-size: .8rem; color: #9ca3af; margin: 0 0 .4rem; font-weight: 400; }}
 .u {{ margin: .5rem 0; padding: .55rem .8rem; background: #fff; border-radius: 10px;
      border: 1px solid #e5e7eb; }}
@@ -132,6 +133,16 @@ h1 {{ font-size: 1.2rem; }} .meta {{ color: #6b7280; font-size: .85rem; }}
 .rename-btn {{ font-size: .75rem; background: #2563eb; color: #fff; border: none;
               border-radius: 4px; padding: .2em .5em; cursor: pointer; white-space: nowrap; }}
 .rename-btn:hover {{ background: #1d4ed8; }}
+.profile-section {{ margin-bottom: .8rem; }}
+.profile-item {{ display: flex; align-items: center; gap: .4em; font-size: .82rem;
+                padding: .3em .5em; background: #fff; border-radius: 6px;
+                border: 1px solid #e5e7eb; margin-bottom: .3em; cursor: pointer;
+                user-select: none; transition: background .15s; }}
+.profile-item:hover {{ background: #f3f4f6; }}
+.profile-item.active {{ background: #eff6ff; border-color: #93c5fd; }}
+.profile-toggle {{ width: 14px; height: 14px; border-radius: 50%;
+                  border: 2px solid #d1d5db; flex-shrink: 0; transition: all .15s; }}
+.profile-item.active .profile-toggle {{ background: #2563eb; border-color: #2563eb; }}
 </style></head><body>
 <h1>議事録 {title}</h1>
 <p class="meta">{status}</p>
@@ -139,10 +150,26 @@ h1 {{ font-size: 1.2rem; }} .meta {{ color: #6b7280; font-size: .85rem; }}
 <div class="main">
 {body}
 </div>
+<div class="sidebar-wrap">
+{profile_panel}
 {speaker_panel}
+</div>
 </div>
 <script>
 if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+async function toggleProfile(el) {{
+  var name = el.dataset.name;
+  var isActive = el.classList.contains('active');
+  try {{
+    var res = await fetch('/activate', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{name: name, active: !isActive}})
+    }});
+    if (res.ok) location.reload();
+    else {{ var d = await res.json(); alert(d.error || '切替失敗'); }}
+  }} catch(e) {{}}
+}}
 async function rename(btn) {{
   var input = btn.parentElement.querySelector('.rename-input');
   var label = input.dataset.label;
@@ -257,6 +284,8 @@ def _map_speakers(utts: list[tuple], pcm: bytes, tracker) -> dict:
         if s is None or e is None or spk is None:
             continue
         by_spk.setdefault(str(spk), []).append((e - s, s, e))
+    # アクティブなプロファイルのみ対象（セッション中に使ったもの＋自動登録）
+    active = {k: v for k, v in tracker.profiles.items() if k in tracker._active_keys}
     pairs = []   # (sim, async話者, 人物)
     for spk, segs in by_spk.items():
         segs = [x for x in sorted(segs, reverse=True) if x[0] >= 1200][:6]
@@ -269,7 +298,7 @@ def _map_speakers(utts: list[tuple], pcm: bytes, tracker) -> dict:
         if embs:
             prof = np.mean(embs, axis=0)
             prof = prof / np.linalg.norm(prof)
-            for n, v in tracker.profiles.items():
+            for n, v in active.items():
                 sim = float(np.dot(v, prof))
                 if sim >= tracker.dedupe:
                     pairs.append((sim, spk, n))
@@ -416,6 +445,10 @@ class VoiceProfiles:
         self.counts: dict[str, int] = {}                    # 判定種別の集計
         self.last: dict | None = None                       # 直近の判定内容（可視化用）
         self._lock = threading.RLock()   # classify(受信スレッド)とenroll/remap(入力スレッド)の排他
+        # プロファイル選択: セッション中に照合対象とするプロファイルのキー集合。
+        # voices.jsonから読んだ名前付きプロファイルは全て非アクティブで開始し、
+        # ユーザーが明示的にONにしたもの＋セッション中に自動登録された人物Nのみが照合対象。
+        self._active_keys: set[str] = set()
 
     def _note(self, kind: str, **info) -> None:
         self.counts[kind] = self.counts.get(kind, 0) + 1
@@ -471,10 +504,11 @@ class VoiceProfiles:
                 self.label_embs.setdefault(sp, []).append(emb)
                 del self.label_embs[sp][:-10]    # 手動登録用に直近10発話だけ保持
                 th, dd, cs = self.thresh, self.dedupe, self.consist
-                info = {"n_prof": len(self.profiles)}   # 診断ログ用
-                if self.profiles:
+                active = {k: v for k, v in self.profiles.items() if k in self._active_keys}
+                info = {"n_prof": len(active), "n_all": len(self.profiles)}   # 診断ログ用
+                if active:
                     ranked = sorted(((float(np.dot(p, emb)), n)
-                                     for n, p in self.profiles.items()), reverse=True)
+                                     for n, p in active.items()), reverse=True)
                     sim, cand = ranked[0]
                     second = ranked[1][0] if len(ranked) > 1 else -1.0
                     info.update(sim=round(sim, 3), second=round(second, 3), name=cand, prev=prev)
@@ -502,13 +536,14 @@ class VoiceProfiles:
                         prof = np.mean(triple, axis=0)
                         prof = prof / np.linalg.norm(prof)
                         hit_sim, hit = max(((float(np.dot(p, prof)), n)
-                                            for n, p in self.profiles.items()), default=(-1.0, None))
+                                            for n, p in active.items()), default=(-1.0, None))
                         if hit is not None and hit_sim >= dd:
-                            target = hit          # 既存人物の声だった → 合流
+                            target = hit          # アクティブな既存人物の声だった → 合流
                         else:
                             self.n_anon += 1
                             target = f"人物{self.n_anon}"
                             self.profiles[target] = prof   # 新規人物（以後凍結）
+                            self._active_keys.add(target)  # セッション中の新規人物は自動アクティブ
                         # 遡及置換は未確定キー(#ラベル)の昇格のみ。人物キーは絶対に書き換えない。
                         rename = ("#" + sp, target) if (prev is None or prev.startswith("#")) else None
                         self.sp_map[sp] = target
@@ -551,6 +586,12 @@ class VoiceProfiles:
                 prof = np.mean(embs, axis=0)
                 self.profiles[name] = prof / np.linalg.norm(prof)
                 old = cur if cur is not None else "#" + label
+        # _active_keysの更新（旧キーが有効だったら新キーに引き継ぐ）
+        if old in self._active_keys:
+            self._active_keys.discard(old)
+            self._active_keys.add(name)
+        else:
+            self._active_keys.add(name)   # 新規命名は自動的にアクティブ
         for k, v in list(self.sp_map.items()):
             if v == old:
                 self.sp_map[k] = name
@@ -571,8 +612,49 @@ class VoiceProfiles:
             for k, v in list(self.sp_map.items()):
                 if v == src:
                     self.sp_map[k] = dst
+            self._active_keys.discard(src)
             self._persist()
             return True
+
+    def activate(self, name: str) -> str | None:
+        """プロファイルをこのセッションで有効化する.
+
+        有効化されたプロファイルは _classify() の照合対象になる。
+        既にセッション中に自動登録された人物Nが同一人物だった場合は自動マージし、
+        マージされた旧キーを返す（rekey用）。マージなしならNone。
+        """
+        with self._lock:
+            if name not in self.profiles:
+                return None
+            self._active_keys.add(name)
+            prof = self.profiles[name]
+            # セッション中の匿名人物Nに同一人物がいたらマージ
+            for key in list(self._active_keys):
+                if self.ANON.match(key) and key in self.profiles:
+                    sim = float(np.dot(prof, self.profiles[key]))
+                    if sim >= self.dedupe:
+                        self.profiles.pop(key)
+                        self._active_keys.discard(key)
+                        self.own_sims.pop(key, None)
+                        for k, v in list(self.sp_map.items()):
+                            if v == key:
+                                self.sp_map[k] = name
+                        return key   # マージされた旧キー
+            return None
+
+    def deactivate(self, name: str) -> None:
+        """プロファイルをこのセッションで無効化する（匿名人物Nは無効化不可）."""
+        with self._lock:
+            if not self.ANON.match(name):
+                self._active_keys.discard(name)
+
+    def active_profile_names(self) -> list[str]:
+        """現在アクティブな名前付きプロファイルの一覧（UI表示用）."""
+        return sorted(k for k in self._active_keys if not self.ANON.match(k) and k in self.profiles)
+
+    def all_profile_names(self) -> list[str]:
+        """voices.jsonに保存された全名前付きプロファイル（UI表示用）."""
+        return sorted(k for k in self.profiles if not self.ANON.match(k))
 
     def _persist(self):
         named = {k: v.tolist() for k, v in self.profiles.items() if not self.ANON.match(k)}
@@ -837,16 +919,34 @@ def main(argv=None):
                         f'<div class="speaker-name"><span class="dot" style="background:{c}"></span>{dn}</div>'
                         f'</div>')
             if sp_tags:
-                speaker_panel = ('<div class="sidebar"><p class="sidebar-title">話者</p>'
+                speaker_panel = ('<div class="sidebar"><p class="sidebar-title">この会議の話者</p>'
                                  '<div class="speaker-panel">' + ''.join(sp_tags) + '</div></div>')
             else:
                 speaker_panel = ''
+            # プロファイル一覧パネル（voices.jsonに保存済みのプロファイルをトグル表示）
+            profile_panel = ''
+            if _serve and tracker is not None:
+                all_names = tracker.all_profile_names()
+                if all_names:
+                    active_names = set(tracker.active_profile_names())
+                    items = []
+                    for n in all_names:
+                        cls = 'profile-item active' if n in active_names else 'profile-item'
+                        items.append(
+                            f'<div class="{cls}" data-name="{_html.escape(n)}" '
+                            f'onclick="toggleProfile(this)">'
+                            f'<span class="profile-toggle"></span>'
+                            f'{_html.escape(n)}</div>')
+                    profile_panel = ('<div class="profile-section">'
+                                     '<p class="sidebar-title">プロファイル</p>'
+                                     + ''.join(items) + '</div>')
             doc = HTML_TMPL.format(
                 refresh='<meta http-equiv="refresh" content="2">' if live else "",
                 title=started.strftime("%Y-%m-%d %H:%M"),
                 status=status or ('<span class="live">● ライブ（2秒ごと自動更新）</span>'
                                   if live else "終了"),
                 speaker_panel=speaker_panel,
+                profile_panel=profile_panel,
                 body="\n".join(parts) or '<p class="meta">（まだ発話なし）</p>',
             )
             dst = path or html_path
@@ -930,6 +1030,31 @@ def main(argv=None):
                         save()
                         print_line(f"# 話者{label} → {name}（UIから）")
                     self._json(200, {"ok": True, "name": name})
+                elif self.path == "/activate":
+                    length = int(self.headers.get("Content-Length", 0))
+                    body = json.loads(self.rfile.read(length))
+                    name = str(body.get("name", ""))
+                    active = bool(body.get("active", True))
+                    if not name:
+                        self._json(400, {"error": "name を指定してください"})
+                        return
+                    if tracker is None:
+                        self._json(400, {"error": "声紋照合が無効です"})
+                        return
+                    if active:
+                        merged = tracker.activate(name)
+                        if merged is not None:
+                            rekey(merged, name)
+                            add_sys(None, f"「{name}」を有効化（{merged}と統合）")
+                            print_line(f"# {name} を有効化（{merged}と統合、UIから）")
+                        else:
+                            print_line(f"# {name} を有効化（UIから）")
+                        save()
+                    else:
+                        tracker.deactivate(name)
+                        print_line(f"# {name} を無効化（UIから）")
+                        save()
+                    self._json(200, {"ok": True, "name": name, "active": active})
                 else:
                     self.send_error(404)
 
