@@ -558,6 +558,11 @@ def main(argv=None):
     ap.add_argument("--lang", default="ja")
     ap.add_argument("--model", default="stt-rt-v4")
     ap.add_argument("--wav", default=None, help="指定で実マイクの代わりにファイル擬似ライブ")
+    ap.add_argument("--play", action="store_true",
+                    help="--wav使用時、注入と同時にスピーカーからも再生する（観戦用）")
+    ap.add_argument("--join", action="store_true",
+                    help="--wav使用時、再生しつつ自分のマイクも混ぜて参加する（イヤホン推奨。"
+                         "wav終了後もマイクは生き続けるのでCtrl+Cで終了）")
     ap.add_argument("--device", default=None)
     ap.add_argument("--out", default=None, help="保存先mdファイル（省略時 transcripts/日時.md）")
     ap.add_argument("--no-open", action="store_true", help="ブラウザを自動で開かない")
@@ -580,6 +585,10 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     load_env()   # .env からAPIキーを読み込み（export済みの値が優先）
+    if args.wav and not os.path.exists(args.wav):
+        raise SystemExit(f"音声ファイルがありません: {args.wav}\n"
+                         "（テスト音声は scripts/make_overlap_testset.py 等で先に生成してください）")
+
     api_key = os.environ.get("SONIOX_API_KEY")
     sm_key = os.environ.get("SPEECHMATICS_API_KEY")
     if args.stt == "speechmatics":
@@ -780,7 +789,8 @@ def main(argv=None):
                     continue
                 tid += 1
                 lines.append(json.dumps({"turn_id": tid, "speaker": disp_name(r["speaker"]),
-                                         "text": r["text"]}, ensure_ascii=False))
+                                         "text": r["text"], "ms": r.get("ms")},
+                                        ensure_ascii=False))
             dst = path or turns_path
             tmp = dst + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
@@ -825,12 +835,39 @@ def main(argv=None):
         import librosa
         y, _ = librosa.load(args.wav, sr=SR)
         step = int(SR * 0.12)
-        for i in range(0, len(y), step):
-            if stop.is_set():
-                break
-            pcm = (np.clip(y[i:i + step], -1, 1) * 32767).astype("<i2").tobytes()
-            audio_q.put(pcm)
-            time.sleep(0.12)
+        out = mic = None
+        if args.play or args.join:
+            import sounddevice as sd
+            out = sd.OutputStream(samplerate=SR, channels=1, dtype="float32")
+            out.start()
+        if args.join:
+            import sounddevice as sd
+            mic = sd.InputStream(samplerate=SR, channels=1, dtype="float32", blocksize=step)
+            mic.start()
+        i = 0
+        while not stop.is_set():
+            chunk = np.clip(y[i:i + step], -1, 1).astype("float32") if i < len(y) else                 np.zeros(0, dtype="float32")
+            if len(chunk) < step:
+                chunk = np.pad(chunk, (0, step - len(chunk)))
+            i += step
+            if i - step >= len(y) and mic is None:
+                break   # wav終了(参加モードでなければここで終わり)
+            if mic is not None:
+                mdata, _ = mic.read(step)        # マイク読みが実時間ペースを刻む
+                mix = np.clip(chunk + mdata[:, 0], -1, 1)
+            else:
+                mix = chunk
+            audio_q.put((mix * 32767).astype("<i2").tobytes())
+            if out is not None:
+                out.write(chunk.reshape(-1, 1))   # 自分の声は再生しない(ハウリング防止)
+                if mic is None:
+                    continue                       # 再生がペースを刻む
+            if mic is None and out is None:
+                time.sleep(0.12)
+        for s in (out, mic):
+            if s is not None:
+                s.stop()
+                s.close()
         audio_q.put(None)
 
     # --- 実行中コマンド ---

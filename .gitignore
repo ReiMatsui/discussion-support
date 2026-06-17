@@ -54,3 +54,16 @@ data/runs/
 
 # 一時的な検証スペース (本体に組み込む前の実験置き場、後で削除する)
 experiments/
+
+# 生成物・バイナリ（gitに入れない）
+*.wav
+*.mp3
+*.m4a
+*.webm
+transcripts/
+data/overlap_test/
+live_transcriber.html
+
+# ドキュメント成果物（別管理）
+*.docx
+*.pptx
