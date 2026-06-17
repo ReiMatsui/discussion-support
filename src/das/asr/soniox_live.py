@@ -105,9 +105,14 @@ HTML_TMPL = """<!doctype html>
 <html lang="ja"><head><meta charset="utf-8">
 {refresh}<title>議事録 {title}</title>
 <style>
-body {{ font-family: -apple-system, "Hiragino Sans", sans-serif; max-width: 760px;
-       margin: 2rem auto; padding: 0 1rem; background: #fafafa; color: #1f2937; }}
+body {{ font-family: -apple-system, "Hiragino Sans", sans-serif;
+       margin: 2rem auto; padding: 0 1rem; background: #fafafa; color: #1f2937;
+       max-width: 960px; }}
 h1 {{ font-size: 1.2rem; }} .meta {{ color: #6b7280; font-size: .85rem; }}
+.container {{ display: flex; gap: 1.2rem; align-items: flex-start; }}
+.main {{ flex: 1; min-width: 0; }}
+.sidebar {{ width: 180px; flex-shrink: 0; position: sticky; top: 1rem; }}
+.sidebar-title {{ font-size: .8rem; color: #9ca3af; margin: 0 0 .4rem; font-weight: 400; }}
 .u {{ margin: .5rem 0; padding: .55rem .8rem; background: #fff; border-radius: 10px;
      border: 1px solid #e5e7eb; }}
 .u .who {{ font-weight: 700; margin-right: .5em; }}
@@ -116,11 +121,51 @@ h1 {{ font-size: 1.2rem; }} .meta {{ color: #6b7280; font-size: .85rem; }}
 .badge {{ background: #fef3c7; color: #92400e; font-size: .7rem; border-radius: 6px;
          padding: .05em .45em; margin-left: .55em; vertical-align: middle; }}
 .sys {{ text-align: center; color: #6b7280; font-size: .78rem; margin: .45rem 0; }}
+.speaker-panel {{ display: flex; flex-direction: column; gap: .5rem; }}
+.speaker-tag {{ font-size: .85rem; padding: .4em .6em;
+               background: #fff; border-radius: 8px; border: 1px solid #e5e7eb; }}
+.speaker-name {{ display: flex; align-items: center; gap: .4em; font-weight: 600; }}
+.speaker-name .dot {{ width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }}
+.rename-row {{ display: flex; gap: .25em; margin-top: .3em; }}
+.rename-input {{ flex: 1; min-width: 0; font-size: .8rem; border: 1px solid #d1d5db;
+                border-radius: 4px; padding: .2em .35em; }}
+.rename-btn {{ font-size: .75rem; background: #2563eb; color: #fff; border: none;
+              border-radius: 4px; padding: .2em .5em; cursor: pointer; white-space: nowrap; }}
+.rename-btn:hover {{ background: #1d4ed8; }}
 </style></head><body>
 <h1>議事録 {title}</h1>
-<p class="meta">{status} / 話者: {speakers}</p>
+<p class="meta">{status}</p>
+<div class="container">
+<div class="main">
 {body}
-<script>window.scrollTo(0, document.body.scrollHeight);</script>
+</div>
+{speaker_panel}
+</div>
+<script>
+if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+async function rename(btn) {{
+  var input = btn.parentElement.querySelector('.rename-input');
+  var label = input.dataset.label;
+  var name = input.value.trim();
+  if (!name) return;
+  btn.disabled = true;
+  try {{
+    var res = await fetch('/rename', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{label: label, name: name}})
+    }});
+    if (res.ok) location.reload();
+    else {{ var d = await res.json(); alert(d.error || '登録失敗'); btn.disabled = false; }}
+  }} catch(e) {{ btn.disabled = false; }}
+}}
+document.querySelectorAll('.rename-input').forEach(function(input) {{
+  input.addEventListener('keydown', function(e) {{
+    if (e.key === 'Enter') rename(input.nextElementSibling);
+  }});
+}});
+window.scrollTo(0, document.body.scrollHeight);
+</script>
 </body></html>
 """
 
@@ -582,7 +627,10 @@ def main(argv=None):
     ap.add_argument("--stt", default="soniox", choices=["soniox", "speechmatics"],
                     help="リアルタイムSTTの供給源。speechmaticsは要 SPEECHMATICS_API_KEY"
                          "（話者分離の評判が良い代替。声紋層など他の機能は不変）")
+    ap.add_argument("--port", type=int, default=8231,
+                    help="UIサーバーのポート番号（ブラウザからの話者リネームに必要。0で無効）")
     args = ap.parse_args(argv)
+    _serve = args.port > 0
 
     load_env()   # .env からAPIキーを読み込み（export済みの値が優先）
     if args.wav and not os.path.exists(args.wav):
@@ -760,12 +808,45 @@ def main(argv=None):
                     f'{_html.escape(r["text"])}{badge}</div>'
                 )
             speakers = list(dict.fromkeys(r["speaker"] for r in rs if "speaker" in r))
+            # サイドバー話者パネル: 確定済み話者（人物N＋実名）はリネーム可能、未確定(話者N)は表示のみ
+            sp_tags = []
+            for s in speakers:
+                dn = _html.escape(disp_name(s))
+                idx_s = list(colors).index(s) if s in colors else 0
+                c = HTML_PALETTE[idx_s % len(HTML_PALETTE)]
+                # #N(話者N)は未確定なのでリネーム不可。人物N・実名は確定済みなのでリネーム可能
+                is_renameable = _serve and tracker is not None and not s.startswith("#")
+                if is_renameable:
+                    lbl = s  # enroll()は"人物1"でも"松井"でも受け付ける
+                    for _l, _k in tracker.sp_map.items():
+                        if _k == s:
+                            lbl = _l
+                            break
+                    is_anon = re.match(r"^人物\d+$", s)
+                    ph = "名前" if is_anon else "新しい名前"
+                    sp_tags.append(
+                        f'<div class="speaker-tag">'
+                        f'<div class="speaker-name"><span class="dot" style="background:{c}"></span>{dn}</div>'
+                        f'<div class="rename-row">'
+                        f'<input class="rename-input" placeholder="{ph}" data-label="{_html.escape(lbl)}">'
+                        f'<button class="rename-btn" onclick="rename(this)">登録</button>'
+                        f'</div></div>')
+                else:
+                    sp_tags.append(
+                        f'<div class="speaker-tag">'
+                        f'<div class="speaker-name"><span class="dot" style="background:{c}"></span>{dn}</div>'
+                        f'</div>')
+            if sp_tags:
+                speaker_panel = ('<div class="sidebar"><p class="sidebar-title">話者</p>'
+                                 '<div class="speaker-panel">' + ''.join(sp_tags) + '</div></div>')
+            else:
+                speaker_panel = ''
             doc = HTML_TMPL.format(
                 refresh='<meta http-equiv="refresh" content="2">' if live else "",
                 title=started.strftime("%Y-%m-%d %H:%M"),
                 status=status or ('<span class="live">● ライブ（2秒ごと自動更新）</span>'
                                   if live else "終了"),
-                speakers=_html.escape(", ".join(disp_name(s) for s in speakers) or "（未検出）"),
+                speaker_panel=speaker_panel,
                 body="\n".join(parts) or '<p class="meta">（まだ発話なし）</p>',
             )
             dst = path or html_path
@@ -801,6 +882,72 @@ def main(argv=None):
         write_md()
         write_html(live)
         write_turns()
+
+    # --- UIサーバー（ブラウザからの話者リネーム用）---
+    _httpd = None
+    if _serve:
+        from http.server import HTTPServer, BaseHTTPRequestHandler
+
+        class _Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path == "/" or self.path.startswith("/?"):
+                    try:
+                        with open(html_path, "rb") as f:
+                            content = f.read()
+                        self.send_response(200)
+                        self.send_header("Content-Type", "text/html; charset=utf-8")
+                        self.end_headers()
+                        self.wfile.write(content)
+                    except FileNotFoundError:
+                        self.send_response(200)
+                        self.send_header("Content-Type", "text/html; charset=utf-8")
+                        self.end_headers()
+                        self.wfile.write("<p>準備中…</p>".encode())
+                else:
+                    self.send_error(404)
+
+            def do_POST(self):
+                if self.path == "/rename":
+                    length = int(self.headers.get("Content-Length", 0))
+                    body = json.loads(self.rfile.read(length))
+                    label = str(body.get("label", ""))
+                    name = str(body.get("name", ""))
+                    if not label or not name:
+                        self._json(400, {"error": "label と name を指定してください"})
+                        return
+                    if tracker is not None:
+                        old = tracker.enroll(label, name)
+                        if old is None:
+                            self._json(400, {"error": f"話者{label}の音声がまだ足りません"})
+                            return
+                        rekey(old, name)
+                        add_sys(None, f"「{name}」の声を登録（次回の会議から自動表示）")
+                        save()
+                        print_line(f"# {name} の声を登録しました（UIから）")
+                    else:
+                        with state_lock:
+                            names["#" + label] = name
+                        save()
+                        print_line(f"# 話者{label} → {name}（UIから）")
+                    self._json(200, {"ok": True, "name": name})
+                else:
+                    self.send_error(404)
+
+            def _json(self, code, data):
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps(data, ensure_ascii=False).encode())
+
+            def log_message(self, format, *args):
+                pass
+
+        try:
+            _httpd = HTTPServer(("127.0.0.1", args.port), _Handler)
+            threading.Thread(target=_httpd.serve_forever, daemon=True).start()
+        except OSError as e:
+            print(f"# 警告: UIサーバーをポート{args.port}で起動できません ({e})", flush=True)
+            _serve = False
 
     def print_line(text: str):
         sys.stdout.write(CLEAR_LINE + text + "\n")
@@ -943,7 +1090,10 @@ def main(argv=None):
         print(f"# ブラウザ表示: open {html_path}（ライブ中は2秒ごと自動更新）\n", flush=True)
         if not args.no_open:
             import webbrowser
-            webbrowser.open("file://" + os.path.abspath(html_path))
+            if _serve:
+                webbrowser.open(f"http://127.0.0.1:{args.port}/")
+            else:
+                webbrowser.open("file://" + os.path.abspath(html_path))
 
         cur_speaker = None
         cur_text = ""
