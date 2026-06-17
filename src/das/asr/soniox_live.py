@@ -372,7 +372,7 @@ REALTIME_URL = "wss://api.openai.com/v1/realtime?model=gpt-realtime-2"
 AGENT_SPEAKER = "AI"          # recordsに使うスピーカーキー
 _AGENT_TRIGGER = 10           # N発話ごとに応答検討(facilitator)
 _AGENT_SILENCE = 5.0          # N秒沈黙で応答検討
-AGENT_VOICES = ["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"]
+AGENT_VOICES = ["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse", "marin", "cedar"]
 
 
 # ---------- 信号レベルAEC（エコーキャンセレーション） ----------
@@ -576,7 +576,15 @@ class RealtimeAgent:
         print(f"# AI Agent: 接続完了（voice={self.voice}, mode={self.mode}）", flush=True)
 
     def _send_session_update(self):
-        """現在の設定でsession.updateを送信（GA API形式）."""
+        """現在の設定でsession.updateを送信（GA API形式）.
+
+        GA (gpt-realtime-2) WebSocket スキーマ:
+          session.type = "realtime"           (必須)
+          session.instructions               (フラット)
+          session.audio.input.turn_detection  (None で VAD 無効)
+          session.audio.output.voice          (ネスト)
+        参照: https://developers.openai.com/api/docs/guides/realtime-conversations
+        """
         if not self.ws:
             return
         try:
@@ -584,14 +592,15 @@ class RealtimeAgent:
                 "type": "session.update",
                 "session": {
                     "type": "realtime",
-                    "modalities": ["audio"],
                     "instructions": self._prompt,
                     "audio": {
+                        "input": {
+                            "turn_detection": None,
+                        },
                         "output": {
                             "voice": self.voice,
                         },
                     },
-                    "turn_detection": None,
                 },
             }))
         except Exception as e:
@@ -738,20 +747,32 @@ class RealtimeAgent:
         """マイク入力(float32, 16kHz)からAIエコーを除去。senderスレッドから呼ぶ。"""
         return self._echo_canceller.process(mic_float)
 
+    @staticmethod
+    def _normalize(text: str) -> str:
+        """テキスト比較用の正規化: 句読点・空白・記号を除去。"""
+        import unicodedata
+        # 全角→半角の正規化 + 句読点・空白・記号を除去
+        t = unicodedata.normalize("NFKC", text)
+        return re.sub(r'[\s　、。,.!?！？「」『』（）()・…\-―ー～~]+', '', t)
+
     def is_likely_echo(self, text: str) -> bool:
         """テキスト類似度でAIエコーか判定（AEC漏れの安全網）。"""
         if not text or not self._recent_ai_texts:
             return False
         from difflib import SequenceMatcher
-        text_c = text.strip()
-        if len(text_c) < 3:
+        norm = self._normalize(text)
+        if len(norm) < 2:
             return False
         for ai_text in self._recent_ai_texts:
+            ai_norm = self._normalize(ai_text)
             # 部分一致: STTがAIテキストの一部を拾った場合
-            if len(text_c) >= 5 and text_c in ai_text:
+            if len(norm) >= 4 and norm in ai_norm:
                 return True
-            # 類似度チェック（日本語STTの揺れを考慮して閾値低め）
-            if SequenceMatcher(None, text_c, ai_text).ratio() > 0.3:
+            # 逆方向の部分一致: AIテキストの断片がSTTに出た場合
+            if len(ai_norm) >= 4 and ai_norm in norm:
+                return True
+            # 類似度チェック（正規化後で比較、閾値シビア）
+            if SequenceMatcher(None, norm, ai_norm).ratio() > 0.28:
                 return True
         return False
 
@@ -1731,19 +1752,31 @@ def main(argv=None):
             time.sleep(0.5)
             if agent is None or not agent._connected or not agent.enabled:
                 continue
-            # 応答生成中 or エコー到達待ちクールダウン中はスキップ
-            if agent.in_echo_cooldown:
-                continue
             with state_lock:
                 talk_rs = [r for r in records
                            if "speaker" in r and r.get("text")
                            and r.get("speaker") != AGENT_SPEAKER]
             n = len(talk_rs)
+            # クールダウン中: カーソルだけ進めて蓄積・トリガーをスキップ
+            # （エコーレコードがクールダウン後に一気にfeedされるのを防止）
+            if agent.in_echo_cooldown:
+                _agent_cursor = n
+                continue
             if n > _agent_cursor:
                 _last_utt_time[0] = time.monotonic()
+                fed = 0
                 for r in talk_rs[_agent_cursor:]:
+                    # 最終防衛線: AIエコーのテキスト類似度チェック
+                    if agent.is_likely_echo(r.get("text", "")):
+                        if args.vp_debug:
+                            print_line(f"# worker: エコー除去"
+                                       f" ({r.get('text', '')[:30]}...)")
+                        continue
                     agent.feed(disp_name(r["speaker"]), r["text"])
+                    fed += 1
                 _agent_cursor = n
+                if fed == 0:
+                    continue  # 全てエコーだった場合はトリガーしない
             # モード別トリガー判定
             if agent.mode == "conversation":
                 # 会話モード: 新発話があったら即trigger（0.5秒以内）
