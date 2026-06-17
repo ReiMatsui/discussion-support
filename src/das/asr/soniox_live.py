@@ -539,15 +539,18 @@ class VoiceProfiles:
                                             for n, p in active.items()), default=(-1.0, None))
                         if hit is not None and hit_sim >= dd:
                             target = hit          # アクティブな既存人物の声だった → 合流
+                            is_new = False
                         else:
                             self.n_anon += 1
                             target = f"人物{self.n_anon}"
                             self.profiles[target] = prof   # 新規人物（以後凍結）
                             self._active_keys.add(target)  # セッション中の新規人物は自動アクティブ
+                            is_new = True
                         # 遡及置換は未確定キー(#ラベル)の昇格のみ。人物キーは絶対に書き換えない。
                         rename = ("#" + sp, target) if (prev is None or prev.startswith("#")) else None
                         self.sp_map[sp] = target
-                        self._note("自動登録", label=sp, name=target, rename=rename)
+                        kind = "自動登録" if is_new else "合流"
+                        self._note(kind, label=sp, name=target, rename=rename)
                         return target
                     self.pool.append(emb)
                     del self.pool[:-12]
@@ -673,7 +676,7 @@ class VoiceProfiles:
             parts.append(f"部屋の声紋分布(参考): ラベル内{np.median(self.same_sims):.2f}"
                          f"/ラベル間{np.median(self.diff_sims):.2f}")
         if self.counts:
-            order = ["声紋一致", "補正", "自動登録", "蓄積中", "未確定", "相槌追従",
+            order = ["声紋一致", "補正", "自動登録", "合流", "蓄積中", "未確定", "相槌追従",
                      "重なりスキップ", "声紋計算不可"]
             parts.append("判定内訳: " + " / ".join(
                 f"{k}{self.counts[k]}" for k in order if self.counts.get(k)))
@@ -1259,6 +1262,12 @@ def main(argv=None):
                                         f"（実名にするには {d['label']}=名前）")
                         print_line(f"# この声を「{d['name']}」として追跡します"
                                    f"（実名にするには {d['label']}=名前 と入力）")
+                    elif d and d["kind"] == "合流":
+                        if d["rename"]:
+                            rekey(*d["rename"])
+                        # 既存人物への合流はターミナルにのみ軽く表示（議事録には載せない）
+                        if args.vp_debug:
+                            print_line(f"# 合流: ラベル{d['label']}→{d['name']}")
                     elif args.vp_debug and d:
                         extra = f" 類似{d['sim']:.2f}({d['name']})" if "sim" in d else ""
                         print_line(f"# vp判定[{d['kind']}]{extra}")
