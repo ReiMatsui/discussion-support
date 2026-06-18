@@ -377,11 +377,11 @@ _AGENT_SILENCE = 5.0          # N秒沈黙で応答検討
 AGENT_VOICES = ["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse", "marin", "cedar"]
 
 
-# ---------- 信号レベルAEC（エコーキャンセレーション） ----------
+# ---------- リサンプル（AI声紋登録用） ----------
 
 
 def _resample_24_to_16(pcm_24k: np.ndarray) -> np.ndarray:
-    """24kHz float32 → 16kHz float32 リサンプル（線形補間）。AEC参照信号用。"""
+    """24kHz float32 → 16kHz float32 リサンプル（線形補間）。AI声紋登録用。"""
     n_in = len(pcm_24k)
     n_out = int(n_in * 2 / 3)
     if n_out < 2:
@@ -390,133 +390,18 @@ def _resample_24_to_16(pcm_24k: np.ndarray) -> np.ndarray:
     return np.interp(idx, np.arange(n_in), pcm_24k).astype(np.float32)
 
 
-class _EchoCanceller:
-    """信号レベルAEC: AI再生音声（参照信号）をマイク入力から減算。
-
-    AI音声のPCMデータを完全に保持しているので、FFT相互相関で遅延を推定し、
-    ゲインを合わせて減算する。人間の声は参照に含まれないのでそのまま通る。
-    電話やビデオ会議ソフトと同じ原理。
-    """
-
-    def __init__(self, sr: int = 16000, max_delay_s: float = 0.5):
-        self.sr = sr
-        self.max_delay = int(max_delay_s * sr)   # 最大探索遅延（サンプル）
-        # リングバッファ: 参照信号を10秒分保持
-        self._buf_len = sr * 10
-        self._ref = np.zeros(self._buf_len, dtype=np.float32)
-        self._wpos = 0
-        self._lock = threading.Lock()
-        # 推定パラメータ
-        self._delay = 0
-        self._gain = 0.0
-        self._estimated = False
-        self._n_frames = 0
-        self._re_est_every = 20     # N フレームごとに再推定
-
-    def feed_reference(self, pcm_16k: np.ndarray):
-        """16kHzリサンプル済み参照音声をバッファに追加。再生スレッドから呼ぶ。"""
-        with self._lock:
-            n = len(pcm_16k)
-            if n == 0:
-                return
-            L = self._buf_len
-            w = self._wpos
-            end = w + n
-            if end <= L:
-                self._ref[w:end] = pcm_16k
-            else:
-                first = L - w
-                self._ref[w:] = pcm_16k[:first]
-                self._ref[:n - first] = pcm_16k[first:]
-            self._wpos = end % L
-
-    def _get_ref_unlocked(self, length: int) -> np.ndarray:
-        """直近 length サンプルを取得。_lock 保持下で呼ぶこと。"""
-        L = self._buf_len
-        w = self._wpos
-        length = min(length, L)
-        start = (w - length) % L
-        if start + length <= L:
-            return self._ref[start:start + length].copy()
-        first = L - start
-        return np.concatenate([self._ref[start:], self._ref[:length - first]])
-
-    def process(self, mic: np.ndarray) -> np.ndarray:
-        """マイクフレームからAIエコーを除去して返す。senderスレッドから呼ぶ。"""
-        flen = len(mic)
-        need = flen + self.max_delay
-
-        with self._lock:
-            ref_seg = self._get_ref_unlocked(need)
-
-        # 参照にエネルギーがなければスキップ（AI無音中）
-        if np.mean(ref_seg ** 2) < 1e-8:
-            self._estimated = False
-            return mic
-
-        self._n_frames += 1
-
-        # 定期的に遅延・ゲインを再推定
-        if not self._estimated or self._n_frames % self._re_est_every == 0:
-            self._estimate(mic, ref_seg)
-
-        if not self._estimated:
-            return mic
-
-        # 推定遅延で参照を切り出し
-        # ref_seg[k : k+flen] が delay = max_delay - k に対応
-        k = self.max_delay - self._delay
-        if k < 0 or k + flen > len(ref_seg):
-            return mic
-        ref_aligned = ref_seg[k: k + flen]
-
-        # ゲイン適応（エコーの相対音量）
-        rp = np.dot(ref_aligned, ref_aligned)
-        if rp > 1e-8:
-            g = float(np.clip(np.dot(mic, ref_aligned) / rp, 0.0, 3.0))
-            self._gain = 0.7 * self._gain + 0.3 * g
-
-        # 減算
-        return mic - self._gain * ref_aligned
-
-    def _estimate(self, mic: np.ndarray, ref_seg: np.ndarray):
-        """FFT相互相関で遅延を推定。"""
-        flen = len(mic)
-        N = 1
-        while N < len(ref_seg) + flen:
-            N *= 2
-        MIC = np.fft.rfft(mic, N)
-        REF = np.fft.rfft(ref_seg, N)
-        # xcorr[k] = sum_i mic[i] * ref_seg[i+k]
-        xcorr = np.fft.irfft(np.conj(MIC) * REF, N)
-        search = np.abs(xcorr[: self.max_delay + 1])
-        best_k = int(np.argmax(search))
-        # 相関が弱すぎる場合はスキップ
-        mic_energy = np.dot(mic, mic)
-        if mic_energy < 1e-8:
-            return
-        ncc = search[best_k] / (np.sqrt(mic_energy * np.dot(ref_seg, ref_seg)) + 1e-8)
-        if ncc < 0.01:
-            return
-        self._delay = self.max_delay - best_k
-        self._estimated = True
-
-
 class RealtimeAgent:
     """OpenAI Realtime API v2 WebSocket で会議に参加するAIエージェント.
 
     エコー防止（マイク常時オン — 人間の割り込みを維持）:
-      1. 信号レベルAEC — AI再生音声を参照信号としてマイク入力から減算（sender）
-      2. AI声紋フィルタ（主フィルタ）— 初回AI応答の音声から声紋を自動登録し、
+      1. AI声紋フィルタ（主フィルタ）— 初回AI応答の音声から声紋を自動登録し、
          VoiceProfiles.classify()でAI声紋に一致するセグメントを除去。
          ラベル追従により、短い断片もAI扱いで除去される。
-      3. テキスト類似度（安全網）— 声紋未登録時やtrackerなし時の補助。
+      2. テキスト類似度（安全網）— 声紋未登録時（最初の~3秒）の補助。
          エコーウィンドウ中のみテキスト類似度>0.35で除去。
-      4. _agent_workerトリガーガード — エコーウィンドウ中はtrigger抑止。
-         feedは即座に行い遅延なし。フィードバックループの最終防衛線。
-      5. 応答状態ガード — 応答生成中は新規triggerを抑止
+      3. トリガーガード — エコーウィンドウ中はtrigger抑止（feedは即座）。
+         応答生成中も新規triggerを抑止。フィードバックループの最終防衛線。
 
-    interrupt()は手動トリガー用に残置。
     interrupt()時はresponse.cancel + conversation.item.truncateで
     AIの会話履歴を正確に保つ。
 
@@ -548,7 +433,6 @@ class RealtimeAgent:
         # --- エコー防止 ---
         self._responding = False           # response生成中フラグ
         self._interrupted = False          # 割り込みによるキャンセル中（残留音声を破棄）
-        self._echo_canceller = _EchoCanceller()
         self._recent_ai_texts: collections.deque = collections.deque(maxlen=20)
         self._last_speech_end = 0.0        # ai_speaking が False になった時刻
         self._echo_cooldown = 2.0          # AI発話終了後のエコーウィンドウ秒数
@@ -672,8 +556,9 @@ class RealtimeAgent:
     # --- ストリーミング音声再生 ---
 
     def _start_playback_thread(self):
-        """PCMキューから読み出して逐次再生するスレッド。AEC参照信号も同時にバッファ。
-        再生済みバイト数を_played_bytesに蓄積（truncate用）。"""
+        """PCMキューから読み出して逐次再生するスレッド。
+        再生済みバイト数を_played_bytesに蓄積（truncate用）。
+        声紋未登録時は16kHzリサンプル音声を蓄積して自動登録。"""
         def _player():
             try:
                 import sounddevice as sd
@@ -689,12 +574,10 @@ class RealtimeAgent:
                     pcm = np.frombuffer(chunk, dtype="<i2").astype(np.float32) / 32768.0
                     stream.write(pcm.reshape(-1, 1))
                     self._played_bytes += len(chunk)
-                    # AEC: 再生音声を16kHzにリサンプルして参照バッファに蓄積
-                    ref16 = _resample_24_to_16(pcm)
-                    if len(ref16) > 0:
-                        self._echo_canceller.feed_reference(ref16)
-                        # AI声紋登録用: 16kHz音声を蓄積
-                        if not self._ai_voice_enrolled:
+                    # AI声紋登録用: 16kHzにリサンプルして蓄積
+                    if not self._ai_voice_enrolled:
+                        ref16 = _resample_24_to_16(pcm)
+                        if len(ref16) > 0:
                             self._ai_voice_buf.append(ref16.copy())
                             self._ai_voice_sec += len(ref16) / 16000.0
                             self._try_enroll_ai_voice()
@@ -855,10 +738,6 @@ class RealtimeAgent:
         if self._last_speech_end == 0.0:
             return False
         return time.monotonic() - self._last_speech_end < self._echo_cooldown
-
-    def cancel_echo(self, mic_float: np.ndarray) -> np.ndarray:
-        """マイク入力(float32, 16kHz)からAIエコーを除去。senderスレッドから呼ぶ。"""
-        return self._echo_canceller.process(mic_float)
 
     @staticmethod
     def _normalize(text: str) -> str:
@@ -2161,14 +2040,6 @@ def main(argv=None):
                     break
                 with buf_lock:
                     pcm_buf.extend(pcm)   # STTの時刻軸と完全一致する位置で蓄積
-                # AEC: AI再生音声をマイク入力から減算してからSTTへ送信
-                if agent is not None and agent._connected:
-                    try:
-                        mic_f = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768.0
-                        cleaned = agent.cancel_echo(mic_f)
-                        pcm = (np.clip(cleaned, -1, 1) * 32767).astype("<i2").tobytes()
-                    except Exception:
-                        pass  # AEC失敗時は元のpcmをそのまま送信
                 ws.send(pcm)
                 seq += 1
         threading.Thread(target=sender, daemon=True).start()
