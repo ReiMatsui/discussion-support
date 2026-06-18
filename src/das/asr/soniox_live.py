@@ -373,7 +373,8 @@ _PROMPT_CONVERSATION = """\
 REALTIME_URL = "wss://api.openai.com/v1/realtime?model=gpt-realtime-2"
 AGENT_SPEAKER = "AI"          # recordsに使うスピーカーキー
 _AGENT_TRIGGER = 10           # N発話ごとに応答検討(facilitator)
-_AGENT_SILENCE = 5.0          # N秒沈黙で応答検討
+_AGENT_SILENCE = 5.0          # N秒沈黙で応答検討(facilitator)
+_AGENT_CONV_SILENCE = 1.5     # N秒沈黙で応答(conversation — 発話断片をまとめる)
 AGENT_VOICES = ["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse", "marin", "cedar"]
 
 
@@ -1760,17 +1761,19 @@ def main(argv=None):
 
     _agent_cursor = 0
     _last_utt_time = [time.monotonic()]   # mutableで非ローカル参照
+    _was_in_echo = [False]                # エコーウィンドウ→通常への遷移検出用
+    _INTERRUPT_MIN_CHARS = 8              # 自動割り込みの最小文字数（相槌フィルタ）
 
     def _agent_worker():
-        """バックグラウンドでAI応答のトリガーを管理.
+        """バックグラウンドでAI応答のトリガーを管理（ターンテイキング）.
 
-        flush()が声紋+テキストでエコーを除去済みなので、recordsには
-        基本的に人間の発話だけが残っている前提。カーソルは常に進め、
-        新しいレコードを即座にfeedする（遅延なし）。
+        自然な会話のフロア交代を模倣:
+          - 人間のターン: 発話を即座にfeed、沈黙で譲渡 → AIがtrigger
+          - AIのターン: 応答を再生。人間の実質的な発話で自動interrupt
+          - AIターン終了: フロアを人間に返す（沈黙タイマーをリセット）
 
-        ただし、triggerの発火はエコーウィンドウ終了後まで抑止する。
-        声紋フィルタをすり抜けたエコーがagentに自己応答ループを
-        引き起こすのを防ぐ最終防衛線。
+        これにより、AI発話中に溜まったリアクションが即座にチェーン応答を
+        引き起こすのを防ぎ、人間が被せて話せばAIが止まる。
         """
         nonlocal _agent_cursor
         while not stop.is_set():
@@ -1784,15 +1787,31 @@ def main(argv=None):
             n = len(talk_rs)
             if n > _agent_cursor:
                 _last_utt_time[0] = time.monotonic()
+                new_texts = [r.get("text", "") for r in talk_rs[_agent_cursor:]]
                 for r in talk_rs[_agent_cursor:]:
                     agent.feed(disp_name(r.get("speaker", "")), r.get("text", ""))
                 _agent_cursor = n
+                # --- 自動割り込み: AI発話中に人間が実質的な発話をしたら中断 ---
+                if agent.ai_speaking:
+                    for txt in new_texts:
+                        if len(txt.strip()) > _INTERRUPT_MIN_CHARS:
+                            agent.interrupt()
+                            break
             # エコーウィンドウ中はtriggerしない（フィードバックループ防止）
             if agent.in_echo_window:
+                _was_in_echo[0] = True
                 continue
+            # --- フロア返却: エコーウィンドウ終了時に沈黙タイマーをリセット ---
+            # AIのターンが終わり、フロアを人間に返す。溜まったリアクションは
+            # 即座にtriggerせず、人間が新たに話すか一定の沈黙を待つ。
+            if _was_in_echo[0]:
+                _was_in_echo[0] = False
+                _last_utt_time[0] = time.monotonic()
             # モード別トリガー判定
             if agent.mode == "conversation":
-                if agent.pending_count > 0:
+                # 沈黙ベース: 最後の発話から一定時間経過でまとめてtrigger
+                if (agent.pending_count > 0
+                        and time.monotonic() - _last_utt_time[0] > _AGENT_CONV_SILENCE):
                     agent.trigger()
             else:
                 # ファシリテーター: N発話蓄積 or 沈黙
