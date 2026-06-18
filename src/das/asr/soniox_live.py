@@ -754,14 +754,25 @@ class RealtimeAgent:
         return {text[i:i+n] for i in range(len(text) - n + 1)}
 
     def _best_similarity(self, text: str) -> float:
-        """正規化テキストとAI生成テキスト群の最大類似度を返す（0.0〜1.0）。"""
-        if not text or not self._recent_ai_texts:
+        """正規化テキストとAI生成テキスト群の最大類似度を返す（0.0〜1.0）。
+
+        完了済みの応答(_recent_ai_texts)に加え、現在ストリーミング中の応答
+        (_ai_text_buf)も比較対象に含める。AI発話中のエコーは_ai_text_bufに
+        しか存在しないため、これがないとテキスト安全網が機能しない。
+        """
+        if not text:
+            return 0.0
+        # 完了済み + ストリーミング中のテキストを結合
+        targets = list(self._recent_ai_texts)
+        if self._ai_text_buf:
+            targets.append(self._ai_text_buf)
+        if not targets:
             return 0.0
         norm = self._normalize(text)
         if len(norm) < 2:
             return 0.0
         best = 0.0
-        for ai_text in self._recent_ai_texts:
+        for ai_text in targets:
             ai_norm = self._normalize(ai_text)
             # 部分一致: 完全包含なら1.0
             if len(norm) >= 4 and norm in ai_norm:
