@@ -46,6 +46,8 @@ import re
 import sys
 import threading
 import time
+import unicodedata
+from difflib import SequenceMatcher
 
 import numpy as np
 
@@ -503,10 +505,14 @@ class _EchoCanceller:
 class RealtimeAgent:
     """OpenAI Realtime API v2 WebSocket で会議に参加するAIエージェント.
 
-    エコー防止3層:
-      1. 信号レベルAEC — AI再生音声を参照信号としてマイク入力から減算
-      2. テキスト類似度 — STT出力がAI生成テキストと類似していれば破棄
-      3. 応答状態ガード — 応答生成中は新規triggerを抑止
+    エコー防止（マイク常時オン — 人間の割り込みは維持）:
+      1. 信号レベルAEC — AI再生音声を参照信号としてマイク入力から減算（sender）
+      2. クールダウン — AI発話終了後5秒間は_agent_workerがカーソルをスキップ
+      3. flush() 2層テキスト判定:
+         a. 既知AIスピーカー + 類似度>0.25 → 除去
+         b. 強テキスト一致>0.40 → 除去（クールダウン中ならスピーカー学習）
+      4. _agent_worker テキストフィルタ — flush()を通過したレコードの最終チェック
+      5. 応答状態ガード — 応答生成中は新規triggerを抑止
 
     モード:
       off          = 無効
@@ -529,7 +535,6 @@ class RealtimeAgent:
         self.ai_speaking = False           # AI音声再生中フラグ
         self._ai_text_buf = ""             # ストリーミング転写バッファ
         self._audio_q: "queue.Queue[bytes | None]" = queue.Queue()  # ストリーミング再生用
-        self._ai_speaker_ids: set[str] = set()
         self._connected = False
         self._conn_error = ""              # 接続エラーメッセージ（UI表示用）
         self.on_ai_utterance = None        # callback(text: str) AI発話確定時
@@ -540,6 +545,8 @@ class RealtimeAgent:
         self._recent_ai_texts: collections.deque = collections.deque(maxlen=20)
         self._last_speech_end = 0.0        # ai_speaking が False になった時刻
         self._echo_cooldown = 5.0          # AI発話終了後のクールダウン秒数
+        # スピーカーID自動検出: エコーと判定されたvoiceprint sp_idを記録
+        self._ai_echo_speakers: dict[str, float] = {}  # sp_id -> 最終検出時刻(monotonic)
 
     @property
     def _prompt(self) -> str:
@@ -750,41 +757,61 @@ class RealtimeAgent:
     @staticmethod
     def _normalize(text: str) -> str:
         """テキスト比較用の正規化: 句読点・空白・記号を除去。"""
-        import unicodedata
-        # 全角→半角の正規化 + 句読点・空白・記号を除去
         t = unicodedata.normalize("NFKC", text)
         return re.sub(r'[\s　、。,.!?！？「」『』（）()・…\-―ー～~]+', '', t)
 
-    def is_likely_echo(self, text: str) -> bool:
-        """テキスト類似度でAIエコーか判定（AEC漏れの安全網）。"""
+    @staticmethod
+    def _char_ngrams(text: str, n: int = 3) -> set[str]:
+        """文字n-gramの集合を返す。"""
+        if len(text) < n:
+            return {text} if text else set()
+        return {text[i:i+n] for i in range(len(text) - n + 1)}
+
+    def _best_similarity(self, text: str) -> float:
+        """正規化テキストとAI生成テキスト群の最大類似度を返す（0.0〜1.0）。"""
         if not text or not self._recent_ai_texts:
-            return False
-        from difflib import SequenceMatcher
+            return 0.0
         norm = self._normalize(text)
         if len(norm) < 2:
-            return False
+            return 0.0
+        best = 0.0
         for ai_text in self._recent_ai_texts:
             ai_norm = self._normalize(ai_text)
-            # 部分一致: STTがAIテキストの一部を拾った場合
+            # 部分一致: 完全包含なら1.0
             if len(norm) >= 4 and norm in ai_norm:
-                return True
-            # 逆方向の部分一致: AIテキストの断片がSTTに出た場合
+                return 1.0
             if len(ai_norm) >= 4 and ai_norm in norm:
-                return True
-            # 類似度チェック（正規化後で比較、閾値シビア）
-            if SequenceMatcher(None, norm, ai_norm).ratio() > 0.28:
-                return True
-        return False
+                return 1.0
+            # SequenceMatcher
+            sm = SequenceMatcher(None, norm, ai_norm).ratio()
+            # 文字trigram Jaccard類似度
+            ng_a = self._char_ngrams(norm)
+            ng_b = self._char_ngrams(ai_norm)
+            jaccard = len(ng_a & ng_b) / max(len(ng_a | ng_b), 1)
+            # 両方の最大値を採用（STTの揺れに強い）
+            best = max(best, sm, jaccard)
+        return best
 
     def is_ai_echo(self, speaker_id: str) -> bool:
-        return speaker_id in self._ai_speaker_ids
+        """このスピーカーが過去にAIエコーとして検出されたことがあるか。
+        60秒以上検出がなければ自動解除（誤マーク防止）。"""
+        t = self._ai_echo_speakers.get(speaker_id)
+        if t is None:
+            return False
+        if time.monotonic() - t > 60.0:
+            del self._ai_echo_speakers[speaker_id]
+            return False
+        return True
 
     def mark_ai_echo(self, speaker_id: str):
-        self._ai_speaker_ids.add(speaker_id)
+        """スピーカーをAIエコーとして記録（タイムスタンプ付き）。"""
+        self._ai_echo_speakers[speaker_id] = time.monotonic()
 
     def close(self):
         self._stop.set()
         self._audio_q.put(None)
+        if self._playback_thread is not None:
+            self._playback_thread.join(timeout=2.0)
         if self.ws:
             try:
                 self.ws.close()
@@ -1766,13 +1793,16 @@ def main(argv=None):
                 _last_utt_time[0] = time.monotonic()
                 fed = 0
                 for r in talk_rs[_agent_cursor:]:
-                    # 最終防衛線: AIエコーのテキスト類似度チェック
-                    if agent.is_likely_echo(r.get("text", "")):
+                    _sp = r.get("speaker", "")
+                    _txt = r.get("text", "")
+                    # 最終防衛線: スピーカーID + テキスト類似度でエコー除去
+                    _sim = agent._best_similarity(_txt)
+                    if (agent.is_ai_echo(_sp) and _sim > 0.25) or _sim > 0.40:
                         if args.vp_debug:
-                            print_line(f"# worker: エコー除去"
-                                       f" ({r.get('text', '')[:30]}...)")
+                            print_line(f"# worker: エコー除去 sim={_sim:.2f}"
+                                       f" sp={_sp} ({_txt[:30]}...)")
                         continue
-                    agent.feed(disp_name(r["speaker"]), r["text"])
+                    agent.feed(disp_name(_sp), _txt)
                     fed += 1
                 _agent_cursor = n
                 if fed == 0:
@@ -2114,16 +2144,37 @@ def main(argv=None):
                 else:
                     sp_id = "#" + str(cur_speaker)
                     rec_extra = {}
-                # --- エコー安全網: テキスト類似度チェック ---
-                # AEC で除去しきれなかったAIエコーをテキストレベルで検出
-                if agent is not None and agent.is_likely_echo(cur_text):
-                    if args.vp_debug:
-                        print_line(f"# エコー安全網: テキスト類似度で除去"
-                                   f" ({cur_text.strip()[:40]}...)")
-                    cur_text = ""
-                    cur_ms = None
-                    cur_end = None
-                    return
+                # --- エコー安全網: 2層判定 ---
+                # マイクは常時オン（人間の割り込みを取得するため）。
+                # AI音声のエコーだけをテキスト+スピーカーIDで選別除去する。
+                # 注意: 日本語テキスト同士は助詞・語尾の共通で無関係でも
+                #        trigram Jaccard 0.15〜0.25 になるため閾値は高めに設定。
+                if agent is not None:
+                    sim = agent._best_similarity(cur_text)
+                    _echo = False
+                    _echo_reason = ""
+
+                    # 層1: 既知AIエコースピーカー + 中程度の類似度（0.25）
+                    if agent.is_ai_echo(sp_id) and sim > 0.25:
+                        _echo = True
+                        _echo_reason = f"既知AIスピーカー({sp_id})"
+                    # 層2: 強いテキスト類似度（0.40）— 常時有効
+                    # 真のエコー（STTがAI音声を文字起こし）なら0.5以上になる。
+                    # 0.40でマーク＋除去。誤マーク防止のため以前の0.28から引き上げ。
+                    elif sim > 0.40:
+                        _echo = True
+                        _echo_reason = "テキスト類似度"
+                        if agent.in_echo_cooldown:
+                            agent.mark_ai_echo(sp_id)
+
+                    if _echo:
+                        if args.vp_debug:
+                            print_line(f"# エコー除去[{_echo_reason}] sim={sim:.2f}:"
+                                       f" sp={sp_id} ({cur_text.strip()[:40]}...)")
+                        cur_text = ""
+                        cur_ms = None
+                        cur_end = None
+                        return
                 if cur_ms is not None and cur_end is not None:
                     recent_segs.append((cur_ms, cur_end, label))
                     del recent_segs[:-12]
