@@ -507,13 +507,18 @@ class RealtimeAgent:
 
     エコー防止（マイク常時オン — 人間の割り込みを維持）:
       1. 信号レベルAEC — AI再生音声を参照信号としてマイク入力から減算（sender）
-      2. flush() 2層テキスト判定（議事録フィルタ）:
-         a. 既知AIスピーカー + 類似度>0.25 → 除去
-         b. 強テキスト一致>0.40 → 除去（クールダウン中ならスピーカー学習）
-      3. クールダウン — AI発話中〜終了後5秒はカーソルを止めてバックログ。
-         flush()でエコー除去済みのrecordsをクールダウン後にまとめて処理。
-      4. _agent_worker テキストフィルタ — 2重フィルタとしてflush()通過後に再チェック
+      2. AI声紋フィルタ（主フィルタ）— 初回AI応答の音声から声紋を自動登録し、
+         VoiceProfiles.classify()でAI声紋に一致するセグメントを除去。
+         ラベル追従により、短い断片もAI扱いで除去される。
+      3. テキスト類似度（安全網）— 声紋未登録時やtrackerなし時の補助。
+         エコーウィンドウ中のみテキスト類似度>0.35で除去。
+      4. _agent_workerトリガーガード — エコーウィンドウ中はtrigger抑止。
+         feedは即座に行い遅延なし。フィードバックループの最終防衛線。
       5. 応答状態ガード — 応答生成中は新規triggerを抑止
+
+    interrupt()は手動トリガー用に残置。
+    interrupt()時はresponse.cancel + conversation.item.truncateで
+    AIの会話履歴を正確に保つ。
 
     モード:
       off          = 無効
@@ -542,12 +547,22 @@ class RealtimeAgent:
         self._playback_thread: threading.Thread | None = None
         # --- エコー防止 ---
         self._responding = False           # response生成中フラグ
+        self._interrupted = False          # 割り込みによるキャンセル中（残留音声を破棄）
         self._echo_canceller = _EchoCanceller()
         self._recent_ai_texts: collections.deque = collections.deque(maxlen=20)
         self._last_speech_end = 0.0        # ai_speaking が False になった時刻
-        self._echo_cooldown = 5.0          # AI発話終了後のクールダウン秒数
-        # スピーカーID自動検出: エコーと判定されたvoiceprint sp_idを記録
-        self._ai_echo_speakers: dict[str, float] = {}  # sp_id -> 最終検出時刻(monotonic)
+        self._echo_cooldown = 2.0          # AI発話終了後のエコーウィンドウ秒数
+        # --- truncate用: 再生済み音声の追跡 ---
+        self._current_item_id: str | None = None    # 現在の応答のoutput item ID
+        self._played_bytes = 0                       # 再生スレッドが出力したPCMバイト数
+        # --- AI声紋登録用 ---
+        self._voice_tracker: "VoiceProfiles | None" = None  # set_tracker()で外部から注入
+        self._ai_voice_buf: list[np.ndarray] = []   # 16kHz float32 チャンク
+        self._ai_voice_sec = 0.0                     # 蓄積秒数
+        self._ai_voice_enrolled = False              # 登録済みフラグ
+
+    AI_VOICE_KEY = "__AI__"             # VoiceProfiles内のAI声紋キー（セッション限り）
+    _AI_ENROLL_SEC = 3.0                 # 声紋登録に必要な最小秒数
 
     @property
     def _prompt(self) -> str:
@@ -556,6 +571,31 @@ class RealtimeAgent:
     @property
     def enabled(self) -> bool:
         return self.mode != "off"
+
+    def set_tracker(self, tracker: "VoiceProfiles"):
+        """VoiceProfilesを外部から注入。connect()の前後いつでも可。"""
+        self._voice_tracker = tracker
+
+    def _try_enroll_ai_voice(self):
+        """蓄積したAI音声から声紋を計算しVoiceProfilesに登録する。
+
+        再生スレッドから呼ばれる。十分な音声が溜まったら1回だけ実行。
+        """
+        if self._ai_voice_enrolled or self._voice_tracker is None:
+            return
+        if self._ai_voice_sec < self._AI_ENROLL_SEC:
+            return
+        wav = np.concatenate(self._ai_voice_buf)
+        tracker = self._voice_tracker
+        emb = tracker._embed(wav)
+        if emb is None:
+            return
+        with tracker._lock:
+            tracker.profiles[self.AI_VOICE_KEY] = emb
+            tracker._active_keys.add(self.AI_VOICE_KEY)
+        self._ai_voice_enrolled = True
+        self._ai_voice_buf.clear()   # メモリ解放
+        print(f"# AI Agent: AI声紋を登録しました（{self._ai_voice_sec:.1f}秒の音声から）", flush=True)
 
     def connect(self):
         """WebSocket接続を開始し、受信スレッドを起動."""
@@ -632,7 +672,8 @@ class RealtimeAgent:
     # --- ストリーミング音声再生 ---
 
     def _start_playback_thread(self):
-        """PCMキューから読み出して逐次再生するスレッド。AEC参照信号も同時にバッファ。"""
+        """PCMキューから読み出して逐次再生するスレッド。AEC参照信号も同時にバッファ。
+        再生済みバイト数を_played_bytesに蓄積（truncate用）。"""
         def _player():
             try:
                 import sounddevice as sd
@@ -647,10 +688,16 @@ class RealtimeAgent:
                         continue
                     pcm = np.frombuffer(chunk, dtype="<i2").astype(np.float32) / 32768.0
                     stream.write(pcm.reshape(-1, 1))
+                    self._played_bytes += len(chunk)
                     # AEC: 再生音声を16kHzにリサンプルして参照バッファに蓄積
                     ref16 = _resample_24_to_16(pcm)
                     if len(ref16) > 0:
                         self._echo_canceller.feed_reference(ref16)
+                        # AI声紋登録用: 16kHz音声を蓄積
+                        if not self._ai_voice_enrolled:
+                            self._ai_voice_buf.append(ref16.copy())
+                            self._ai_voice_sec += len(ref16) / 16000.0
+                            self._try_enroll_ai_voice()
                 stream.stop()
                 stream.close()
             except Exception as e:
@@ -677,29 +724,41 @@ class RealtimeAgent:
     def _handle(self, ev: dict):
         etype = ev.get("type", "")
 
-        if etype == "response.output_audio.delta":
+        if etype == "response.output_item.added":
+            # 新しい出力アイテム開始 — item_idを記録、再生カウンタをリセット
+            item = ev.get("item", {})
+            self._current_item_id = item.get("id")
+            self._played_bytes = 0
+
+        elif etype == "response.output_audio.delta":
+            if self._interrupted:
+                return  # キャンセル後の残留チャンクを破棄
             chunk = ev.get("delta", "")
             if chunk:
                 self._audio_q.put(base64.b64decode(chunk))
                 self.ai_speaking = True
 
         elif etype == "response.output_audio_transcript.delta":
-            self._ai_text_buf += ev.get("delta", "")
+            if not self._interrupted:
+                self._ai_text_buf += ev.get("delta", "")
 
         elif etype == "response.output_audio_transcript.done":
             transcript = ev.get("transcript", "") or self._ai_text_buf
             self._ai_text_buf = ""
             if transcript and "（介入不要）" not in transcript:
                 self._recent_ai_texts.append(transcript)
-                if self.on_ai_utterance:
+                if not self._interrupted and self.on_ai_utterance:
                     self.on_ai_utterance(transcript)
 
         elif etype == "response.output_audio.done":
-            self._audio_q.put(None)   # 再生終端マーカー
+            if not self._interrupted:
+                self._audio_q.put(None)   # 再生終端マーカー
 
         elif etype == "response.done":
             self._ai_text_buf = ""
             self._responding = False
+            self._interrupted = False     # 次の応答に備えてリセット
+            self._current_item_id = None
 
         elif etype == "error":
             msg = ev.get("error", {}).get("message", "unknown")
@@ -739,16 +798,62 @@ class RealtimeAgent:
         except Exception as e:
             print(f"# AI Agent 送信エラー: {e}", flush=True)
 
+    def interrupt(self):
+        """人間の割り込みを検出。現在のAI応答をキャンセルし再生を停止する。
+
+        response.cancelで生成を停止した後、conversation.item.truncateで
+        実際に再生された分だけを会話履歴に残す。これによりAIが
+        「全部喋った」と誤認して次の応答がずれるのを防ぐ。
+        """
+        if not self.ai_speaking and not self._responding:
+            return
+        self._interrupted = True
+        # 再生キューを空にして停止（truncate用のバイト数を先に確定）
+        played = self._played_bytes
+        while True:
+            try:
+                self._audio_q.get_nowait()
+            except queue.Empty:
+                break
+        self._audio_q.put(None)  # 終端マーカー → playback threadが停止処理
+        self.ai_speaking = False
+        self._responding = False
+        self._last_speech_end = time.monotonic()
+        # Realtime APIの応答をキャンセル + 会話履歴をtruncate
+        if self.ws:
+            try:
+                self.ws.send(json.dumps({"type": "response.cancel"}))
+            except Exception:
+                pass
+            # truncate: 再生済みバイト数からミリ秒を算出（24kHz, 16bit PCM）
+            item_id = self._current_item_id
+            if item_id:
+                audio_end_ms = int(played / 2 * 1000 / 24000)  # 2bytes/sample, 24kHz
+                try:
+                    self.ws.send(json.dumps({
+                        "type": "conversation.item.truncate",
+                        "item_id": item_id,
+                        "content_index": 0,
+                        "audio_end_ms": audio_end_ms,
+                    }))
+                except Exception:
+                    pass
+        self._current_item_id = None
+        print("# AI Agent: 割り込み検出 — 応答を中断", flush=True)
+
     @property
     def pending_count(self) -> int:
         with self._lock:
             return len(self._pending)
 
     @property
-    def in_echo_cooldown(self) -> bool:
-        """AI発話中、またはAI発話終了後のクールダウン期間中か。"""
-        if self.ai_speaking or self._responding:
+    def in_echo_window(self) -> bool:
+        """AI発話中、またはAI発話終了後のエコー残留期間中か。
+        エコーウィンドウ外ではテキストフィルタを適用しない。"""
+        if self.ai_speaking:
             return True
+        if self._last_speech_end == 0.0:
+            return False
         return time.monotonic() - self._last_speech_end < self._echo_cooldown
 
     def cancel_echo(self, mic_float: np.ndarray) -> np.ndarray:
@@ -793,21 +898,6 @@ class RealtimeAgent:
             best = max(best, sm, jaccard)
         return best
 
-    def is_ai_echo(self, speaker_id: str) -> bool:
-        """このスピーカーが過去にAIエコーとして検出されたことがあるか。
-        60秒以上検出がなければ自動解除（誤マーク防止）。"""
-        t = self._ai_echo_speakers.get(speaker_id)
-        if t is None:
-            return False
-        if time.monotonic() - t > 60.0:
-            del self._ai_echo_speakers[speaker_id]
-            return False
-        return True
-
-    def mark_ai_echo(self, speaker_id: str):
-        """スピーカーをAIエコーとして記録（タイムスタンプ付き）。"""
-        self._ai_echo_speakers[speaker_id] = time.monotonic()
-
     def close(self):
         self._stop.set()
         self._audio_q.put(None)
@@ -818,6 +908,11 @@ class RealtimeAgent:
                 self.ws.close()
             except Exception:
                 pass
+        # セッション限りのAI声紋をクリーンアップ
+        if self._voice_tracker is not None and self.AI_VOICE_KEY in self._voice_tracker.profiles:
+            with self._voice_tracker._lock:
+                self._voice_tracker.profiles.pop(self.AI_VOICE_KEY, None)
+                self._voice_tracker._active_keys.discard(self.AI_VOICE_KEY)
 
 
 # ---------- 清書（会議後の非同期再処理） ----------
@@ -1421,6 +1516,8 @@ def main(argv=None):
         else:
             agent = RealtimeAgent(api_key=_agent_oai_key, voice=args.agent_voice,
                                   mode="facilitator", trigger_n=args.agent_trigger)
+            if tracker is not None:
+                agent.set_tracker(tracker)
 
     pcm_buf = bytearray()               # 送信済み音声の全バッファ（声紋切り出し用, 16bit）
     buf_lock = threading.Lock()
@@ -1774,7 +1871,16 @@ def main(argv=None):
     _last_utt_time = [time.monotonic()]   # mutableで非ローカル参照
 
     def _agent_worker():
-        """バックグラウンドでAI応答のトリガーを管理."""
+        """バックグラウンドでAI応答のトリガーを管理.
+
+        flush()が声紋+テキストでエコーを除去済みなので、recordsには
+        基本的に人間の発話だけが残っている前提。カーソルは常に進め、
+        新しいレコードを即座にfeedする（遅延なし）。
+
+        ただし、triggerの発火はエコーウィンドウ終了後まで抑止する。
+        声紋フィルタをすり抜けたエコーがagentに自己応答ループを
+        引き起こすのを防ぐ最終防衛線。
+        """
         nonlocal _agent_cursor
         while not stop.is_set():
             time.sleep(0.5)
@@ -1785,32 +1891,16 @@ def main(argv=None):
                            if "speaker" in r and r.get("text")
                            and r.get("speaker") != AGENT_SPEAKER]
             n = len(talk_rs)
-            # クールダウン中: カーソルを止めてバックログを溜める。
-            # flush()がエコーを除去済みなので、recordsには人間の発話だけ残る。
-            # クールダウン終了後にまとめて処理し、ここでも類似度チェックする（2重フィルタ）。
-            if agent.in_echo_cooldown:
-                continue
             if n > _agent_cursor:
                 _last_utt_time[0] = time.monotonic()
-                fed = 0
                 for r in talk_rs[_agent_cursor:]:
-                    _sp = r.get("speaker", "")
-                    _txt = r.get("text", "")
-                    # 2重フィルタ: flush()を通過したレコードの最終エコーチェック
-                    _sim = agent._best_similarity(_txt)
-                    if (agent.is_ai_echo(_sp) and _sim > 0.25) or _sim > 0.40:
-                        if args.vp_debug:
-                            print_line(f"# worker: エコー除去 sim={_sim:.2f}"
-                                       f" sp={_sp} ({_txt[:30]}...)")
-                        continue
-                    agent.feed(disp_name(_sp), _txt)
-                    fed += 1
+                    agent.feed(disp_name(r.get("speaker", "")), r.get("text", ""))
                 _agent_cursor = n
-                if fed == 0:
-                    continue  # 全てエコーだった場合はトリガーしない
+            # エコーウィンドウ中はtriggerしない（フィードバックループ防止）
+            if agent.in_echo_window:
+                continue
             # モード別トリガー判定
             if agent.mode == "conversation":
-                # 会話モード: 新発話があったら即trigger（0.5秒以内）
                 if agent.pending_count > 0:
                     agent.trigger()
             else:
@@ -2119,6 +2209,17 @@ def main(argv=None):
                         wav = np.zeros(0, dtype=np.float32)
                     sp_id = tracker.classify(wav, cur_speaker,
                                              overlapped=overlaps_other(cur_ms, cur_end, label))
+                    # --- 声紋ベースのAIエコー除去（主フィルタ） ---
+                    # classify()がAI声紋に一致した場合、このセグメントはAI音声のエコー。
+                    # ラベル追従で短い断片もAI扱いになるため、分断されたエコーも除去される。
+                    if sp_id == RealtimeAgent.AI_VOICE_KEY:
+                        if args.vp_debug:
+                            print_line(f"# AI声紋エコー除去: sp={sp_id}"
+                                       f" ({cur_text.strip()[:40]}...)")
+                        cur_text = ""
+                        cur_ms = None
+                        cur_end = None
+                        return
                     d = tracker.last
                     rec_extra = {}
                     if d and d["kind"] == "補正":
@@ -2145,32 +2246,14 @@ def main(argv=None):
                 else:
                     sp_id = "#" + str(cur_speaker)
                     rec_extra = {}
-                # --- エコー安全網: 2層判定 ---
-                # マイクは常時オン（人間の割り込みを取得するため）。
-                # AI音声のエコーだけをテキスト+スピーカーIDで選別除去する。
-                # 注意: 日本語テキスト同士は助詞・語尾の共通で無関係でも
-                #        trigram Jaccard 0.15〜0.25 になるため閾値は高めに設定。
-                if agent is not None:
+                # --- テキスト類似度エコー判定（安全網） ---
+                # 声紋フィルタが主。声紋未登録時 or trackerなし時の補助として、
+                # エコーウィンドウ中のテキスト類似度チェックを残す。
+                if agent is not None and agent.in_echo_window:
                     sim = agent._best_similarity(cur_text)
-                    _echo = False
-                    _echo_reason = ""
-
-                    # 層1: 既知AIエコースピーカー + 中程度の類似度（0.25）
-                    if agent.is_ai_echo(sp_id) and sim > 0.25:
-                        _echo = True
-                        _echo_reason = f"既知AIスピーカー({sp_id})"
-                    # 層2: 強いテキスト類似度（0.40）— 常時有効
-                    # 真のエコー（STTがAI音声を文字起こし）なら0.5以上になる。
-                    # 0.40でマーク＋除去。誤マーク防止のため以前の0.28から引き上げ。
-                    elif sim > 0.40:
-                        _echo = True
-                        _echo_reason = "テキスト類似度"
-                        if agent.in_echo_cooldown:
-                            agent.mark_ai_echo(sp_id)
-
-                    if _echo:
+                    if sim > 0.35:
                         if args.vp_debug:
-                            print_line(f"# エコー除去[{_echo_reason}] sim={sim:.2f}:"
+                            print_line(f"# テキスト安全網エコー除去 sim={sim:.2f}:"
                                        f" sp={sp_id} ({cur_text.strip()[:40]}...)")
                         cur_text = ""
                         cur_ms = None
