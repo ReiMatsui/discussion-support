@@ -1077,8 +1077,22 @@ class VoiceProfiles:
                 self.label_embs.setdefault(sp, []).append(emb)
                 del self.label_embs[sp][:-10]    # 手動登録用に直近10発話だけ保持
                 th, dd, cs = self.thresh, self.dedupe, self.consist
-                active = {k: v for k, v in self.profiles.items() if k in self._active_keys}
+                # AI声紋は通常の話者ランキングから分離（margin/dedupeへの干渉を防ぐ）
+                _AI = "__AI__"
+                active = {k: v for k, v in self.profiles.items()
+                          if k in self._active_keys and k != _AI}
+                ai_prof = self.profiles.get(_AI) if _AI in self._active_keys else None
                 info = {"n_prof": len(active), "n_all": len(self.profiles)}   # 診断ログ用
+                # ① AI声紋の先行チェック（エコー除去用）
+                if ai_prof is not None:
+                    ai_sim = float(np.dot(ai_prof, emb))
+                    best_human = max((float(np.dot(p, emb))
+                                      for p in active.values()), default=-1.0)
+                    if ai_sim >= th and ai_sim > best_human:
+                        self.sp_map[sp] = _AI
+                        self._note("AI声紋一致", label=sp, sim=round(ai_sim, 3))
+                        return _AI
+                # ② 通常の話者照合（人間のプロファイルのみ）
                 if active:
                     ranked = sorted(((float(np.dot(p, emb)), n)
                                      for n, p in active.items()), reverse=True)
@@ -1086,8 +1100,6 @@ class VoiceProfiles:
                     second = ranked[1][0] if len(ranked) > 1 else -1.0
                     info.update(sim=round(sim, 3), second=round(second, 3), name=cand, prev=prev)
                     if sim >= self._person_th(cand, th) and sim - second >= self.margin:
-                        # 注: ここでbufは消さない。たまたま強一致した発話でバッファを
-                        # リセットすると、新しい話者の3発話が永遠に貯まらない(検証で確認)。
                         self.sp_map[sp] = cand
                         h = self.own_sims.setdefault(cand, [])
                         h.append(sim)
