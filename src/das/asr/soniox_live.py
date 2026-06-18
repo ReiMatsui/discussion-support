@@ -505,13 +505,14 @@ class _EchoCanceller:
 class RealtimeAgent:
     """OpenAI Realtime API v2 WebSocket で会議に参加するAIエージェント.
 
-    エコー防止（マイク常時オン — 人間の割り込みは維持）:
+    エコー防止（マイク常時オン — 人間の割り込みを維持）:
       1. 信号レベルAEC — AI再生音声を参照信号としてマイク入力から減算（sender）
-      2. クールダウン — AI発話終了後5秒間は_agent_workerがカーソルをスキップ
-      3. flush() 2層テキスト判定:
+      2. flush() 2層テキスト判定（議事録フィルタ）:
          a. 既知AIスピーカー + 類似度>0.25 → 除去
          b. 強テキスト一致>0.40 → 除去（クールダウン中ならスピーカー学習）
-      4. _agent_worker テキストフィルタ — flush()を通過したレコードの最終チェック
+      3. クールダウン — AI発話中〜終了後5秒はカーソルを止めてバックログ。
+         flush()でエコー除去済みのrecordsをクールダウン後にまとめて処理。
+      4. _agent_worker テキストフィルタ — 2重フィルタとしてflush()通過後に再チェック
       5. 応答状態ガード — 応答生成中は新規triggerを抑止
 
     モード:
@@ -1784,10 +1785,10 @@ def main(argv=None):
                            if "speaker" in r and r.get("text")
                            and r.get("speaker") != AGENT_SPEAKER]
             n = len(talk_rs)
-            # クールダウン中: カーソルだけ進めて蓄積・トリガーをスキップ
-            # （エコーレコードがクールダウン後に一気にfeedされるのを防止）
+            # クールダウン中: カーソルを止めてバックログを溜める。
+            # flush()がエコーを除去済みなので、recordsには人間の発話だけ残る。
+            # クールダウン終了後にまとめて処理し、ここでも類似度チェックする（2重フィルタ）。
             if agent.in_echo_cooldown:
-                _agent_cursor = n
                 continue
             if n > _agent_cursor:
                 _last_utt_time[0] = time.monotonic()
@@ -1795,7 +1796,7 @@ def main(argv=None):
                 for r in talk_rs[_agent_cursor:]:
                     _sp = r.get("speaker", "")
                     _txt = r.get("text", "")
-                    # 最終防衛線: スピーカーID + テキスト類似度でエコー除去
+                    # 2重フィルタ: flush()を通過したレコードの最終エコーチェック
                     _sim = agent._best_similarity(_txt)
                     if (agent.is_ai_echo(_sp) and _sim > 0.25) or _sim > 0.40:
                         if args.vp_debug:
