@@ -781,12 +781,14 @@ class RealtimeAgent:
                 return 1.0
             # SequenceMatcher
             sm = SequenceMatcher(None, norm, ai_norm).ratio()
-            # 文字trigram Jaccard類似度
+            # 文字trigram類似度
             ng_a = self._char_ngrams(norm)
             ng_b = self._char_ngrams(ai_norm)
             jaccard = len(ng_a & ng_b) / max(len(ng_a | ng_b), 1)
-            # 両方の最大値を採用（STTの揺れに強い）
-            best = max(best, sm, jaccard)
+            # カバレッジ: 断片のtrigramがAIテキストにどれだけ含まれるか
+            # AIの発話の一部分だけがエコーとして拾われるケースを検出
+            coverage = len(ng_a & ng_b) / max(len(ng_a), 1)
+            best = max(best, sm, jaccard, coverage)
         return best
 
     def close(self):
