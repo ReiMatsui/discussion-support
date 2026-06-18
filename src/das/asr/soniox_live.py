@@ -952,6 +952,8 @@ class VoiceProfiles:
     # 単発より高め（2026-06-11夜: 0.30→巻き取り復活/個人別→本人分裂のため固定の中庸値に）
     DEFAULTS = {"resemblyzer": (0.75, 0.72, 0.62), "ecapa": (0.35, 0.40, 0.30),
                 "redimnet": (0.42, 0.50, 0.34)}
+    # AI声紋判定用の閾値（人間より高め — TTS音声はスピーカー経由でも特徴が明瞭）
+    AI_THRESH = {"resemblyzer": 0.82, "ecapa": 0.45, "redimnet": 0.55}
 
     def __init__(self, path: str = "voices.json", thresh: float | None = None,
                  min_sec: float = 1.0, margin: float = 0.05, auto: bool = True,
@@ -1084,12 +1086,13 @@ class VoiceProfiles:
                           if k in self._active_keys and k != _AI}
                 ai_prof = self.profiles.get(_AI) if _AI in self._active_keys else None
                 info = {"n_prof": len(active), "n_all": len(self.profiles)}   # 診断ログ用
-                # ① AI声紋の先行チェック（エコー除去用）
+                # ① AI声紋の先行チェック（エコー除去用 — 人間より高い閾値）
                 if ai_prof is not None:
+                    ai_th = self.AI_THRESH.get(self.model, th + 0.10)
                     ai_sim = float(np.dot(ai_prof, emb))
                     best_human = max((float(np.dot(p, emb))
                                       for p in active.values()), default=-1.0)
-                    if ai_sim >= th and ai_sim > best_human:
+                    if ai_sim >= ai_th and ai_sim > best_human:
                         self.sp_map[sp] = _AI
                         self._note("AI声紋一致", label=sp, sim=round(ai_sim, 3))
                         return _AI
