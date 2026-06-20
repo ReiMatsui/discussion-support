@@ -170,8 +170,21 @@
 
   <div class="panel">
     <h2>翻訳 / 要約 (GPT-4o-mini)</h2>
+    <div class="row" style="margin-bottom:8px; align-items:center;">
+      <label style="display:flex; align-items:center; gap:6px; font-size:13px;">
+        <input type="checkbox" id="autoTranslateChk" />
+        自動翻訳
+      </label>
+      <select id="autoTranslateInterval" style="font-size:13px;">
+        <option value="15000">15秒ごと</option>
+        <option value="30000" selected>30秒ごと</option>
+        <option value="60000">1分ごと</option>
+        <option value="120000">2分ごと</option>
+      </select>
+      <span id="autoTranslateStatus" style="font-size:12px; color:#888;"></span>
+    </div>
     <div class="row" style="margin-bottom:8px;">
-      <button id="translateBtn">未翻訳セグメントを翻訳</button>
+      <button id="translateBtn">未翻訳セグメントを今すぐ翻訳</button>
       <button id="summarizeBtn">議事録を要約</button>
       <button id="clearSummaryBtn">クリア</button>
     </div>
@@ -210,6 +223,8 @@
   const meterBar=$("meterBar"), errEl=$("err");
   const translateBtn=$("translateBtn"), summarizeBtn=$("summarizeBtn"), clearSummaryBtn=$("clearSummaryBtn");
   const summaryEl=$("summary");
+  const autoTranslateChk=$("autoTranslateChk"), autoTranslateInterval=$("autoTranslateInterval");
+  const autoTranslateStatus=$("autoTranslateStatus");
   const downloadTxt=$("downloadTxt"), downloadMd=$("downloadMd"), clearAllBtn=$("clearAll");
   const clearTranscriptBtn=$("clearTranscriptBtn");
 
@@ -524,18 +539,31 @@
     return data.text || "";
   }
 
-  async function translatePending() {
-    const pending = segments.filter(s => !s.translation && s.text);
-    if (!pending.length) {
-      summaryEl.textContent = "翻訳が必要なセグメントはありません。";
+  let translatingNow = false;
+
+  // 日本語(ひらがな/カタカナ/漢字/半角カナ)を含むかどうか
+  function hasJapanese(text) {
+    return /[぀-ヿ一-龯ｦ-ﾟ]/.test(text || "");
+  }
+
+  async function translatePending({ silent = false } = {}) {
+    if (translatingNow) {
+      if (!silent) summaryEl.textContent = "翻訳がすでに実行中です。少し待ってから再度押してください。";
       return;
     }
-    summaryEl.textContent = `翻訳中... (${pending.length}件)`;
+    // 翻訳対象 = まだ翻訳されてない && テキストあり && 日本語を含まない(=英語っぽい)
+    const pending = segments.filter(s => !s.translation && s.text && !hasJapanese(s.text));
+    if (!pending.length) {
+      if (!silent) summaryEl.textContent = "翻訳が必要な英語セグメントはありません。";
+      return;
+    }
+    translatingNow = true;
+    if (!silent) summaryEl.textContent = `翻訳中... (${pending.length}件)`;
+    if (silent) setAutoStatus(`翻訳中 (${pending.length}件)…`);
     try {
       const payload = pending.map(s => ({ id: s.id, text: s.text }));
       const prompt =
-        "以下のセグメントを各言語の相手側に翻訳してください。" +
-        "英語のものは日本語に、日本語のものは英語に。" +
+        "以下は英語の文字起こしセグメントです。各セグメントを自然な日本語に翻訳してください。" +
         "出力は厳密に次のJSON配列のみ(コードフェンス不要): " +
         `[{"id":"...","translation":"..."}]\n\nセグメント:\n${JSON.stringify(payload)}`;
       const text = await callComplete(prompt, "gpt-4o-mini");
@@ -549,11 +577,66 @@
       }
       save();
       render();
-      summaryEl.textContent = `${n}件のセグメントを翻訳しました。`;
+      if (!silent) summaryEl.textContent = `${n}件のセグメントを翻訳しました。`;
+      if (silent) setAutoStatus(`最終翻訳: ${new Date().toLocaleTimeString("ja-JP",{hour12:false})} (${n}件追加)`);
     } catch (e) {
-      summaryEl.textContent = "翻訳に失敗しました: " + e.message;
+      if (!silent) summaryEl.textContent = "翻訳に失敗しました: " + e.message;
+      if (silent) setAutoStatus("翻訳エラー: " + e.message);
+    } finally {
+      translatingNow = false;
     }
   }
+
+  // ---- Auto-translate -------------------------------------------------------
+  const AUTO_PREF_KEY = "live_transcriber_auto_translate_v1";
+  let autoTranslateTimer = null;
+
+  function setAutoStatus(msg) {
+    autoTranslateStatus.textContent = msg || "";
+  }
+
+  function loadAutoPref() {
+    try {
+      const raw = localStorage.getItem(AUTO_PREF_KEY);
+      if (raw) {
+        const p = JSON.parse(raw);
+        if (typeof p.enabled === "boolean") autoTranslateChk.checked = p.enabled;
+        if (p.interval) autoTranslateInterval.value = String(p.interval);
+      }
+    } catch {}
+  }
+  function saveAutoPref() {
+    try {
+      localStorage.setItem(AUTO_PREF_KEY, JSON.stringify({
+        enabled: autoTranslateChk.checked,
+        interval: Number(autoTranslateInterval.value),
+      }));
+    } catch {}
+  }
+
+  function startAutoTranslate() {
+    stopAutoTranslate();
+    const ms = Number(autoTranslateInterval.value) || 30000;
+    setAutoStatus(`待機中 (${ms/1000}秒ごと)`);
+    autoTranslateTimer = setInterval(() => {
+      translatePending({ silent: true });
+    }, ms);
+  }
+  function stopAutoTranslate() {
+    if (autoTranslateTimer) clearInterval(autoTranslateTimer);
+    autoTranslateTimer = null;
+    setAutoStatus("");
+  }
+
+  autoTranslateChk.addEventListener("change", () => {
+    saveAutoPref();
+    if (autoTranslateChk.checked) startAutoTranslate();
+    else stopAutoTranslate();
+  });
+  autoTranslateInterval.addEventListener("change", () => {
+    saveAutoPref();
+    if (autoTranslateChk.checked) startAutoTranslate();
+  });
 
   async function summarize() {
     if (!segments.length) {
@@ -620,7 +703,7 @@ ${full}`;
   // ---- Wire -----------------------------------------------------------------
   startBtn.addEventListener("click", start);
   stopBtn.addEventListener("click", stop);
-  translateBtn.addEventListener("click", translatePending);
+  translateBtn.addEventListener("click", () => translatePending({ silent: false }));
   summarizeBtn.addEventListener("click", summarize);
   clearSummaryBtn.addEventListener("click", () => { summaryEl.textContent = ""; });
   downloadTxt.addEventListener("click", exportTxt);
@@ -639,6 +722,8 @@ ${full}`;
 
   // Init
   load();
+  loadAutoPref();
+  if (autoTranslateChk.checked) startAutoTranslate();
   setStatus("待機中");
   listMics();
   navigator.mediaDevices?.addEventListener?.("devicechange", listMics);

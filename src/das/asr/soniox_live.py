@@ -20,7 +20,7 @@ Sonioxのストリーミング(WebSocket)に音声を流し、speaker付きト�
       不変条件: 一度確定した人物キーは書き換えない（遡及置換は 話者N→人物N の昇格のみ）。
       「1=松井」で実名化、実名のみ voices.json に永続化 → 次回から自動で実名表示。
   - 終了時に清書: 録音全体を非同期APIで再処理し、全文脈の話者分離＋声紋実名対応の
-    最終版(日時.final.md/.html)を自動生成（高速応酬でのRT分離崩れへの対策。--no-polishで無効）
+    最終版(日時.final.md/.html)を自動生成（高速応酬でのRT分離崩れへの対策。--polishで有効化）
   - 「fix 2=1」「fix 人物2=人物1」で誤った話者の統合（過去の発言も修正）
   - 診断ログ(日時.diag.jsonl): 発話ごとの判定根拠を常時記録（問題解析用）
 
@@ -1309,8 +1309,10 @@ def main(argv=None):
     ap.add_argument("--vp-no-auto", action="store_true",
                     help="未知の声の自動登録（匿名「人物N」）を無効化")
     ap.add_argument("--vp-debug", action="store_true", help="発話ごとの声紋判定の内訳を表示")
+    ap.add_argument("--polish", action="store_true",
+                    help="終了時に清書を行う（非同期APIでの全体再処理。デフォルトオフ）")
     ap.add_argument("--no-polish", action="store_true",
-                    help="終了時の清書（非同期APIでの全体再処理）を行わない")
+                    help="(後方互換用、現在はデフォルトでオフ)")
     ap.add_argument("--stt", default="soniox", choices=["soniox", "speechmatics"],
                     help="リアルタイムSTTの供給源。speechmaticsは要 SPEECHMATICS_API_KEY"
                          "（話者分離の評判が良い代替。声紋層など他の機能は不変）")
@@ -1427,8 +1429,25 @@ def main(argv=None):
             if tracker is not None:
                 agent.set_tracker(tracker)
 
-    pcm_buf = bytearray()               # 送信済み音声の全バッファ（声紋切り出し用, 16bit）
+    pcm_buf = bytearray()               # 声紋切り出し用の直近音声バッファ（16bit, 直近120秒分）
+    pcm_buf_offset = 0                   # pcm_bufから切り落とした先頭バイト数（絶対位置補正用）
+    _PCM_KEEP_BYTES = SR * 2 * 120       # メモリに保持する最大バイト数（120秒分）
+    pcm_total_bytes = 0                  # 録音全体の累計バイト数
     buf_lock = threading.Lock()
+    # --- WAVストリーミング書き出し（クラッシュ時もファイルが残る） ---
+    wav_path = os.path.splitext(out_path)[0] + ".wav"
+    _pcm_file: "typing.IO[bytes] | None" = None
+    try:
+        _pcm_file = open(wav_path, "wb")
+        # WAVヘッダ（サイズ=プレースホルダ、終了時に更新）
+        import struct as _struct
+        _pcm_file.write(b"RIFF" + _struct.pack("<I", 0) + b"WAVEfmt " +
+                         _struct.pack("<IHHIIHH", 16, 1, 1, SR, SR * 2, 2, 16) +
+                         b"data" + _struct.pack("<I", 0))
+        _pcm_file.flush()
+    except OSError as e:
+        print(f"# 警告: 録音ファイルを開けません: {e}", flush=True)
+        _pcm_file = None
 
     def disp_name(key) -> str:
         key = str(key)
@@ -2076,6 +2095,7 @@ def main(argv=None):
                   f" trigger={agent.trigger_n}（ブラウザから変更可能）", flush=True)
 
         def sender():
+            nonlocal pcm_total_bytes, pcm_buf_offset
             seq = 0
             while True:
                 pcm = audio_q.get()
@@ -2086,7 +2106,20 @@ def main(argv=None):
                         ws.send("")
                     break
                 with buf_lock:
-                    pcm_buf.extend(pcm)   # STTの時刻軸と完全一致する位置で蓄積
+                    pcm_buf.extend(pcm)
+                    pcm_total_bytes += len(pcm)
+                    # メモリ節約: 直近120秒分だけ保持
+                    if len(pcm_buf) > _PCM_KEEP_BYTES + SR * 2 * 10:
+                        trim = len(pcm_buf) - _PCM_KEEP_BYTES
+                        del pcm_buf[:trim]
+                        pcm_buf_offset += trim
+                # WAVファイルにストリーミング書き出し（クラッシュ耐性）
+                if _pcm_file is not None:
+                    try:
+                        _pcm_file.write(pcm)
+                        _pcm_file.flush()
+                    except OSError:
+                        pass
                 ws.send(pcm)
                 seq += 1
         threading.Thread(target=sender, daemon=True).start()
@@ -2106,6 +2139,10 @@ def main(argv=None):
         cur_text = ""
         cur_ms: int | None = None
         cur_end: int | None = None
+        cur_last_token_time: float = time.monotonic()  # 最後にcur_textへトークン追加した時刻
+        _FLUSH_TIMEOUT = 30.0    # トークンが来なくなってからの強制flush（秒）
+        _FLUSH_SOFT_CHARS = 500  # この文字数を超えたら文の切れ目でflush
+        _FLUSH_HARD_CHARS = 1000 # この文字数を超えたら問答無用で強制flush（最終安全弁）
         recent_segs: list[tuple] = []   # (start, end, ラベル) 直近の確定発話（重なり検出用）
 
         def overlaps_other(start, end, label) -> bool:
@@ -2115,13 +2152,18 @@ def main(argv=None):
                        for s, e, l in recent_segs)
 
         def flush():
-            nonlocal cur_text, cur_ms, cur_end
+            nonlocal cur_text, cur_ms, cur_end, cur_last_token_time
             if cur_text.strip():
                 label = str(cur_speaker)
                 if tracker is not None:
                     if cur_ms is not None and cur_end is not None and cur_end > cur_ms:
                         with buf_lock:
-                            seg = bytes(pcm_buf[cur_ms * 32: cur_end * 32])  # 16サンプル/ms×2byte
+                            # 絶対バイト位置からバッファ内位置に変換
+                            abs_start = cur_ms * 32   # 16サンプル/ms × 2byte
+                            abs_end = cur_end * 32
+                            rel_start = max(abs_start - pcm_buf_offset, 0)
+                            rel_end = max(abs_end - pcm_buf_offset, 0)
+                            seg = bytes(pcm_buf[rel_start: rel_end])
                         wav = np.frombuffer(seg, dtype="<i2").astype(np.float32) / 32768.0
                     else:
                         wav = np.zeros(0, dtype=np.float32)
@@ -2204,6 +2246,7 @@ def main(argv=None):
             cur_text = ""
             cur_ms = None
             cur_end = None
+            cur_last_token_time = time.monotonic()
 
         try:
             while True:
@@ -2232,9 +2275,20 @@ def main(argv=None):
                         if token.get("end_ms") is not None:
                             cur_end = token["end_ms"]
                         cur_text += text
+                        cur_last_token_time = time.monotonic()
                     else:
                         partial += text
                         partial_sp = token.get("speaker") or partial_sp
+                # --- 強制flush: バッファの肥大化を防止（2段構え） ---
+                if cur_text:
+                    clen = len(cur_text)
+                    if (time.monotonic() - cur_last_token_time > _FLUSH_TIMEOUT
+                            or clen > _FLUSH_HARD_CHARS):
+                        # タイムアウト or ハードリミット: 問答無用でflush
+                        flush()
+                    elif clen > _FLUSH_SOFT_CHARS and cur_text.rstrip()[-1:] in "。？！.?!\n":
+                        # ソフトリミット超過 + 文の切れ目: 自然な位置でflush
+                        flush()
                 show_partial(partial_sp if partial else cur_speaker, cur_text + partial)
                 if res.get("finished"):
                     flush()
@@ -2252,21 +2306,33 @@ def main(argv=None):
             if tracker is not None:
                 print_line(f"# レイテンシ統計: {tracker.stats()}")
             print_line(f"# 議事録を保存しました: {out_path} / {html_path}")
-            if len(pcm_buf) > SR * 2 * 10:
-                # 録音を保存（清書の再実験・診断用。*.wavはgitignore済み）
-                wav_path = os.path.splitext(out_path)[0] + ".wav"
+            # WAVファイルのヘッダを更新して正規のWAVにする
+            if _pcm_file is not None:
                 try:
-                    with open(wav_path, "wb") as f:
-                        f.write(_wav_bytes(bytes(pcm_buf)))
-                    print_line(f"# 録音を保存しました: {wav_path}")
+                    import struct as _struct
+                    _pcm_file.flush()
+                    data_size = pcm_total_bytes
+                    _pcm_file.seek(4)
+                    _pcm_file.write(_struct.pack("<I", 36 + data_size))  # RIFFサイズ
+                    _pcm_file.seek(40)
+                    _pcm_file.write(_struct.pack("<I", data_size))       # dataサイズ
+                    _pcm_file.close()
+                    if pcm_total_bytes > SR * 2 * 10:
+                        print_line(f"# 録音を保存しました: {wav_path}")
+                    else:
+                        os.remove(wav_path)  # 短すぎる録音は削除
                 except OSError as e:
                     print_line(f"# 録音保存に失敗: {e}")
+                _pcm_file = None
             # 清書: RT分離は高速応酬で崩れる(実測)ため、全文脈の非同期再処理で最終版を作る
-            if not args.no_polish and not api_key and len(pcm_buf) > SR * 2 * 10:
+            if args.polish and not api_key and pcm_total_bytes > SR * 2 * 10:
                 print_line("# 清書はスキップ（SONIOX_API_KEY未設定。清書はSoniox非同期APIを使用）")
-            if not args.no_polish and api_key and len(pcm_buf) > SR * 2 * 10:
+            if args.polish and api_key and pcm_total_bytes > SR * 2 * 10:
                 try:
-                    recs = polish(api_key, bytes(pcm_buf), args.lang, tracker, log=print_line)
+                    with open(wav_path, "rb") as f:
+                        wav_data = f.read()
+                    # WAVヘッダ(44byte)を除いた生PCMを渡す
+                    recs = polish(api_key, wav_data[44:], args.lang, tracker, log=print_line)
                     fmd = os.path.splitext(out_path)[0] + ".final.md"
                     fht = os.path.splitext(out_path)[0] + ".final.html"
                     write_md(recs, fmd)
