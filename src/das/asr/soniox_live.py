@@ -531,6 +531,23 @@ class ConversationPartner:
         except Exception:
             pass
 
+    def inject_context(self, speaker: str, text: str):
+        """外部テキストをPartnerの会話履歴に注入（ファシリテーター発言等）."""
+        if not self._connected or not self.ws:
+            return
+        try:
+            self.ws.send(json.dumps({
+                "type": "conversation.item.create",
+                "item": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text",
+                                 "text": f"[{speaker}]: {text}"}],
+                },
+            }))
+        except Exception:
+            pass
+
     def interrupt(self):
         """外部からの割り込み（ファシリテーター介入時に使用）.
 
@@ -658,9 +675,6 @@ class ConversationPartner:
             self._ai_text_buf += ev.get("delta", "")
 
         elif etype == "response.output_audio_transcript.done":
-            if self._interrupted:
-                self._ai_text_buf = ""
-                return
             transcript = ev.get("transcript", "") or self._ai_text_buf
             self._ai_text_buf = ""
             if transcript:
@@ -673,9 +687,16 @@ class ConversationPartner:
                 self._audio_q.put(None)
 
         elif etype == "response.done":
+            # 中断された場合でも、蓄積済みテキストがあればコールバックで通知
+            if self._interrupted and self._ai_text_buf:
+                partial = self._ai_text_buf.strip()
+                if partial:
+                    self._recent_ai_texts.append(partial)
+                    if self.on_ai_utterance:
+                        self.on_ai_utterance(partial)
             self._ai_text_buf = ""
             self._responding = False
-            self._interrupted = False  # 次のresponseに備えてリセット
+            self._interrupted = False
 
         elif etype == "error":
             msg = ev.get("error", {}).get("message", "unknown")
@@ -2853,6 +2874,8 @@ def main(argv=None):
                     _on_agent_text(text)
                     if "介入不要" not in text and partner._connected:
                         partner.interrupt()
+                        # ファシリテーターの発言をPartnerの会話履歴に注入
+                        partner.inject_context("ファシリテーター", text)
                 agent.on_ai_utterance = _on_agent_with_partner
                 # ファシリテーター音声生成開始の瞬間にPartnerを即停止
                 def _on_facilitator_speech_start():
@@ -2997,20 +3020,26 @@ def main(argv=None):
                     sp_id = "#" + str(cur_speaker)
                     rec_extra = {}
                 # --- テキスト類似度エコー判定（安全網） ---
-                # 声紋フィルタが主。声紋未登録時 or trackerなし時の補助として、
-                # エコーウィンドウ中のテキスト類似度チェックを残す。
+                # 声紋フィルタが主。声紋未登録時 or trackerなし時の補助として
+                # テキスト類似度チェックを行う。
+                # - agent(ファシリテーター): エコーウィンドウ中のみ（人間の発言を誤除去しない）
+                # - partner: 常時チェック（Soniox ASRの遅延でecho window後にflushされる場合がある）
                 for _src_name, _src in [("agent", agent), ("partner", partner)]:
-                    if _src is not None and _src.in_echo_window:
-                        sim = _src._best_similarity(cur_text)
-                        if sim > 0.35:
-                            if args.vp_debug:
-                                print_line(f"# テキスト安全網エコー除去({_src_name})"
-                                           f" sim={sim:.2f}: sp={sp_id}"
-                                           f" ({cur_text.strip()[:40]}...)")
-                            cur_text = ""
-                            cur_ms = None
-                            cur_end = None
-                            return
+                    if _src is None:
+                        continue
+                    # agentはecho window中のみ、partnerは常時
+                    if _src_name == "agent" and not _src.in_echo_window:
+                        continue
+                    sim = _src._best_similarity(cur_text)
+                    if sim > 0.35:
+                        if args.vp_debug:
+                            print_line(f"# テキスト安全網エコー除去({_src_name})"
+                                       f" sim={sim:.2f}: sp={sp_id}"
+                                       f" ({cur_text.strip()[:40]}...)")
+                        cur_text = ""
+                        cur_ms = None
+                        cur_end = None
+                        return
                 if cur_ms is not None and cur_end is not None:
                     recent_segs.append((cur_ms, cur_end, label))
                     del recent_segs[:-12]
