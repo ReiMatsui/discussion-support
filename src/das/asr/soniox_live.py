@@ -371,7 +371,7 @@ _PROMPT_CONVERSATION = """\
 会議の文脈を踏まえた上で、役に立つ回答を心がけてください。"""
 
 REALTIME_URL = "wss://api.openai.com/v1/realtime?model=gpt-realtime-2"
-AGENT_SPEAKER = "AI"          # recordsに使うスピーカーキー
+AGENT_SPEAKER = "ファシリテーター"   # recordsに使うスピーカーキー
 _AGENT_TRIGGER = 10           # N発話ごとに応答検討(facilitator)
 _AGENT_SILENCE = 5.0          # N秒沈黙で応答検討(facilitator)
 _AGENT_CONV_SILENCE = 1.5     # N秒沈黙で応答(conversation — 発話断片をまとめる)
@@ -978,7 +978,7 @@ class RealtimeAgent:
 
     MODES = ("off", "facilitator", "conversation")
 
-    def __init__(self, api_key: str, voice: str = "alloy",
+    def __init__(self, api_key: str, voice: str = "shimmer",
                  mode: str = "facilitator", trigger_n: int = _AGENT_TRIGGER):
         self.api_key = api_key
         self.voice = voice
@@ -1974,7 +1974,7 @@ def main(argv=None):
     ap.add_argument("--agent", action="store_true",
                     help="AIエージェント（ファシリテーター）を有効化。OPENAI_API_KEYが必要。"
                          "Realtime API v2 WebSocketで会議に参加する")
-    ap.add_argument("--agent-voice", default="alloy",
+    ap.add_argument("--agent-voice", default="shimmer",
                     help="AIエージェントの声（alloy/ash/ballad/coral/echo/sage/shimmer/verse）")
     ap.add_argument("--agent-trigger", type=int, default=_AGENT_TRIGGER,
                     help=f"AIの応答を検討する発話間隔（既定{_AGENT_TRIGGER}）")
@@ -2454,10 +2454,10 @@ def main(argv=None):
             color_of(AGENT_SPEAKER)
         if ON_UTTERANCE is not None:
             try:
-                ON_UTTERANCE("AI", text.strip())
+                ON_UTTERANCE("ファシリテーター", text.strip())
             except Exception:
                 pass
-        print_line(f"\x1b[96m[AI] AI\x1b[0m: {text.strip()}")
+        print_line(f"\x1b[96m[ファシリテーター]\x1b[0m: {text.strip()}")
         save()
 
     _agent_cursor = 0
@@ -2482,7 +2482,7 @@ def main(argv=None):
             if agent is None or not agent._connected or not agent.enabled:
                 continue
             with state_lock:
-                _skip = {AGENT_SPEAKER, "[Partner]"}
+                _skip = {AGENT_SPEAKER, "パートナー"}
                 talk_rs = [r for r in records
                            if "speaker" in r and r.get("text")
                            and r.get("speaker") not in _skip]
@@ -2848,13 +2848,13 @@ def main(argv=None):
                 """Partner（会話相手AI）の発言をrecordsに記録."""
                 with state_lock:
                     records.append({"ms": None, "end_ms": None,
-                                    "speaker": "[Partner]", "text": text.strip()})
-                    color_of("[Partner]")
-                print_line(f"\x1b[93m[Partner]\x1b[0m: {text.strip()}")
+                                    "speaker": "パートナー", "text": text.strip()})
+                    color_of("パートナー")
+                print_line(f"\x1b[93mパートナー\x1b[0m: {text.strip()}")
                 save()
                 # ファシリテーターにPartnerの発言も共有
                 if agent is not None:
-                    agent.feed("[Partner]", text)
+                    agent.feed("パートナー", text)
             partner.on_ai_utterance = _on_partner_text
             partner.connect()
             print(f"# Partner: voice={partner.voice} topic={partner.topic}", flush=True)
@@ -2934,10 +2934,19 @@ def main(argv=None):
                         wav = np.zeros(0, dtype=np.float32)
                     sp_id = tracker.classify(wav, cur_speaker,
                                              overlapped=overlaps_other(cur_ms, cur_end, label))
-                    # --- 声紋ベースのAIエコー除去（主フィルタ） ---
-                    # classify()がAI声紋に一致した場合、このセグメントはAI音声のエコー。
-                    # ラベル追従で短い断片もAI扱いになるため、分断されたエコーも除去される。
-                    if sp_id is not None and sp_id.startswith("__") and sp_id.endswith("__"):
+                    # --- AIエコー除去 ---
+                    # (A) 声紋がAIキーに一致 → 確実にエコー
+                    # (B) echo window中 かつ 声紋が人間に確定しなかった → ほぼエコー
+                    #     スピーカー→マイクの音質劣化でAI閾値を超えられず人物に
+                    #     誤判定されるケースを補完する。
+                    _is_ai_key = (sp_id is not None
+                                  and sp_id.startswith("__") and sp_id.endswith("__"))
+                    _in_any_echo = ((agent is not None and agent.in_echo_window)
+                                    or (partner is not None and partner.in_echo_window))
+                    # echo window中: 声紋が「声紋一致」（既知人間に高確信マッチ）でなければ除去
+                    _voice_confirmed_human = (tracker.last is not None
+                                              and tracker.last.get("kind") == "声紋一致")
+                    if _is_ai_key or (_in_any_echo and not _voice_confirmed_human):
                         if args.vp_debug:
                             print_line(f"# AI声紋エコー除去: sp={sp_id}"
                                        f" ({cur_text.strip()[:40]}...)")
