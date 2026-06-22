@@ -644,13 +644,47 @@ class ConversationPartner:
             self._handle(ev)
         self._connected = False
 
+    @staticmethod
+    def _normalize(text: str) -> str:
+        t = unicodedata.normalize("NFKC", text)
+        return re.sub(r'[\s　、。,.!?！？「」『』（）()・…\-―ー～~]+', '', t)
+
+    @staticmethod
+    def _char_ngrams(text: str, n: int = 3) -> set[str]:
+        if len(text) < n:
+            return {text} if text else set()
+        return {text[i:i+n] for i in range(len(text) - n + 1)}
+
     def _best_similarity(self, text: str) -> float:
-        """テキスト安全網: recent_ai_textsとの最大類似度を返す."""
-        if not self._recent_ai_texts or not text:
+        """正規化テキストとAI生成テキスト群の最大類似度を返す（0.0〜1.0）。
+
+        RealtimeAgentと同じロジック: 正規化 + 部分包含 + SequenceMatcher
+        + trigram jaccard + coverage。ストリーミング中の_ai_text_bufも対象。
+        """
+        if not text:
             return 0.0
-        from difflib import SequenceMatcher
-        return max(SequenceMatcher(None, text, ai).ratio()
-                   for ai in self._recent_ai_texts)
+        targets = list(self._recent_ai_texts)
+        if self._ai_text_buf:
+            targets.append(self._ai_text_buf)
+        if not targets:
+            return 0.0
+        norm = self._normalize(text)
+        if len(norm) < 2:
+            return 0.0
+        best = 0.0
+        for ai_text in targets:
+            ai_norm = self._normalize(ai_text)
+            if len(norm) >= 4 and norm in ai_norm:
+                return 1.0
+            if len(ai_norm) >= 4 and ai_norm in norm:
+                return 1.0
+            sm = SequenceMatcher(None, norm, ai_norm).ratio()
+            ng_a = self._char_ngrams(norm)
+            ng_b = self._char_ngrams(ai_norm)
+            jaccard = len(ng_a & ng_b) / max(len(ng_a | ng_b), 1)
+            coverage = len(ng_a & ng_b) / max(len(ng_a), 1)
+            best = max(best, sm, jaccard, coverage)
+        return best
 
     def _handle(self, ev: dict):
         etype = ev.get("type", "")
