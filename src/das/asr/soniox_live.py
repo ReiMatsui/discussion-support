@@ -625,6 +625,9 @@ class RealtimeAgent:
         elif etype == "response.output_audio_transcript.delta":
             if not self._interrupted:
                 self._ai_text_buf += ev.get("delta", "")
+                # 「介入不要」を検出したら即座に応答をキャンセル（音声再生を止める）
+                if "介入不要" in self._ai_text_buf:
+                    self._cancel_response()
 
         elif etype == "response.output_audio_transcript.done":
             transcript = ev.get("transcript", "") or self._ai_text_buf
@@ -724,6 +727,37 @@ class RealtimeAgent:
                     pass
         self._current_item_id = None
         print("# AI Agent: 割り込み検出 — 応答を中断", flush=True)
+
+    def _cancel_response(self):
+        """「介入不要」応答を静かにキャンセル。音声再生を止め、会話履歴から削除する."""
+        self._interrupted = True
+        # 再生キューを空にして停止
+        while True:
+            try:
+                self._audio_q.get_nowait()
+            except queue.Empty:
+                break
+        self._audio_q.put(None)
+        self.ai_speaking = False
+        self._responding = False
+        self._ai_text_buf = ""
+        # Realtime APIの応答をキャンセル + 会話履歴からこのアイテムを削除
+        if self.ws:
+            try:
+                self.ws.send(json.dumps({"type": "response.cancel"}))
+            except Exception:
+                pass
+            # 介入不要の応答はtruncateではなく削除（会話履歴に残さない）
+            item_id = self._current_item_id
+            if item_id:
+                try:
+                    self.ws.send(json.dumps({
+                        "type": "conversation.item.delete",
+                        "item_id": item_id,
+                    }))
+                except Exception:
+                    pass
+        self._current_item_id = None
 
     @property
     def pending_count(self) -> int:
