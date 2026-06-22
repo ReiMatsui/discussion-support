@@ -2942,6 +2942,9 @@ def main(argv=None):
                     color_of("パートナー")
                 print_line(f"\x1b[93mパートナー\x1b[0m: {text.strip()}")
                 save()
+                # パートナー発話も沈黙タイマーをリセット
+                # （議論が続いている間はファシリテーターが割り込まない）
+                _last_utt_time[0] = time.monotonic()
                 # ファシリテーターにPartnerの発言も共有
                 if agent is not None:
                     agent.feed("パートナー", text)
