@@ -392,6 +392,313 @@ def _resample_24_to_16(pcm_24k: np.ndarray) -> np.ndarray:
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  ConversationPartner — 人間と音声で直接会話するRealtime APIエージェント
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+_PROMPT_DEBATE_PARTNER = """\
+あなたは会議の参加者です。もう一人の参加者（人間）と議題について議論してください。
+
+ルール:
+- 自然な日本語で話してください
+- 自分の意見を持ち、根拠を示してください
+- 相手の意見に同意する場合も反論する場合も、理由を述べてください
+- 1回の発言は15秒以内に収まる長さにしてください
+- ファシリテーターが介入したら、その指摘を受け止めて議論に反映してください"""
+
+
+class ConversationPartner:
+    """人間と音声で直接議論するRealtime APIエージェント.
+
+    人間のマイク音声をinput_audio_buffer.appendで受け取り、
+    server VADで自動的にターンを検出して応答する。
+    ファシリテーター（既存RealtimeAgent）とは独立したセッション。
+
+    使い方:
+      partner = ConversationPartner(api_key, topic="AIツール導入の是非")
+      partner.connect()
+      partner.feed_audio(pcm_24k_bytes)  # マイク音声を継続的に送信
+    """
+
+    def __init__(self, api_key: str, voice: str = "echo", topic: str = ""):
+        self.api_key = api_key
+        self.voice = voice
+        self.topic = topic
+        self.ws = None
+        self._stop = threading.Event()
+        self._connected = False
+        self.ai_speaking = False
+        self._responding = False
+        self._interrupted = False          # interrupt後の残留イベント破棄用
+        self._audio_q: "queue.Queue[bytes | None]" = queue.Queue()
+        self._playback_thread: threading.Thread | None = None
+        self._ai_text_buf = ""
+        self.on_ai_utterance = None       # callback(text: str)
+        self._recent_ai_texts: collections.deque = collections.deque(maxlen=20)
+        self._last_speech_end = 0.0
+        self._echo_cooldown = 2.0
+        # --- truncate用: 再生済み音声の追跡 ---
+        self._current_item_id: str | None = None
+        self._played_bytes = 0
+        # --- AI声紋登録用 ---
+        self._voice_tracker: "VoiceProfiles | None" = None
+        self._ai_voice_buf: list[np.ndarray] = []
+        self._ai_voice_sec = 0.0
+        self._ai_voice_enrolled = False
+
+    AI_VOICE_KEY = "__PARTNER__"   # ファシリテーターの__AI__と区別
+
+    @property
+    def in_echo_window(self) -> bool:
+        """AI発話中 or 直後のエコーウィンドウ内か."""
+        if self.ai_speaking or self._responding:
+            return True
+        if self._last_speech_end > 0:
+            return (time.monotonic() - self._last_speech_end) < self._echo_cooldown
+        return False
+
+    def set_tracker(self, tracker: "VoiceProfiles"):
+        self._voice_tracker = tracker
+
+    def connect(self):
+        """WebSocket接続を開始."""
+        try:
+            from websockets.sync.client import connect
+        except ImportError:
+            print("# Partner: websockets未インストール", flush=True)
+            return
+        try:
+            self.ws = connect(
+                REALTIME_URL,
+                additional_headers={"Authorization": f"Bearer {self.api_key}"},
+            )
+        except Exception as e:
+            print(f"# Partner: 接続失敗 ({e})", flush=True)
+            return
+        self._connected = True
+        self._send_session_update()
+        threading.Thread(target=self._recv_loop, daemon=True).start()
+        self._start_playback_thread()
+        print(f"# Partner: 接続完了（voice={self.voice}）", flush=True)
+
+    def _send_session_update(self):
+        """server VAD有効 + 音声入出力の設定."""
+        if not self.ws:
+            return
+        prompt = _PROMPT_DEBATE_PARTNER
+        if self.topic:
+            prompt += f"\n\n今日の議題: {self.topic}"
+        try:
+            self.ws.send(json.dumps({
+                "type": "session.update",
+                "session": {
+                    "type": "realtime",
+                    "instructions": prompt,
+                    "audio": {
+                        "input": {
+                            "turn_detection": {
+                                "type": "server_vad",
+                                "threshold": 0.5,
+                                "prefix_padding_ms": 300,
+                                "silence_duration_ms": 500,
+                            },
+                        },
+                        "output": {
+                            "voice": self.voice,
+                        },
+                    },
+                },
+            }))
+        except Exception as e:
+            print(f"# Partner: session.update失敗 ({e})", flush=True)
+
+    def feed_audio(self, pcm_16k: bytes):
+        """16kHz 16bit PCMを24kHz PCMに変換してRealtime APIに送信."""
+        if not self._connected or not self.ws:
+            return
+        # 16kHz → 24kHz アップサンプル
+        samples = np.frombuffer(pcm_16k, dtype="<i2").astype(np.float32)
+        n_out = int(len(samples) * 24000 / 16000)
+        if n_out < 2:
+            return
+        indices = np.linspace(0, len(samples) - 1, n_out)
+        samples_24k = np.interp(indices, np.arange(len(samples)), samples)
+        pcm_24k = np.clip(samples_24k, -32768, 32767).astype("<i2").tobytes()
+        try:
+            self.ws.send(json.dumps({
+                "type": "input_audio_buffer.append",
+                "audio": base64.b64encode(pcm_24k).decode(),
+            }))
+        except Exception:
+            pass
+
+    def interrupt(self):
+        """外部からの割り込み（ファシリテーター介入時に使用）.
+
+        AI同士の制御なので即停止。graceful yieldは不要。
+        - _interruptedフラグで残留イベントを破棄
+        - conversation.item.truncateで会話履歴を再生済み分に切り詰め
+        """
+        if not self.ai_speaking and not self._responding:
+            return
+        self._interrupted = True
+        # キュー即排出
+        while True:
+            try:
+                self._audio_q.get_nowait()
+            except queue.Empty:
+                break
+        self._audio_q.put(None)  # playback threadにEOSを通知
+        self.ai_speaking = False
+        self._responding = False
+        self._last_speech_end = time.monotonic()
+        if self.ws:
+            try:
+                self.ws.send(json.dumps({"type": "response.cancel"}))
+                if self._current_item_id:
+                    self.ws.send(json.dumps({
+                        "type": "conversation.item.truncate",
+                        "item_id": self._current_item_id,
+                        "content_index": 0,
+                        "audio_end_ms": int(self._played_bytes // 2 / 24),
+                    }))
+            except Exception:
+                pass
+
+    # --- ストリーミング音声再生 ---
+
+    def _start_playback_thread(self):
+        def _player():
+            try:
+                import sounddevice as sd
+                stream = sd.OutputStream(samplerate=24000, channels=1,
+                                         dtype="float32", blocksize=2400)
+                stream.start()
+                while not self._stop.is_set():
+                    chunk = self._audio_q.get()
+                    if chunk is None:
+                        self.ai_speaking = False
+                        self._last_speech_end = time.monotonic()
+                        continue
+                    self._played_bytes += len(chunk)
+                    pcm = np.frombuffer(chunk, dtype="<i2").astype(np.float32) / 32768.0
+                    stream.write(pcm.reshape(-1, 1))
+                    # AI声紋登録用
+                    if not self._ai_voice_enrolled and self._voice_tracker is not None:
+                        ref16 = _resample_24_to_16(pcm)
+                        if len(ref16) > 0:
+                            self._ai_voice_buf.append(ref16.copy())
+                            self._ai_voice_sec += len(ref16) / 16000.0
+                            if self._ai_voice_sec >= 3.0:
+                                self._try_enroll_voice()
+                stream.stop()
+                stream.close()
+            except Exception as e:
+                print(f"# Partner 音声再生異常: {e}", flush=True)
+
+        self._playback_thread = threading.Thread(target=_player, daemon=True)
+        self._playback_thread.start()
+
+    def _try_enroll_voice(self):
+        if self._ai_voice_enrolled or self._voice_tracker is None:
+            return
+        wav = np.concatenate(self._ai_voice_buf)
+        emb = self._voice_tracker._embed(wav)
+        if emb is None:
+            return
+        with self._voice_tracker._lock:
+            self._voice_tracker.profiles[self.AI_VOICE_KEY] = emb
+            self._voice_tracker._active_keys.add(self.AI_VOICE_KEY)
+        self._ai_voice_enrolled = True
+        self._ai_voice_buf.clear()
+        print(f"# Partner: 声紋を登録しました（{self._ai_voice_sec:.1f}秒の音声から）",
+              flush=True)
+
+    # --- WebSocket受信 ---
+
+    def _recv_loop(self):
+        while not self._stop.is_set():
+            try:
+                raw = self.ws.recv()
+                ev = json.loads(raw)
+            except Exception as e:
+                if not self._stop.is_set():
+                    print(f"# Partner: WebSocket切断 ({e})", flush=True)
+                break
+            self._handle(ev)
+        self._connected = False
+
+    def _best_similarity(self, text: str) -> float:
+        """テキスト安全網: recent_ai_textsとの最大類似度を返す."""
+        if not self._recent_ai_texts or not text:
+            return 0.0
+        from difflib import SequenceMatcher
+        return max(SequenceMatcher(None, text, ai).ratio()
+                   for ai in self._recent_ai_texts)
+
+    def _handle(self, ev: dict):
+        etype = ev.get("type", "")
+
+        if etype == "response.output_item.added":
+            item = ev.get("item", {})
+            self._current_item_id = item.get("id")
+            self._played_bytes = 0
+
+        elif etype == "response.output_audio.delta":
+            if self._interrupted:
+                return  # interrupt後の残留チャンクを破棄
+            chunk = ev.get("delta", "")
+            if chunk:
+                self._audio_q.put(base64.b64decode(chunk))
+                self.ai_speaking = True
+                self._responding = True
+
+        elif etype == "response.output_audio_transcript.delta":
+            if self._interrupted:
+                return
+            self._ai_text_buf += ev.get("delta", "")
+
+        elif etype == "response.output_audio_transcript.done":
+            if self._interrupted:
+                self._ai_text_buf = ""
+                return
+            transcript = ev.get("transcript", "") or self._ai_text_buf
+            self._ai_text_buf = ""
+            if transcript:
+                self._recent_ai_texts.append(transcript)
+                if self.on_ai_utterance:
+                    self.on_ai_utterance(transcript)
+
+        elif etype == "response.output_audio.done":
+            if not self._interrupted:
+                self._audio_q.put(None)
+
+        elif etype == "response.done":
+            self._ai_text_buf = ""
+            self._responding = False
+            self._interrupted = False  # 次のresponseに備えてリセット
+
+        elif etype == "error":
+            msg = ev.get("error", {}).get("message", "unknown")
+            print(f"# Partner エラー: {msg}", flush=True)
+
+    def close(self):
+        self._stop.set()
+        self._audio_q.put(None)
+        if self._playback_thread:
+            self._playback_thread.join(timeout=2.0)
+        # 声紋プロファイルのクリーンアップ
+        if self._voice_tracker is not None and self.AI_VOICE_KEY in self._voice_tracker.profiles:
+            with self._voice_tracker._lock:
+                self._voice_tracker.profiles.pop(self.AI_VOICE_KEY, None)
+                self._voice_tracker._active_keys.discard(self.AI_VOICE_KEY)
+        if self.ws:
+            try:
+                self.ws.close()
+            except Exception:
+                pass
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  DiscussionSimulator — Chat API + TTS API で複数話者の議論を生成
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -1438,21 +1745,23 @@ class VoiceProfiles:
                 del self.label_embs[sp][:-10]    # 手動登録用に直近10発話だけ保持
                 th, dd, cs = self.thresh, self.dedupe, self.consist
                 # AI声紋は通常の話者ランキングから分離（margin/dedupeへの干渉を防ぐ）
-                _AI = "__AI__"
+                # __AI__ (ファシリテーター) と __PARTNER__ (会話相手) の両方を対象
+                _AI_KEYS = {k for k in self._active_keys if k.startswith("__") and k.endswith("__")}
                 active = {k: v for k, v in self.profiles.items()
-                          if k in self._active_keys and k != _AI}
-                ai_prof = self.profiles.get(_AI) if _AI in self._active_keys else None
+                          if k in self._active_keys and k not in _AI_KEYS}
+                ai_profs = {k: self.profiles[k] for k in _AI_KEYS if k in self.profiles}
                 info = {"n_prof": len(active), "n_all": len(self.profiles)}   # 診断ログ用
                 # ① AI声紋の先行チェック（エコー除去用 — 人間より高い閾値）
-                if ai_prof is not None:
-                    ai_th = self.AI_THRESH.get(self.model, th + 0.10)
-                    ai_sim = float(np.dot(ai_prof, emb))
+                if ai_profs:
                     best_human = max((float(np.dot(p, emb))
                                       for p in active.values()), default=-1.0)
-                    if ai_sim >= ai_th and ai_sim > best_human:
-                        self.sp_map[sp] = _AI
-                        self._note("AI声紋一致", label=sp, sim=round(ai_sim, 3))
-                        return _AI
+                    for ai_key, ai_prof in ai_profs.items():
+                        ai_th = self.AI_THRESH.get(self.model, th + 0.10)
+                        ai_sim = float(np.dot(ai_prof, emb))
+                        if ai_sim >= ai_th and ai_sim > best_human:
+                            self.sp_map[sp] = ai_key
+                            self._note("AI声紋一致", label=sp, sim=round(ai_sim, 3), key=ai_key)
+                            return ai_key
                 # ② 通常の話者照合（人間のプロファイルのみ）
                 if active:
                     ranked = sorted(((float(np.dot(p, emb)), n)
@@ -1676,6 +1985,12 @@ def main(argv=None):
     ap.add_argument("--sim-scenario", default=None,
                     choices=["stalled", "biased", "derailed", "consensus_needed", "healthy"],
                     help="シミュレーションの議論パターン")
+    ap.add_argument("--debate", metavar="TOPIC",
+                    help="AI会話相手と議論。Realtime APIで音声対話し、"
+                         "ファシリテーターが介入する。--agentと組み合わせて使用。"
+                         "例: --debate 'AIツール導入の是非'")
+    ap.add_argument("--debate-voice", default="echo",
+                    help="会話相手の声（既定echo。ファシリテーターのalloyと被らないこと）")
     args = ap.parse_args(argv)
     _serve = args.port > 0
 
@@ -2167,9 +2482,10 @@ def main(argv=None):
             if agent is None or not agent._connected or not agent.enabled:
                 continue
             with state_lock:
+                _skip = {AGENT_SPEAKER, "[Partner]"}
                 talk_rs = [r for r in records
                            if "speaker" in r and r.get("text")
-                           and r.get("speaker") != AGENT_SPEAKER]
+                           and r.get("speaker") not in _skip]
             n = len(talk_rs)
             if n > _agent_cursor:
                 _last_utt_time[0] = time.monotonic()
@@ -2184,7 +2500,7 @@ def main(argv=None):
                             agent.interrupt()
                             break
             # エコーウィンドウ中はtriggerしない（フィードバックループ防止）
-            if agent.in_echo_window:
+            if agent.in_echo_window or (partner is not None and partner.in_echo_window):
                 _was_in_echo[0] = True
                 continue
             # --- フロア返却: エコーウィンドウ終了時に沈黙タイマーをリセット ---
@@ -2338,6 +2654,14 @@ def main(argv=None):
         def cb(indata, frames, t, status):
             pcm = (np.clip(indata[:, 0], -1, 1) * 32767).astype("<i2").tobytes()
             audio_q.put(pcm)
+            # --debate: マイク音声をConversationPartnerにも送信
+            # 以下の間は送らない（スピーカー音声のマイク回り込み→自己割り込み防止）:
+            # - Partner自身が話している間＋直後のエコー残響
+            # - ファシリテーターが話している間＋直後のエコー残響
+            if (partner is not None and partner._connected
+                    and not partner.in_echo_window
+                    and not (agent is not None and agent.in_echo_window)):
+                partner.feed_audio(pcm)
         with sd.InputStream(samplerate=SR, channels=1, dtype="float32",
                             device=args.device, callback=cb, blocksize=int(SR * 0.1)):
             while not stop.is_set():
@@ -2446,6 +2770,9 @@ def main(argv=None):
             elif line.strip():
                 print_line("# コマンド: 「1=松井」(声を登録) / 「fix 2=1」「fix 人物2=人物1」(統合) / Ctrl+Cで終了")
 
+    if args.simulate and args.debate:
+        raise SystemExit("--simulate と --debate は同時に使えません")
+
     # --- DiscussionSimulator ---
     simulator: DiscussionSimulator | None = None
     if args.simulate:
@@ -2460,6 +2787,21 @@ def main(argv=None):
         simulator = DiscussionSimulator(
             api_key=_oai_key, topic=args.simulate,
             scenario=args.sim_scenario)
+
+    # --- ConversationPartner（--debate モード）---
+    partner: ConversationPartner | None = None
+    if args.debate:
+        if not _oai_key:
+            raise SystemExit("--debate には OPENAI_API_KEY が必要です")
+        if not args.agent:
+            print("# ヒント: --agent を付けるとファシリテーターが介入します", flush=True)
+        if args.agent and args.debate_voice == args.agent_voice:
+            print(f"# 警告: --debate-voice と --agent-voice が同じ ({args.debate_voice})。"
+                  f"声紋分離に影響します。", flush=True)
+        partner = ConversationPartner(
+            api_key=_oai_key, voice=args.debate_voice, topic=args.debate)
+        if tracker is not None:
+            partner.set_tracker(tracker)
 
     print(f"# {args.stt} に接続中…", flush=True)
     with connect(ws_url, additional_headers=ws_headers) as ws:
@@ -2486,12 +2828,36 @@ def main(argv=None):
                     if "介入不要" not in text:
                         simulator.inject_facilitator(text)
                 agent.on_ai_utterance = _on_agent_with_sim
+            elif partner is not None:
+                # ファシリテーター介入時にPartnerを一時停止
+                def _on_agent_with_partner(text: str):
+                    _on_agent_text(text)
+                    if "介入不要" not in text and partner._connected:
+                        partner.interrupt()
+                agent.on_ai_utterance = _on_agent_with_partner
             else:
                 agent.on_ai_utterance = _on_agent_text
             agent.connect()
             threading.Thread(target=_agent_worker, daemon=True).start()
             print(f"# AI Agent: mode={agent.mode} voice={agent.voice}"
                   f" trigger={agent.trigger_n}（ブラウザから変更可能）", flush=True)
+
+        # ConversationPartner接続
+        if partner is not None:
+            def _on_partner_text(text: str):
+                """Partner（会話相手AI）の発言をrecordsに記録."""
+                with state_lock:
+                    records.append({"ms": None, "end_ms": None,
+                                    "speaker": "[Partner]", "text": text.strip()})
+                    color_of("[Partner]")
+                print_line(f"\x1b[93m[Partner]\x1b[0m: {text.strip()}")
+                save()
+                # ファシリテーターにPartnerの発言も共有
+                if agent is not None:
+                    agent.feed("[Partner]", text)
+            partner.on_ai_utterance = _on_partner_text
+            partner.connect()
+            print(f"# Partner: voice={partner.voice} topic={partner.topic}", flush=True)
 
         def sender():
             nonlocal pcm_total_bytes, pcm_buf_offset
@@ -2571,7 +2937,7 @@ def main(argv=None):
                     # --- 声紋ベースのAIエコー除去（主フィルタ） ---
                     # classify()がAI声紋に一致した場合、このセグメントはAI音声のエコー。
                     # ラベル追従で短い断片もAI扱いになるため、分断されたエコーも除去される。
-                    if sp_id == RealtimeAgent.AI_VOICE_KEY:
+                    if sp_id is not None and sp_id.startswith("__") and sp_id.endswith("__"):
                         if args.vp_debug:
                             print_line(f"# AI声紋エコー除去: sp={sp_id}"
                                        f" ({cur_text.strip()[:40]}...)")
@@ -2608,16 +2974,18 @@ def main(argv=None):
                 # --- テキスト類似度エコー判定（安全網） ---
                 # 声紋フィルタが主。声紋未登録時 or trackerなし時の補助として、
                 # エコーウィンドウ中のテキスト類似度チェックを残す。
-                if agent is not None and agent.in_echo_window:
-                    sim = agent._best_similarity(cur_text)
-                    if sim > 0.35:
-                        if args.vp_debug:
-                            print_line(f"# テキスト安全網エコー除去 sim={sim:.2f}:"
-                                       f" sp={sp_id} ({cur_text.strip()[:40]}...)")
-                        cur_text = ""
-                        cur_ms = None
-                        cur_end = None
-                        return
+                for _src_name, _src in [("agent", agent), ("partner", partner)]:
+                    if _src is not None and _src.in_echo_window:
+                        sim = _src._best_similarity(cur_text)
+                        if sim > 0.35:
+                            if args.vp_debug:
+                                print_line(f"# テキスト安全網エコー除去({_src_name})"
+                                           f" sim={sim:.2f}: sp={sp_id}"
+                                           f" ({cur_text.strip()[:40]}...)")
+                            cur_text = ""
+                            cur_ms = None
+                            cur_end = None
+                            return
                 if cur_ms is not None and cur_end is not None:
                     recent_segs.append((cur_ms, cur_end, label))
                     del recent_segs[:-12]
@@ -2698,6 +3066,8 @@ def main(argv=None):
         finally:
             globals()["_SYS_HOOK"] = None
             stop.set()
+            if partner is not None:
+                partner.close()
             if simulator is not None:
                 simulator.shutdown()
             if agent is not None:
