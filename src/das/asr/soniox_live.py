@@ -445,6 +445,10 @@ class RealtimeAgent:
         self._ai_voice_buf: list[np.ndarray] = []   # 16kHz float32 チャンク
         self._ai_voice_sec = 0.0                     # 蓄積秒数
         self._ai_voice_enrolled = False              # 登録済みフラグ
+        # --- 介入内容の保存（割り込まれても内容を失わない） ---
+        self._pending_intervention: dict | None = None  # 割り込みで中断された介入内容
+        self._INTERVENTION_TTL = 60.0                   # 保存した介入の有効期限（秒）
+        self._INTERVENTION_MAX_RETRIES = 2              # 再試行上限
 
     AI_VOICE_KEY = "__AI__"             # VoiceProfiles内のAI声紋キー（セッション限り）
     _AI_ENROLL_SEC = 3.0                 # 声紋登録に必要な最小秒数
@@ -661,7 +665,11 @@ class RealtimeAgent:
             self._pending.append({"speaker": speaker, "text": text})
 
     def trigger(self):
-        """蓄積した発話をRealtimeAPIに送信し応答を要求."""
+        """蓄積した発話をRealtimeAPIに送信し応答を要求.
+
+        保存された介入内容（割り込みで中断された発言）がある場合、
+        コンテキストに追加して再試行の機会を与える。
+        """
         if not self._connected or not self.enabled or not self.ws:
             return
         if self._responding:
@@ -671,6 +679,20 @@ class RealtimeAgent:
                 return
             conv = "\n".join(f"{u['speaker']}: {u['text']}" for u in self._pending)
             self._pending.clear()
+        # --- 保存された介入内容をコンテキストに追加 ---
+        pi = self._pending_intervention
+        if pi is not None:
+            age = time.monotonic() - pi["created_at"]
+            if age < self._INTERVENTION_TTL:
+                conv += (f"\n\n[システム注記: あなたは先ほど以下の発言を試みましたが、"
+                         f"参加者の発言と重なり中断されました。"
+                         f"まだ重要であれば、簡潔に再度伝えてください]\n"
+                         f"あなたの中断された発言: {pi['delivered']}")
+                print(f"# AI Agent: 中断された介入を再試行コンテキストに追加", flush=True)
+            else:
+                print(f"# AI Agent: 中断された介入を期限切れで破棄（{age:.0f}秒経過）",
+                      flush=True)
+            self._pending_intervention = None
         try:
             self.ws.send(json.dumps({
                 "type": "conversation.item.create",
@@ -691,21 +713,51 @@ class RealtimeAgent:
         response.cancelで生成を停止した後、conversation.item.truncateで
         実際に再生された分だけを会話履歴に残す。これによりAIが
         「全部喋った」と誤認して次の応答がずれるのを防ぐ。
+
+        介入内容の保存: 割り込まれた時点の_ai_text_bufを保存し、
+        次のトリガー機会で「先ほど言いかけた内容」として再利用可能にする。
         """
         if not self.ai_speaking and not self._responding:
             return
         self._interrupted = True
-        # 再生キューを空にして停止（truncate用のバイト数を先に確定）
+        # --- 介入内容の保存: 割り込まれた内容を記憶 ---
+        delivered = self._ai_text_buf.strip()
+        if delivered and "介入不要" not in delivered:
+            existing = self._pending_intervention
+            attempts = (existing["attempts"] if existing else 0) + 1
+            if attempts <= self._INTERVENTION_MAX_RETRIES:
+                self._pending_intervention = {
+                    "delivered": delivered,
+                    "created_at": time.monotonic(),
+                    "attempts": attempts,
+                }
+                print(f"# AI Agent: 介入内容を保存（試行{attempts}回目、次の機会で再試行）",
+                      flush=True)
+            else:
+                self._pending_intervention = None
+                print("# AI Agent: 介入内容を破棄（再試行上限に達した）", flush=True)
+        # --- Graceful yield: キュー内の音声を少しだけ残して自然に終了 ---
+        # 24kHz 16bit PCM = 48000 bytes/sec → 300ms ≒ 14400 bytes
+        _YIELD_KEEP_BYTES = 14400
         played = self._played_bytes
+        kept_bytes = 0
+        kept_chunks: list[bytes] = []
         while True:
             try:
-                self._audio_q.get_nowait()
+                chunk = self._audio_q.get_nowait()
             except queue.Empty:
                 break
+            if chunk is not None and kept_bytes < _YIELD_KEEP_BYTES:
+                kept_chunks.append(chunk)
+                kept_bytes += len(chunk)
+            # それ以降は破棄
+        for c in kept_chunks:
+            self._audio_q.put(c)
         self._audio_q.put(None)  # 終端マーカー → playback threadが停止処理
-        self.ai_speaking = False
+        self.ai_speaking = bool(kept_chunks)  # 残りがあれば再生中のまま
         self._responding = False
-        self._last_speech_end = time.monotonic()
+        if not kept_chunks:
+            self._last_speech_end = time.monotonic()
         # Realtime APIの応答をキャンセル + 会話履歴をtruncate
         if self.ws:
             try:
@@ -731,6 +783,7 @@ class RealtimeAgent:
     def _cancel_response(self):
         """「介入不要」応答を静かにキャンセル。音声再生を止め、会話履歴から削除する."""
         self._interrupted = True
+        self._pending_intervention = None  # 介入不要の内容は再試行しない
         # 再生キューを空にして停止
         while True:
             try:
@@ -2028,6 +2081,11 @@ def main(argv=None):
         audio_q.put(None)
 
     def from_wav():
+        """WAVファイルを擬似ライブで送信する.
+
+        Reactive WAV: agentが発話中はWAV再生・ASR送信を一時停止し、
+        介入終了後に自動再開する。これにより「同時に喋る」問題を解消。
+        """
         import librosa
         y, _ = librosa.load(args.wav, sr=SR)
         step = int(SR * 0.12)
@@ -2041,8 +2099,21 @@ def main(argv=None):
             mic = sd.InputStream(samplerate=SR, channels=1, dtype="float32", blocksize=step)
             mic.start()
         i = 0
+        _wav_paused = False
         while not stop.is_set():
-            chunk = np.clip(y[i:i + step], -1, 1).astype("float32") if i < len(y) else                 np.zeros(0, dtype="float32")
+            # --- Reactive WAV: AI発話中はWAV再生を一時停止 ---
+            if agent is not None and (agent.ai_speaking or agent._responding):
+                if not _wav_paused:
+                    _wav_paused = True
+                    print("# WAV: AI介入中 — 再生を一時停止", flush=True)
+                time.sleep(0.05)
+                continue
+            if _wav_paused:
+                _wav_paused = False
+                print("# WAV: 再生を再開", flush=True)
+            # --- 通常のWAV送信 ---
+            chunk = np.clip(y[i:i + step], -1, 1).astype("float32") if i < len(y) else \
+                np.zeros(0, dtype="float32")
             if len(chunk) < step:
                 chunk = np.pad(chunk, (0, step - len(chunk)))
             i += step
