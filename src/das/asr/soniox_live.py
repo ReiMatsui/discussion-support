@@ -734,7 +734,9 @@ class ConversationPartner:
 
         elif etype == "error":
             msg = ev.get("error", {}).get("message", "unknown")
-            print(f"# Partner エラー: {msg}", flush=True)
+            # response.cancel が active response なしに到達した場合は無視
+            if "no active response" not in msg.lower():
+                print(f"# Partner エラー: {msg}", flush=True)
 
     def close(self):
         self._stop.set()
@@ -2566,15 +2568,22 @@ def main(argv=None):
                     #  server VADでは検知できない。テキストベースで補完する）
                     if partner is not None and (partner.ai_speaking or partner._responding):
                         partner.interrupt()
-            # --- ファシリテーター優先: ファシリテーターが応答開始したらPartnerを即停止 ---
-            # on_ai_utterance（テキスト完了時）を待たず、音声生成開始の時点で止める
+            # --- ファシリテーター優先: on_speech_startで音声到達の瞬間に停止 ---
+            # _agent_workerでの_respondingベース先行停止は削除。
+            # response.create直後に止めるとファシリテーター音声到達まで
+            # 不自然な無音が生じるため、on_speech_start一本化とした。
+            # ai_speakingチェックはバックアップ（on_speech_startが失敗した場合）
             if (partner is not None
                     and (partner.ai_speaking or partner._responding)
                     and agent is not None
-                    and (agent.ai_speaking or agent._responding)):
+                    and agent.ai_speaking):
                 partner.interrupt()
             # エコーウィンドウ中はtriggerしない（フィードバックループ防止）
-            if agent.in_echo_window or (partner is not None and partner.in_echo_window):
+            # ファシリテーター自身のecho windowのみチェック。
+            # Partnerのecho windowではブロックしない（Partnerエコーは
+            # テキスト安全網の常時チェックで除去済み。ここでブロックすると
+            # 人間がPartnerに割り込んだ後、不要な沈黙が発生する）。
+            if agent is not None and agent.in_echo_window:
                 _was_in_echo[0] = True
                 continue
             # --- フロア返却: エコーウィンドウ終了時に沈黙タイマーをリセット ---
