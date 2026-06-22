@@ -1617,7 +1617,7 @@ class VoiceProfiles:
     DEFAULTS = {"resemblyzer": (0.75, 0.72, 0.62), "ecapa": (0.35, 0.40, 0.30),
                 "redimnet": (0.42, 0.50, 0.34)}
     # AI声紋判定用の閾値（人間より高め — TTS音声はスピーカー経由でも特徴が明瞭）
-    AI_THRESH = {"resemblyzer": 0.82, "ecapa": 0.45, "redimnet": 0.55}
+    AI_THRESH = {"resemblyzer": 0.80, "ecapa": 0.42, "redimnet": 0.50}
 
     def __init__(self, path: str = "voices.json", thresh: float | None = None,
                  min_sec: float = 1.0, margin: float = 0.05, auto: bool = True,
@@ -2934,19 +2934,11 @@ def main(argv=None):
                         wav = np.zeros(0, dtype=np.float32)
                     sp_id = tracker.classify(wav, cur_speaker,
                                              overlapped=overlaps_other(cur_ms, cur_end, label))
-                    # --- AIエコー除去 ---
-                    # (A) 声紋がAIキーに一致 → 確実にエコー
-                    # (B) echo window中 かつ 声紋が人間に確定しなかった → ほぼエコー
-                    #     スピーカー→マイクの音質劣化でAI閾値を超えられず人物に
-                    #     誤判定されるケースを補完する。
-                    _is_ai_key = (sp_id is not None
-                                  and sp_id.startswith("__") and sp_id.endswith("__"))
-                    _in_any_echo = ((agent is not None and agent.in_echo_window)
-                                    or (partner is not None and partner.in_echo_window))
-                    # echo window中: 声紋が「声紋一致」（既知人間に高確信マッチ）でなければ除去
-                    _voice_confirmed_human = (tracker.last is not None
-                                              and tracker.last.get("kind") == "声紋一致")
-                    if _is_ai_key or (_in_any_echo and not _voice_confirmed_human):
+                    # --- 声紋ベースのAIエコー除去（主フィルタ） ---
+                    # classify()がAI声紋キー（__AI__や__PARTNER__）に一致した場合のみ除去。
+                    # echo window中でも人間の割り込みは通す（本プロジェクトの前提）。
+                    if (sp_id is not None
+                            and sp_id.startswith("__") and sp_id.endswith("__")):
                         if args.vp_debug:
                             print_line(f"# AI声紋エコー除去: sp={sp_id}"
                                        f" ({cur_text.strip()[:40]}...)")
