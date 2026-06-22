@@ -994,6 +994,7 @@ class RealtimeAgent:
         self._connected = False
         self._conn_error = ""              # 接続エラーメッセージ（UI表示用）
         self.on_ai_utterance = None        # callback(text: str) AI発話確定時
+        self.on_speech_start = None        # callback() 音声生成開始時（即座に通知）
         self._playback_thread: threading.Thread | None = None
         # --- エコー防止 ---
         self._responding = False           # response生成中フラグ
@@ -1187,6 +1188,12 @@ class RealtimeAgent:
                 return  # キャンセル後の残留チャンクを破棄
             chunk = ev.get("delta", "")
             if chunk:
+                # 音声生成開始を即座に通知（Partner停止用）
+                if not self.ai_speaking and self.on_speech_start:
+                    try:
+                        self.on_speech_start()
+                    except Exception:
+                        pass
                 self._audio_q.put(base64.b64decode(chunk))
                 self.ai_speaking = True
 
@@ -2494,11 +2501,23 @@ def main(argv=None):
                     agent.feed(disp_name(r.get("speaker", "")), r.get("text", ""))
                 _agent_cursor = n
                 # --- 自動割り込み: AI発話中に人間が実質的な発話をしたら中断 ---
-                if agent.ai_speaking:
-                    for txt in new_texts:
-                        if len(txt.strip()) > _INTERRUPT_MIN_CHARS:
-                            agent.interrupt()
-                            break
+                _human_spoke = any(len(t.strip()) > _INTERRUPT_MIN_CHARS
+                                   for t in new_texts)
+                if _human_spoke:
+                    if agent.ai_speaking:
+                        agent.interrupt()
+                    # Partner発話中に人間が話したらPartnerも中断
+                    # （Partnerへの音声送信はecho window中停止しているため
+                    #  server VADでは検知できない。テキストベースで補完する）
+                    if partner is not None and (partner.ai_speaking or partner._responding):
+                        partner.interrupt()
+            # --- ファシリテーター優先: ファシリテーターが応答開始したらPartnerを即停止 ---
+            # on_ai_utterance（テキスト完了時）を待たず、音声生成開始の時点で止める
+            if (partner is not None
+                    and (partner.ai_speaking or partner._responding)
+                    and agent is not None
+                    and (agent.ai_speaking or agent._responding)):
+                partner.interrupt()
             # エコーウィンドウ中はtriggerしない（フィードバックループ防止）
             if agent.in_echo_window or (partner is not None and partner.in_echo_window):
                 _was_in_echo[0] = True
@@ -2835,6 +2854,11 @@ def main(argv=None):
                     if "介入不要" not in text and partner._connected:
                         partner.interrupt()
                 agent.on_ai_utterance = _on_agent_with_partner
+                # ファシリテーター音声生成開始の瞬間にPartnerを即停止
+                def _on_facilitator_speech_start():
+                    if partner._connected and (partner.ai_speaking or partner._responding):
+                        partner.interrupt()
+                agent.on_speech_start = _on_facilitator_speech_start
             else:
                 agent.on_ai_utterance = _on_agent_text
             agent.connect()
