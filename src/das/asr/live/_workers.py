@@ -200,13 +200,18 @@ def _run_agent_worker(state: SessionState):
                   f" trigger_n={agent.trigger_n} responding={agent._responding}"
                   f" silence={_elapsed:.1f}s echo={agent.in_echo_window}"
                   f" partner_talk={partner.ai_speaking if partner else '?'}", flush=True)
+        # --- 論点一覧を取得（facilitatorモードのみ） ---
+        _topics = None
+        if agent.mode != "conversation":
+            with state.topics_lock:
+                _topics = list(state.topics) if state.topics else None
         # --- 割り込まれた介入の即時再開: 沈黙2秒で再トリガー ---
         _has_retry = agent._pending_intervention is not None
         _silence_elapsed = time.monotonic() - _last_utt_time[0]
         if _has_retry and _silence_elapsed > _AGENT_RETRY_SILENCE:
             print(f"# [diag] TRIGGER by retry: silence={_silence_elapsed:.1f}s"
                   f" > {_AGENT_RETRY_SILENCE}s (pending_intervention)", flush=True)
-            agent.trigger()
+            agent.trigger(topics=_topics)
         elif agent.mode == "conversation":
             if (agent.pending_count > 0
                     and _silence_elapsed > _AGENT_CONV_SILENCE):
@@ -216,11 +221,11 @@ def _run_agent_worker(state: SessionState):
                                else _AGENT_SILENCE)
             if agent.pending_count >= agent.trigger_n:
                 print(f"# [diag] TRIGGER by count: {agent.pending_count}>={agent.trigger_n}", flush=True)
-                agent.trigger()
+                agent.trigger(topics=_topics)
             elif (agent.pending_count > 0
                   and _silence_elapsed > _silence_thresh):
                 print(f"# [diag] TRIGGER by silence: {_silence_elapsed:.1f}s > {_silence_thresh}s", flush=True)
-                agent.trigger()
+                agent.trigger(topics=_topics)
 
 
 def _run_stdin_commands(state: SessionState):

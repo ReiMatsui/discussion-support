@@ -76,6 +76,10 @@ class RealtimeAgent:
         self._ai_voice_buf: list[np.ndarray] = []   # 16kHz float32 チャンク
         self._ai_voice_sec = 0.0                     # 蓄積秒数
         self._ai_voice_enrolled = False              # 登録済みフラグ
+        # --- プリフライトバッファ（「介入不要」音声漏れ防止） ---
+        self._preflight_buf: list[bytes] = []  # 再生前の音声チャンクバッファ
+        self._preflight_cleared = False        # テキスト確認OK → 再生開始済み
+        self._preflight_chars = 3              # この文字数まで蓄積して判定
         # --- 介入内容の保存（割り込まれても内容を失わない） ---
         self._pending_intervention: dict | None = None  # 割り込みで中断された介入内容
         self._INTERVENTION_TTL = 60.0                   # 保存した介入の有効期限（秒）
@@ -248,30 +252,45 @@ class RealtimeAgent:
             item = ev.get("item", {})
             self._current_item_id = item.get("id")
             self._played_bytes = 0
+            # プリフライトバッファをリセット（新応答の開始）
+            self._preflight_buf.clear()
+            self._preflight_cleared = False
 
         elif etype == "response.output_audio.delta":
             if self._interrupted:
                 return  # キャンセル後の残留チャンクを破棄
             chunk = ev.get("delta", "")
             if chunk:
-                # 音声生成開始を即座に通知（Partner停止用）
-                if not self.ai_speaking and self.on_speech_start:
-                    with contextlib.suppress(Exception):
-                        self.on_speech_start()
-                self._audio_q.put(base64.b64decode(chunk))
+                pcm = base64.b64decode(chunk)
+                if self._preflight_cleared:
+                    # テキスト確認済み → そのまま再生キューへ
+                    self._audio_q.put(pcm)
+                else:
+                    # まだテキスト未確認 → バッファに溜める
+                    self._preflight_buf.append(pcm)
                 self.ai_speaking = True
 
         elif etype == "response.output_audio_transcript.delta":
             if not self._interrupted:
                 self._ai_text_buf += ev.get("delta", "")
-                # 「介入不要」を検出したら即座に応答をキャンセル（音声再生を止める）
+                # 「介入不要」を検出したら即座に応答をキャンセル
                 if "介入不要" in self._ai_text_buf:
                     self._cancel_response()
+                # プリフライト判定: 十分なテキストが来て「介入不要」でなければ再生開始
+                elif (not self._preflight_cleared
+                      and len(self._ai_text_buf) >= self._preflight_chars):
+                    self._flush_preflight()
 
         elif etype == "response.output_audio_transcript.done":
             transcript = ev.get("transcript", "") or self._ai_text_buf
             self._ai_text_buf = ""
-            if transcript and "（介入不要）" not in transcript:
+            # transcript.doneが来たのにまだプリフライト中なら確定フラッシュ
+            if not self._preflight_cleared and not self._interrupted:
+                if "介入不要" in (transcript or ""):
+                    self._cancel_response()
+                else:
+                    self._flush_preflight()
+            if transcript and "介入不要" not in transcript:
                 self._recent_ai_texts.append(transcript)
                 if not self._interrupted and self.on_ai_utterance:
                     self.on_ai_utterance(transcript)
@@ -285,6 +304,8 @@ class RealtimeAgent:
             self._responding = False
             self._interrupted = False     # 次の応答に備えてリセット
             self._current_item_id = None
+            self._preflight_buf.clear()
+            self._preflight_cleared = False
 
         elif etype == "error":
             msg = ev.get("error", {}).get("message", "unknown")
@@ -310,9 +331,11 @@ class RealtimeAgent:
             self._pending.append({"speaker": speaker, "text": text,
                                   "_count": trigger_count})
 
-    def trigger(self):
+    def trigger(self, *, topics: list[dict] | None = None):
         """蓄積した発話をRealtimeAPIに送信し応答を要求.
 
+        topics: 現在の論点一覧（_topic_workerが抽出したもの）。
+                渡された場合、コンテキストに含めて脱線検出の精度を上げる。
         保存された介入内容（割り込みで中断された発言）がある場合、
         コンテキストに追加して再試行の機会を与える。
         """
@@ -325,6 +348,16 @@ class RealtimeAgent:
                 return
             conv = "\n".join(f"{u['speaker']}: {u['text']}" for u in self._pending)
             self._pending.clear()
+        # --- 論点一覧をコンテキストに追加 ---
+        if topics:
+            topic_lines = "\n".join(
+                f"  {i+1}. {t['topic']}（{t.get('speaker', '?')}）"
+                for i, t in enumerate(topics[-8:])  # 最新8件まで
+            )
+            topic_note = (f"[現在の論点]\n{topic_lines}\n\n"
+                          f"議論がこれらの論点からズレていたら、"
+                          f"簡潔に指摘して元のテーマに戻してください。")
+            conv = f"{topic_note}\n\n{conv}" if conv else topic_note
         # --- 保存された介入内容をコンテキストに追加 ---
         pi = self._pending_intervention
         if pi is not None:
@@ -425,10 +458,25 @@ class RealtimeAgent:
         self._current_item_id = None
         print("# AI Agent: 割り込み検出 — 応答を中断", flush=True)
 
+    def _flush_preflight(self):
+        """プリフライトバッファの音声を再生キューに一括フラッシュ."""
+        if self._preflight_cleared:
+            return
+        self._preflight_cleared = True
+        # 音声生成開始を通知（Partner停止用）
+        if not self.ai_speaking and self.on_speech_start:
+            with contextlib.suppress(Exception):
+                self.on_speech_start()
+        for chunk in self._preflight_buf:
+            self._audio_q.put(chunk)
+        self._preflight_buf.clear()
+
     def _cancel_response(self):
         """「介入不要」応答を静かにキャンセル。音声再生を止め、会話履歴から削除する."""
         print("# AI Agent: 介入不要と判断 — 応答をキャンセル", flush=True)
         self._interrupted = True
+        self._preflight_buf.clear()        # バッファも破棄
+        self._preflight_cleared = False
         self._pending_intervention = None  # 介入不要の内容は再試行しない
         # 再生キューを空にして停止
         while True:
