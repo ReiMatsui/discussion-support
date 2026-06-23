@@ -532,8 +532,13 @@ class ConversationPartner:
         except Exception:
             pass
 
-    def inject_context(self, speaker: str, text: str):
-        """外部テキストをPartnerの会話履歴に注入（ファシリテーター発言等）."""
+    def inject_context(self, speaker: str, text: str, *,
+                        request_response: bool = False):
+        """外部テキストをPartnerの会話履歴に注入.
+
+        request_response=True の場合、注入後にresponse.createを送信して
+        応答を明示的に要求する。割り込み後に新しい質問へ応答させる場合に使う。
+        """
         if not self._connected or not self.ws:
             return
         try:
@@ -546,6 +551,8 @@ class ConversationPartner:
                                  "text": f"[{speaker}]: {text}"}],
                 },
             }))
+            if request_response:
+                self.ws.send(json.dumps({"type": "response.create"}))
         except Exception:
             pass
 
@@ -2535,7 +2542,22 @@ def main(argv=None):
     _agent_cursor = 0
     _last_utt_time = [time.monotonic()]   # mutableで非ローカル参照
     _was_in_echo = [False]                # エコーウィンドウ→通常への遷移検出用
-    _INTERRUPT_MIN_CHARS = 8              # 自動割り込みの最小文字数（相槌フィルタ）
+    # --- 相槌判定: Partnerへの割り込みをフィルタ ---
+    # 相槌パターンに一致する発話ではPartnerを止めない。
+    # 文字数ではなく意味で判定する（「止めて」は3文字だが割り込み、
+    # 「はい、はい、はい」は9文字だが相槌）。
+    _BACKCHANNEL_RE = re.compile(
+        r'^[\s、。,.!?！？]*'
+        r'('
+        r'うん|ふん|ふーん|へー|ほー|おー|あー|えー'
+        r'|はい|ええ|そう|そっか|そうだね|そうですね|そうですか'
+        r'|なるほど|確かに|分かる|わかる|分かります|わかりました'
+        r'|了解|オッケー|OK'
+        r')'
+        r'[\s、。,.!?！？うんはいええそっかなるほど確かに]*$',
+        re.IGNORECASE,
+    )
+    _INTERRUPT_MIN_CHARS = 8              # ファシリテーター割り込みの最小文字数
 
     def _agent_worker():
         """バックグラウンドでAI応答のトリガーを管理（ターンテイキング）.
@@ -2565,17 +2587,27 @@ def main(argv=None):
                 for r in talk_rs[_agent_cursor:]:
                     agent.feed(disp_name(r.get("speaker", "")), r.get("text", ""))
                 _agent_cursor = n
-                # --- 自動割り込み: AI発話中に人間が実質的な発話をしたら中断 ---
+                # --- 自動割り込み ---
+                # ファシリテーター: 文字数ベース（従来通り）
                 _human_spoke = any(len(t.strip()) > _INTERRUPT_MIN_CHARS
                                    for t in new_texts)
-                if _human_spoke:
-                    if agent.ai_speaking:
-                        agent.interrupt()
-                    # Partner発話中に人間が話したらPartnerも中断
-                    # （Partnerへの音声送信はecho window中停止しているため
-                    #  server VADでは検知できない。テキストベースで補完する）
-                    if partner is not None and (partner.ai_speaking or partner._responding):
+                if _human_spoke and agent.ai_speaking:
+                    agent.interrupt()
+                # Partner: 相槌判定（相槌ではPartnerを止めない）
+                # server VADの代替なので、本気の発言のみで割り込む。
+                if partner is not None and (partner.ai_speaking or partner._responding):
+                    _real_utterances = [t.strip() for t in new_texts
+                                        if t.strip()
+                                        and not _BACKCHANNEL_RE.match(t.strip())]
+                    if _real_utterances:
                         partner.interrupt()
+                        # 人間の新しい発話をPartnerに注入し、応答を要求
+                        # （中断前の続きではなく、新しい質問に答えさせる）
+                        for i, utt in enumerate(_real_utterances):
+                            is_last = (i == len(_real_utterances) - 1)
+                            partner.inject_context(
+                                "人間", utt,
+                                request_response=is_last)
             # --- ファシリテーター優先: on_speech_startで音声到達の瞬間に停止 ---
             # _agent_workerでの_respondingベース先行停止は削除。
             # response.create直後に止めるとファシリテーター音声到達まで
