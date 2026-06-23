@@ -1,0 +1,20 @@
+refactor: SessionState抽出 + バグ修正
+
+SessionState抽出:
+- main()内の共有状態をSessionStateクラスに集約（335行）
+- _print_lineをモジュールレベル関数に抽出
+- 出力関数（write_md/write_html/write_turns/save）をSessionStateメソッドに移行
+- ヘルパー関数（disp_name/color_of/rekey/add_sys/show_partial）をSessionStateメソッドに移行
+- main()内でクロージャ互換エイリアスを設定
+- pcm_buf_offset/pcm_total_bytesをstate.xxx参照に統一
+- main() 1249行→約984行（-21%）
+
+バグ修正:
+- RealtimeAgent: errorイベント時の_responding固着バグを修正
+- ConversationPartner: 中断された応答のテキストが議事録に残るバグを修正
+  （音声未再生のテキストがrecordsに追加されていた）
+
+診断ログ:
+- _agent_workerに10秒間隔の状態ログ（[diag]プレフィックス）
+- trigger発火ログ（count/silence別）
+- _cancel_response()の介入不要判断ログ

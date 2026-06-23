@@ -732,8 +732,10 @@ class ConversationPartner:
             transcript = ev.get("transcript", "") or self._ai_text_buf
             self._ai_text_buf = ""
             if transcript:
+                # エコー判定用には常に記録（中断されたテキストもASRに拾われうる）
                 self._recent_ai_texts.append(transcript)
-                if self.on_ai_utterance:
+                # 中断された応答は議事録に載せない（音声が再生されていない）
+                if not self._interrupted and self.on_ai_utterance:
                     self.on_ai_utterance(transcript)
 
         elif etype == "response.output_audio.done":
@@ -741,13 +743,12 @@ class ConversationPartner:
                 self._audio_q.put(None)
 
         elif etype == "response.done":
-            # 中断された場合でも、蓄積済みテキストがあればコールバックで通知
+            # 中断された応答: エコー判定用にテキストを記録するが、
+            # 議事録には載せない（音声が途中で止まっているため）
             if self._interrupted and self._ai_text_buf:
                 partial = self._ai_text_buf.strip()
                 if partial:
                     self._recent_ai_texts.append(partial)
-                    if self.on_ai_utterance:
-                        self.on_ai_utterance(partial)
             self._ai_text_buf = ""
             self._responding = False
             self._interrupted = False
