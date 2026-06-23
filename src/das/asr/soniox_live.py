@@ -376,6 +376,19 @@ _AGENT_TRIGGER = 10           # N発話ごとに応答検討(facilitator)
 _AGENT_SILENCE = 5.0          # N秒沈黙で応答検討(facilitator)
 _AGENT_DEBATE_SILENCE = 15.0  # N秒沈黙で応答検討(debate — Partner会話が主なので長め)
 _AGENT_CONV_SILENCE = 1.5     # N秒沈黙で応答(conversation — 発話断片をまとめる)
+_INTERRUPT_MIN_CHARS = 8      # ファシリテーター割り込みの最小文字数
+# 相槌判定: 相槌パターンに一致する発話ではPartnerを止めない
+_BACKCHANNEL_RE = re.compile(
+    r'^[\s、。,.!?！？]*'
+    r'('
+    r'うん|ふん|ふーん|へー|ほー|おー|あー|えー'
+    r'|はい|ええ|そう|そっか|そうだね|そうですね|そうですか'
+    r'|なるほど|確かに|分かる|わかる|分かります|わかりました'
+    r'|了解|オッケー|OK'
+    r')'
+    r'[\s、。,.!?！？うんはいええそっかなるほど確かに]*$',
+    re.IGNORECASE,
+)
 AGENT_VOICES = ["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse", "marin", "cedar"]
 
 
@@ -1995,6 +2008,377 @@ def _print_line(text: str):
     sys.stdout.flush()
 
 
+class _UIHandler:
+    """UIサーバー用HTTPハンドラ（トップレベル定義）.
+
+    BaseHTTPRequestHandlerのサブクラスを動的に生成するファクトリ。
+    クロージャ変数の代わりにクラス変数 _state でSessionStateを参照する。
+
+    使い方:
+        handler_cls = _UIHandler.create(state)
+        httpd = HTTPServer(("127.0.0.1", port), handler_cls)
+    """
+
+    @staticmethod
+    def create(state: "SessionState") -> type:
+        """state を束縛した BaseHTTPRequestHandler サブクラスを返す."""
+        from http.server import BaseHTTPRequestHandler
+
+        class Handler(BaseHTTPRequestHandler):
+            _state = state
+
+            def do_GET(self):
+                if self.path == "/" or self.path.startswith("/?"):
+                    try:
+                        with open(self._state.html_path, "rb") as f:
+                            content = f.read()
+                        self.send_response(200)
+                        self.send_header("Content-Type", "text/html; charset=utf-8")
+                        self.end_headers()
+                        self.wfile.write(content)
+                    except FileNotFoundError:
+                        self.send_response(200)
+                        self.send_header("Content-Type", "text/html; charset=utf-8")
+                        self.end_headers()
+                        self.wfile.write("<p>準備中…</p>".encode())
+                else:
+                    self.send_error(404)
+
+            def do_POST(self):
+                s = self._state
+                if self.path == "/rename":
+                    length = int(self.headers.get("Content-Length", 0))
+                    body = json.loads(self.rfile.read(length))
+                    label = str(body.get("label", ""))
+                    name = str(body.get("name", ""))
+                    if not label or not name:
+                        self._json(400, {"error": "label と name を指定してください"})
+                        return
+                    if s.tracker is not None:
+                        old = s.tracker.enroll(label, name)
+                        if old is None:
+                            self._json(400, {"error": f"話者{label}の音声がまだ足りません"})
+                            return
+                        s.rekey(old, name)
+                        s.add_sys(None, f"「{name}」の声を登録（次回の会議から自動表示）")
+                        s.save()
+                        _print_line(f"# {name} の声を登録しました（UIから）")
+                    else:
+                        with s.state_lock:
+                            s.names["#" + label] = name
+                        s.save()
+                        _print_line(f"# 話者{label} → {name}（UIから）")
+                    self._json(200, {"ok": True, "name": name})
+                elif self.path == "/activate":
+                    length = int(self.headers.get("Content-Length", 0))
+                    body = json.loads(self.rfile.read(length))
+                    name = str(body.get("name", ""))
+                    active = bool(body.get("active", True))
+                    if not name:
+                        self._json(400, {"error": "name を指定してください"})
+                        return
+                    if s.tracker is None:
+                        self._json(400, {"error": "声紋照合が無効です"})
+                        return
+                    if active:
+                        merged = s.tracker.activate(name)
+                        if merged is not None:
+                            s.rekey(merged, name)
+                            s.add_sys(None, f"「{name}」を有効化（{merged}と統合）")
+                            _print_line(f"# {name} を有効化（{merged}と統合、UIから）")
+                        else:
+                            _print_line(f"# {name} を有効化（UIから）")
+                        s.save()
+                    else:
+                        s.tracker.deactivate(name)
+                        _print_line(f"# {name} を無効化（UIから）")
+                        s.save()
+                    self._json(200, {"ok": True, "name": name, "active": active})
+                elif self.path == "/agent":
+                    length = int(self.headers.get("Content-Length", 0))
+                    body = json.loads(self.rfile.read(length))
+                    if s.agent is None:
+                        self._json(400, {"error": "AIエージェントが無効です（--agent で起動してください）"})
+                        return
+                    mode = body.get("mode")
+                    voice = body.get("voice")
+                    trigger_n = body.get("trigger_n")
+                    if trigger_n is not None:
+                        trigger_n = int(trigger_n)
+                    s.agent.apply_config(mode=mode, voice=voice, trigger_n=trigger_n)
+                    _print_line(f"# AI Agent 設定変更: mode={s.agent.mode} voice={s.agent.voice}"
+                                f" trigger={s.agent.trigger_n}（UIから）")
+                    s.save()
+                    self._json(200, {"ok": True, "mode": s.agent.mode,
+                                     "voice": s.agent.voice, "trigger_n": s.agent.trigger_n})
+                else:
+                    self.send_error(404)
+
+            def _json(self, code, data):
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps(data, ensure_ascii=False).encode())
+
+            def log_message(self, format, *args):
+                pass
+
+        return Handler
+
+
+def _run_topic_worker(state: "SessionState", oai_key: str, oai_model: str):
+    """論点抽出のバックグラウンドワーカー（モジュールレベル関数）."""
+    while not state.stop.is_set():
+        time.sleep(3)
+        if not oai_key:
+            continue
+        with state.state_lock:
+            talk_rs = [r for r in state.records if "speaker" in r and r.get("text")]
+        n = len(talk_rs)
+        if n - state.topic_cursor < state._TOPIC_TRIGGER:
+            continue
+        window = talk_rs[max(0, n - state._TOPIC_WINDOW):]
+        utts = [{"speaker": state.disp_name(r["speaker"]), "text": r["text"]} for r in window]
+        with state.topics_lock:
+            existing = [t["topic"] for t in state.topics]
+        new_topics = _extract_topics(utts, existing, oai_key, oai_model)
+        if new_topics:
+            ms = window[-1].get("ms")
+            with state.topics_lock:
+                for t in new_topics:
+                    if isinstance(t, dict) and "topic" in t:
+                        state.topics.append({"topic": t["topic"],
+                                             "speaker": t.get("speaker", "?"),
+                                             "ms": ms})
+            state.save()
+            for t in new_topics:
+                if isinstance(t, dict) and "topic" in t:
+                    _print_line(f"# 💡論点: {t['topic']}（{t.get('speaker', '?')}）")
+        state.topic_cursor = n
+
+
+def _on_agent_text_factory(state: "SessionState"):
+    """ファシリテーター発言コールバックを生成."""
+    def _on_agent_text(text: str):
+        with state.state_lock:
+            state.records.append({"ms": None, "end_ms": None,
+                                  "speaker": AGENT_SPEAKER, "text": text.strip()})
+            state.color_of(AGENT_SPEAKER)
+        if ON_UTTERANCE is not None:
+            try:
+                ON_UTTERANCE("ファシリテーター", text.strip())
+            except Exception:
+                pass
+        _print_line(f"\x1b[96m[ファシリテーター]\x1b[0m: {text.strip()}")
+        state.save()
+    return _on_agent_text
+
+
+def _run_agent_worker(state: "SessionState"):
+    """バックグラウンドでAI応答のトリガーを管理（ターンテイキング）.
+
+    自然な会話のフロア交代を模倣:
+      - 人間のターン: 発話を即座にfeed、沈黙で譲渡 → AIがtrigger
+      - AIのターン: 応答を再生。人間の実質的な発話で自動interrupt
+      - AIターン終了: フロアを人間に返す（沈黙タイマーをリセット）
+    """
+    agent = state.agent
+    partner = state.partner
+    _last_utt_time = state._last_utt_time
+    _was_in_echo = state._was_in_echo
+    _diag_tick = 0
+    while not state.stop.is_set():
+        time.sleep(0.5)
+        _diag_tick += 1
+        if agent is None or not agent._connected or not agent.enabled:
+            if _diag_tick % 20 == 0:
+                print(f"# [diag] _agent_worker skip: agent={agent is not None}"
+                      f" conn={agent._connected if agent else '?'}"
+                      f" enabled={agent.enabled if agent else '?'}", flush=True)
+            continue
+        with state.state_lock:
+            _skip = {AGENT_SPEAKER, "パートナー"}
+            talk_rs = [r for r in state.records
+                       if "speaker" in r and r.get("text")
+                       and r.get("speaker") not in _skip]
+        n = len(talk_rs)
+        if n > state.agent_cursor:
+            _last_utt_time[0] = time.monotonic()
+            new_texts = [r.get("text", "") for r in talk_rs[state.agent_cursor:]]
+            for r in talk_rs[state.agent_cursor:]:
+                agent.feed(state.disp_name(r.get("speaker", "")), r.get("text", ""))
+            state.agent_cursor = n
+            # --- 自動割り込み ---
+            _human_spoke = any(len(t.strip()) > _INTERRUPT_MIN_CHARS
+                               for t in new_texts)
+            if _human_spoke and agent.ai_speaking:
+                agent.interrupt()
+            if partner is not None and (partner.ai_speaking or partner._responding):
+                _real_utterances = [t.strip() for t in new_texts
+                                    if t.strip()
+                                    and not _BACKCHANNEL_RE.match(t.strip())]
+                if _real_utterances:
+                    partner.interrupt()
+                    for i, utt in enumerate(_real_utterances):
+                        is_last = (i == len(_real_utterances) - 1)
+                        partner.inject_context(
+                            "人間", utt,
+                            request_response=is_last)
+        # --- ファシリテーター優先 ---
+        if (partner is not None
+                and (partner.ai_speaking or partner._responding)
+                and agent is not None
+                and agent.ai_speaking):
+            partner.interrupt()
+        # エコーウィンドウ中はtriggerしない
+        if agent is not None and agent.in_echo_window:
+            _was_in_echo[0] = True
+            continue
+        # Partnerが発話中はtriggerしない
+        if partner is not None and (partner.ai_speaking or partner._responding):
+            _was_in_echo[0] = True
+            continue
+        # --- フロア返却 ---
+        if _was_in_echo[0]:
+            _was_in_echo[0] = False
+            _last_utt_time[0] = time.monotonic()
+        # モード別トリガー判定
+        if _diag_tick % 20 == 0:
+            _elapsed = time.monotonic() - _last_utt_time[0]
+            print(f"# [diag] agent: mode={agent.mode} pending={agent.pending_count}"
+                  f" trigger_n={agent.trigger_n} responding={agent._responding}"
+                  f" silence={_elapsed:.1f}s echo={agent.in_echo_window}"
+                  f" partner_talk={partner.ai_speaking if partner else '?'}", flush=True)
+        if agent.mode == "conversation":
+            if (agent.pending_count > 0
+                    and time.monotonic() - _last_utt_time[0] > _AGENT_CONV_SILENCE):
+                agent.trigger()
+        else:
+            _silence_thresh = (_AGENT_DEBATE_SILENCE if partner is not None
+                               else _AGENT_SILENCE)
+            if agent.pending_count >= agent.trigger_n:
+                print(f"# [diag] TRIGGER by count: {agent.pending_count}>={agent.trigger_n}", flush=True)
+                agent.trigger()
+            elif (agent.pending_count > 0
+                  and time.monotonic() - _last_utt_time[0] > _silence_thresh):
+                print(f"# [diag] TRIGGER by silence: {time.monotonic() - _last_utt_time[0]:.1f}s > {_silence_thresh}s", flush=True)
+                agent.trigger()
+
+
+def _run_stdin_commands(state: "SessionState"):
+    """標準入力からの話者リネーム・統合コマンドを処理."""
+    while not state.stop.is_set():
+        try:
+            line = input()
+        except (EOFError, KeyboardInterrupt):
+            break
+        mfix = re.match(r"^\s*fix\s+(\S+)\s*=\s*(\S+)\s*$", line)
+        m = re.match(r"^\s*(\S+?)\s*=\s*(.+?)\s*$", line)
+        if mfix:
+            src, dst = state.key_of(mfix.group(1)), state.key_of(mfix.group(2))
+            if state.tracker is not None:
+                state.tracker.remap(src, dst)
+            state.rekey(src, dst)
+            state.add_sys(None, f"{state.disp_name(src)} を {state.disp_name(dst)} に統合（手動fix）")
+            state.save()
+            _print_line(f"# {state.disp_name(src)} を {state.disp_name(dst)} に統合しました（過去の発言も修正済み）")
+        elif m:
+            label, name = m.group(1), m.group(2)
+            if state.tracker is not None:
+                old = state.tracker.enroll(label, name)
+                if old is None:
+                    _print_line(f"# 話者{label}の音声がまだ足りません（1秒以上話してから再実行）")
+                    continue
+                state.rekey(old, name)
+                state.add_sys(None, f"「{name}」の声を登録（次回の会議から自動表示）")
+                state.save()
+                _print_line(f"# {name} の声を登録しました（過去の発言も置換、次回の会議から自動表示）")
+            else:
+                with state.state_lock:
+                    state.names["#" + label] = name
+                state.save()
+                _print_line(f"# 話者{label} → {name}（過去の発言も置換済み）")
+        elif line.strip():
+            _print_line("# コマンド: 「1=松井」(声を登録) / 「fix 2=1」「fix 人物2=人物1」(統合) / Ctrl+Cで終了")
+
+
+def _run_from_mic(state: "SessionState", device):
+    """マイクからPCMを読み取り audio_q に送信."""
+    import sounddevice as sd
+    partner = state.partner
+    agent = state.agent
+
+    def cb(indata, frames, t, status):
+        pcm = (np.clip(indata[:, 0], -1, 1) * 32767).astype("<i2").tobytes()
+        state.audio_q.put(pcm)
+        if (partner is not None and partner._connected
+                and not partner.in_echo_window
+                and not (agent is not None and agent.in_echo_window)):
+            partner.feed_audio(pcm)
+    with sd.InputStream(samplerate=SR, channels=1, dtype="float32",
+                        device=device, callback=cb, blocksize=int(SR * 0.1)):
+        while not state.stop.is_set():
+            time.sleep(0.1)
+    state.audio_q.put(None)
+
+
+def _run_from_wav(state: "SessionState", args):
+    """WAVファイルを擬似ライブで送信する.
+
+    Reactive WAV: agentが発話中はWAV再生・ASR送信を一時停止し、
+    介入終了後に自動再開する。
+    """
+    import librosa
+    agent = state.agent
+    y, _ = librosa.load(args.wav, sr=SR)
+    step = int(SR * 0.12)
+    out = mic = None
+    if args.play or args.join:
+        import sounddevice as sd
+        out = sd.OutputStream(samplerate=SR, channels=1, dtype="float32")
+        out.start()
+    if args.join:
+        import sounddevice as sd
+        mic = sd.InputStream(samplerate=SR, channels=1, dtype="float32", blocksize=step)
+        mic.start()
+    i = 0
+    _wav_paused = False
+    while not state.stop.is_set():
+        if agent is not None and (agent.ai_speaking or agent._responding):
+            if not _wav_paused:
+                _wav_paused = True
+                print("# WAV: AI介入中 — 再生を一時停止", flush=True)
+            time.sleep(0.05)
+            continue
+        if _wav_paused:
+            _wav_paused = False
+            print("# WAV: 再生を再開", flush=True)
+        chunk = np.clip(y[i:i + step], -1, 1).astype("float32") if i < len(y) else \
+            np.zeros(0, dtype="float32")
+        if len(chunk) < step:
+            chunk = np.pad(chunk, (0, step - len(chunk)))
+        i += step
+        if i - step >= len(y) and mic is None:
+            break
+        if mic is not None:
+            mdata, _ = mic.read(step)
+            mix = np.clip(chunk + mdata[:, 0], -1, 1)
+        else:
+            mix = chunk
+        state.audio_q.put((mix * 32767).astype("<i2").tobytes())
+        if out is not None:
+            out.write(chunk.reshape(-1, 1))
+            if mic is None:
+                continue
+        if mic is None and out is None:
+            time.sleep(0.12)
+    for s in (out, mic):
+        if s is not None:
+            s.stop()
+            s.close()
+    state.audio_q.put(None)
+
+
 class SessionState:
     """main()内の共有状態を集約するコンテナ.
 
@@ -2033,6 +2417,9 @@ class SessionState:
         # 論点
         self.topics: list[dict] = []
         self.topics_lock = threading.Lock()
+        self.topic_cursor = 0
+        self._TOPIC_WINDOW = 10
+        self._TOPIC_TRIGGER = 5
 
         # PCMバッファ
         self.pcm_buf = bytearray()
@@ -2048,6 +2435,7 @@ class SessionState:
         # エージェントワーカー状態
         self._last_utt_time = [time.monotonic()]
         self._was_in_echo = [False]
+        self.agent_cursor = 0
 
     # ------------------------------------------------------------------
     # 表示ヘルパー
@@ -2556,287 +2944,19 @@ def main(argv=None):
     def print_line(text: str):
         _print_line(text)
 
-    # --- 論点抽出（非同期バックグラウンド処理）---
-    _topic_cursor = 0
-    _TOPIC_WINDOW = 10
-    _TOPIC_TRIGGER = 5
+    # --- 論点抽出 ---
     _oai_key = os.environ.get("OPENAI_API_KEY", "")
     _oai_model = os.environ.get("OPENAI_MODEL_FAST", "gpt-5-mini")
 
-    def _topic_worker():
-        nonlocal _topic_cursor
-        while not stop.is_set():
-            time.sleep(3)
-            if not _oai_key:
-                continue
-            with state_lock:
-                talk_rs = [r for r in records if "speaker" in r and r.get("text")]
-            n = len(talk_rs)
-            if n - _topic_cursor < _TOPIC_TRIGGER:
-                continue
-            # 直近ウィンドウを取得
-            window = talk_rs[max(0, n - _TOPIC_WINDOW):]
-            utts = [{"speaker": disp_name(r["speaker"]), "text": r["text"]} for r in window]
-            with topics_lock:
-                existing = [t["topic"] for t in topics]
-            new_topics = _extract_topics(utts, existing, _oai_key, _oai_model)
-            if new_topics:
-                ms = window[-1].get("ms")
-                with topics_lock:
-                    for t in new_topics:
-                        if isinstance(t, dict) and "topic" in t:
-                            topics.append({"topic": t["topic"],
-                                           "speaker": t.get("speaker", "?"),
-                                           "ms": ms})
-                save()
-                for t in new_topics:
-                    if isinstance(t, dict) and "topic" in t:
-                        print_line(f"# 💡論点: {t['topic']}（{t.get('speaker', '?')}）")
-            _topic_cursor = n
-
-    # --- AIエージェント: コールバック + ワーカースレッド ---
-    def _on_agent_text(text: str):
-        """E: AIの生成テキストをrecordsに直接挿入（STTバイパス）."""
-        with state_lock:
-            records.append({"ms": None, "end_ms": None,
-                            "speaker": AGENT_SPEAKER, "text": text.strip()})
-            color_of(AGENT_SPEAKER)
-        if ON_UTTERANCE is not None:
-            try:
-                ON_UTTERANCE("ファシリテーター", text.strip())
-            except Exception:
-                pass
-        print_line(f"\x1b[96m[ファシリテーター]\x1b[0m: {text.strip()}")
-        save()
-
-    _agent_cursor = 0
-    _last_utt_time = state._last_utt_time   # mutableリスト（エイリアス）
-    _was_in_echo = state._was_in_echo       # mutableリスト（エイリアス）
-    # --- 相槌判定: Partnerへの割り込みをフィルタ ---
-    # 相槌パターンに一致する発話ではPartnerを止めない。
-    # 文字数ではなく意味で判定する（「止めて」は3文字だが割り込み、
-    # 「はい、はい、はい」は9文字だが相槌）。
-    _BACKCHANNEL_RE = re.compile(
-        r'^[\s、。,.!?！？]*'
-        r'('
-        r'うん|ふん|ふーん|へー|ほー|おー|あー|えー'
-        r'|はい|ええ|そう|そっか|そうだね|そうですね|そうですか'
-        r'|なるほど|確かに|分かる|わかる|分かります|わかりました'
-        r'|了解|オッケー|OK'
-        r')'
-        r'[\s、。,.!?！？うんはいええそっかなるほど確かに]*$',
-        re.IGNORECASE,
-    )
-    _INTERRUPT_MIN_CHARS = 8              # ファシリテーター割り込みの最小文字数
-
-    def _agent_worker():
-        """バックグラウンドでAI応答のトリガーを管理（ターンテイキング）.
-
-        自然な会話のフロア交代を模倣:
-          - 人間のターン: 発話を即座にfeed、沈黙で譲渡 → AIがtrigger
-          - AIのターン: 応答を再生。人間の実質的な発話で自動interrupt
-          - AIターン終了: フロアを人間に返す（沈黙タイマーをリセット）
-
-        これにより、AI発話中に溜まったリアクションが即座にチェーン応答を
-        引き起こすのを防ぎ、人間が被せて話せばAIが止まる。
-        """
-        nonlocal _agent_cursor
-        _diag_tick = 0
-        while not stop.is_set():
-            time.sleep(0.5)
-            _diag_tick += 1
-            if agent is None or not agent._connected or not agent.enabled:
-                if _diag_tick % 20 == 0:  # 10秒ごと
-                    print(f"# [diag] _agent_worker skip: agent={agent is not None}"
-                          f" conn={agent._connected if agent else '?'}"
-                          f" enabled={agent.enabled if agent else '?'}", flush=True)
-                continue
-            with state_lock:
-                _skip = {AGENT_SPEAKER, "パートナー"}
-                talk_rs = [r for r in records
-                           if "speaker" in r and r.get("text")
-                           and r.get("speaker") not in _skip]
-            n = len(talk_rs)
-            if n > _agent_cursor:
-                _last_utt_time[0] = time.monotonic()
-                new_texts = [r.get("text", "") for r in talk_rs[_agent_cursor:]]
-                for r in talk_rs[_agent_cursor:]:
-                    agent.feed(disp_name(r.get("speaker", "")), r.get("text", ""))
-                _agent_cursor = n
-                # --- 自動割り込み ---
-                # ファシリテーター: 文字数ベース（従来通り）
-                _human_spoke = any(len(t.strip()) > _INTERRUPT_MIN_CHARS
-                                   for t in new_texts)
-                if _human_spoke and agent.ai_speaking:
-                    agent.interrupt()
-                # Partner: 相槌判定（相槌ではPartnerを止めない）
-                # server VADの代替なので、本気の発言のみで割り込む。
-                if partner is not None and (partner.ai_speaking or partner._responding):
-                    _real_utterances = [t.strip() for t in new_texts
-                                        if t.strip()
-                                        and not _BACKCHANNEL_RE.match(t.strip())]
-                    if _real_utterances:
-                        partner.interrupt()
-                        # 人間の新しい発話をPartnerに注入し、応答を要求
-                        # （中断前の続きではなく、新しい質問に答えさせる）
-                        for i, utt in enumerate(_real_utterances):
-                            is_last = (i == len(_real_utterances) - 1)
-                            partner.inject_context(
-                                "人間", utt,
-                                request_response=is_last)
-            # --- ファシリテーター優先: on_speech_startで音声到達の瞬間に停止 ---
-            # _agent_workerでの_respondingベース先行停止は削除。
-            # response.create直後に止めるとファシリテーター音声到達まで
-            # 不自然な無音が生じるため、on_speech_start一本化とした。
-            # ai_speakingチェックはバックアップ（on_speech_startが失敗した場合）
-            if (partner is not None
-                    and (partner.ai_speaking or partner._responding)
-                    and agent is not None
-                    and agent.ai_speaking):
-                partner.interrupt()
-            # エコーウィンドウ中はtriggerしない（フィードバックループ防止）
-            if agent is not None and agent.in_echo_window:
-                _was_in_echo[0] = True
-                continue
-            # Partnerが発話中はtriggerしない（議論の途中で割り込まない）
-            # ※ ai_speaking/_respondingのみチェック。echo cooldownは含めない。
-            #   cooldownまで含めると人間がPartnerに割り込んだ後に沈黙が生じる。
-            if partner is not None and (partner.ai_speaking or partner._responding):
-                _was_in_echo[0] = True
-                continue
-            # --- フロア返却: エコーウィンドウ終了時に沈黙タイマーをリセット ---
-            # AIのターンが終わり、フロアを人間に返す。溜まったリアクションは
-            # 即座にtriggerせず、人間が新たに話すか一定の沈黙を待つ。
-            if _was_in_echo[0]:
-                _was_in_echo[0] = False
-                _last_utt_time[0] = time.monotonic()
-            # モード別トリガー判定
-            if _diag_tick % 20 == 0:  # 10秒ごとの診断ログ
-                _elapsed = time.monotonic() - _last_utt_time[0]
-                print(f"# [diag] agent: mode={agent.mode} pending={agent.pending_count}"
-                      f" trigger_n={agent.trigger_n} responding={agent._responding}"
-                      f" silence={_elapsed:.1f}s echo={agent.in_echo_window}"
-                      f" partner_talk={partner.ai_speaking if partner else '?'}", flush=True)
-            if agent.mode == "conversation":
-                # 沈黙ベース: 最後の発話から一定時間経過でまとめてtrigger
-                if (agent.pending_count > 0
-                        and time.monotonic() - _last_utt_time[0] > _AGENT_CONV_SILENCE):
-                    agent.trigger()
-            else:
-                # ファシリテーター: N発話蓄積 or 沈黙
-                _silence_thresh = (_AGENT_DEBATE_SILENCE if partner is not None
-                                   else _AGENT_SILENCE)
-                if agent.pending_count >= agent.trigger_n:
-                    print(f"# [diag] TRIGGER by count: {agent.pending_count}>={agent.trigger_n}", flush=True)
-                    agent.trigger()
-                elif (agent.pending_count > 0
-                      and time.monotonic() - _last_utt_time[0] > _silence_thresh):
-                    print(f"# [diag] TRIGGER by silence: {time.monotonic() - _last_utt_time[0]:.1f}s > {_silence_thresh}s", flush=True)
-                    agent.trigger()
+    # --- AIエージェント: コールバック ---
+    _on_agent_text = _on_agent_text_factory(state)
 
     # --- UIサーバー（ブラウザからの話者リネーム用）---
     _httpd = None
     if _serve:
-        from http.server import HTTPServer, BaseHTTPRequestHandler
-
-        class _Handler(BaseHTTPRequestHandler):
-            def do_GET(self):
-                if self.path == "/" or self.path.startswith("/?"):
-                    try:
-                        with open(html_path, "rb") as f:
-                            content = f.read()
-                        self.send_response(200)
-                        self.send_header("Content-Type", "text/html; charset=utf-8")
-                        self.end_headers()
-                        self.wfile.write(content)
-                    except FileNotFoundError:
-                        self.send_response(200)
-                        self.send_header("Content-Type", "text/html; charset=utf-8")
-                        self.end_headers()
-                        self.wfile.write("<p>準備中…</p>".encode())
-                else:
-                    self.send_error(404)
-
-            def do_POST(self):
-                if self.path == "/rename":
-                    length = int(self.headers.get("Content-Length", 0))
-                    body = json.loads(self.rfile.read(length))
-                    label = str(body.get("label", ""))
-                    name = str(body.get("name", ""))
-                    if not label or not name:
-                        self._json(400, {"error": "label と name を指定してください"})
-                        return
-                    if tracker is not None:
-                        old = tracker.enroll(label, name)
-                        if old is None:
-                            self._json(400, {"error": f"話者{label}の音声がまだ足りません"})
-                            return
-                        rekey(old, name)
-                        add_sys(None, f"「{name}」の声を登録（次回の会議から自動表示）")
-                        save()
-                        print_line(f"# {name} の声を登録しました（UIから）")
-                    else:
-                        with state_lock:
-                            names["#" + label] = name
-                        save()
-                        print_line(f"# 話者{label} → {name}（UIから）")
-                    self._json(200, {"ok": True, "name": name})
-                elif self.path == "/activate":
-                    length = int(self.headers.get("Content-Length", 0))
-                    body = json.loads(self.rfile.read(length))
-                    name = str(body.get("name", ""))
-                    active = bool(body.get("active", True))
-                    if not name:
-                        self._json(400, {"error": "name を指定してください"})
-                        return
-                    if tracker is None:
-                        self._json(400, {"error": "声紋照合が無効です"})
-                        return
-                    if active:
-                        merged = tracker.activate(name)
-                        if merged is not None:
-                            rekey(merged, name)
-                            add_sys(None, f"「{name}」を有効化（{merged}と統合）")
-                            print_line(f"# {name} を有効化（{merged}と統合、UIから）")
-                        else:
-                            print_line(f"# {name} を有効化（UIから）")
-                        save()
-                    else:
-                        tracker.deactivate(name)
-                        print_line(f"# {name} を無効化（UIから）")
-                        save()
-                    self._json(200, {"ok": True, "name": name, "active": active})
-                elif self.path == "/agent":
-                    length = int(self.headers.get("Content-Length", 0))
-                    body = json.loads(self.rfile.read(length))
-                    if agent is None:
-                        self._json(400, {"error": "AIエージェントが無効です（--agent で起動してください）"})
-                        return
-                    mode = body.get("mode")
-                    voice = body.get("voice")
-                    trigger_n = body.get("trigger_n")
-                    if trigger_n is not None:
-                        trigger_n = int(trigger_n)
-                    agent.apply_config(mode=mode, voice=voice, trigger_n=trigger_n)
-                    print_line(f"# AI Agent 設定変更: mode={agent.mode} voice={agent.voice}"
-                               f" trigger={agent.trigger_n}（UIから）")
-                    save()   # HTMLを即時更新（meta-refreshで古い状態が表示されるのを防止）
-                    self._json(200, {"ok": True, "mode": agent.mode,
-                                     "voice": agent.voice, "trigger_n": agent.trigger_n})
-                else:
-                    self.send_error(404)
-
-            def _json(self, code, data):
-                self.send_response(code)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps(data, ensure_ascii=False).encode())
-
-            def log_message(self, format, *args):
-                pass
-
+        from http.server import HTTPServer
         try:
-            _httpd = HTTPServer(("127.0.0.1", args.port), _Handler)
+            _httpd = HTTPServer(("127.0.0.1", args.port), _UIHandler.create(state))
             threading.Thread(target=_httpd.serve_forever, daemon=True).start()
         except OSError as e:
             print(f"# 警告: UIサーバーをポート{args.port}で起動できません ({e})", flush=True)
@@ -2845,82 +2965,7 @@ def main(argv=None):
 
 
     # --- 音声入力（マイク or ファイル）→ audio_q ---
-    def from_mic():
-        import sounddevice as sd
-
-        def cb(indata, frames, t, status):
-            pcm = (np.clip(indata[:, 0], -1, 1) * 32767).astype("<i2").tobytes()
-            audio_q.put(pcm)
-            # --debate: マイク音声をConversationPartnerにも送信
-            # 以下の間は送らない（スピーカー音声のマイク回り込み→自己割り込み防止）:
-            # - Partner自身が話している間＋直後のエコー残響
-            # - ファシリテーターが話している間＋直後のエコー残響
-            if (partner is not None and partner._connected
-                    and not partner.in_echo_window
-                    and not (agent is not None and agent.in_echo_window)):
-                partner.feed_audio(pcm)
-        with sd.InputStream(samplerate=SR, channels=1, dtype="float32",
-                            device=args.device, callback=cb, blocksize=int(SR * 0.1)):
-            while not stop.is_set():
-                time.sleep(0.1)
-        audio_q.put(None)
-
-    def from_wav():
-        """WAVファイルを擬似ライブで送信する.
-
-        Reactive WAV: agentが発話中はWAV再生・ASR送信を一時停止し、
-        介入終了後に自動再開する。これにより「同時に喋る」問題を解消。
-        """
-        import librosa
-        y, _ = librosa.load(args.wav, sr=SR)
-        step = int(SR * 0.12)
-        out = mic = None
-        if args.play or args.join:
-            import sounddevice as sd
-            out = sd.OutputStream(samplerate=SR, channels=1, dtype="float32")
-            out.start()
-        if args.join:
-            import sounddevice as sd
-            mic = sd.InputStream(samplerate=SR, channels=1, dtype="float32", blocksize=step)
-            mic.start()
-        i = 0
-        _wav_paused = False
-        while not stop.is_set():
-            # --- Reactive WAV: AI発話中はWAV再生を一時停止 ---
-            if agent is not None and (agent.ai_speaking or agent._responding):
-                if not _wav_paused:
-                    _wav_paused = True
-                    print("# WAV: AI介入中 — 再生を一時停止", flush=True)
-                time.sleep(0.05)
-                continue
-            if _wav_paused:
-                _wav_paused = False
-                print("# WAV: 再生を再開", flush=True)
-            # --- 通常のWAV送信 ---
-            chunk = np.clip(y[i:i + step], -1, 1).astype("float32") if i < len(y) else \
-                np.zeros(0, dtype="float32")
-            if len(chunk) < step:
-                chunk = np.pad(chunk, (0, step - len(chunk)))
-            i += step
-            if i - step >= len(y) and mic is None:
-                break   # wav終了(参加モードでなければここで終わり)
-            if mic is not None:
-                mdata, _ = mic.read(step)        # マイク読みが実時間ペースを刻む
-                mix = np.clip(chunk + mdata[:, 0], -1, 1)
-            else:
-                mix = chunk
-            audio_q.put((mix * 32767).astype("<i2").tobytes())
-            if out is not None:
-                out.write(chunk.reshape(-1, 1))   # 自分の声は再生しない(ハウリング防止)
-                if mic is None:
-                    continue                       # 再生がペースを刻む
-            if mic is None and out is None:
-                time.sleep(0.12)
-        for s in (out, mic):
-            if s is not None:
-                s.stop()
-                s.close()
-        audio_q.put(None)
+    # from_mic / from_wav は _run_from_mic(state, device) / _run_from_wav(state, args) に抽出済み
 
     # --- 実行中コマンド ---
     def key_of(tok: str) -> str:
@@ -2932,40 +2977,7 @@ def main(argv=None):
                 return tracker.sp_map[tok]
         return "#" + tok
 
-    def stdin_commands():
-        while not stop.is_set():
-            try:
-                line = input()
-            except (EOFError, KeyboardInterrupt):
-                break
-            mfix = re.match(r"^\s*fix\s+(\S+)\s*=\s*(\S+)\s*$", line)
-            m = re.match(r"^\s*(\S+?)\s*=\s*(.+?)\s*$", line)
-            if mfix:
-                src, dst = key_of(mfix.group(1)), key_of(mfix.group(2))
-                if tracker is not None:
-                    tracker.remap(src, dst)
-                rekey(src, dst)
-                add_sys(None, f"{disp_name(src)} を {disp_name(dst)} に統合（手動fix）")
-                save()
-                print_line(f"# {disp_name(src)} を {disp_name(dst)} に統合しました（過去の発言も修正済み）")
-            elif m:
-                label, name = m.group(1), m.group(2)
-                if tracker is not None:
-                    old = tracker.enroll(label, name)
-                    if old is None:
-                        print_line(f"# 話者{label}の音声がまだ足りません（1秒以上話してから再実行）")
-                        continue
-                    rekey(old, name)
-                    add_sys(None, f"「{name}」の声を登録（次回の会議から自動表示）")
-                    save()
-                    print_line(f"# {name} の声を登録しました（過去の発言も置換、次回の会議から自動表示）")
-                else:
-                    with state_lock:
-                        names["#" + label] = name
-                    save()
-                    print_line(f"# 話者{label} → {name}（過去の発言も置換済み）")
-            elif line.strip():
-                print_line("# コマンド: 「1=松井」(声を登録) / 「fix 2=1」「fix 人物2=人物1」(統合) / Ctrl+Cで終了")
+    # stdin_commands は _run_stdin_commands(state) に抽出済み
 
     if args.simulate and args.debate:
         raise SystemExit("--simulate と --debate は同時に使えません")
@@ -3009,10 +3021,17 @@ def main(argv=None):
             simulator.start(audio_q, stop, play_audio=True)
             print(f"# Simulator: 議論を自動生成中（議題: {args.simulate}）", flush=True)
         else:
-            threading.Thread(target=from_wav if args.wav else from_mic, daemon=True).start()
-        threading.Thread(target=stdin_commands, daemon=True).start()
+            if args.wav:
+                threading.Thread(target=_run_from_wav, args=(state, args),
+                                 daemon=True).start()
+            else:
+                threading.Thread(target=_run_from_mic, args=(state, args.device),
+                                 daemon=True).start()
+        threading.Thread(target=_run_stdin_commands, args=(state,),
+                         daemon=True).start()
         if _oai_key:
-            threading.Thread(target=_topic_worker, daemon=True).start()
+            threading.Thread(target=_run_topic_worker,
+                            args=(state, _oai_key, _oai_model), daemon=True).start()
             print("# 論点抽出: 有効（5発話ごとにLLMで分析）", flush=True)
         else:
             print("# 論点抽出: 無効（OPENAI_API_KEYが未設定）", flush=True)
@@ -3041,7 +3060,8 @@ def main(argv=None):
             else:
                 agent.on_ai_utterance = _on_agent_text
             agent.connect()
-            threading.Thread(target=_agent_worker, daemon=True).start()
+            threading.Thread(target=_run_agent_worker, args=(state,),
+                             daemon=True).start()
             print(f"# AI Agent: mode={agent.mode} voice={agent.voice}"
                   f" trigger={agent.trigger_n}（ブラウザから変更可能）", flush=True)
 
@@ -3057,7 +3077,7 @@ def main(argv=None):
                 save()
                 # パートナー発話も沈黙タイマーをリセット
                 # （議論が続いている間はファシリテーターが割り込まない）
-                _last_utt_time[0] = time.monotonic()
+                state._last_utt_time[0] = time.monotonic()
                 # ファシリテーターにPartnerの発言を文脈として共有
                 # （trigger_nカウントには含めない — 人間の発話のみでトリガー判定）
                 if agent is not None:
