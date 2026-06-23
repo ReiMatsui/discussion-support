@@ -3,6 +3,10 @@ from __future__ import annotations
 
 import json
 import sys
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ._session_state import SessionState
 
 from ._constants import CLEAR_LINE
 
@@ -25,7 +29,7 @@ class _UIHandler:
     """
 
     @staticmethod
-    def create(state: "SessionState") -> type:
+    def create(state: SessionState) -> type:
         """state を束縛した BaseHTTPRequestHandler サブクラスを返す."""
         from http.server import BaseHTTPRequestHandler
 

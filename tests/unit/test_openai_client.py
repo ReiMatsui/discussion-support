@@ -361,7 +361,7 @@ async def test_chat_records_cost_when_tracker_attached() -> None:
 async def test_chat_raises_when_hard_budget_exceeded_pre_call() -> None:
     """``check_before_call`` で hard budget 超過なら API を呼ばずに止める。"""
 
-    from das.llm import BudgetExceeded, CostTracker
+    from das.llm import BudgetExceededError, CostTracker
 
     create = AsyncMock(return_value=_completion_response("ok"))
     fake = _fake_async_client(create=create)
@@ -370,7 +370,7 @@ async def test_chat_raises_when_hard_budget_exceeded_pre_call() -> None:
     tracker._total = 1.0  # type: ignore[attr-defined]
     client = OpenAIClient(client=fake, cost_tracker=tracker)
 
-    with pytest.raises(BudgetExceeded):
+    with pytest.raises(BudgetExceededError):
         await client.chat([{"role": "user", "content": "hi"}], model="gpt-5-mini")
     # API は呼ばれない
     create.assert_not_awaited()

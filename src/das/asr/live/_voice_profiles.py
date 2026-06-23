@@ -8,11 +8,11 @@ import threading
 import time
 import unicodedata
 from difflib import SequenceMatcher
+from typing import ClassVar
 
 import numpy as np
 
 from ._constants import SR
-
 
 # ---------- リサンプル（AI声紋登録用） ----------
 
@@ -99,10 +99,10 @@ class VoiceProfiles:
     # redimnet: Interspeech 2024。本プールで最良の分離(+0.10)・27ms級・5M params
     # (即時判定th, 合流dedupe, 一貫性consist)。dedupeは三発話プロファイル同士の比較なので
     # 単発より高め（2026-06-11夜: 0.30→巻き取り復活/個人別→本人分裂のため固定の中庸値に）
-    DEFAULTS = {"resemblyzer": (0.75, 0.72, 0.62), "ecapa": (0.35, 0.40, 0.30),
-                "redimnet": (0.42, 0.50, 0.34)}
+    DEFAULTS: ClassVar[dict] = {"resemblyzer": (0.75, 0.72, 0.62), "ecapa": (0.35, 0.40, 0.30),
+                                "redimnet": (0.42, 0.50, 0.34)}
     # AI声紋判定用の閾値（人間より高め — TTS音声はスピーカー経由でも特徴が明瞭）
-    AI_THRESH = {"resemblyzer": 0.80, "ecapa": 0.42, "redimnet": 0.50}
+    AI_THRESH: ClassVar[dict] = {"resemblyzer": 0.80, "ecapa": 0.42, "redimnet": 0.50}
 
     def __init__(self, path: str = "voices.json", thresh: float | None = None,
                  min_sec: float = 1.0, margin: float = 0.05, auto: bool = True,
@@ -119,7 +119,7 @@ class VoiceProfiles:
                     return enc.encode_batch(torch.from_numpy(wav).float().unsqueeze(0)).squeeze().numpy()
             self._embed_raw = _embed_raw
         elif model == "redimnet":
-            import torch   # 初回はGitHubからコード＋重み(20MB)をダウンロード
+            import torch  # 初回はGitHubからコード＋重み(20MB)をダウンロード
             enc = torch.hub.load("IDRnD/ReDimNet", "ReDimNet", model_name="b2",
                                  train_type="ft_lm", dataset="vox2", trust_repo=True)
             enc.eval()
@@ -231,10 +231,10 @@ class VoiceProfiles:
                 th, dd, cs = self.thresh, self.dedupe, self.consist
                 # AI声紋は通常の話者ランキングから分離（margin/dedupeへの干渉を防ぐ）
                 # __AI__ (ファシリテーター) と __PARTNER__ (会話相手) の両方を対象
-                _AI_KEYS = {k for k in self._active_keys if k.startswith("__") and k.endswith("__")}
+                _ai_keys = {k for k in self._active_keys if k.startswith("__") and k.endswith("__")}
                 active = {k: v for k, v in self.profiles.items()
-                          if k in self._active_keys and k not in _AI_KEYS}
-                ai_profs = {k: self.profiles[k] for k in _AI_KEYS if k in self.profiles}
+                          if k in self._active_keys and k not in _ai_keys}
+                ai_profs = {k: self.profiles[k] for k in _ai_keys if k in self.profiles}
                 info = {"n_prof": len(active), "n_all": len(self.profiles)}   # 診断ログ用
                 # ① AI声紋の先行チェック（エコー除去用 — 人間より高い閾値）
                 if ai_profs:

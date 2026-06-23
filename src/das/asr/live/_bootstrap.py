@@ -13,15 +13,9 @@ import os
 import threading
 from dataclasses import dataclass
 
-from das.asr.live._constants import OPENAI_API, SR, _TOPIC_PROMPT
-from das.asr.live.agents._partner import ConversationPartner
-from das.asr.live.agents._simulator import DiscussionSimulator
-from das.asr.live.agents._realtime import RealtimeAgent
+from das.asr.live._constants import _TOPIC_PROMPT, OPENAI_API, SR
 from das.asr.live._recv_loop import RecvLoop
 from das.asr.live._session_state import SessionState
-from das.asr.live.stt import STTBackend
-from das.asr.live.stt._soniox import SonioxBackend
-from das.asr.live.stt._speechmatics import SpeechmaticsBackend
 from das.asr.live._ui import _UIHandler
 from das.asr.live._voice_profiles import VoiceProfiles
 from das.asr.live._workers import (
@@ -35,7 +29,12 @@ from das.asr.live._workers import (
     _run_stdin_commands,
     _run_topic_worker,
 )
-
+from das.asr.live.agents._partner import ConversationPartner
+from das.asr.live.agents._realtime import RealtimeAgent
+from das.asr.live.agents._simulator import DiscussionSimulator
+from das.asr.live.stt import STTBackend
+from das.asr.live.stt._soniox import SonioxBackend
+from das.asr.live.stt._speechmatics import SpeechmaticsBackend
 
 # ---------------------------------------------------------------------------
 # CLI引数をまとめるデータクラス（argparse.Namespace の代替）
@@ -166,8 +165,8 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
 
     try:
         from websockets.sync.client import connect
-    except ImportError:
-        raise SystemExit("uv add websockets を実行してください")
+    except ImportError as exc:
+        raise SystemExit("uv add websockets を実行してください") from exc
 
     started = datetime.datetime.now()
     if args.out:
@@ -225,7 +224,7 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
 
     # --- WAVストリーミング書き出し ---
     try:
-        state.pcm_file = open(wav_path, "wb")
+        state.pcm_file = open(wav_path, "wb")  # noqa: SIM115
         import struct as _struct
         state.pcm_file.write(b"RIFF" + _struct.pack("<I", 0) + b"WAVEfmt " +
                               _struct.pack("<IHHIIHH", 16, 1, 1, SR, SR * 2, 2, 16) +

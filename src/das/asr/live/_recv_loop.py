@@ -3,8 +3,15 @@ from __future__ import annotations
 
 import json
 import time
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from ._session_state import SessionState
+    from .stt import STTBackend
+
+import contextlib
 
 from ._constants import RESET, fmt_ts
 from ._ui import _print_line
@@ -22,7 +29,7 @@ class RecvLoop:
     _FLUSH_SOFT_CHARS = 500   # この文字数を超えたら文の切れ目でflush
     _FLUSH_HARD_CHARS = 1000  # この文字数を超えたら問答無用で強制flush
 
-    def __init__(self, state: "SessionState", args, backend: "STTBackend"):
+    def __init__(self, state: SessionState, args, backend: STTBackend):
         self.state = state
         self.args = args
         self.backend = backend
@@ -36,8 +43,8 @@ class RecvLoop:
     def overlaps_other(self, start, end, label) -> bool:
         if start is None or end is None:
             return False
-        return any(l != label and min(e, end) - max(s, start) > 0
-                   for s, e, l in self.recent_segs)
+        return any(lbl != label and min(e, end) - max(s, start) > 0
+                   for s, e, lbl in self.recent_segs)
 
     def flush(self):
         from das.asr.live import ON_UTTERANCE
@@ -134,10 +141,8 @@ class RecvLoop:
                               **rec_extra})
             c = s.color_of(sp_id)
         if ON_UTTERANCE is not None:
-            try:
+            with contextlib.suppress(Exception):
                 ON_UTTERANCE(s.disp_name(sp_id), self.cur_text.strip())
-            except Exception:
-                pass
         _print_line(f"{c}[{fmt_ts(self.cur_ms)}] {s.disp_name(sp_id)}{RESET}: {self.cur_text.strip()}")
         s.save()
         self.cur_text = ""
@@ -181,10 +186,10 @@ class RecvLoop:
                 # --- 強制flush ---
                 if self.cur_text:
                     clen = len(self.cur_text)
-                    if (time.monotonic() - self.cur_last_token_time > self._FLUSH_TIMEOUT
-                            or clen > self._FLUSH_HARD_CHARS):
-                        self.flush()
-                    elif clen > self._FLUSH_SOFT_CHARS and self.cur_text.rstrip()[-1:] in "。？！.?!\n":
+                    if ((time.monotonic() - self.cur_last_token_time > self._FLUSH_TIMEOUT
+                            or clen > self._FLUSH_HARD_CHARS)
+                            or (clen > self._FLUSH_SOFT_CHARS
+                                and self.cur_text.rstrip()[-1:] in "。？！.?!\n")):
                         self.flush()
                 self.state.show_partial(partial_sp if partial else self.cur_speaker,
                                         self.cur_text + partial)

@@ -3,17 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 
 import pytest
 
 from das.llm.cost import (
     PRICING,
-    BudgetExceeded,
+    BudgetExceededError,
     CostTracker,
     ModelPricing,
     resolve_pricing,
 )
-
 
 # --- ModelPricing -----------------------------------------------------
 
@@ -95,10 +95,10 @@ def test_tracker_soft_budget_does_not_raise_but_flags_skip() -> None:
 
 
 def test_tracker_hard_budget_raises_when_exceeded() -> None:
-    """hard budget 超過時のみ BudgetExceeded を raise。"""
+    """hard budget 超過時のみ BudgetExceededError を raise。"""
 
     t = CostTracker(hard_budget_usd=1e-3)
-    with pytest.raises(BudgetExceeded):
+    with pytest.raises(BudgetExceededError):
         t.record("gpt-5-mini", 1000, 500)
 
 
@@ -112,7 +112,7 @@ def test_tracker_soft_and_hard_combined() -> None:
     assert t.should_skip_new_run()
     assert not t.is_over_hard_budget()
     # 2 回目: 追加 $0.0012 → 累計 $0.0024 で hard 超過、raise する
-    with pytest.raises(BudgetExceeded):
+    with pytest.raises(BudgetExceededError):
         t.record("gpt-5-mini", 1000, 500)
 
 
@@ -132,9 +132,9 @@ def test_tracker_check_before_call_only_raises_for_hard() -> None:
     t_soft.check_before_call()  # raise しない
     # hard だけ → 超過すると raise
     t_hard = CostTracker(hard_budget_usd=1e-3)
-    with pytest.raises(BudgetExceeded):
+    with pytest.raises(BudgetExceededError):
         t_hard.record("gpt-5-mini", 1000, 500)
-    with pytest.raises(BudgetExceeded):
+    with pytest.raises(BudgetExceededError):
         t_hard.check_before_call()
 
 
@@ -208,17 +208,15 @@ async def test_tracker_safe_under_concurrent_record() -> None:
 
 
 async def test_tracker_concurrent_hard_budget_exceeded() -> None:
-    """並列 record で hard budget を超えたら BudgetExceeded が伝播する。"""
+    """並列 record で hard budget を超えたら BudgetExceededError が伝播する。"""
 
     # 1 call で $0.00012 程度。hard $0.0005 なら 4-5 回で超える
     t = CostTracker(hard_budget_usd=5e-4)
     n_tasks = 50
 
     async def _bump() -> None:
-        try:
+        with contextlib.suppress(BudgetExceededError):
             t.record("gpt-5-mini", 100, 50)
-        except BudgetExceeded:
-            pass  # 最初に超えたタスク以降は止まる
 
     await asyncio.gather(*[_bump() for _ in range(n_tasks)])
     # 全 task が実行されるが、hard budget は最終的に超過状態

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import collections
+import contextlib
 import json
 import queue
 import threading
@@ -17,7 +18,7 @@ from .._constants import (
     AGENT_VOICES,
     REALTIME_URL,
 )
-from .._voice_profiles import VoiceProfiles, _resample_24_to_16, _best_text_similarity
+from .._voice_profiles import VoiceProfiles, _best_text_similarity, _resample_24_to_16
 
 
 class RealtimeAgent:
@@ -55,7 +56,7 @@ class RealtimeAgent:
         self._pending: list[dict] = []     # 送信待ち発話
         self.ai_speaking = False           # AI音声再生中フラグ
         self._ai_text_buf = ""             # ストリーミング転写バッファ
-        self._audio_q: "queue.Queue[bytes | None]" = queue.Queue()  # ストリーミング再生用
+        self._audio_q: queue.Queue[bytes | None] = queue.Queue()  # ストリーミング再生用
         self._connected = False
         self._conn_error = ""              # 接続エラーメッセージ（UI表示用）
         self.on_ai_utterance = None        # callback(text: str) AI発話確定時
@@ -71,7 +72,7 @@ class RealtimeAgent:
         self._current_item_id: str | None = None    # 現在の応答のoutput item ID
         self._played_bytes = 0                       # 再生スレッドが出力したPCMバイト数
         # --- AI声紋登録用 ---
-        self._voice_tracker: "VoiceProfiles | None" = None  # set_tracker()で外部から注入
+        self._voice_tracker: VoiceProfiles | None = None  # set_tracker()で外部から注入
         self._ai_voice_buf: list[np.ndarray] = []   # 16kHz float32 チャンク
         self._ai_voice_sec = 0.0                     # 蓄積秒数
         self._ai_voice_enrolled = False              # 登録済みフラグ
@@ -91,7 +92,7 @@ class RealtimeAgent:
     def enabled(self) -> bool:
         return self.mode != "off"
 
-    def set_tracker(self, tracker: "VoiceProfiles"):
+    def set_tracker(self, tracker: VoiceProfiles):
         """VoiceProfilesを外部から注入。connect()の前後いつでも可。"""
         self._voice_tracker = tracker
 
@@ -255,10 +256,8 @@ class RealtimeAgent:
             if chunk:
                 # 音声生成開始を即座に通知（Partner停止用）
                 if not self.ai_speaking and self.on_speech_start:
-                    try:
+                    with contextlib.suppress(Exception):
                         self.on_speech_start()
-                    except Exception:
-                        pass
                 self._audio_q.put(base64.b64decode(chunk))
                 self.ai_speaking = True
 
@@ -385,7 +384,7 @@ class RealtimeAgent:
                 print("# AI Agent: 介入内容を破棄（再試行上限に達した）", flush=True)
         # --- Graceful yield: キュー内の音声を少しだけ残して自然に終了 ---
         # 24kHz 16bit PCM = 48000 bytes/sec → 300ms ≒ 14400 bytes
-        _YIELD_KEEP_BYTES = 14400
+        _yield_keep_bytes = 14400
         played = self._played_bytes
         kept_bytes = 0
         kept_chunks: list[bytes] = []
@@ -394,7 +393,7 @@ class RealtimeAgent:
                 chunk = self._audio_q.get_nowait()
             except queue.Empty:
                 break
-            if chunk is not None and kept_bytes < _YIELD_KEEP_BYTES:
+            if chunk is not None and kept_bytes < _yield_keep_bytes:
                 kept_chunks.append(chunk)
                 kept_bytes += len(chunk)
             # それ以降は破棄
@@ -407,23 +406,19 @@ class RealtimeAgent:
             self._last_speech_end = time.monotonic()
         # Realtime APIの応答をキャンセル + 会話履歴をtruncate
         if self.ws:
-            try:
+            with contextlib.suppress(Exception):
                 self.ws.send(json.dumps({"type": "response.cancel"}))
-            except Exception:
-                pass
             # truncate: 再生済みバイト数からミリ秒を算出（24kHz, 16bit PCM）
             item_id = self._current_item_id
             if item_id:
                 audio_end_ms = int(played / 2 * 1000 / 24000)  # 2bytes/sample, 24kHz
-                try:
+                with contextlib.suppress(Exception):
                     self.ws.send(json.dumps({
                         "type": "conversation.item.truncate",
                         "item_id": item_id,
                         "content_index": 0,
                         "audio_end_ms": audio_end_ms,
                     }))
-                except Exception:
-                    pass
         self._current_item_id = None
         print("# AI Agent: 割り込み検出 — 応答を中断", flush=True)
 
@@ -444,20 +439,16 @@ class RealtimeAgent:
         self._ai_text_buf = ""
         # Realtime APIの応答をキャンセル + 会話履歴からこのアイテムを削除
         if self.ws:
-            try:
+            with contextlib.suppress(Exception):
                 self.ws.send(json.dumps({"type": "response.cancel"}))
-            except Exception:
-                pass
             # 介入不要の応答はtruncateではなく削除（会話履歴に残さない）
             item_id = self._current_item_id
             if item_id:
-                try:
+                with contextlib.suppress(Exception):
                     self.ws.send(json.dumps({
                         "type": "conversation.item.delete",
                         "item_id": item_id,
                     }))
-                except Exception:
-                    pass
         self._current_item_id = None
 
     @property
@@ -486,10 +477,8 @@ class RealtimeAgent:
         if self._playback_thread is not None:
             self._playback_thread.join(timeout=2.0)
         if self.ws:
-            try:
+            with contextlib.suppress(Exception):
                 self.ws.close()
-            except Exception:
-                pass
         # セッション限りのAI声紋をクリーンアップ
         if self._voice_tracker is not None and self.AI_VOICE_KEY in self._voice_tracker.profiles:
             with self._voice_tracker._lock:

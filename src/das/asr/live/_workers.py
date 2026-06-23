@@ -5,23 +5,30 @@ import os
 import re
 import threading
 import time
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from ._session_state import SessionState
+    from .stt import STTBackend
+
+import contextlib
 
 from ._constants import (
     _AGENT_CONV_SILENCE,
     _AGENT_DEBATE_SILENCE,
     _AGENT_SILENCE,
-    AGENT_SPEAKER,
     _BACKCHANNEL_RE,
     _INTERRUPT_MIN_CHARS,
+    AGENT_SPEAKER,
     SR,
 )
 from ._polish import polish
 from ._ui import _print_line
 
 
-def _run_topic_worker(state: "SessionState", oai_key: str, oai_model: str):
+def _run_topic_worker(state: SessionState, oai_key: str, oai_model: str):
     """論点抽出のバックグラウンドワーカー（モジュールレベル関数）."""
     from das.asr.live._bootstrap import extract_topics as _extract_topics
 
@@ -54,7 +61,7 @@ def _run_topic_worker(state: "SessionState", oai_key: str, oai_model: str):
         state.topic_cursor = n
 
 
-def _on_agent_text_factory(state: "SessionState"):
+def _on_agent_text_factory(state: SessionState):
     """ファシリテーター発言コールバックを生成."""
     def _on_agent_text(text: str):
         from das.asr.live import ON_UTTERANCE
@@ -64,16 +71,14 @@ def _on_agent_text_factory(state: "SessionState"):
                                   "speaker": AGENT_SPEAKER, "text": text.strip()})
             state.color_of(AGENT_SPEAKER)
         if ON_UTTERANCE is not None:
-            try:
+            with contextlib.suppress(Exception):
                 ON_UTTERANCE("ファシリテーター", text.strip())
-            except Exception:
-                pass
         _print_line(f"\x1b[96m[ファシリテーター]\x1b[0m: {text.strip()}")
         state.save()
     return _on_agent_text
 
 
-def _connect_agent(state: "SessionState", on_text):
+def _connect_agent(state: SessionState, on_text):
     """ファシリテーターAgentのコールバック設定・接続・ワーカー起動."""
     agent = state.agent
     partner = state.partner
@@ -104,7 +109,7 @@ def _connect_agent(state: "SessionState", on_text):
           f" trigger={agent.trigger_n}（ブラウザから変更可能）", flush=True)
 
 
-def _on_partner_text_factory(state: "SessionState"):
+def _on_partner_text_factory(state: SessionState):
     """Partner発言コールバックを生成."""
     def _on_partner_text(text: str):
         with state.state_lock:
@@ -119,7 +124,7 @@ def _on_partner_text_factory(state: "SessionState"):
     return _on_partner_text
 
 
-def _run_agent_worker(state: "SessionState"):
+def _run_agent_worker(state: SessionState):
     """バックグラウンドでAI応答のトリガーを管理（ターンテイキング）.
 
     自然な会話のフロア交代を模倣:
@@ -210,7 +215,7 @@ def _run_agent_worker(state: "SessionState"):
                 agent.trigger()
 
 
-def _run_stdin_commands(state: "SessionState"):
+def _run_stdin_commands(state: SessionState):
     """標準入力からの話者リネーム・統合コマンドを処理."""
     while not state.stop.is_set():
         try:
@@ -247,7 +252,7 @@ def _run_stdin_commands(state: "SessionState"):
             _print_line("# コマンド: 「1=松井」(声を登録) / 「fix 2=1」「fix 人物2=人物1」(統合) / Ctrl+Cで終了")
 
 
-def _run_from_mic(state: "SessionState", device):
+def _run_from_mic(state: SessionState, device):
     """マイクからPCMを読み取り audio_q に送信."""
     import sounddevice as sd
     partner = state.partner
@@ -267,7 +272,7 @@ def _run_from_mic(state: "SessionState", device):
     state.audio_q.put(None)
 
 
-def _run_from_wav(state: "SessionState", args):
+def _run_from_wav(state: SessionState, args):
     """WAVファイルを擬似ライブで送信する.
 
     Reactive WAV: agentが発話中はWAV再生・ASR送信を一時停止し、
@@ -324,7 +329,7 @@ def _run_from_wav(state: "SessionState", args):
     state.audio_q.put(None)
 
 
-def _run_sender(state: "SessionState", ws, backend: "STTBackend"):
+def _run_sender(state: SessionState, ws, backend: STTBackend):
     """audio_qからPCMを読みWebSocketに送信 + PCMバッファ/ファイル書き出し."""
     seq = 0
     while True:
@@ -350,7 +355,7 @@ def _run_sender(state: "SessionState", ws, backend: "STTBackend"):
         seq += 1
 
 
-def _cleanup(state: "SessionState", args, api_key: str,
+def _cleanup(state: SessionState, args, api_key: str,
              tracker, wav_path: str, out_path: str, html_path: str):
     """セッション終了時のリソース解放・ファイル保存."""
     from das.asr.live import _SYS_HOOK_REF

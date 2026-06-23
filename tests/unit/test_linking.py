@@ -11,10 +11,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from das.agents.linking import (
+    LinkingAgent,
     _BatchJudgment,
     _IndexedJudgment,
     _LinkJudgment,
-    LinkingAgent,
     cosine_similarity,
 )
 from das.graph.schema import Node
@@ -441,7 +441,7 @@ async def test_top_k_per_source_overrides_top_k(store: NetworkXGraphStore) -> No
         for i in range(5)
     ]
     doc = Node(text="d1", node_type="premise", source="document", author="d1")
-    for n in utts + [doc]:
+    for n in [*utts, doc]:
         store.add_node(n)
     store.add_node(target)
 

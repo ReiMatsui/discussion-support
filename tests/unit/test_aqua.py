@@ -5,17 +5,16 @@ LLM 部分は AsyncMock でフェイクする (実 API は呼ばない)。
 
 from __future__ import annotations
 
-import math
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from das.eval.aqua import (
+    _S_MAX,
+    _S_MIN,
     INDICATORS,
     AQuAAgent,
     AQuAScores,
-    _S_MAX,
-    _S_MIN,
     aggregate_aqua_reports,
 )
 from das.llm import OpenAIClient
@@ -48,8 +47,8 @@ def test_aqua_has_exactly_20_indicators() -> None:
 
 def test_aqua_normalization_constants_match_paper() -> None:
     # Behrendt et al. §3.4: s_max ≈ 4.9893, s_min ≈ -1.6693
-    assert _S_MAX == pytest.approx(4.9893, abs=1e-3)
-    assert _S_MIN == pytest.approx(-1.6693, abs=1e-3)
+    assert pytest.approx(4.9893, abs=1e-3) == _S_MAX
+    assert pytest.approx(-1.6693, abs=1e-3) == _S_MIN
 
 
 def test_aqua_value_min_when_only_negatives_max() -> None:

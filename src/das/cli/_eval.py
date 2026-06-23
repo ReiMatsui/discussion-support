@@ -105,7 +105,7 @@ def eval_cmd(
         None,
         "--hard-budget",
         help="OpenAI 累積コストの **ハード上限** (USD)。超過すると **進行中の "
-        "API 呼び出しごと**即停止 (BudgetExceeded)。--budget の 1.5〜2x を推奨。"
+        "API 呼び出しごと**即停止 (BudgetExceededError)。--budget の 1.5〜2x を推奨。"
         "省略すると hard cap なし (in-flight は際限なく完走)",
     ),
     cond_concurrency: str = typer.Option(
@@ -148,9 +148,9 @@ def eval_cmd(
         name, n_str = token.split("=", 1)
         try:
             parsed_cond_conc[name.strip()] = int(n_str.strip())
-        except ValueError:
+        except ValueError as exc:
             typer.echo(f"--cond-concurrency の値が int でない: '{token}'")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
     asyncio.run(
         _run_eval_cli(
@@ -262,7 +262,7 @@ async def _run_aqua_rescore(
     from collections import defaultdict
 
     from das.eval.aqua import AQuAAgent, aggregate_aqua_reports
-    from das.llm import BudgetExceeded, CostTracker
+    from das.llm import BudgetExceededError, CostTracker
 
     typer.echo(f"[aqua] scanning {eval_dir}")
 
@@ -318,7 +318,7 @@ async def _run_aqua_rescore(
                 concurrency=concurrency,
                 model=model,
             )
-        except BudgetExceeded as exc:
+        except BudgetExceededError as exc:
             typer.echo(f"[aqua] HARD BUDGET EXCEEDED: {exc}", err=True)
             typer.echo("[aqua] stopping. Partial results saved so far.", err=True)
             halted = True
@@ -445,7 +445,7 @@ async def _run_eval_cli(
         policy_ai_lecture_personas,
         run_eval,
     )
-    from das.llm import BudgetExceeded, CostTracker
+    from das.llm import BudgetExceededError, CostTracker
 
     # (persona_factory, topic, default_docs_subdir)。
     # preset ごとに docs サブディレクトリを分けることで、トピックを切り替えても
@@ -497,7 +497,7 @@ async def _run_eval_cli(
         elif name == "flat_rag":
             factories[name] = lambda llm=llm: ConditionFlatRAG(llm=llm)
         elif name == "full_proposal":
-            factories[name] = lambda llm=llm, top_k=linking_top_k, top_k_ps=linking_top_k_per_source, lmodel=linking_model: (  # noqa: E501
+            factories[name] = lambda llm=llm, top_k=linking_top_k, top_k_ps=linking_top_k_per_source, lmodel=linking_model: (
                 ConditionFullProposal(
                     llm=llm,
                     enable_web_search=web_search,
@@ -587,7 +587,7 @@ async def _run_eval_cli(
             stance_agent=stance_agent_obj,
             condition_concurrency=condition_concurrency,
         )
-    except BudgetExceeded as exc:
+    except BudgetExceededError as exc:
         import sys as _sys
 
         typer.echo("")

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+import contextlib
+from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
@@ -143,7 +144,6 @@ async def _run_listen_soniox_async(
 ) -> None:
     """live を別スレッドで回し、確定発話キュー → run_live ＋ 周期介入判定."""
 
-    import contextlib
     import threading
     from collections.abc import AsyncIterator
 
@@ -151,7 +151,7 @@ async def _run_listen_soniox_async(
 
     settings = get_settings()
     docs_dir = docs if docs is not None else settings.docs_dir
-    run_id = run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    run_id = run_id or datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     run_dir = settings.runs_dir / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     typer.echo(f"[listen-soniox] run_dir={run_dir}")
@@ -189,7 +189,7 @@ async def _run_listen_soniox_async(
     def _runner() -> None:
         try:
             _live_mod.main(argv)
-        except BaseException as exc:  # noqa: BLE001 - スレッド境界で握って通知する
+        except BaseException as exc:
             typer.echo(f"\n[listen-soniox] 文字起こしスレッド終了: {exc!r}")
         finally:
             loop.call_soon_threadsafe(queue.put_nowait, None)
@@ -258,7 +258,7 @@ async def _run_listen_soniox_async(
                                 reason=decision.reason,
                             )
                 _present(decision)
-            except Exception as exc:  # noqa: BLE001 - 介入失敗で本流を止めない
+            except Exception as exc:
                 typer.echo(f"[listen-soniox] 介入判定エラー: {exc!r}")
 
     fac_task = (
@@ -320,14 +320,13 @@ async def _run_listen_async(
         EOS (空フレーム) を ASR に送って残りの確定行をフラッシュさせる
     """
 
-    import contextlib
     import signal
     import sys
     from collections.abc import AsyncIterator
 
     settings = get_settings()
     docs_dir = docs if docs is not None else settings.docs_dir
-    run_id = run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    run_id = run_id or datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     run_dir = settings.runs_dir / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -387,10 +386,8 @@ async def _run_listen_async(
             typer.echo("\n[listen] 停止要求 (Ctrl-C)。残りをフラッシュ中...")
             stop_event.set()
 
-    try:
+    with contextlib.suppress(NotImplementedError):  # pragma: no cover - Windows
         loop.add_signal_handler(signal.SIGINT, _on_sigint)
-    except NotImplementedError:  # pragma: no cover - Windows
-        pass
 
     async def _pump_mic() -> None:
         async for chunk in iter_mic_chunks(stop_event=stop_event):

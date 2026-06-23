@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import collections
+import contextlib
 import json
 import queue
 import threading
@@ -11,7 +12,7 @@ import time
 import numpy as np
 
 from .._constants import _PROMPT_DEBATE_PARTNER, REALTIME_URL
-from .._voice_profiles import VoiceProfiles, _resample_24_to_16, _best_text_similarity
+from .._voice_profiles import VoiceProfiles, _best_text_similarity, _resample_24_to_16
 
 
 class ConversationPartner:
@@ -37,7 +38,7 @@ class ConversationPartner:
         self.ai_speaking = False
         self._responding = False
         self._interrupted = False          # interrupt後の残留イベント破棄用
-        self._audio_q: "queue.Queue[bytes | None]" = queue.Queue()
+        self._audio_q: queue.Queue[bytes | None] = queue.Queue()
         self._playback_thread: threading.Thread | None = None
         self._ai_text_buf = ""
         self.on_ai_utterance = None       # callback(text: str)
@@ -48,7 +49,7 @@ class ConversationPartner:
         self._current_item_id: str | None = None
         self._played_bytes = 0
         # --- AI声紋登録用 ---
-        self._voice_tracker: "VoiceProfiles | None" = None
+        self._voice_tracker: VoiceProfiles | None = None
         self._ai_voice_buf: list[np.ndarray] = []
         self._ai_voice_sec = 0.0
         self._ai_voice_enrolled = False
@@ -64,7 +65,7 @@ class ConversationPartner:
             return (time.monotonic() - self._last_speech_end) < self._echo_cooldown
         return False
 
-    def set_tracker(self, tracker: "VoiceProfiles"):
+    def set_tracker(self, tracker: VoiceProfiles):
         self._voice_tracker = tracker
 
     def connect(self):
@@ -131,13 +132,11 @@ class ConversationPartner:
         indices = np.linspace(0, len(samples) - 1, n_out)
         samples_24k = np.interp(indices, np.arange(len(samples)), samples)
         pcm_24k = np.clip(samples_24k, -32768, 32767).astype("<i2").tobytes()
-        try:
+        with contextlib.suppress(Exception):
             self.ws.send(json.dumps({
                 "type": "input_audio_buffer.append",
                 "audio": base64.b64encode(pcm_24k).decode(),
             }))
-        except Exception:
-            pass
 
     def inject_context(self, speaker: str, text: str, *,
                         request_response: bool = False):
@@ -327,7 +326,5 @@ class ConversationPartner:
                 self._voice_tracker.profiles.pop(self.AI_VOICE_KEY, None)
                 self._voice_tracker._active_keys.discard(self.AI_VOICE_KEY)
         if self.ws:
-            try:
+            with contextlib.suppress(Exception):
                 self.ws.close()
-            except Exception:
-                pass

@@ -20,10 +20,10 @@ from ._constants import (
     SR,
     fmt_ts,
 )
-from .agents._partner import ConversationPartner  # noqa: F401 (type ref)
-from .agents._simulator import DiscussionSimulator  # noqa: F401 (type ref)
-from .agents._realtime import RealtimeAgent  # noqa: F401 (type ref)
-from ._voice_profiles import VoiceProfiles  # noqa: F401 (type ref)
+from ._voice_profiles import VoiceProfiles
+from .agents._partner import ConversationPartner
+from .agents._realtime import RealtimeAgent
+from .agents._simulator import DiscussionSimulator
 
 
 class SessionState:
@@ -78,7 +78,7 @@ class SessionState:
 
         # 制御
         self.stop = threading.Event()
-        self.audio_q: "queue.Queue[bytes | None]" = queue.Queue()
+        self.audio_q: queue.Queue[bytes | None] = queue.Queue()
 
         # エージェントワーカー状態
         self._last_utt_time = [time.monotonic()]

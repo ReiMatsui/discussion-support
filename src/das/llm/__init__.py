@@ -2,7 +2,7 @@
 
 from das.llm.cost import (
     PRICING,
-    BudgetExceeded,
+    BudgetExceededError,
     CostTracker,
     ModelPricing,
     ModelUsage,
@@ -12,7 +12,7 @@ from das.llm.openai_client import OpenAIClient
 
 __all__ = [
     "PRICING",
-    "BudgetExceeded",
+    "BudgetExceededError",
     "CostTracker",
     "ModelPricing",
     "ModelUsage",

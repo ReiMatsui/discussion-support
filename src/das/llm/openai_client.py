@@ -232,7 +232,7 @@ class OpenAIClient:
             completion_tokens=completion,
             total_tokens=total,
         )
-        # cost 集計と budget enforcement。BudgetExceeded はそのまま伝播させる
+        # cost 集計と budget enforcement。BudgetExceededError はそのまま伝播させる
         if self._cost_tracker is not None:
             self._cost_tracker.record(model, prompt, completion)
 

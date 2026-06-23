@@ -1,10 +1,12 @@
 """シミュレーション用ディスカッション（録音済み音声の再生）."""
 from __future__ import annotations
 
+import contextlib
 import queue
 import re
 import threading
 import time
+from typing import ClassVar
 
 import numpy as np
 
@@ -27,7 +29,7 @@ class DiscussionSimulator:
     """
 
     # 話者 → TTSボイス（ファシリテーターのalloyと被らないよう選定）
-    SPEAKERS = {
+    SPEAKERS: ClassVar[dict] = {
         "松井": "echo",
         "田中": "nova",
         "佐藤": "onyx",
@@ -50,14 +52,14 @@ class DiscussionSimulator:
         self.topic = topic
         self.scenario = scenario
         self._stop = threading.Event()
-        self._audio_q: "queue.Queue | None" = None
-        self._facilitator_q: "queue.Queue[str]" = queue.Queue()
+        self._audio_q: queue.Queue | None = None
+        self._facilitator_q: queue.Queue[str] = queue.Queue()
         self._thread: threading.Thread | None = None
         self._history: list[dict] = []
         self._play_out = None  # スピーカー再生用OutputStream
-        self._agent_ref: "RealtimeAgent | None" = None  # ファシリテーター待機用
+        self._agent_ref: RealtimeAgent | None = None  # ファシリテーター待機用
 
-    def start(self, audio_q: "queue.Queue", stop: threading.Event,
+    def start(self, audio_q: queue.Queue, stop: threading.Event,
               play_audio: bool = False):
         """バックグラウンドで議論音声の生成を開始する."""
         self._audio_q = audio_q
@@ -238,10 +240,8 @@ class DiscussionSimulator:
             # スピーカー再生
             if self._play_out:
                 samples = np.frombuffer(chunk, dtype="<i2").astype(np.float32) / 32768.0
-                try:
+                with contextlib.suppress(Exception):
                     self._play_out.write(samples.reshape(-1, 1))
-                except Exception:
-                    pass
             else:
                 time.sleep(0.12)  # 再生なしの場合はリアルタイムペースを維持
 
@@ -256,9 +256,7 @@ class DiscussionSimulator:
             self._audio_q.put(silence[off:off + step_bytes])
             if self._play_out:
                 z = np.zeros(min(step_bytes // 2, n_samples - off // 2), dtype=np.float32)
-                try:
+                with contextlib.suppress(Exception):
                     self._play_out.write(z.reshape(-1, 1))
-                except Exception:
-                    pass
             else:
                 time.sleep(0.12)

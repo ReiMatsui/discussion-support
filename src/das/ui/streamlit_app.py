@@ -28,16 +28,15 @@
 
 from __future__ import annotations
 
+import html as _html
 import json
 import re
 import subprocess
 import sys
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-
-import html as _html
 
 import altair as alt
 import pandas as pd
@@ -46,7 +45,6 @@ import streamlit.components.v1 as components
 
 from das.settings import get_settings
 from das.viz import load_snapshot, render_html
-
 
 # --- チャット風スタイル (LINE / Slack 風) ----------------------------
 
@@ -1175,7 +1173,7 @@ if mode == "新しい評価を実行" and run_clicked:
         st.stop()
     fallback_eval_id = (
         eval_id_input.strip()
-        or f"eval-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+        or f"eval-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}"
     )
     cmd = _build_command(
         preset=preset,

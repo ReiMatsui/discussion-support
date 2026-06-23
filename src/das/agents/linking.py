@@ -377,7 +377,7 @@ class LinkingAgent(BaseAgent):
                 self._judge_batch(target, candidates),
                 timeout=self._judge_timeout,
             )
-        except (TimeoutError, asyncio.TimeoutError):
+        except TimeoutError:
             self.log.warning(
                 "linking.judge_timeout",
                 target_id=str(target.id),
@@ -407,7 +407,7 @@ class LinkingAgent(BaseAgent):
                 self._judge_pair(target, cand),
                 timeout=self._judge_timeout,
             )
-        except (TimeoutError, asyncio.TimeoutError):
+        except TimeoutError:
             self.log.warning(
                 "linking.judge_timeout",
                 target_id=str(target.id),

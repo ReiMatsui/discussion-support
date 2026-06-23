@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
@@ -192,7 +192,7 @@ class ConditionFlatRAG:
             InterventionLogEntry(
                 turn_id=history[-1].turn_id,
                 persona_name=persona.name,
-                timestamp=datetime.now(timezone.utc).isoformat(),
+                timestamp=datetime.now(UTC).isoformat(),
                 items=[
                     {
                         "source_text": item.text,
@@ -311,7 +311,7 @@ class ConditionGraphlessFacilitation:
                 InterventionLogEntry(
                     turn_id=history[-1].turn_id,
                     persona_name=persona.name,
-                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    timestamp=datetime.now(UTC).isoformat(),
                     items=[],
                     kind="skip",
                     addressed_to=persona.name,
@@ -324,7 +324,7 @@ class ConditionGraphlessFacilitation:
             InterventionLogEntry(
                 turn_id=history[-1].turn_id,
                 persona_name=persona.name,
-                timestamp=datetime.now(timezone.utc).isoformat(),
+                timestamp=datetime.now(UTC).isoformat(),
                 items=[{"source_text": response, "source_kind": "llm_generated", "relation": ""}],
                 kind="l1",
                 addressed_to=persona.name,
@@ -500,7 +500,7 @@ class ConditionFullProposal:
             InterventionLogEntry(
                 turn_id=history[-1].turn_id,
                 persona_name=persona.name,
-                timestamp=datetime.now(timezone.utc).isoformat(),
+                timestamp=datetime.now(UTC).isoformat(),
                 items=[asdict(it) for it in decision.items],
                 kind=decision.kind,
                 addressed_to=decision.addressed_to,

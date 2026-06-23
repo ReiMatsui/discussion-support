@@ -115,7 +115,7 @@ def main() -> None:
 
     if args.script:
         turns = [(str(j["speaker"]), j["text"]) for j in
-                 (json.loads(l) for l in args.script.read_text(encoding="utf-8").splitlines() if l.strip())]
+                 (json.loads(line) for line in args.script.read_text(encoding="utf-8").splitlines() if line.strip())]
     else:
         turns = SCRIPT
 
@@ -160,7 +160,9 @@ def main() -> None:
                 break
         wav_path = args.outdir / f"{name}.wav"
         with wave.open(str(wav_path), "wb") as w:
-            w.setnchannels(1); w.setsampwidth(2); w.setframerate(SR)
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(SR)
             w.writeframes(pcm)
         (args.outdir / f"{name}.answer.json").write_text(
             json.dumps({"voices": voice_of, "turns": answer}, ensure_ascii=False, indent=1),

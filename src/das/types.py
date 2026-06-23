@@ -6,7 +6,7 @@ Intervention はファシリテーション結果として参加者に届く提�
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID, uuid4
 
@@ -23,7 +23,7 @@ class Utterance(BaseModel):
     turn_id: int
     speaker: str
     text: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class NodeAdded(BaseModel):
@@ -40,7 +40,7 @@ class Tick(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 Event = Utterance | NodeAdded | Tick
@@ -83,7 +83,7 @@ class Intervention(BaseModel):
     text: str
     related_node_ids: list[UUID] = Field(default_factory=list)
     rationale: str
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 __all__ = [

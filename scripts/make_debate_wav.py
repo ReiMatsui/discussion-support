@@ -21,7 +21,6 @@ import argparse
 import io
 import json
 import random
-import struct
 import sys
 import wave
 from pathlib import Path
@@ -69,7 +68,7 @@ def main() -> None:
         sys.exit("OPENAI_API_KEY が見つかりません（.env か環境変数に設定してください）")
     rng = random.Random(args.seed)
 
-    turns = [json.loads(l) for l in args.script.read_text(encoding="utf-8").splitlines() if l.strip()]
+    turns = [json.loads(line) for line in args.script.read_text(encoding="utf-8").splitlines() if line.strip()]
     voice_of: dict[str, str] = {}
     pcm = bytearray()
     answer_key = []

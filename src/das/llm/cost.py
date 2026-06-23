@@ -4,7 +4,7 @@
   - **asyncio 単一スレッド前提**: ``CostTracker.record`` の中に ``await`` が無いため、
     複数 coroutine が並列に呼んでも互いに割り込まない (= 排他制御不要)
   - **逐次表示**: ``CostTracker.snapshot()`` を呼ぶと現時点の累積を取得できる
-  - **上限超過は例外で停止**: ``budget_usd`` 設定時、超過したら ``BudgetExceeded``
+  - **上限超過は例外で停止**: ``budget_usd`` 設定時、超過したら ``BudgetExceededError``
     を raise する。呼び出し側 (CLI / run_eval) は catch して部分結果を保存して exit する設計
   - **料金は静的辞書**: 公開料金を埋め込み (2026-05 時点)。未知モデルは保守的に
     gpt-5-mini と同じ料金で扱う
@@ -13,7 +13,7 @@ Usage:
     tracker = CostTracker(budget_usd=1.0)
     llm = OpenAIClient(cost_tracker=tracker)
     # ... eval を回す ...
-    # BudgetExceeded が raise されたら、tracker.snapshot() を保存して exit
+    # BudgetExceededError が raise されたら、tracker.snapshot() を保存して exit
 
 Reference:
   - OpenAI 公開料金 https://openai.com/api/pricing/
@@ -21,7 +21,7 @@ Reference:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from das.logging import get_logger
@@ -69,7 +69,7 @@ PRICING: dict[str, ModelPricing] = {
 _DEFAULT_PRICING = ModelPricing(0.40e-6, 1.60e-6)
 
 
-class BudgetExceeded(RuntimeError):
+class BudgetExceededError(RuntimeError):
     """累積コストが上限を超過した。呼び出し側で catch して部分結果を保存して exit する。"""
 
 
@@ -109,7 +109,7 @@ class CostTracker:
         を返す。**進行中の API 呼び出しは止めない**。run_eval は新規 run の開始だけを
         gate するため、in-flight run は最後まで完走する。
       - **hard budget** (``hard_budget_usd``): 超過すると ``record()`` / ``check_before_call()``
-        が ``BudgetExceeded`` を即 raise する。暴走防止用の絶対上限。
+        が ``BudgetExceededError`` を即 raise する。暴走防止用の絶対上限。
 
     Args:
       budget_usd: soft 上限 USD。``None`` なら gate なし。
@@ -205,7 +205,7 @@ class CostTracker:
     ) -> float:
         """1 つの API 呼び出しを記録し、累積 cost (USD) を返す。
 
-        budget が設定済みで超過したら ``BudgetExceeded`` を raise する。
+        budget が設定済みで超過したら ``BudgetExceededError`` を raise する。
         """
 
         pricing = resolve_pricing(model)
@@ -258,7 +258,7 @@ class CostTracker:
                 hard_budget_usd=round(self._hard_budget, 4) if self._hard_budget else None,
                 n_calls=self.n_calls,
             )
-            raise BudgetExceeded(
+            raise BudgetExceededError(
                 f"Hard budget exceeded: ${self._total:.4f} > "
                 f"${self._hard_budget:.4f} after {self.n_calls} API calls"
             )
@@ -273,7 +273,7 @@ class CostTracker:
         """
 
         if self.is_over_hard_budget():
-            raise BudgetExceeded(
+            raise BudgetExceededError(
                 f"Hard budget already exceeded: ${self._total:.4f} > "
                 f"${self._hard_budget:.4f} (call refused before issue)"
             )
@@ -315,10 +315,10 @@ class CostTracker:
 
 
 __all__ = [
-    "BudgetExceeded",
+    "PRICING",
+    "BudgetExceededError",
     "CostTracker",
     "ModelPricing",
     "ModelUsage",
-    "PRICING",
     "resolve_pricing",
 ]

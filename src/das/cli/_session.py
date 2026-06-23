@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
@@ -91,7 +91,7 @@ async def _run_session_async(
 ) -> None:
     settings = get_settings()
     docs_dir = docs if docs is not None else settings.docs_dir
-    run_id = run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    run_id = run_id or datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     run_dir = settings.runs_dir / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 

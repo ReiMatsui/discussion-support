@@ -18,8 +18,8 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
-from datetime import datetime, timezone
-from typing import Any, Union
+from datetime import UTC, datetime
+from typing import Any
 
 from das.asr.engine import get_engine
 from das.logging import get_logger
@@ -27,7 +27,7 @@ from das.types import Utterance
 
 _log = get_logger("das.asr.session")
 
-PartialCallback = Callable[[str], Union[Awaitable[None], None]]
+PartialCallback = Callable[[str], Awaitable[None] | None]
 
 
 class LiveAsrSession:
@@ -117,7 +117,7 @@ class LiveAsrSession:
                     turn_id=i,
                     speaker=self._resolve_speaker(line),
                     text=text,
-                    timestamp=datetime.now(timezone.utc),
+                    timestamp=datetime.now(UTC),
                 )
             self._next_turn_id = len(lines)
 

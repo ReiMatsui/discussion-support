@@ -23,22 +23,22 @@ import contextlib
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
-from das.eval.conditions import (
-    Condition,
-    ConditionFullProposal,
-    InterventionLogEntry,
-    write_intervention_log,
-)
 from das.agents.stance_agent import StanceAgent, StanceMeasurement
 from das.eval.citation import (
     CitationStats,
     aggregate_citation_stats,
     compute_citation_stats,
     compute_citation_stats_with_embeddings,
+)
+from das.eval.conditions import (
+    Condition,
+    ConditionFullProposal,
+    InterventionLogEntry,
+    write_intervention_log,
 )
 from das.eval.consensus import ConsensusReport, detect_consensus, detect_consensus_with_llm
 from das.eval.controller import SessionConfig, SessionRunner
@@ -405,7 +405,7 @@ async def _run_single(
     """1 ラン分のシミュレーションを実行する。
 
     ``incremental_save_dir`` を指定すると、各発話・スナップショット・介入ログを
-    **turn ごとに**ディスクに書き出す。BudgetExceeded などで途中で死んでも
+    **turn ごとに**ディスクに書き出す。BudgetExceededError などで途中で死んでも
     保存済みの部分結果が残る (= post-hoc 採点が可能になる)。
     """
 
@@ -731,7 +731,7 @@ async def run_eval(
     condition_concurrency = condition_concurrency or {}
 
     llm = llm or OpenAIClient()
-    eval_id = eval_id or datetime.now(timezone.utc).strftime("eval-%Y%m%dT%H%M%SZ")
+    eval_id = eval_id or datetime.now(UTC).strftime("eval-%Y%m%dT%H%M%SZ")
     target_dir = (eval_dir / eval_id) if eval_dir is not None else None
     if target_dir is not None:
         _ensure_dir(target_dir)
@@ -821,7 +821,7 @@ async def run_eval(
             tasks.append(asyncio.create_task(_job(cond_name, factory, run_idx)))
 
     # 部分結果でも全条件の差分が見えるよう、gather は return_exceptions=True で
-    # 個別タスクの失敗 (BudgetExceeded など) を許容し、終わったぶんは保存しておく。
+    # 個別タスクの失敗 (BudgetExceededError など) を許容し、終わったぶんは保存しておく。
     # 後でこの中に Exception があれば再 raise する (元のセマンティクスを保つ)。
     #
     # 戻り値 3 種:
@@ -875,7 +875,7 @@ async def run_eval(
             "concurrency": concurrency,
             "personas": [asdict(p) for p in personas],
             "condition_names": list(condition_factories.keys()),
-            "started_at": datetime.now(timezone.utc).isoformat(),
+            "started_at": datetime.now(UTC).isoformat(),
         }
         (target_dir / "meta.json").write_text(
             json.dumps(meta, ensure_ascii=False, indent=2, default=str),

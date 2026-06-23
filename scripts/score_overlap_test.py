@@ -40,7 +40,7 @@ def main() -> None:
     args = ap.parse_args()
 
     ans = json.loads(args.answer.read_text(encoding="utf-8"))["turns"]
-    sys_turns = [json.loads(l) for l in args.turns.read_text(encoding="utf-8").splitlines() if l.strip()]
+    sys_turns = [json.loads(line) for line in args.turns.read_text(encoding="utf-8").splitlines() if line.strip()]
     for t in sys_turns:
         t["s"] = (t.get("ms") or 0) / 1000.0
 

@@ -360,7 +360,7 @@ async def test_run_eval_writes_run_meta_with_convergence(tmp_path: Path) -> None
     assert conv["n_runs"] == 1
 
 
-# --- Stratified ordering と部分完了 (BudgetExceeded 互換) ----------
+# --- Stratified ordering と部分完了 (BudgetExceededError 互換) ----------
 
 
 async def test_run_eval_partial_completion_on_task_exception(tmp_path: Path) -> None:
@@ -437,7 +437,7 @@ async def test_run_eval_incremental_save_writes_transcript_per_turn(
 ) -> None:
     """``eval_dir`` 指定時、各 turn の直後に transcript.jsonl が更新される。
 
-    途中で BudgetExceeded などで中断しても、それまでの発話が残る。
+    途中で BudgetExceededError などで中断しても、それまでの発話が残る。
     """
 
     llm = _fake_llm("発言")

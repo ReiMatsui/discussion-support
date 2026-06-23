@@ -22,7 +22,6 @@ OpenAI TTS APIで各話者の発言を生成し、適切な間（ま）を入れ
 from __future__ import annotations
 
 import argparse
-import io
 import os
 import struct
 import sys
@@ -32,7 +31,7 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, os.path.join(_PROJECT_ROOT, "src"))
 
-from das.asr.live._bootstrap import load_env
+from das.asr.live._bootstrap import load_env  # noqa: E402
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  話者 → TTS音声マッピング
@@ -273,11 +272,11 @@ def main():
             path = generate_scenario_wav(name, args.output_dir, args.pause)
             paths.append(path)
         print(f"\n🎉 全{len(paths)}シナリオ生成完了")
-        print(f"\nテスト実行例:")
+        print("\nテスト実行例:")
         print(f"  uv run python -m das.asr.live --wav {paths[0]} --agent --play")
     elif args.scenario:
         path = generate_scenario_wav(args.scenario, args.output_dir, args.pause)
-        print(f"\nテスト実行:")
+        print("\nテスト実行:")
         print(f"  uv run python -m das.asr.live --wav {path} --agent --play")
     else:
         ap.print_help()

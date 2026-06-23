@@ -24,7 +24,6 @@ from dataclasses import dataclass, field
 
 from das.types import Utterance
 
-
 _WS = re.compile(r"\s+")
 
 
@@ -79,10 +78,8 @@ def is_cited(
 
     if _coverage(source_text, utterance_text, n) >= coverage_threshold:
         return True
-    if source_embedding is not None and utterance_embedding is not None:
-        if _cosine(source_embedding, utterance_embedding) >= embedding_threshold:
-            return True
-    return False
+    return (source_embedding is not None and utterance_embedding is not None
+            and _cosine(source_embedding, utterance_embedding) >= embedding_threshold)
 
 
 @dataclass(frozen=True)

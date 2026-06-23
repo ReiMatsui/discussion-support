@@ -90,7 +90,7 @@ def _map_speakers(utts: list[tuple], pcm: bytes, tracker) -> dict:
                 if sim >= tracker.dedupe:
                     pairs.append((sim, spk, n))
     used_spk, used_person = set(), set()
-    for sim, spk, n in sorted(pairs, reverse=True):
+    for _sim, spk, n in sorted(pairs, reverse=True):
         if spk in used_spk or n in used_person:
             continue
         mapping[spk] = n

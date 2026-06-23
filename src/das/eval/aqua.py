@@ -411,11 +411,11 @@ def aggregate_aqua_reports(reports: list[AQuADiscussionReport]) -> dict:
 
 
 __all__ = [
+    "INDICATORS",
     "AQuAAgent",
     "AQuADiscussionReport",
     "AQuAIndicator",
     "AQuAScores",
     "AQuAUtteranceReport",
-    "INDICATORS",
     "aggregate_aqua_reports",
 ]

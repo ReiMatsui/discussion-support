@@ -19,7 +19,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal
 from uuid import UUID, uuid4
 
@@ -43,7 +43,7 @@ class Node(BaseModel):
     author: str | None = None
     """発話なら話者ID、文献なら doc_id、Web なら domain。"""
 
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -59,7 +59,7 @@ class Edge(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0, default=1.0)
     rationale: str = ""
     created_by: EdgeCreator = "linking"
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 __all__ = [
