@@ -1,37 +1,26 @@
-"""1マイク + Soniox リアルタイム議事録ツール（日本語・話者分離内蔵）.
+"""リアルタイム議事録ツール — エントリーポイント + STT接続 + 論点抽出.
 
-【das統合版】speaker-attribution リポジトリ v1.0 からの移植（上流は凍結、以後はこちらが正）。
-das連携フック: モジュール変数 ON_UTTERANCE に callable(speaker:str, text:str) を設定すると、
-確定発話ごとに呼ばれる（das listen-soniox がオーケストレータへ流すのに使用）。
+STTバックエンド（Soniox/Speechmatics/…）経由で音声をストリーミングし、
+声紋話者分離・AI ファシリテーション・議事録保存を統合する。
 
-1本のマイクで「誰が・何を」をライブ取得する本線ツール。
-Sonioxのストリーミング(WebSocket)に音声を流し、speaker付きトークンが返るので、
-多マイク・ゲート・同期なしで who-said-what が出る。
+das連携フック:
+  ON_UTTERANCE に callable(speaker:str, text:str) を設定 →
+  確定発話ごとに呼ばれる（cli.py がオーケストレータへ流すのに使用）。
 
-機能:
-  - 話者ごとに色分けしたライブ表示（確定前のテキストは薄く表示）
-  - Markdown議事録 + HTML を transcripts/ に自動保存（発話確定ごと＝クラッシュ安全）
-  - HTMLはブラウザ自動オープン、ライブ中2秒ごと自動更新（--no-openで無効）
-  - 声紋プロファイル方式の話者特定（登録不要で自動補正）。判定は2経路のみ:
-      ① 即時判定: 声紋が強一致した発話はその場で人物確定（入れ替わりも補正）
-      ② それ以外は3発話バッファ: 一貫した3発話を束ねて「既存人物に合流 or 新規人物N」
-      しきい値は2層: モデル別既定値 → 人物別しきい値(本人の一致sim中央値-0.12、
-      新声の巻き取り防止。厳しくする方向にのみ働く)。
-      不変条件: 一度確定した人物キーは書き換えない（遡及置換は 話者N→人物N の昇格のみ）。
-      「1=松井」で実名化、実名のみ voices.json に永続化 → 次回から自動で実名表示。
-  - 終了時に清書: 録音全体を非同期APIで再処理し、全文脈の話者分離＋声紋実名対応の
-    最終版(日時.final.md/.html)を自動生成（高速応酬でのRT分離崩れへの対策。--polishで有効化）
-  - 「fix 2=1」「fix 人物2=人物1」で誤った話者の統合（過去の発言も修正）
-  - 診断ログ(日時.diag.jsonl): 発話ごとの判定根拠を常時記録（問題解析用）
-
-準備(Mac):
-  uv add websockets sounddevice
-  export SONIOX_API_KEY=...   # https://console.soniox.com で取得
-
-使い方:
-  uv run python offshelf/live_soniox.py            # 実マイクでライブ
-  uv run python offshelf/live_soniox.py --wav offshelf/ami_raw/mic0.wav  # ファイル擬似ライブ
-  実行中: 「1=松井」Enter で話者登録 / Ctrl+C で終了（保存先を表示）
+主要モジュール構成:
+  _stt_backend.py     STTBackend Protocol
+  _stt_soniox.py      Soniox 実装
+  _stt_speechmatics.py Speechmatics 実装
+  _recv_loop.py       WebSocket受信 + flush（声紋判定・エコー除去）
+  _workers.py         音声入力・送信・トピック抽出・ターンテイキング
+  _session_state.py   共有状態 + ファイル出力
+  _voice_profiles.py  声紋プロファイル
+  _realtime_agent.py  OpenAI Realtime API ファシリテーター
+  _conversation_partner.py  Realtime API 議論パートナー
+  _discussion_simulator.py  Chat+TTS シミュレーション
+  _polish.py          非同期バッチ再処理（清書）
+  _ui.py              HTTPサーバー + ターミナル出力
+  _constants.py       定数・プロンプト・HTML テンプレート
 """
 from __future__ import annotations
 
@@ -40,16 +29,12 @@ import datetime
 import json
 import os
 import threading
-import time
-import numpy as np
 
 from das.asr._constants import (
     _AGENT_TRIGGER,
     OPENAI_API,
-    RESET,
     SR,
     _TOPIC_PROMPT,
-    fmt_ts,
 )
 from das.asr._stt_backend import STTBackend
 from das.asr._stt_soniox import SonioxBackend
@@ -59,7 +44,8 @@ from das.asr._discussion_simulator import DiscussionSimulator
 from das.asr._realtime_agent import RealtimeAgent
 from das.asr._voice_profiles import VoiceProfiles
 from das.asr._session_state import SessionState
-from das.asr._ui import _print_line, _UIHandler
+from das.asr._recv_loop import RecvLoop
+from das.asr._ui import _UIHandler
 from das.asr._workers import (
     _cleanup,
     _connect_agent,
@@ -154,191 +140,6 @@ def _extract_topics(utterances: list[dict], existing: list[str],
     except Exception:
         return []
 
-
-
-class _RecvLoop:
-    """WebSocketメッセージ受信ループ + flush処理.
-
-    STTからのトークンストリームを処理し、発話を確定(flush)してrecordsに追加する。
-    main()内のnonlocal変数群をインスタンス変数で置き換え。
-    """
-
-    _FLUSH_TIMEOUT = 30.0     # トークンが来なくなってからの強制flush（秒）
-    _FLUSH_SOFT_CHARS = 500   # この文字数を超えたら文の切れ目でflush
-    _FLUSH_HARD_CHARS = 1000  # この文字数を超えたら問答無用で強制flush
-
-    def __init__(self, state: "SessionState", args, backend: "STTBackend"):
-        self.state = state
-        self.args = args
-        self.backend = backend
-        self.cur_speaker = None
-        self.cur_text = ""
-        self.cur_ms: int | None = None
-        self.cur_end: int | None = None
-        self.cur_last_token_time: float = time.monotonic()
-        self.recent_segs: list[tuple] = []
-
-    def overlaps_other(self, start, end, label) -> bool:
-        if start is None or end is None:
-            return False
-        return any(l != label and min(e, end) - max(s, start) > 0
-                   for s, e, l in self.recent_segs)
-
-    def flush(self):
-        s = self.state
-        if not self.cur_text.strip():
-            self.cur_text = ""
-            self.cur_ms = None
-            self.cur_end = None
-            self.cur_last_token_time = time.monotonic()
-            return
-        label = str(self.cur_speaker)
-        tracker = s.tracker
-        agent = s.agent
-        partner = s.partner
-        if tracker is not None:
-            if self.cur_ms is not None and self.cur_end is not None and self.cur_end > self.cur_ms:
-                with s.buf_lock:
-                    abs_start = self.cur_ms * 32
-                    abs_end = self.cur_end * 32
-                    rel_start = max(abs_start - s.pcm_buf_offset, 0)
-                    rel_end = max(abs_end - s.pcm_buf_offset, 0)
-                    seg = bytes(s.pcm_buf[rel_start: rel_end])
-                wav = np.frombuffer(seg, dtype="<i2").astype(np.float32) / 32768.0
-            else:
-                wav = np.zeros(0, dtype=np.float32)
-            sp_id = tracker.classify(wav, self.cur_speaker,
-                                     overlapped=self.overlaps_other(self.cur_ms, self.cur_end, label))
-            # --- 声紋ベースのAIエコー除去 ---
-            if (sp_id is not None
-                    and sp_id.startswith("__") and sp_id.endswith("__")):
-                if self.args.vp_debug:
-                    _print_line(f"# AI声紋エコー除去: sp={sp_id}"
-                                f" ({self.cur_text.strip()[:40]}...)")
-                self.cur_text = ""
-                self.cur_ms = None
-                self.cur_end = None
-                return
-            d = tracker.last
-            rec_extra = {}
-            if d and d["kind"] == "補正":
-                note = (f"声紋でラベル{d['label']}の取り違えを修正"
-                        f"（類似{d['sim']:.2f}、放置なら{s.disp_name(d['prev'])}の発言になっていた）")
-                rec_extra = {"vp": "補正", "note": note}
-                _print_line(f"# ⚡補正: {note}")
-            elif d and d["kind"] == "自動登録":
-                if d["rename"]:
-                    s.rekey(*d["rename"])
-                s.add_sys(self.cur_ms, f"この声を「{d['name']}」として追跡開始"
-                                       f"（実名にするには {d['label']}=名前）")
-                _print_line(f"# この声を「{d['name']}」として追跡します"
-                            f"（実名にするには {d['label']}=名前 と入力）")
-            elif d and d["kind"] == "合流":
-                if d["rename"]:
-                    s.rekey(*d["rename"])
-                if self.args.vp_debug:
-                    _print_line(f"# 合流: ラベル{d['label']}→{d['name']}")
-            elif self.args.vp_debug and d:
-                extra = f" 類似{d['sim']:.2f}({d['name']})" if "sim" in d else ""
-                _print_line(f"# vp判定[{d['kind']}]{extra}")
-        else:
-            sp_id = "#" + str(self.cur_speaker)
-            rec_extra = {}
-        # --- テキスト類似度エコー判定（安全網） ---
-        for _src_name, _src in [("agent", agent), ("partner", partner)]:
-            if _src is None:
-                continue
-            if _src_name == "agent" and not _src.in_echo_window:
-                continue
-            sim = _src._best_similarity(self.cur_text)
-            if sim > 0.35:
-                if self.args.vp_debug:
-                    _print_line(f"# テキスト安全網エコー除去({_src_name})"
-                                f" sim={sim:.2f}: sp={sp_id}"
-                                f" ({self.cur_text.strip()[:40]}...)")
-                self.cur_text = ""
-                self.cur_ms = None
-                self.cur_end = None
-                return
-        if self.cur_ms is not None and self.cur_end is not None:
-            self.recent_segs.append((self.cur_ms, self.cur_end, label))
-            del self.recent_segs[:-12]
-        if tracker is not None and tracker.last is not None:
-            try:
-                with open(s.diag_path, "a", encoding="utf-8") as f:
-                    f.write(json.dumps({"ms": self.cur_ms, "end": self.cur_end, "label": label,
-                                        "key": sp_id, **tracker.last},
-                                       ensure_ascii=False, default=str) + "\n")
-            except OSError:
-                pass
-        with s.state_lock:
-            s.records.append({"ms": self.cur_ms, "end_ms": self.cur_end,
-                              "speaker": sp_id, "text": self.cur_text.strip(),
-                              **rec_extra})
-            c = s.color_of(sp_id)
-        if ON_UTTERANCE is not None:
-            try:
-                ON_UTTERANCE(s.disp_name(sp_id), self.cur_text.strip())
-            except Exception:
-                pass
-        _print_line(f"{c}[{fmt_ts(self.cur_ms)}] {s.disp_name(sp_id)}{RESET}: {self.cur_text.strip()}")
-        s.save()
-        self.cur_text = ""
-        self.cur_ms = None
-        self.cur_end = None
-        self.cur_last_token_time = time.monotonic()
-
-    def run(self, ws):
-        """WebSocket受信ループのメイン."""
-        args = self.args
-        try:
-            while True:
-                res = self.backend.parse_message(
-                    json.loads(ws.recv()), args.lang)
-                if res.get("error_code") is not None:
-                    _print_line(f"# エラー: {res['error_code']} - {res.get('error_message')}")
-                    break
-                partial = ""
-                partial_sp = self.cur_speaker
-                for token in res.get("tokens", []):
-                    text = token.get("text") or ""
-                    if text == "<end>":
-                        self.flush()
-                        continue
-                    if not text:
-                        continue
-                    if token.get("is_final"):
-                        sp = token.get("speaker")
-                        if sp != self.cur_speaker:
-                            self.flush()
-                            self.cur_speaker = sp
-                        if self.cur_ms is None:
-                            self.cur_ms = token.get("start_ms")
-                        if token.get("end_ms") is not None:
-                            self.cur_end = token["end_ms"]
-                        self.cur_text += text
-                        self.cur_last_token_time = time.monotonic()
-                    else:
-                        partial += text
-                        partial_sp = token.get("speaker") or partial_sp
-                # --- 強制flush ---
-                if self.cur_text:
-                    clen = len(self.cur_text)
-                    if (time.monotonic() - self.cur_last_token_time > self._FLUSH_TIMEOUT
-                            or clen > self._FLUSH_HARD_CHARS):
-                        self.flush()
-                    elif clen > self._FLUSH_SOFT_CHARS and self.cur_text.rstrip()[-1:] in "。？！.?!\n":
-                        self.flush()
-                self.state.show_partial(partial_sp if partial else self.cur_speaker,
-                                        self.cur_text + partial)
-                if res.get("finished"):
-                    self.flush()
-                    _print_line("# 終了")
-                    break
-        except KeyboardInterrupt:
-            pass
-        finally:
-            self.flush()
 
 
 def main(argv=None):
@@ -578,7 +379,7 @@ def main(argv=None):
             else:
                 webbrowser.open("file://" + os.path.abspath(html_path))
 
-        recv = _RecvLoop(state, args, backend)
+        recv = RecvLoop(state, args, backend)
         try:
             recv.run(ws)
         finally:

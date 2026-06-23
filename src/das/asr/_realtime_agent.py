@@ -335,7 +335,7 @@ class RealtimeAgent:
                          f"参加者の発言と重なり中断されました。"
                          f"まだ重要であれば、簡潔に再度伝えてください]\n"
                          f"あなたの中断された発言: {pi['delivered']}")
-                print(f"# AI Agent: 中断された介入を再試行コンテキストに追加", flush=True)
+                print("# AI Agent: 中断された介入を再試行コンテキストに追加", flush=True)
             else:
                 print(f"# AI Agent: 中断された介入を期限切れで破棄（{age:.0f}秒経過）",
                       flush=True)

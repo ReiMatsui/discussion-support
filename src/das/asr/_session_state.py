@@ -272,14 +272,14 @@ class SessionState:
 
                 groups = []
                 if total_dur > 0.5:
-                    groups.append(f'<div class="stats-group">'
-                                  f'<div class="stats-label">発話時間</div>'
+                    groups.append('<div class="stats-group">'
+                                  '<div class="stats-label">発話時間</div>'
                                   + _bar_rows(sp_dur, total_dur) + '</div>')
-                groups.append(f'<div class="stats-group">'
-                              f'<div class="stats-label">文字数</div>'
+                groups.append('<div class="stats-group">'
+                              '<div class="stats-label">文字数</div>'
                               + _bar_rows(sp_chars, total_chars) + '</div>')
-                groups.append(f'<div class="stats-group">'
-                              f'<div class="stats-label">発話回数</div>'
+                groups.append('<div class="stats-group">'
+                              '<div class="stats-label">発話回数</div>'
                               + _bar_rows(sp_turns, total_turns) + '</div>')
                 stats_panel = ('<div class="stats-section">'
                                '<p class="sidebar-title">発言量</p>'

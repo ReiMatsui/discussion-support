@@ -130,7 +130,7 @@ class DiscussionSimulator:
                         "content": f"[ファシリテーターからの介入]: {msg}\n\n"
                                    "この介入を受けて、次の参加者の反応を生成してください。"
                     })
-                    print(f"# Simulator: ファシリテーター介入を受信 → 反応生成",
+                    print("# Simulator: ファシリテーター介入を受信 → 反応生成",
                           flush=True)
 
             # Chat APIでテキスト生成
