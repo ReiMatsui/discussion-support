@@ -439,6 +439,7 @@ dependencies = [
     { name = "tenacity" },
     { name = "tiktoken" },
     { name = "typer" },
+    { name = "websockets" },
 ]
 
 [package.optional-dependencies]
@@ -505,6 +506,7 @@ requires-dist = [
     { name = "torch", marker = "extra == 'soniox'", specifier = ">=2.0" },
     { name = "torchaudio", marker = "extra == 'soniox'", specifier = ">=2.0" },
     { name = "typer", specifier = ">=0.12" },
+    { name = "websockets", specifier = ">=16.0" },
     { name = "websockets", marker = "extra == 'soniox'", specifier = ">=12" },
     { name = "whisperlivekit", extras = ["mlx-whisper"], marker = "extra == 'asr'", specifier = ">=0.2.20" },
 ]

@@ -147,6 +147,10 @@ class ConversationPartner:
         """
         if not self._connected or not self.ws:
             return
+        # interrupt()直後の呼び出し時、_interruptedをリセットしないと
+        # 新しい応答の音声チャンクまで破棄されてしまう
+        if request_response:
+            self._interrupted = False
         try:
             self.ws.send(json.dumps({
                 "type": "conversation.item.create",
@@ -299,15 +303,23 @@ class ConversationPartner:
                 self._audio_q.put(None)
 
         elif etype == "response.done":
-            # 中断された応答: エコー判定用にテキストを記録するが、
-            # 議事録には載せない（音声が途中で止まっているため）
-            if self._interrupted and self._ai_text_buf:
-                partial = self._ai_text_buf.strip()
-                if partial:
-                    self._recent_ai_texts.append(partial)
-            self._ai_text_buf = ""
-            self._responding = False
-            self._interrupted = False
+            resp = ev.get("response", {})
+            status = resp.get("status", "")
+            if status == "cancelled":
+                # キャンセル済み応答: テキストをエコー判定用に記録、
+                # _respondingはリセットしない（直後にrequest_responseで
+                # 新しい応答が来る場合があるため）
+                if self._ai_text_buf:
+                    partial = self._ai_text_buf.strip()
+                    if partial:
+                        self._recent_ai_texts.append(partial)
+                self._ai_text_buf = ""
+                self._interrupted = False
+            else:
+                # 正常完了 or その他
+                self._ai_text_buf = ""
+                self._responding = False
+                self._interrupted = False
 
         elif etype == "error":
             msg = ev.get("error", {}).get("message", "unknown")
