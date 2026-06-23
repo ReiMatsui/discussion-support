@@ -1302,6 +1302,11 @@ class RealtimeAgent:
         elif etype == "error":
             msg = ev.get("error", {}).get("message", "unknown")
             print(f"# AI Agent エラー: {msg}", flush=True)
+            # エラーでresponse生成が中断された場合、_respondingをリセット
+            # （固着するとtrigger()が永遠にスキップされる）
+            if self._responding:
+                self._responding = False
+                self._interrupted = False
 
     # --- 発話送信 ---
 
@@ -1436,6 +1441,7 @@ class RealtimeAgent:
 
     def _cancel_response(self):
         """「介入不要」応答を静かにキャンセル。音声再生を止め、会話履歴から削除する."""
+        print("# AI Agent: 介入不要と判断 — 応答をキャンセル", flush=True)
         self._interrupted = True
         self._pending_intervention = None  # 介入不要の内容は再試行しない
         # 再生キューを空にして停止
@@ -1982,6 +1988,349 @@ class VoiceProfiles:
         return "、".join(parts) or "判定なし"
 
 
+def _print_line(text: str):
+    """ターミナルの現在行をクリアして1行出力."""
+    sys.stdout.write(CLEAR_LINE + text + "\n")
+    sys.stdout.flush()
+
+
+class SessionState:
+    """main()内の共有状態を集約するコンテナ.
+
+    巨大だった main() のクロージャ変数をインスタンス属性に集約し、
+    ヘルパーメソッドとして外部からアクセス可能にする。
+    """
+
+    # ------------------------------------------------------------------
+    # 初期化
+    # ------------------------------------------------------------------
+    def __init__(self, *, args, started, out_path, html_path, diag_path,
+                 turns_path, wav_path, tracker=None, serve=True):
+        self.args = args
+        self.started = started
+        self.out_path = out_path
+        self.html_path = html_path
+        self.diag_path = diag_path
+        self.turns_path = turns_path
+        self.wav_path = wav_path
+        self._serve = serve
+
+        # 発話記録
+        self.names: dict[str, str] = {}
+        self.colors: dict[str, str] = {}
+        self.records: list[dict] = []
+        self.state_lock = threading.Lock()
+
+        # 声紋
+        self.tracker: VoiceProfiles | None = tracker
+
+        # AI
+        self.agent: RealtimeAgent | None = None
+        self.partner: ConversationPartner | None = None
+        self.simulator: DiscussionSimulator | None = None
+
+        # 論点
+        self.topics: list[dict] = []
+        self.topics_lock = threading.Lock()
+
+        # PCMバッファ
+        self.pcm_buf = bytearray()
+        self.pcm_buf_offset = 0
+        self.pcm_total_bytes = 0
+        self._PCM_KEEP_BYTES = SR * 2 * 120
+        self.buf_lock = threading.Lock()
+
+        # 制御
+        self.stop = threading.Event()
+        self.audio_q: "queue.Queue[bytes | None]" = queue.Queue()
+
+        # エージェントワーカー状態
+        self._last_utt_time = [time.monotonic()]
+        self._was_in_echo = [False]
+
+    # ------------------------------------------------------------------
+    # 表示ヘルパー
+    # ------------------------------------------------------------------
+    def disp_name(self, key) -> str:
+        key = str(key)
+        if key in self.names:
+            return self.names[key]
+        return f"話者{key[1:]}" if key.startswith("#") else key
+
+    def key_for_label(self, sp) -> str:
+        sp = str(sp)
+        if self.tracker is not None and sp in self.tracker.sp_map:
+            return self.tracker.sp_map[sp]
+        return "#" + sp
+
+    def color_of(self, key) -> str:
+        key = str(key)
+        if key not in self.colors:
+            self.colors[key] = PALETTE[len(self.colors) % len(PALETTE)]
+        return self.colors[key]
+
+    def rekey(self, old: str, new: str):
+        """表示キーの付け替え: recordsと色を一括移行."""
+        with self.state_lock:
+            for r in self.records:
+                if r.get("speaker") == old:
+                    r["speaker"] = new
+            if old in self.colors:
+                self.colors.setdefault(new, self.colors.pop(old))
+
+    def add_sys(self, ms, text: str):
+        """システムイベントを議事録のタイムラインに残す."""
+        with self.state_lock:
+            self.records.append({"ms": ms, "sys": text})
+
+    def show_partial(self, sp, text: str):
+        if not text.strip():
+            sys.stdout.write(CLEAR_LINE)
+        else:
+            cols = os.get_terminal_size().columns if sys.stdout.isatty() else 120
+            line = f"{self.disp_name(self.key_for_label(sp))}: {text.strip()}"
+            sys.stdout.write(CLEAR_LINE + DIM + line[-(cols - 2):] + RESET)
+        sys.stdout.flush()
+
+    # ------------------------------------------------------------------
+    # 出力
+    # ------------------------------------------------------------------
+    def write_md(self, recs=None, path=None):
+        with self.state_lock:
+            rs = self.records if recs is None else recs
+            speakers = list(dict.fromkeys(r["speaker"] for r in rs if "speaker" in r))
+            lines = [
+                f"# 議事録 {self.started.strftime('%Y-%m-%d %H:%M')}",
+                "",
+                "話者: " + (", ".join(self.disp_name(s) for s in speakers) or "（未検出）"),
+                "",
+            ]
+            for r in rs:
+                if "sys" in r:
+                    lines.append(f"> [{fmt_ts(r['ms'])}] {r['sys']}")
+                    continue
+                mark = " ⚡" if r.get("vp") == "補正" else ""
+                lines.append(f"- **[{fmt_ts(r['ms'])}] {self.disp_name(r['speaker'])}{mark}**: {r['text']}")
+            dst = path or self.out_path
+            tmp = dst + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines) + "\n")
+            os.replace(tmp, dst)
+
+    def write_html(self, live: bool = True, recs=None, path=None, status=None):
+        import html as _html
+        with self.state_lock:
+            rs = self.records if recs is None else recs
+            parts = []
+            for r in rs:
+                if "sys" in r:
+                    parts.append(f'<div class="sys">⚙ {_html.escape(r["sys"])}</div>')
+                    continue
+                sp = str(r["speaker"])
+                self.color_of(sp)
+                idx = list(self.colors).index(sp)
+                c = HTML_PALETTE[idx % len(HTML_PALETTE)]
+                badge = ""
+                if r.get("vp") == "補正":
+                    note = _html.escape(r.get("note", ""))
+                    badge = f'<span class="badge" title="{note}">⚡声紋補正</span>'
+                parts.append(
+                    f'<div class="u"><span class="ts">{fmt_ts(r["ms"])}</span>'
+                    f'<span class="who" style="color:{c}">{_html.escape(self.disp_name(sp))}</span>'
+                    f'{_html.escape(r["text"])}{badge}</div>'
+                )
+            speakers = list(dict.fromkeys(r["speaker"] for r in rs if "speaker" in r))
+            sp_tags = []
+            for s in speakers:
+                dn = _html.escape(self.disp_name(s))
+                idx_s = list(self.colors).index(s) if s in self.colors else 0
+                c = HTML_PALETTE[idx_s % len(HTML_PALETTE)]
+                is_renameable = self._serve and self.tracker is not None and not s.startswith("#")
+                if is_renameable:
+                    lbl = s
+                    for _l, _k in self.tracker.sp_map.items():
+                        if _k == s:
+                            lbl = _l
+                            break
+                    is_anon = re.match(r"^人物\d+$", s)
+                    ph = "名前" if is_anon else "新しい名前"
+                    sp_tags.append(
+                        f'<div class="speaker-tag">'
+                        f'<div class="speaker-name"><span class="dot" style="background:{c}"></span>{dn}</div>'
+                        f'<div class="rename-row">'
+                        f'<input class="rename-input" placeholder="{ph}" data-label="{_html.escape(lbl)}">'
+                        f'<button class="rename-btn" onclick="rename(this)">登録</button>'
+                        f'</div></div>')
+                else:
+                    sp_tags.append(
+                        f'<div class="speaker-tag">'
+                        f'<div class="speaker-name"><span class="dot" style="background:{c}"></span>{dn}</div>'
+                        f'</div>')
+            if sp_tags:
+                speaker_panel = ('<div class="sidebar"><p class="sidebar-title">この会議の話者</p>'
+                                 '<div class="speaker-panel">' + ''.join(sp_tags) + '</div></div>')
+            else:
+                speaker_panel = ''
+            profile_panel = ''
+            if self._serve and self.tracker is not None:
+                all_names = self.tracker.all_profile_names()
+                if all_names:
+                    active_names = set(self.tracker.active_profile_names())
+                    items = []
+                    for n in all_names:
+                        cls = 'profile-item active' if n in active_names else 'profile-item'
+                        items.append(
+                            f'<div class="{cls}" data-name="{_html.escape(n)}" '
+                            f'onclick="toggleProfile(this)">'
+                            f'<span class="profile-toggle"></span>'
+                            f'{_html.escape(n)}</div>')
+                    profile_panel = ('<div class="profile-section">'
+                                     '<p class="sidebar-title">プロファイル</p>'
+                                     + ''.join(items) + '</div>')
+            stats_panel = ''
+            talk_rs = [r for r in rs if "speaker" in r and r.get("text")]
+            if talk_rs:
+                sp_dur: dict[str, float] = {}
+                sp_chars: dict[str, int] = {}
+                sp_turns: dict[str, int] = {}
+                for r in talk_rs:
+                    s = r["speaker"]
+                    ms, end = r.get("ms"), r.get("end_ms")
+                    dur = (end - ms) / 1000.0 if ms is not None and end is not None and end > ms else 0.0
+                    sp_dur[s] = sp_dur.get(s, 0.0) + dur
+                    sp_chars[s] = sp_chars.get(s, 0) + len(r["text"])
+                    sp_turns[s] = sp_turns.get(s, 0) + 1
+                total_dur = sum(sp_dur.values()) or 1.0
+                total_chars = sum(sp_chars.values()) or 1
+                total_turns = sum(sp_turns.values()) or 1
+                ranked = sorted(sp_dur.keys(), key=lambda s: sp_dur[s], reverse=True)
+
+                def _bar_rows(data, total, unit=""):
+                    rows = []
+                    for s in ranked:
+                        v = data.get(s, 0)
+                        pct = v / total * 100 if total else 0
+                        idx_s = list(self.colors).index(s) if s in self.colors else 0
+                        c = HTML_PALETTE[idx_s % len(HTML_PALETTE)]
+                        dn = _html.escape(self.disp_name(s))
+                        short = dn[:2] if len(dn) > 3 else dn
+                        rows.append(
+                            f'<div class="stats-row">'
+                            f'<span class="stats-name" title="{dn}">{short}</span>'
+                            f'<div class="stats-bar-bg">'
+                            f'<div class="stats-bar" style="width:{pct:.0f}%;background:{c}"></div>'
+                            f'</div>'
+                            f'<span class="stats-pct">{pct:.0f}%</span>'
+                            f'</div>')
+                    return ''.join(rows)
+
+                groups = []
+                if total_dur > 0.5:
+                    groups.append(f'<div class="stats-group">'
+                                  f'<div class="stats-label">発話時間</div>'
+                                  + _bar_rows(sp_dur, total_dur) + '</div>')
+                groups.append(f'<div class="stats-group">'
+                              f'<div class="stats-label">文字数</div>'
+                              + _bar_rows(sp_chars, total_chars) + '</div>')
+                groups.append(f'<div class="stats-group">'
+                              f'<div class="stats-label">発話回数</div>'
+                              + _bar_rows(sp_turns, total_turns) + '</div>')
+                stats_panel = ('<div class="stats-section">'
+                               '<p class="sidebar-title">発言量</p>'
+                               + ''.join(groups) + '</div>')
+            topics_panel = ''
+            with self.topics_lock:
+                if self.topics:
+                    items = []
+                    for t in self.topics:
+                        tt = _html.escape(t.get("topic", ""))
+                        ts = _html.escape(t.get("speaker", ""))
+                        items.append(f'<div class="topic-item">'
+                                     f'<div class="topic-text">{tt}</div>'
+                                     f'<div class="topic-by">{ts}</div></div>')
+                    topics_panel = ('<div class="topics-section">'
+                                   '<p class="sidebar-title">論点</p>'
+                                   + ''.join(items) + '</div>')
+            agent_panel = ''
+            if self.agent is not None:
+                cur_mode = self.agent.mode
+                if self.agent._connected:
+                    conn = '接続中'
+                elif self.agent._conn_error:
+                    conn = f'エラー: {_html.escape(self.agent._conn_error)}'
+                else:
+                    conn = '未接続'
+                mode_btns = []
+                for m, lbl in [("off", "OFF"), ("facilitator", "進行役"),
+                               ("conversation", "会話")]:
+                    cls = "agent-mode-btn active" if m == cur_mode else "agent-mode-btn"
+                    mode_btns.append(f'<button class="{cls}" data-mode="{m}" '
+                                     f'onclick="setAgentMode(this)">{lbl}</button>')
+                voice_opts = []
+                for v in AGENT_VOICES:
+                    sel = 'selected' if v == self.agent.voice else ''
+                    voice_opts.append(f'<option value="{v}" {sel}>{v}</option>')
+                trigger_val = self.agent.trigger_n
+                agent_panel = (
+                    f'<div class="agent-section" data-mode="{cur_mode}">'
+                    f'<div class="agent-header">'
+                    f'<span class="agent-label">🤖 AI Agent</span>'
+                    f'<span class="agent-conn">{conn}</span>'
+                    f'</div>'
+                    f'<div class="agent-modes">{"".join(mode_btns)}</div>'
+                    f'<div class="agent-opts">'
+                    f'<label class="agent-opt-label">声'
+                    f'<select class="agent-select" onchange="setAgentVoice(this)">'
+                    f'{"".join(voice_opts)}</select></label>'
+                    f'<label class="agent-opt-label agent-trigger-row">'
+                    f'間隔 <input type="number" class="agent-num" value="{trigger_val}" '
+                    f'min="1" max="50" onchange="setAgentTrigger(this)">発話'
+                    f'</label>'
+                    f'</div></div>')
+            doc = HTML_TMPL.format(
+                refresh='<meta http-equiv="refresh" content="2">' if live else "",
+                title=self.started.strftime("%Y-%m-%d %H:%M"),
+                status=status or ('<span class="live">● ライブ（2秒ごと自動更新）</span>'
+                                  if live else "終了"),
+                speaker_panel=speaker_panel,
+                profile_panel=profile_panel,
+                stats_panel=stats_panel,
+                topics_panel=topics_panel,
+                agent_panel=agent_panel,
+                body="\n".join(parts) or '<p class="meta">（まだ発話なし）</p>',
+            )
+            dst = path or self.html_path
+            tmp = dst + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(doc)
+            os.replace(tmp, dst)
+
+    def write_turns(self, recs=None, path=None):
+        """discussion-support(das)のUtteranceスキーマでJSONL出力."""
+        with self.state_lock:
+            rs = self.records if recs is None else recs
+            lines = []
+            tid = 0
+            for r in rs:
+                if "speaker" not in r or not r.get("text"):
+                    continue
+                tid += 1
+                lines.append(json.dumps({"turn_id": tid, "speaker": self.disp_name(r["speaker"]),
+                                         "text": r["text"], "ms": r.get("ms"),
+                                         "end_ms": r.get("end_ms")},
+                                        ensure_ascii=False))
+            dst = path or self.turns_path
+            tmp = dst + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines) + ("\n" if lines else ""))
+            os.replace(tmp, dst)
+
+    def save(self, live: bool = True):
+        self.write_md()
+        self.write_html(live)
+        self.write_turns()
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--lang", default="ja")
@@ -2096,12 +2445,7 @@ def main(argv=None):
     diag_path = os.path.splitext(out_path)[0] + ".diag.jsonl"   # 発話ごとの判定根拠(劣化解析用)
     turns_path = os.path.splitext(out_path)[0] + ".turns.jsonl"  # das(議論支援)連携用
 
-    # --- 状態 ---
-    names: dict[str, str] = {}          # 表示キー -> 別名（声紋OFF時の命名用）
-    colors: dict[str, str] = {}         # 表示キー -> ANSI色（出現順に割当）
-    records: list[dict] = []            # 確定発話 {"ms", "speaker", "text"}
-    state_lock = threading.Lock()
-
+    # --- 声紋モデル読み込み ---
     tracker: VoiceProfiles | None = None
     if not args.no_vp:
         print("# 声紋モデルを読み込み中…", flush=True)
@@ -2127,25 +2471,25 @@ def main(argv=None):
             print(f"# 声紋プロファイル: なし。未知の声は「人物N」として自動追跡、"
                   f"「1=松井」で実名化すると次回から自動表示（{args.voices}）", flush=True)
 
+    # --- SessionState: 共有状態の一括管理 ---
+    wav_path = os.path.splitext(out_path)[0] + ".wav"
+    state = SessionState(args=args, started=started, out_path=out_path,
+                         html_path=html_path, diag_path=diag_path,
+                         turns_path=turns_path, wav_path=wav_path,
+                         tracker=tracker, serve=_serve)
+
     # --- AIエージェント ---
-    agent: RealtimeAgent | None = None
     _agent_oai_key = os.environ.get("OPENAI_API_KEY", "")
     if args.agent:
         if not _agent_oai_key:
             print("# AI Agent: OPENAI_API_KEY が未設定です。--agent は無効になります。", flush=True)
         else:
-            agent = RealtimeAgent(api_key=_agent_oai_key, voice=args.agent_voice,
-                                  mode="facilitator", trigger_n=args.agent_trigger)
+            state.agent = RealtimeAgent(api_key=_agent_oai_key, voice=args.agent_voice,
+                                        mode="facilitator", trigger_n=args.agent_trigger)
             if tracker is not None:
-                agent.set_tracker(tracker)
+                state.agent.set_tracker(tracker)
 
-    pcm_buf = bytearray()               # 声紋切り出し用の直近音声バッファ（16bit, 直近120秒分）
-    pcm_buf_offset = 0                   # pcm_bufから切り落とした先頭バイト数（絶対位置補正用）
-    _PCM_KEEP_BYTES = SR * 2 * 120       # メモリに保持する最大バイト数（120秒分）
-    pcm_total_bytes = 0                  # 録音全体の累計バイト数
-    buf_lock = threading.Lock()
     # --- WAVストリーミング書き出し（クラッシュ時もファイルが残る） ---
-    wav_path = os.path.splitext(out_path)[0] + ".wav"
     _pcm_file: "typing.IO[bytes] | None" = None
     try:
         _pcm_file = open(wav_path, "wb")
@@ -2159,302 +2503,62 @@ def main(argv=None):
         print(f"# 警告: 録音ファイルを開けません: {e}", flush=True)
         _pcm_file = None
 
-    def disp_name(key) -> str:
-        key = str(key)
-        if key in names:
-            return names[key]
-        return f"話者{key[1:]}" if key.startswith("#") else key
-
-    def key_for_label(sp) -> str:
-        sp = str(sp)
-        if tracker is not None and sp in tracker.sp_map:
-            return tracker.sp_map[sp]
-        return "#" + sp
-
-    def color_of(key) -> str:
-        key = str(key)
-        if key not in colors:
-            colors[key] = PALETTE[len(colors) % len(PALETTE)]
-        return colors[key]
-
-    def rekey(old: str, new: str):
-        """表示キーの付け替え: recordsと色を一括移行（話者一覧に旧キーの幽霊を残さない）."""
-        with state_lock:
-            for r in records:
-                if r.get("speaker") == old:
-                    r["speaker"] = new
-            if old in colors:
-                colors.setdefault(new, colors.pop(old))
-
-    def add_sys(ms, text: str):
-        """システムイベント（補正・自動登録・命名・統合）を議事録のタイムラインに残す."""
-        with state_lock:
-            records.append({"ms": ms, "sys": text})
+    # --- クロージャ互換エイリアス ---
+    # inner関数が従来クロージャで参照していた変数を state 経由で提供。
+    # ミュータブルコンテナ（参照が不変）はエイリアスで互換を維持。
+    # 再代入される変数 (pcm_total_bytes等) は直接 state.xxx を使う。
+    stop = state.stop
+    audio_q = state.audio_q
+    state_lock = state.state_lock
+    buf_lock = state.buf_lock
+    records = state.records
+    names = state.names
+    colors = state.colors
+    topics = state.topics
+    topics_lock = state.topics_lock
+    pcm_buf = state.pcm_buf
+    agent = state.agent       # 初期化後は不変参照
+    partner = state.partner   # 後で設定、inner関数実行前に確定
 
     global _SYS_HOOK
 
     def _sys_hook(text: str) -> None:   # das介入をライブHTML/MDに反映
-        add_sys(None, text)
-        save()
+        state.add_sys(None, text)
+        state.save()
     _SYS_HOOK = _sys_hook
 
-    def write_md(recs=None, path=None):
-        with state_lock:
-            rs = records if recs is None else recs
-            speakers = list(dict.fromkeys(r["speaker"] for r in rs if "speaker" in r))
-            lines = [
-                f"# 議事録 {started.strftime('%Y-%m-%d %H:%M')}",
-                "",
-                "話者: " + (", ".join(disp_name(s) for s in speakers) or "（未検出）"),
-                "",
-            ]
-            for r in rs:
-                if "sys" in r:
-                    lines.append(f"> [{fmt_ts(r['ms'])}] {r['sys']}")
-                    continue
-                mark = " ⚡" if r.get("vp") == "補正" else ""
-                lines.append(f"- **[{fmt_ts(r['ms'])}] {disp_name(r['speaker'])}{mark}**: {r['text']}")
-            dst = path or out_path
-            tmp = dst + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                f.write("\n".join(lines) + "\n")
-            os.replace(tmp, dst)
+    # --- メソッドエイリアス（残存inner関数から短く呼ぶ用）---
+    def disp_name(key) -> str:
+        return state.disp_name(key)
 
-    def write_html(live: bool = True, recs=None, path=None, status=None):
-        import html as _html
-        with state_lock:
-            rs = records if recs is None else recs
-            parts = []
-            for r in rs:
-                if "sys" in r:
-                    parts.append(f'<div class="sys">⚙ {_html.escape(r["sys"])}</div>')
-                    continue
-                sp = str(r["speaker"])
-                color_of(sp)
-                idx = list(colors).index(sp)
-                c = HTML_PALETTE[idx % len(HTML_PALETTE)]
-                badge = ""
-                if r.get("vp") == "補正":
-                    note = _html.escape(r.get("note", ""))
-                    badge = f'<span class="badge" title="{note}">⚡声紋補正</span>'
-                parts.append(
-                    f'<div class="u"><span class="ts">{fmt_ts(r["ms"])}</span>'
-                    f'<span class="who" style="color:{c}">{_html.escape(disp_name(sp))}</span>'
-                    f'{_html.escape(r["text"])}{badge}</div>'
-                )
-            speakers = list(dict.fromkeys(r["speaker"] for r in rs if "speaker" in r))
-            # サイドバー話者パネル: 確定済み話者（人物N＋実名）はリネーム可能、未確定(話者N)は表示のみ
-            sp_tags = []
-            for s in speakers:
-                dn = _html.escape(disp_name(s))
-                idx_s = list(colors).index(s) if s in colors else 0
-                c = HTML_PALETTE[idx_s % len(HTML_PALETTE)]
-                # #N(話者N)は未確定なのでリネーム不可。人物N・実名は確定済みなのでリネーム可能
-                is_renameable = _serve and tracker is not None and not s.startswith("#")
-                if is_renameable:
-                    lbl = s  # enroll()は"人物1"でも"松井"でも受け付ける
-                    for _l, _k in tracker.sp_map.items():
-                        if _k == s:
-                            lbl = _l
-                            break
-                    is_anon = re.match(r"^人物\d+$", s)
-                    ph = "名前" if is_anon else "新しい名前"
-                    sp_tags.append(
-                        f'<div class="speaker-tag">'
-                        f'<div class="speaker-name"><span class="dot" style="background:{c}"></span>{dn}</div>'
-                        f'<div class="rename-row">'
-                        f'<input class="rename-input" placeholder="{ph}" data-label="{_html.escape(lbl)}">'
-                        f'<button class="rename-btn" onclick="rename(this)">登録</button>'
-                        f'</div></div>')
-                else:
-                    sp_tags.append(
-                        f'<div class="speaker-tag">'
-                        f'<div class="speaker-name"><span class="dot" style="background:{c}"></span>{dn}</div>'
-                        f'</div>')
-            if sp_tags:
-                speaker_panel = ('<div class="sidebar"><p class="sidebar-title">この会議の話者</p>'
-                                 '<div class="speaker-panel">' + ''.join(sp_tags) + '</div></div>')
-            else:
-                speaker_panel = ''
-            # プロファイル一覧パネル（voices.jsonに保存済みのプロファイルをトグル表示）
-            profile_panel = ''
-            if _serve and tracker is not None:
-                all_names = tracker.all_profile_names()
-                if all_names:
-                    active_names = set(tracker.active_profile_names())
-                    items = []
-                    for n in all_names:
-                        cls = 'profile-item active' if n in active_names else 'profile-item'
-                        items.append(
-                            f'<div class="{cls}" data-name="{_html.escape(n)}" '
-                            f'onclick="toggleProfile(this)">'
-                            f'<span class="profile-toggle"></span>'
-                            f'{_html.escape(n)}</div>')
-                    profile_panel = ('<div class="profile-section">'
-                                     '<p class="sidebar-title">プロファイル</p>'
-                                     + ''.join(items) + '</div>')
-            # 発言量統計パネル（発話時間・文字数・発話回数の割合）
-            stats_panel = ''
-            talk_rs = [r for r in rs if "speaker" in r and r.get("text")]
-            if talk_rs:
-                # 話者ごとに集計
-                sp_dur: dict[str, float] = {}   # 発話時間(秒)
-                sp_chars: dict[str, int] = {}   # 文字数
-                sp_turns: dict[str, int] = {}   # 発話回数
-                for r in talk_rs:
-                    s = r["speaker"]
-                    ms, end = r.get("ms"), r.get("end_ms")
-                    dur = (end - ms) / 1000.0 if ms is not None and end is not None and end > ms else 0.0
-                    sp_dur[s] = sp_dur.get(s, 0.0) + dur
-                    sp_chars[s] = sp_chars.get(s, 0) + len(r["text"])
-                    sp_turns[s] = sp_turns.get(s, 0) + 1
-                total_dur = sum(sp_dur.values()) or 1.0
-                total_chars = sum(sp_chars.values()) or 1
-                total_turns = sum(sp_turns.values()) or 1
-                # 発話時間順でソート（最も話した人が上）
-                ranked = sorted(sp_dur.keys(), key=lambda s: sp_dur[s], reverse=True)
+    def color_of(key) -> str:
+        return state.color_of(key)
 
-                def _bar_rows(data, total, unit=""):
-                    rows = []
-                    for s in ranked:
-                        v = data.get(s, 0)
-                        pct = v / total * 100 if total else 0
-                        idx_s = list(colors).index(s) if s in colors else 0
-                        c = HTML_PALETTE[idx_s % len(HTML_PALETTE)]
-                        dn = _html.escape(disp_name(s))
-                        # 短い名前の先頭2文字
-                        short = dn[:2] if len(dn) > 3 else dn
-                        rows.append(
-                            f'<div class="stats-row">'
-                            f'<span class="stats-name" title="{dn}">{short}</span>'
-                            f'<div class="stats-bar-bg">'
-                            f'<div class="stats-bar" style="width:{pct:.0f}%;background:{c}"></div>'
-                            f'</div>'
-                            f'<span class="stats-pct">{pct:.0f}%</span>'
-                            f'</div>')
-                    return ''.join(rows)
+    def rekey(old: str, new: str):
+        state.rekey(old, new)
 
-                groups = []
-                if total_dur > 0.5:   # 発話時間は十分なデータがある時だけ
-                    groups.append(f'<div class="stats-group">'
-                                  f'<div class="stats-label">発話時間</div>'
-                                  + _bar_rows(sp_dur, total_dur) + '</div>')
-                groups.append(f'<div class="stats-group">'
-                              f'<div class="stats-label">文字数</div>'
-                              + _bar_rows(sp_chars, total_chars) + '</div>')
-                groups.append(f'<div class="stats-group">'
-                              f'<div class="stats-label">発話回数</div>'
-                              + _bar_rows(sp_turns, total_turns) + '</div>')
-                stats_panel = ('<div class="stats-section">'
-                               '<p class="sidebar-title">発言量</p>'
-                               + ''.join(groups) + '</div>')
-            # 論点パネル
-            topics_panel = ''
-            with topics_lock:
-                if topics:
-                    items = []
-                    for t in topics:
-                        tt = _html.escape(t.get("topic", ""))
-                        ts = _html.escape(t.get("speaker", ""))
-                        items.append(f'<div class="topic-item">'
-                                     f'<div class="topic-text">{tt}</div>'
-                                     f'<div class="topic-by">{ts}</div></div>')
-                    topics_panel = ('<div class="topics-section">'
-                                   '<p class="sidebar-title">論点</p>'
-                                   + ''.join(items) + '</div>')
-            # AIエージェントパネル
-            agent_panel = ''
-            if agent is not None:
-                cur_mode = agent.mode
-                if agent._connected:
-                    conn = '接続中'
-                elif agent._conn_error:
-                    conn = f'エラー: {_html.escape(agent._conn_error)}'
-                else:
-                    conn = '未接続'
-                # モード選択ボタン
-                mode_btns = []
-                for m, lbl in [("off", "OFF"), ("facilitator", "進行役"),
-                               ("conversation", "会話")]:
-                    cls = "agent-mode-btn active" if m == cur_mode else "agent-mode-btn"
-                    mode_btns.append(f'<button class="{cls}" data-mode="{m}" '
-                                     f'onclick="setAgentMode(this)">{lbl}</button>')
-                # 声選択
-                voice_opts = []
-                for v in AGENT_VOICES:
-                    sel = 'selected' if v == agent.voice else ''
-                    voice_opts.append(f'<option value="{v}" {sel}>{v}</option>')
-                # トリガー間隔(facilitatorのみ)
-                trigger_val = agent.trigger_n
-                agent_panel = (
-                    f'<div class="agent-section" data-mode="{cur_mode}">'
-                    f'<div class="agent-header">'
-                    f'<span class="agent-label">🤖 AI Agent</span>'
-                    f'<span class="agent-conn">{conn}</span>'
-                    f'</div>'
-                    f'<div class="agent-modes">{"".join(mode_btns)}</div>'
-                    f'<div class="agent-opts">'
-                    f'<label class="agent-opt-label">声'
-                    f'<select class="agent-select" onchange="setAgentVoice(this)">'
-                    f'{"".join(voice_opts)}</select></label>'
-                    f'<label class="agent-opt-label agent-trigger-row">'
-                    f'間隔 <input type="number" class="agent-num" value="{trigger_val}" '
-                    f'min="1" max="50" onchange="setAgentTrigger(this)">発話'
-                    f'</label>'
-                    f'</div></div>')
-            doc = HTML_TMPL.format(
-                refresh='<meta http-equiv="refresh" content="2">' if live else "",
-                title=started.strftime("%Y-%m-%d %H:%M"),
-                status=status or ('<span class="live">● ライブ（2秒ごと自動更新）</span>'
-                                  if live else "終了"),
-                speaker_panel=speaker_panel,
-                profile_panel=profile_panel,
-                stats_panel=stats_panel,
-                topics_panel=topics_panel,
-                agent_panel=agent_panel,
-                body="\n".join(parts) or '<p class="meta">（まだ発話なし）</p>',
-            )
-            dst = path or html_path
-            tmp = dst + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                f.write(doc)
-            os.replace(tmp, dst)
-
-    def write_turns(recs=None, path=None):
-        """discussion-support(das)のUtteranceスキーマでJSONL出力.
-
-        `das run-session 日時.turns.jsonl` がそのまま読める形式。saveごとに全体を
-        書き直すので、後からの実名化(1=松井)や統合(fix)が過去の行にも反映される。
-        """
-        with state_lock:
-            rs = records if recs is None else recs
-            lines = []
-            tid = 0
-            for r in rs:
-                if "speaker" not in r or not r.get("text"):
-                    continue
-                tid += 1
-                lines.append(json.dumps({"turn_id": tid, "speaker": disp_name(r["speaker"]),
-                                         "text": r["text"], "ms": r.get("ms"),
-                                         "end_ms": r.get("end_ms")},
-                                        ensure_ascii=False))
-            dst = path or turns_path
-            tmp = dst + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                f.write("\n".join(lines) + ("\n" if lines else ""))
-            os.replace(tmp, dst)
+    def add_sys(ms, text: str):
+        state.add_sys(ms, text)
 
     def save(live: bool = True):
-        write_md()
-        write_html(live)
-        write_turns()
+        state.save(live)
+
+    def write_md(recs=None, path=None):
+        state.write_md(recs, path)
+
+    def write_html(live: bool = True, recs=None, path=None, status=None):
+        state.write_html(live, recs, path, status)
+
+    def write_turns(recs=None, path=None):
+        state.write_turns(recs, path)
+
+    def print_line(text: str):
+        _print_line(text)
 
     # --- 論点抽出（非同期バックグラウンド処理）---
-    topics: list[dict] = []          # {"topic": "...", "speaker": "...", "ms": ...}
-    topics_lock = threading.Lock()
-    _topic_cursor = 0                # recordsの何番目まで処理済みか
-    _TOPIC_WINDOW = 10               # LLMに渡す直近発話数
-    _TOPIC_TRIGGER = 5               # 新発話がこの数たまったらLLM呼び出し
+    _topic_cursor = 0
+    _TOPIC_WINDOW = 10
+    _TOPIC_TRIGGER = 5
     _oai_key = os.environ.get("OPENAI_API_KEY", "")
     _oai_model = os.environ.get("OPENAI_MODEL_FAST", "gpt-5-mini")
 
@@ -2505,8 +2609,8 @@ def main(argv=None):
         save()
 
     _agent_cursor = 0
-    _last_utt_time = [time.monotonic()]   # mutableで非ローカル参照
-    _was_in_echo = [False]                # エコーウィンドウ→通常への遷移検出用
+    _last_utt_time = state._last_utt_time   # mutableリスト（エイリアス）
+    _was_in_echo = state._was_in_echo       # mutableリスト（エイリアス）
     # --- 相槌判定: Partnerへの割り込みをフィルタ ---
     # 相槌パターンに一致する発話ではPartnerを止めない。
     # 文字数ではなく意味で判定する（「止めて」は3文字だが割り込み、
@@ -2536,9 +2640,15 @@ def main(argv=None):
         引き起こすのを防ぎ、人間が被せて話せばAIが止まる。
         """
         nonlocal _agent_cursor
+        _diag_tick = 0
         while not stop.is_set():
             time.sleep(0.5)
+            _diag_tick += 1
             if agent is None or not agent._connected or not agent.enabled:
+                if _diag_tick % 20 == 0:  # 10秒ごと
+                    print(f"# [diag] _agent_worker skip: agent={agent is not None}"
+                          f" conn={agent._connected if agent else '?'}"
+                          f" enabled={agent.enabled if agent else '?'}", flush=True)
                 continue
             with state_lock:
                 _skip = {AGENT_SPEAKER, "パートナー"}
@@ -2600,6 +2710,12 @@ def main(argv=None):
                 _was_in_echo[0] = False
                 _last_utt_time[0] = time.monotonic()
             # モード別トリガー判定
+            if _diag_tick % 20 == 0:  # 10秒ごとの診断ログ
+                _elapsed = time.monotonic() - _last_utt_time[0]
+                print(f"# [diag] agent: mode={agent.mode} pending={agent.pending_count}"
+                      f" trigger_n={agent.trigger_n} responding={agent._responding}"
+                      f" silence={_elapsed:.1f}s echo={agent.in_echo_window}"
+                      f" partner_talk={partner.ai_speaking if partner else '?'}", flush=True)
             if agent.mode == "conversation":
                 # 沈黙ベース: 最後の発話から一定時間経過でまとめてtrigger
                 if (agent.pending_count > 0
@@ -2610,9 +2726,11 @@ def main(argv=None):
                 _silence_thresh = (_AGENT_DEBATE_SILENCE if partner is not None
                                    else _AGENT_SILENCE)
                 if agent.pending_count >= agent.trigger_n:
+                    print(f"# [diag] TRIGGER by count: {agent.pending_count}>={agent.trigger_n}", flush=True)
                     agent.trigger()
                 elif (agent.pending_count > 0
                       and time.monotonic() - _last_utt_time[0] > _silence_thresh):
+                    print(f"# [diag] TRIGGER by silence: {time.monotonic() - _last_utt_time[0]:.1f}s > {_silence_thresh}s", flush=True)
                     agent.trigger()
 
     # --- UIサーバー（ブラウザからの話者リネーム用）---
@@ -2722,24 +2840,10 @@ def main(argv=None):
         except OSError as e:
             print(f"# 警告: UIサーバーをポート{args.port}で起動できません ({e})", flush=True)
             _serve = False
+            state._serve = False
 
-    def print_line(text: str):
-        sys.stdout.write(CLEAR_LINE + text + "\n")
-        sys.stdout.flush()
-
-    def show_partial(sp, text: str):
-        if not text.strip():
-            sys.stdout.write(CLEAR_LINE)
-        else:
-            cols = os.get_terminal_size().columns if sys.stdout.isatty() else 120
-            line = f"{disp_name(key_for_label(sp))}: {text.strip()}"
-            sys.stdout.write(CLEAR_LINE + DIM + line[-(cols - 2):] + RESET)
-        sys.stdout.flush()
 
     # --- 音声入力（マイク or ファイル）→ audio_q ---
-    audio_q: "queue.Queue[bytes | None]" = queue.Queue()
-    stop = threading.Event()
-
     def from_mic():
         import sounddevice as sd
 
@@ -2866,22 +2970,20 @@ def main(argv=None):
         raise SystemExit("--simulate と --debate は同時に使えません")
 
     # --- DiscussionSimulator ---
-    simulator: DiscussionSimulator | None = None
     if args.simulate:
         if not _oai_key:
             raise SystemExit("--simulate には OPENAI_API_KEY が必要です")
         if not args.agent:
             print("# ヒント: --agent を付けるとファシリテーターが介入します", flush=True)
-        # ファシリテーターの声がSimulatorの話者と被っていたら警告
         if args.agent and args.agent_voice in DiscussionSimulator.SPEAKERS.values():
             print(f"# 警告: --agent-voice={args.agent_voice} はSimulator話者と重複しています。"
                   f"声紋分離に影響する可能性があります。alloy を推奨します。", flush=True)
-        simulator = DiscussionSimulator(
+        state.simulator = DiscussionSimulator(
             api_key=_oai_key, topic=args.simulate,
             scenario=args.sim_scenario)
+    simulator = state.simulator  # エイリアス
 
     # --- ConversationPartner（--debate モード）---
-    partner: ConversationPartner | None = None
     if args.debate:
         if not _oai_key:
             raise SystemExit("--debate には OPENAI_API_KEY が必要です")
@@ -2890,10 +2992,11 @@ def main(argv=None):
         if args.agent and args.debate_voice == args.agent_voice:
             print(f"# 警告: --debate-voice と --agent-voice が同じ ({args.debate_voice})。"
                   f"声紋分離に影響します。", flush=True)
-        partner = ConversationPartner(
+        state.partner = ConversationPartner(
             api_key=_oai_key, voice=args.debate_voice, topic=args.debate)
         if tracker is not None:
-            partner.set_tracker(tracker)
+            state.partner.set_tracker(tracker)
+    partner = state.partner  # エイリアス更新
 
     print(f"# {args.stt} に接続中…", flush=True)
     with connect(ws_url, additional_headers=ws_headers) as ws:
@@ -2963,7 +3066,6 @@ def main(argv=None):
             print(f"# Partner: voice={partner.voice} topic={partner.topic}", flush=True)
 
         def sender():
-            nonlocal pcm_total_bytes, pcm_buf_offset
             seq = 0
             while True:
                 pcm = audio_q.get()
@@ -2975,12 +3077,12 @@ def main(argv=None):
                     break
                 with buf_lock:
                     pcm_buf.extend(pcm)
-                    pcm_total_bytes += len(pcm)
+                    state.pcm_total_bytes += len(pcm)
                     # メモリ節約: 直近120秒分だけ保持
-                    if len(pcm_buf) > _PCM_KEEP_BYTES + SR * 2 * 10:
-                        trim = len(pcm_buf) - _PCM_KEEP_BYTES
+                    if len(pcm_buf) > state._PCM_KEEP_BYTES + SR * 2 * 10:
+                        trim = len(pcm_buf) - state._PCM_KEEP_BYTES
                         del pcm_buf[:trim]
-                        pcm_buf_offset += trim
+                        state.pcm_buf_offset += trim
                 # WAVファイルにストリーミング書き出し（クラッシュ耐性）
                 if _pcm_file is not None:
                     try:
@@ -3029,8 +3131,8 @@ def main(argv=None):
                             # 絶対バイト位置からバッファ内位置に変換
                             abs_start = cur_ms * 32   # 16サンプル/ms × 2byte
                             abs_end = cur_end * 32
-                            rel_start = max(abs_start - pcm_buf_offset, 0)
-                            rel_end = max(abs_end - pcm_buf_offset, 0)
+                            rel_start = max(abs_start - state.pcm_buf_offset, 0)
+                            rel_end = max(abs_end - state.pcm_buf_offset, 0)
                             seg = bytes(pcm_buf[rel_start: rel_end])
                         wav = np.frombuffer(seg, dtype="<i2").astype(np.float32) / 32768.0
                     else:
@@ -3166,7 +3268,7 @@ def main(argv=None):
                     elif clen > _FLUSH_SOFT_CHARS and cur_text.rstrip()[-1:] in "。？！.?!\n":
                         # ソフトリミット超過 + 文の切れ目: 自然な位置でflush
                         flush()
-                show_partial(partial_sp if partial else cur_speaker, cur_text + partial)
+                state.show_partial(partial_sp if partial else cur_speaker, cur_text + partial)
                 if res.get("finished"):
                     flush()
                     print_line("# 終了")
@@ -3192,13 +3294,13 @@ def main(argv=None):
                 try:
                     import struct as _struct
                     _pcm_file.flush()
-                    data_size = pcm_total_bytes
+                    data_size = state.pcm_total_bytes
                     _pcm_file.seek(4)
                     _pcm_file.write(_struct.pack("<I", 36 + data_size))  # RIFFサイズ
                     _pcm_file.seek(40)
                     _pcm_file.write(_struct.pack("<I", data_size))       # dataサイズ
                     _pcm_file.close()
-                    if pcm_total_bytes > SR * 2 * 10:
+                    if state.pcm_total_bytes > SR * 2 * 10:
                         print_line(f"# 録音を保存しました: {wav_path}")
                     else:
                         os.remove(wav_path)  # 短すぎる録音は削除
@@ -3206,9 +3308,9 @@ def main(argv=None):
                     print_line(f"# 録音保存に失敗: {e}")
                 _pcm_file = None
             # 清書: RT分離は高速応酬で崩れる(実測)ため、全文脈の非同期再処理で最終版を作る
-            if args.polish and not api_key and pcm_total_bytes > SR * 2 * 10:
+            if args.polish and not api_key and state.pcm_total_bytes > SR * 2 * 10:
                 print_line("# 清書はスキップ（SONIOX_API_KEY未設定。清書はSoniox非同期APIを使用）")
-            if args.polish and api_key and pcm_total_bytes > SR * 2 * 10:
+            if args.polish and api_key and state.pcm_total_bytes > SR * 2 * 10:
                 try:
                     with open(wav_path, "rb") as f:
                         wav_data = f.read()
