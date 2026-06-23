@@ -40,7 +40,7 @@ class RecvLoop:
                    for s, e, l in self.recent_segs)
 
     def flush(self):
-        from das.asr.soniox_live import ON_UTTERANCE
+        from das.asr.live import ON_UTTERANCE
 
         s = self.state
         if not self.cur_text.strip():

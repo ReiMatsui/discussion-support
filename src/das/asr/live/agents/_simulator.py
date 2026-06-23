@@ -8,8 +8,8 @@ import time
 
 import numpy as np
 
-from ._constants import SR
-from ._realtime_agent import RealtimeAgent
+from .._constants import SR
+from ._realtime import RealtimeAgent
 
 
 class DiscussionSimulator:

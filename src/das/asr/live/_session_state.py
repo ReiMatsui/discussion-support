@@ -20,9 +20,9 @@ from ._constants import (
     SR,
     fmt_ts,
 )
-from ._conversation_partner import ConversationPartner  # noqa: F401 (type ref)
-from ._discussion_simulator import DiscussionSimulator  # noqa: F401 (type ref)
-from ._realtime_agent import RealtimeAgent  # noqa: F401 (type ref)
+from .agents._partner import ConversationPartner  # noqa: F401 (type ref)
+from .agents._simulator import DiscussionSimulator  # noqa: F401 (type ref)
+from .agents._realtime import RealtimeAgent  # noqa: F401 (type ref)
 from ._voice_profiles import VoiceProfiles  # noqa: F401 (type ref)
 
 

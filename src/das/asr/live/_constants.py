@@ -1,4 +1,4 @@
-"""soniox_live モジュール定数."""
+"""リアルタイム議事録モジュール定数."""
 from __future__ import annotations
 
 import re

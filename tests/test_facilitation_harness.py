@@ -401,7 +401,7 @@ def main():
             print(f"  {name:20s} [{', '.join(s.tags)}] {s.description}")
         return
 
-    from das.asr.soniox_live import load_env
+    from das.asr.live._bootstrap import load_env
     load_env()
     if not os.environ.get("OPENAI_API_KEY"):
         print("❌ OPENAI_API_KEY が設定されていません。(.env または環境変数)", file=sys.stderr)

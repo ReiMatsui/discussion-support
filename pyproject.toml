@@ -22,6 +22,7 @@ dependencies = [
     "mediapipe>=0.10.35",
     "faster-whisper>=1.2.1",
     "sounddevice>=0.5.5",
+    "click>=8.0",
 ]
 
 [project.optional-dependencies]
@@ -48,7 +49,7 @@ asr = [
     "sounddevice>=0.4",
 ]
 soniox = [
-    # speaker-attribution 由来の Soniox+声紋プロファイル文字起こし (das.asr.soniox_live)
+    # speaker-attribution 由来のリアルタイム文字起こし (das.asr.live)
     "websockets>=12",
     "sounddevice>=0.4",
     # 声紋モデル (ReDimNet via torch.hub / ECAPA via speechbrain)

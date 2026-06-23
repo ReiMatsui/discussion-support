@@ -10,8 +10,8 @@ import time
 
 import numpy as np
 
-from ._constants import _PROMPT_DEBATE_PARTNER, REALTIME_URL
-from ._voice_profiles import VoiceProfiles, _resample_24_to_16, _best_text_similarity
+from .._constants import _PROMPT_DEBATE_PARTNER, REALTIME_URL
+from .._voice_profiles import VoiceProfiles, _resample_24_to_16, _best_text_similarity
 
 
 class ConversationPartner:

@@ -2,7 +2,7 @@
 """複数話者の会議音声WAVを生成する。
 
 OpenAI TTS APIで各話者の発言を生成し、適切な間（ま）を入れて1つのWAVに結合する。
-生成したWAVは soniox_live.py --wav で再生し、--agent と組み合わせて
+生成したWAVは live.py --wav で再生し、--agent と組み合わせて
 ファシリテーターAIの介入テストに使う。
 
 使い方:
@@ -13,10 +13,10 @@ OpenAI TTS APIで各話者の発言を生成し、適切な間（ま）を入れ
   uv run python scripts/generate_conversation_wav.py --all
 
   # 生成したWAVでファシリテーターをテスト（trigger=5で短いシナリオでも発火しやすく）
-  uv run python -m das.asr.soniox_live --wav test_wavs/stalled.wav --agent --play --agent-trigger 5
+  uv run python -m das.asr.live --wav test_wavs/stalled.wav --agent --play --agent-trigger 5
 
   # 自分も参加（マイクON）
-  uv run python -m das.asr.soniox_live --wav test_wavs/stalled.wav --agent --join --agent-trigger 5
+  uv run python -m das.asr.live --wav test_wavs/stalled.wav --agent --join --agent-trigger 5
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, os.path.join(_PROJECT_ROOT, "src"))
 
-from das.asr.soniox_live import load_env
+from das.asr.live._bootstrap import load_env
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  話者 → TTS音声マッピング
@@ -47,7 +47,7 @@ VOICE_MAP: dict[str, str] = {
 }
 
 DEFAULT_VOICE = "shimmer"
-TARGET_SR = 16000  # soniox_liveのサンプリングレート
+TARGET_SR = 16000  # liveのサンプリングレート
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -274,11 +274,11 @@ def main():
             paths.append(path)
         print(f"\n🎉 全{len(paths)}シナリオ生成完了")
         print(f"\nテスト実行例:")
-        print(f"  uv run python -m das.asr.soniox_live --wav {paths[0]} --agent --play")
+        print(f"  uv run python -m das.asr.live --wav {paths[0]} --agent --play")
     elif args.scenario:
         path = generate_scenario_wav(args.scenario, args.output_dir, args.pause)
         print(f"\nテスト実行:")
-        print(f"  uv run python -m das.asr.soniox_live --wav {path} --agent --play")
+        print(f"  uv run python -m das.asr.live --wav {path} --agent --play")
     else:
         ap.print_help()
 

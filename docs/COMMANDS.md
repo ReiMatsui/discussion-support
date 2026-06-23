@@ -21,7 +21,7 @@ cd ~/discussion-support
 ### マイクからリアルタイム書き起こし（最もシンプル）
 
 ```bash
-uv run python -m das.asr.soniox_live
+uv run python -m das.asr.live
 ```
 
 ブラウザに議事録が自動表示され、2秒ごとに更新される。`Ctrl-C`で終了。
@@ -30,16 +30,16 @@ uv run python -m das.asr.soniox_live
 
 ```bash
 # 清書なし（高速・API節約）
-uv run python -m das.asr.soniox_live --no-polish
+uv run python -m das.asr.live --no-polish
 
 # Speechmaticsを使う
-uv run python -m das.asr.soniox_live --stt speechmatics
+uv run python -m das.asr.live --stt speechmatics
 
 # ブラウザを開かない
-uv run python -m das.asr.soniox_live --no-open
+uv run python -m das.asr.live --no-open
 
 # 声紋照合を無効化
-uv run python -m das.asr.soniox_live --no-vp
+uv run python -m das.asr.live --no-vp
 ```
 
 ### 声の登録
@@ -54,13 +54,13 @@ AIファシリテーターが会議に音声で参加する。`--agent` フラ�
 
 ```bash
 # マイクライブ + AIエージェント
-uv run python -m das.asr.soniox_live --agent
+uv run python -m das.asr.live --agent
 
 # 声を変える（alloy/ash/ballad/coral/echo/sage/shimmer/verse）
-uv run python -m das.asr.soniox_live --agent --agent-voice sage
+uv run python -m das.asr.live --agent --agent-voice sage
 
 # 応答頻度を調整（既定10発話ごと）
-uv run python -m das.asr.soniox_live --agent --agent-trigger 5
+uv run python -m das.asr.live --agent --agent-trigger 5
 ```
 
 エコー防止方式（E+B）:
@@ -99,7 +99,7 @@ uv run das listen-soniox --skip-docs --soniox-args "--wav data/overlap_test/C_he
 ### 直接注入（観戦モード）— パイプラインの実力測定
 
 ```bash
-uv run python -m das.asr.soniox_live --wav data/overlap_test/C_heavy.wav --play --no-polish
+uv run python -m das.asr.live --wav data/overlap_test/C_heavy.wav --play --no-polish
 ```
 
 wav内の音声を直接STTに送信。スピーカーからも再生されるので聞きながら確認できる。マイクは使わない。
@@ -108,7 +108,7 @@ wav内の音声を直接STTに送信。スピーカーからも再生される�
 
 ターミナル1:
 ```bash
-uv run python -m das.asr.soniox_live --no-polish
+uv run python -m das.asr.live --no-polish
 ```
 
 ターミナル2:
@@ -121,7 +121,7 @@ afplay data/overlap_test/C_heavy.wav
 ### 参加モード（--join）— TTS討論に乱入
 
 ```bash
-uv run python -m das.asr.soniox_live --wav data/overlap_test/C_heavy.wav --join --no-polish
+uv run python -m das.asr.live --wav data/overlap_test/C_heavy.wav --join --no-polish
 ```
 
 wavをスピーカー再生しつつ、自分のマイクも同時に拾う。**イヤホン推奨**（ハウリング防止）。

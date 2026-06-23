@@ -1,7 +1,7 @@
 """STTプロバイダの共通インターフェース.
 
 新しいSTTプロバイダを追加するには、このProtocolを実装するクラスを作成し、
-soniox_live.py の _build_backend() に選択肢を追加するだけでよい。
+_bootstrap.py の build_backend() に選択肢を追加するだけでよい。
 """
 from __future__ import annotations
 

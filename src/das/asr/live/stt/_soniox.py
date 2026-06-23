@@ -1,7 +1,7 @@
 """Soniox リアルタイムSTTバックエンド."""
 from __future__ import annotations
 
-from ._constants import SR
+from .._constants import SR
 
 WS_URL = "wss://stt-rt.soniox.com/transcribe-websocket"
 

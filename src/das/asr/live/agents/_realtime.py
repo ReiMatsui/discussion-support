@@ -10,14 +10,14 @@ import time
 
 import numpy as np
 
-from ._constants import (
+from .._constants import (
     _AGENT_TRIGGER,
     _PROMPT_CONVERSATION,
     _PROMPT_FACILITATOR,
     AGENT_VOICES,
     REALTIME_URL,
 )
-from ._voice_profiles import VoiceProfiles, _resample_24_to_16, _best_text_similarity
+from .._voice_profiles import VoiceProfiles, _resample_24_to_16, _best_text_similarity
 
 
 class RealtimeAgent:

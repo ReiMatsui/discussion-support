@@ -424,6 +424,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "anyio" },
+    { name = "click" },
     { name = "faster-whisper" },
     { name = "mediapipe" },
     { name = "networkx" },
@@ -478,6 +479,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "anyio", specifier = ">=4.4" },
+    { name = "click", specifier = ">=8.0" },
     { name = "faster-whisper", specifier = ">=1.2.1" },
     { name = "matplotlib", marker = "extra == 'viz'", specifier = ">=3.8" },
     { name = "mediapipe", specifier = ">=0.10.35" },

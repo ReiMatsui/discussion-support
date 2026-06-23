@@ -39,7 +39,7 @@ uv run das ui
 
 ## 対面議論のライブ入力 (Soniox + 声紋プロファイル)
 
-speaker-attribution 由来の「誰が何を言ったか」文字起こしを統合済み (`das/asr/soniox_live.py`)。
+speaker-attribution 由来の「誰が何を言ったか」文字起こしを統合済み (`das/asr/live.py`)。
 
 ```bash
 uv sync --extra soniox

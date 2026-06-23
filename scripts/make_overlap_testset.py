@@ -15,7 +15,7 @@
 
 採点まで:
   uv run das listen-soniox を使わず、文字起こし層単体で:
-  cd 任意 && uv run python -m das.asr.soniox_live --wav data/overlap_test/A_clean.wav --no-open --no-polish
+  cd 任意 && uv run python -m das.asr.live --wav data/overlap_test/A_clean.wav --no-open
   uv run python scripts/score_overlap_test.py data/overlap_test/A_clean.answer.json transcripts/<その時刻>.turns.jsonl
 """
 from __future__ import annotations

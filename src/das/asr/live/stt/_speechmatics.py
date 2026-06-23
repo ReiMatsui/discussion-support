@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from ._constants import SR
+from .._constants import SR
 
 SM_WS_URL = "wss://eu.rt.speechmatics.com/v2/"
 

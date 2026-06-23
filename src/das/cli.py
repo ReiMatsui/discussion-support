@@ -426,7 +426,7 @@ def listen_soniox(
 ) -> None:
     """Soniox+声紋プロファイルで「誰が何を」をライブ取得し、統合 AF 構築＋ライブ介入を行う。
 
-    speaker-attribution 由来の話者特定つき文字起こし (das.asr.soniox_live) を
+    speaker-attribution 由来の話者特定つき文字起こし (das.asr.live) を
     別スレッドで走らせ、確定発話を Orchestrator.run_live に流す。
     FacilitationAgent が周期的に介入を判定し、ターミナルとライブ議事録 HTML
     (💡システム行) に提示する。
@@ -460,7 +460,7 @@ async def _run_listen_soniox_async(
     min_utt_chars: int = 7,
     facilitate_interval: float = 3.0,
 ) -> None:
-    """soniox_live を別スレッドで回し、確定発話キュー → run_live ＋ 周期介入判定."""
+    """live を別スレッドで回し、確定発話キュー → run_live ＋ 周期介入判定."""
 
     import contextlib
     import threading
@@ -476,7 +476,7 @@ async def _run_listen_soniox_async(
     typer.echo(f"[listen-soniox] run_dir={run_dir}")
 
     try:
-        from das.asr import soniox_live
+        from das.asr import live as _live_mod
     except ImportError as exc:
         typer.echo(f"[listen-soniox] 依存が未インストールです: {exc}")
         typer.echo("`uv sync --extra soniox` を実行してください。")
@@ -502,12 +502,12 @@ async def _run_listen_soniox_async(
     def _on_utt(speaker: str, text: str) -> None:
         loop.call_soon_threadsafe(queue.put_nowait, (speaker, text))
 
-    soniox_live.ON_UTTERANCE = _on_utt
+    _live_mod.ON_UTTERANCE = _on_utt
     argv = ["--no-open"] + (soniox_args.split() if soniox_args else [])
 
     def _runner() -> None:
         try:
-            soniox_live.main(argv)
+            _live_mod.main(argv)
         except BaseException as exc:  # noqa: BLE001 - スレッド境界で握って通知する
             typer.echo(f"\n[listen-soniox] 文字起こしスレッド終了: {exc!r}")
         finally:
@@ -554,9 +554,9 @@ async def _run_listen_soniox_async(
         msg = f"{head}: {body}"
         typer.echo(f"\n{msg}")
         with contextlib.suppress(Exception):
-            from das.asr import soniox_live as _sl
+            from das.asr import live as _live
 
-            _sl.post_system(msg)   # ライブ議事録(2秒自動更新HTML)に表示
+            _live.post_system(msg)   # ライブ議事録(2秒自動更新HTML)に表示
 
     async def _facilitate_loop() -> None:
         while True:

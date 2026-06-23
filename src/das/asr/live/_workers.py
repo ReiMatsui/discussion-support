@@ -23,7 +23,7 @@ from ._ui import _print_line
 
 def _run_topic_worker(state: "SessionState", oai_key: str, oai_model: str):
     """論点抽出のバックグラウンドワーカー（モジュールレベル関数）."""
-    from das.asr.soniox_live import _extract_topics
+    from das.asr.live._bootstrap import extract_topics as _extract_topics
 
     while not state.stop.is_set():
         time.sleep(3)
@@ -57,7 +57,7 @@ def _run_topic_worker(state: "SessionState", oai_key: str, oai_model: str):
 def _on_agent_text_factory(state: "SessionState"):
     """ファシリテーター発言コールバックを生成."""
     def _on_agent_text(text: str):
-        from das.asr.soniox_live import ON_UTTERANCE
+        from das.asr.live import ON_UTTERANCE
 
         with state.state_lock:
             state.records.append({"ms": None, "end_ms": None,
@@ -353,8 +353,8 @@ def _run_sender(state: "SessionState", ws, backend: "STTBackend"):
 def _cleanup(state: "SessionState", args, api_key: str,
              tracker, wav_path: str, out_path: str, html_path: str):
     """セッション終了時のリソース解放・ファイル保存."""
-    import das.asr.soniox_live as _sl
-    _sl._SYS_HOOK = None
+    from das.asr.live import _SYS_HOOK_REF
+    _SYS_HOOK_REF[0] = None
     state.stop.set()
     if state.partner is not None:
         state.partner.close()
