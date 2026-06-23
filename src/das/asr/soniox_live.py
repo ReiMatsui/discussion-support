@@ -392,6 +392,56 @@ def _resample_24_to_16(pcm_24k: np.ndarray) -> np.ndarray:
     return np.interp(idx, np.arange(n_in), pcm_24k).astype(np.float32)
 
 
+# ---------- テキスト類似度（エコー判定用） ----------
+
+
+def _normalize_text(text: str) -> str:
+    """テキスト比較用の正規化: 句読点・空白・記号を除去。"""
+    t = unicodedata.normalize("NFKC", text)
+    return re.sub(r'[\s　、。,.!?！？「」『』（）()・…\-―ー～~]+', '', t)
+
+
+def _char_ngrams(text: str, n: int = 3) -> set[str]:
+    """文字n-gramの集合を返す。"""
+    if len(text) < n:
+        return {text} if text else set()
+    return {text[i:i+n] for i in range(len(text) - n + 1)}
+
+
+def _best_text_similarity(text: str, recent_texts: list[str],
+                          streaming_buf: str = "") -> float:
+    """正規化テキストとAI生成テキスト群の最大類似度を返す（0.0〜1.0）。
+
+    完了済みの応答(recent_texts)に加え、現在ストリーミング中の応答
+    (streaming_buf)も比較対象に含める。部分包含 + SequenceMatcher
+    + trigram jaccard + coverage の最大値。
+    """
+    if not text:
+        return 0.0
+    targets = list(recent_texts)
+    if streaming_buf:
+        targets.append(streaming_buf)
+    if not targets:
+        return 0.0
+    norm = _normalize_text(text)
+    if len(norm) < 2:
+        return 0.0
+    best = 0.0
+    for ai_text in targets:
+        ai_norm = _normalize_text(ai_text)
+        if len(norm) >= 4 and norm in ai_norm:
+            return 1.0
+        if len(ai_norm) >= 4 and ai_norm in norm:
+            return 1.0
+        sm = SequenceMatcher(None, norm, ai_norm).ratio()
+        ng_a = _char_ngrams(norm)
+        ng_b = _char_ngrams(ai_norm)
+        jaccard = len(ng_a & ng_b) / max(len(ng_a | ng_b), 1)
+        coverage = len(ng_a & ng_b) / max(len(ng_a), 1)
+        best = max(best, sm, jaccard, coverage)
+    return best
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  ConversationPartner — 人間と音声で直接会話するRealtime APIエージェント
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -652,47 +702,9 @@ class ConversationPartner:
             self._handle(ev)
         self._connected = False
 
-    @staticmethod
-    def _normalize(text: str) -> str:
-        t = unicodedata.normalize("NFKC", text)
-        return re.sub(r'[\s　、。,.!?！？「」『』（）()・…\-―ー～~]+', '', t)
-
-    @staticmethod
-    def _char_ngrams(text: str, n: int = 3) -> set[str]:
-        if len(text) < n:
-            return {text} if text else set()
-        return {text[i:i+n] for i in range(len(text) - n + 1)}
-
     def _best_similarity(self, text: str) -> float:
-        """正規化テキストとAI生成テキスト群の最大類似度を返す（0.0〜1.0）。
-
-        RealtimeAgentと同じロジック: 正規化 + 部分包含 + SequenceMatcher
-        + trigram jaccard + coverage。ストリーミング中の_ai_text_bufも対象。
-        """
-        if not text:
-            return 0.0
-        targets = list(self._recent_ai_texts)
-        if self._ai_text_buf:
-            targets.append(self._ai_text_buf)
-        if not targets:
-            return 0.0
-        norm = self._normalize(text)
-        if len(norm) < 2:
-            return 0.0
-        best = 0.0
-        for ai_text in targets:
-            ai_norm = self._normalize(ai_text)
-            if len(norm) >= 4 and norm in ai_norm:
-                return 1.0
-            if len(ai_norm) >= 4 and ai_norm in norm:
-                return 1.0
-            sm = SequenceMatcher(None, norm, ai_norm).ratio()
-            ng_a = self._char_ngrams(norm)
-            ng_b = self._char_ngrams(ai_norm)
-            jaccard = len(ng_a & ng_b) / max(len(ng_a | ng_b), 1)
-            coverage = len(ng_a & ng_b) / max(len(ng_a), 1)
-            best = max(best, sm, jaccard, coverage)
-        return best
+        return _best_text_similarity(text, list(self._recent_ai_texts),
+                                     self._ai_text_buf)
 
     def _handle(self, ev: dict):
         etype = ev.get("type", "")
@@ -1470,56 +1482,9 @@ class RealtimeAgent:
             return False
         return time.monotonic() - self._last_speech_end < self._echo_cooldown
 
-    @staticmethod
-    def _normalize(text: str) -> str:
-        """テキスト比較用の正規化: 句読点・空白・記号を除去。"""
-        t = unicodedata.normalize("NFKC", text)
-        return re.sub(r'[\s　、。,.!?！？「」『』（）()・…\-―ー～~]+', '', t)
-
-    @staticmethod
-    def _char_ngrams(text: str, n: int = 3) -> set[str]:
-        """文字n-gramの集合を返す。"""
-        if len(text) < n:
-            return {text} if text else set()
-        return {text[i:i+n] for i in range(len(text) - n + 1)}
-
     def _best_similarity(self, text: str) -> float:
-        """正規化テキストとAI生成テキスト群の最大類似度を返す（0.0〜1.0）。
-
-        完了済みの応答(_recent_ai_texts)に加え、現在ストリーミング中の応答
-        (_ai_text_buf)も比較対象に含める。AI発話中のエコーは_ai_text_bufに
-        しか存在しないため、これがないとテキスト安全網が機能しない。
-        """
-        if not text:
-            return 0.0
-        # 完了済み + ストリーミング中のテキストを結合
-        targets = list(self._recent_ai_texts)
-        if self._ai_text_buf:
-            targets.append(self._ai_text_buf)
-        if not targets:
-            return 0.0
-        norm = self._normalize(text)
-        if len(norm) < 2:
-            return 0.0
-        best = 0.0
-        for ai_text in targets:
-            ai_norm = self._normalize(ai_text)
-            # 部分一致: 完全包含なら1.0
-            if len(norm) >= 4 and norm in ai_norm:
-                return 1.0
-            if len(ai_norm) >= 4 and ai_norm in norm:
-                return 1.0
-            # SequenceMatcher
-            sm = SequenceMatcher(None, norm, ai_norm).ratio()
-            # 文字trigram類似度
-            ng_a = self._char_ngrams(norm)
-            ng_b = self._char_ngrams(ai_norm)
-            jaccard = len(ng_a & ng_b) / max(len(ng_a | ng_b), 1)
-            # カバレッジ: 断片のtrigramがAIテキストにどれだけ含まれるか
-            # AIの発話の一部分だけがエコーとして拾われるケースを検出
-            coverage = len(ng_a & ng_b) / max(len(ng_a), 1)
-            best = max(best, sm, jaccard, coverage)
-        return best
+        return _best_text_similarity(text, list(self._recent_ai_texts),
+                                     self._ai_text_buf)
 
     def close(self):
         self._stop.set()
