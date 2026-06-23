@@ -374,6 +374,7 @@ REALTIME_URL = "wss://api.openai.com/v1/realtime?model=gpt-realtime-2"
 AGENT_SPEAKER = "ファシリテーター"   # recordsに使うスピーカーキー
 _AGENT_TRIGGER = 10           # N発話ごとに応答検討(facilitator)
 _AGENT_SILENCE = 5.0          # N秒沈黙で応答検討(facilitator)
+_AGENT_DEBATE_SILENCE = 15.0  # N秒沈黙で応答検討(debate — Partner会話が主なので長め)
 _AGENT_CONV_SILENCE = 1.5     # N秒沈黙で応答(conversation — 発話断片をまとめる)
 AGENT_VOICES = ["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse", "marin", "cedar"]
 
@@ -1285,12 +1286,18 @@ class RealtimeAgent:
 
     # --- 発話送信 ---
 
-    def feed(self, speaker: str, text: str):
-        """人間の確定発話をエージェントに蓄積."""
+    def feed(self, speaker: str, text: str, *, trigger_count: bool = True):
+        """発話をエージェントに蓄積.
+
+        trigger_count=False の場合、文脈としては送信されるが
+        pending_count（trigger_n閾値判定）にはカウントしない。
+        Partner発話など、文脈共有は必要だがtriggerは不要なケースで使う。
+        """
         if not self._connected or not self.enabled:
             return
         with self._lock:
-            self._pending.append({"speaker": speaker, "text": text})
+            self._pending.append({"speaker": speaker, "text": text,
+                                  "_count": trigger_count})
 
     def trigger(self):
         """蓄積した発話をRealtimeAPIに送信し応答を要求.
@@ -1442,8 +1449,9 @@ class RealtimeAgent:
 
     @property
     def pending_count(self) -> int:
+        """trigger_n判定に使うカウント（trigger_count=Falseのものは除外）."""
         with self._lock:
-            return len(self._pending)
+            return sum(1 for u in self._pending if u.get("_count", True))
 
     @property
     def in_echo_window(self) -> bool:
@@ -2579,11 +2587,13 @@ def main(argv=None):
                     and agent.ai_speaking):
                 partner.interrupt()
             # エコーウィンドウ中はtriggerしない（フィードバックループ防止）
-            # ファシリテーター自身のecho windowのみチェック。
-            # Partnerのecho windowではブロックしない（Partnerエコーは
-            # テキスト安全網の常時チェックで除去済み。ここでブロックすると
-            # 人間がPartnerに割り込んだ後、不要な沈黙が発生する）。
             if agent is not None and agent.in_echo_window:
+                _was_in_echo[0] = True
+                continue
+            # Partnerが発話中はtriggerしない（議論の途中で割り込まない）
+            # ※ ai_speaking/_respondingのみチェック。echo cooldownは含めない。
+            #   cooldownまで含めると人間がPartnerに割り込んだ後に沈黙が生じる。
+            if partner is not None and (partner.ai_speaking or partner._responding):
                 _was_in_echo[0] = True
                 continue
             # --- フロア返却: エコーウィンドウ終了時に沈黙タイマーをリセット ---
@@ -2600,10 +2610,12 @@ def main(argv=None):
                     agent.trigger()
             else:
                 # ファシリテーター: N発話蓄積 or 沈黙
+                _silence_thresh = (_AGENT_DEBATE_SILENCE if partner is not None
+                                   else _AGENT_SILENCE)
                 if agent.pending_count >= agent.trigger_n:
                     agent.trigger()
                 elif (agent.pending_count > 0
-                      and time.monotonic() - _last_utt_time[0] > _AGENT_SILENCE):
+                      and time.monotonic() - _last_utt_time[0] > _silence_thresh):
                     agent.trigger()
 
     # --- UIサーバー（ブラウザからの話者リネーム用）---
@@ -2945,9 +2957,10 @@ def main(argv=None):
                 # パートナー発話も沈黙タイマーをリセット
                 # （議論が続いている間はファシリテーターが割り込まない）
                 _last_utt_time[0] = time.monotonic()
-                # ファシリテーターにPartnerの発言も共有
+                # ファシリテーターにPartnerの発言を文脈として共有
+                # （trigger_nカウントには含めない — 人間の発話のみでトリガー判定）
                 if agent is not None:
-                    agent.feed("パートナー", text)
+                    agent.feed("パートナー", text, trigger_count=False)
             partner.on_ai_utterance = _on_partner_text
             partner.connect()
             print(f"# Partner: voice={partner.voice} topic={partner.topic}", flush=True)
