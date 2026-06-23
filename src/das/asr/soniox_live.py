@@ -47,12 +47,13 @@ from das.asr._constants import (
     _AGENT_TRIGGER,
     OPENAI_API,
     RESET,
-    SM_WS_URL,
     SR,
     _TOPIC_PROMPT,
-    WS_URL,
     fmt_ts,
 )
+from das.asr._stt_backend import STTBackend
+from das.asr._stt_soniox import SonioxBackend
+from das.asr._stt_speechmatics import SpeechmaticsBackend
 from das.asr._conversation_partner import ConversationPartner
 from das.asr._discussion_simulator import DiscussionSimulator
 from das.asr._realtime_agent import RealtimeAgent
@@ -81,39 +82,23 @@ def post_system(text: str) -> None:
         _SYS_HOOK(text)
 
 
-def sm_to_res(msg: dict, lang: str = "ja") -> dict:
-    """SpeechmaticsのRTメッセージをSoniox互換のトークン列に翻訳する.
+def _build_backend(args) -> STTBackend:
+    """CLIオプションに基づいてSTTバックエンドを構築する."""
+    if args.stt == "speechmatics":
+        sm_key = os.environ.get("SPEECHMATICS_API_KEY")
+        if not sm_key:
+            raise SystemExit(
+                "環境変数 SPEECHMATICS_API_KEY を設定してください"
+                "（https://portal.speechmatics.com/settings/api-keys）")
+        return SpeechmaticsBackend(api_key=sm_key)
+    else:
+        api_key = os.environ.get("SONIOX_API_KEY")
+        if not api_key:
+            raise SystemExit(
+                "環境変数 SONIOX_API_KEY を設定してください"
+                "（https://console.soniox.com）")
+        return SonioxBackend(api_key=api_key)
 
-    供給源を差し替えるだけで、声紋層・表示・保存・清書は無変更で動く。
-    話者ラベル: S1→"1"(表示は話者1)、不明UUはそのまま。
-    """
-    m = msg.get("message")
-    if m == "Error":
-        return {"error_code": msg.get("type"), "error_message": msg.get("reason")}
-    if m == "EndOfTranscript":
-        return {"finished": True, "tokens": []}
-    if m == "EndOfUtterance":
-        return {"tokens": [{"text": "<end>", "is_final": True}]}
-    if m in ("AddTranscript", "AddPartialTranscript"):
-        final = m == "AddTranscript"
-        toks = []
-        for r in msg.get("results", []):
-            alts = r.get("alternatives") or []
-            content = alts[0].get("content", "") if alts else ""
-            if not content:
-                continue
-            spk = (alts[0].get("speaker") or "UU")
-            if spk.startswith("S") and spk[1:].isdigit():
-                spk = spk[1:]
-            if (lang not in ("ja", "zh", "cmn", "yue") and toks
-                    and r.get("type") == "word"):
-                content = " " + content   # 分かち書き言語は語間スペースを補う
-            toks.append({"text": content, "speaker": spk,
-                         "start_ms": int(r["start_time"] * 1000),
-                         "end_ms": int(r["end_time"] * 1000),
-                         "is_final": final})
-        return {"tokens": toks}
-    return {"tokens": []}   # RecognitionStarted / AudioAdded / Info / Warning 等は無視
 
 def load_env(path: str = ".env") -> None:
     """プロジェクト直下の .env からAPIキー等を読み込む（既に設定済みの環境変数を優先）.
@@ -182,9 +167,10 @@ class _RecvLoop:
     _FLUSH_SOFT_CHARS = 500   # この文字数を超えたら文の切れ目でflush
     _FLUSH_HARD_CHARS = 1000  # この文字数を超えたら問答無用で強制flush
 
-    def __init__(self, state: "SessionState", args):
+    def __init__(self, state: "SessionState", args, backend: "STTBackend"):
         self.state = state
         self.args = args
+        self.backend = backend
         self.cur_speaker = None
         self.cur_text = ""
         self.cur_ms: int | None = None
@@ -307,9 +293,8 @@ class _RecvLoop:
         args = self.args
         try:
             while True:
-                res = json.loads(ws.recv())
-                if args.stt == "speechmatics":
-                    res = sm_to_res(res, args.lang)
+                res = self.backend.parse_message(
+                    json.loads(ws.recv()), args.lang)
                 if res.get("error_code") is not None:
                     _print_line(f"# エラー: {res['error_code']} - {res.get('error_message')}")
                     break
@@ -417,48 +402,13 @@ def main(argv=None):
         raise SystemExit(f"音声ファイルがありません: {args.wav}\n"
                          "（テスト音声は scripts/make_overlap_testset.py 等で先に生成してください）")
 
-    api_key = os.environ.get("SONIOX_API_KEY")
-    sm_key = os.environ.get("SPEECHMATICS_API_KEY")
-    if args.stt == "speechmatics":
-        if not sm_key:
-            raise SystemExit("環境変数 SPEECHMATICS_API_KEY を設定してください"
-                             "（https://portal.speechmatics.com/settings/api-keys）")
-    elif not api_key:
-        raise SystemExit("環境変数 SONIOX_API_KEY を設定してください（https://console.soniox.com）")
+    backend = _build_backend(args)
+    api_key = os.environ.get("SONIOX_API_KEY")  # polish用（STTバックエンドとは独立）
 
     try:
         from websockets.sync.client import connect
     except ImportError:
         raise SystemExit("uv add websockets を実行してください")
-
-    if args.stt == "speechmatics":
-        ws_url = SM_WS_URL
-        ws_headers = {"Authorization": f"Bearer {sm_key}"}
-        start_msg = {
-            "message": "StartRecognition",
-            "audio_format": {"type": "raw", "encoding": "pcm_s16le", "sample_rate": SR},
-            "transcription_config": {
-                "language": args.lang,
-                "operating_point": "enhanced",
-                "diarization": "speaker",
-                "enable_partials": True,
-                "max_delay": 1.2,
-                "conversation_config": {"end_of_utterance_silence_trigger": 0.8},
-            },
-        }
-    else:
-        ws_url = WS_URL
-        ws_headers = None
-        start_msg = {
-            "api_key": api_key,
-            "model": args.model,
-            "language_hints": [args.lang],
-            "enable_speaker_diarization": True,
-            "enable_endpoint_detection": True,
-            "audio_format": "pcm_s16le",
-            "sample_rate": SR,
-            "num_channels": 1,
-        }
 
     started = datetime.datetime.now()
     if args.out:
@@ -582,9 +532,9 @@ def main(argv=None):
         if tracker is not None:
             state.partner.set_tracker(tracker)
 
-    print(f"# {args.stt} に接続中…", flush=True)
-    with connect(ws_url, additional_headers=ws_headers) as ws:
-        ws.send(json.dumps(start_msg))
+    print(f"# {backend.name} に接続中…", flush=True)
+    with connect(backend.ws_url(), additional_headers=backend.ws_headers()) as ws:
+        ws.send(json.dumps(backend.start_message(args.model, args.lang)))
         # 音声ソース選択: simulate > wav > mic
         if state.simulator is not None:
             if state.agent is not None:
@@ -614,7 +564,7 @@ def main(argv=None):
             print(f"# Partner: voice={state.partner.voice} topic={state.partner.topic}",
                   flush=True)
 
-        threading.Thread(target=_run_sender, args=(state, ws, args.stt),
+        threading.Thread(target=_run_sender, args=(state, ws, backend),
                          daemon=True).start()
 
         state.save()
@@ -628,7 +578,7 @@ def main(argv=None):
             else:
                 webbrowser.open("file://" + os.path.abspath(html_path))
 
-        recv = _RecvLoop(state, args)
+        recv = _RecvLoop(state, args, backend)
         try:
             recv.run(ws)
         finally:

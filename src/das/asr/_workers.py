@@ -1,7 +1,6 @@
 """main()から抽出されたワーカー関数群."""
 from __future__ import annotations
 
-import json
 import os
 import re
 import threading
@@ -325,16 +324,14 @@ def _run_from_wav(state: "SessionState", args):
     state.audio_q.put(None)
 
 
-def _run_sender(state: "SessionState", ws, stt_type: str):
+def _run_sender(state: "SessionState", ws, backend: "STTBackend"):
     """audio_qからPCMを読みWebSocketに送信 + PCMバッファ/ファイル書き出し."""
     seq = 0
     while True:
         pcm = state.audio_q.get()
         if pcm is None:
-            if stt_type == "speechmatics":
-                ws.send(json.dumps({"message": "EndOfStream", "last_seq_no": seq}))
-            else:
-                ws.send("")
+            end_msg = backend.make_end_message(seq)
+            ws.send(end_msg)
             break
         with state.buf_lock:
             state.pcm_buf.extend(pcm)

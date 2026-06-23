@@ -4,8 +4,6 @@ from __future__ import annotations
 import re
 
 SR = 16000
-WS_URL = "wss://stt-rt.soniox.com/transcribe-websocket"
-SM_WS_URL = "wss://eu.rt.speechmatics.com/v2/"
 
 RESET = "\x1b[0m"
 DIM = "\x1b[2m"
