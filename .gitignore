@@ -55,8 +55,15 @@ data/runs/
 # 一時的な検証スペース (本体に組み込む前の実験置き場、後で削除する)
 experiments/
 
-# 一時ファイル
+# 一時ファイル・キャッシュ
 COMMIT_MSG.txt
+pytest-cache-files*/
+
+# 個人データ（声紋プロファイル）
+voices.json
+
+# テスト用音声
+test_wavs/
 
 # 生成物・バイナリ（gitに入れない）
 *.wav
