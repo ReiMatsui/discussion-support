@@ -67,6 +67,7 @@ class SessionState:
         self.topic_cursor = 0
         self._TOPIC_WINDOW = 10
         self._TOPIC_TRIGGER = 5
+        self.drift_cursor = 0
 
         # PCMバッファ
         self.pcm_buf = bytearray()

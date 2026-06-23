@@ -189,6 +189,23 @@ _TOPIC_PROMPT = """\
 出力はJSON配列のみ（説明不要）。新しい論点がなければ空配列 [] を返してください。
 形式: [{{"topic": "論点の短い要約", "speaker": "発話者名"}}]"""
 
+_DRIFT_PROMPT = """\
+あなたは会議のモニターです。議論が論点からズレていないかチェックしてください。
+
+## 現在の論点
+{topics}
+
+## 直近の発話
+{utterances}
+
+## 指示
+直近の発話が上記の論点から大きくズレている場合、driftをtrueにしてください。
+多少の脱線や関連する話題への展開はdrift=falseとしてください。
+明らかに無関係な話題に逸れている場合のみdrift=trueです。
+
+出力はJSON1つのみ（説明不要）。
+形式: {{"drift": true/false, "reason": "判断理由（10字程度）"}}"""
+
 _PROMPT_FACILITATOR = """\
 あなたは会議のファシリテーターAIです。
 参加者の議論を聞いて、必要な時だけ介入してください。
@@ -219,6 +236,8 @@ _AGENT_DEBATE_SILENCE = 15.0  # N秒沈黙で応答検討(debate — Partner会�
 _AGENT_CONV_SILENCE = 1.5     # N秒沈黙で応答(conversation — 発話断片をまとめる)
 _AGENT_RETRY_SILENCE = 2.0    # 割り込まれた介入の再試行までの沈黙（短め）
 _INTERRUPT_MIN_CHARS = 8      # ファシリテーター割り込みの最小文字数
+_DRIFT_CHECK_INTERVAL = 3     # ドリフトチェックの発話間隔
+_DRIFT_CHECK_WINDOW = 6       # チェック時に参照する最近の発話数
 # 相槌判定: 相槌パターンに一致する発話ではPartnerを止めない
 _BACKCHANNEL_RE = re.compile(
     r'^[\s、。,.!?！？]*'

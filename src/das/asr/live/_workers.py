@@ -21,6 +21,8 @@ from ._constants import (
     _AGENT_RETRY_SILENCE,
     _AGENT_SILENCE,
     _BACKCHANNEL_RE,
+    _DRIFT_CHECK_INTERVAL,
+    _DRIFT_CHECK_WINDOW,
     _INTERRUPT_MIN_CHARS,
     AGENT_SPEAKER,
     SR,
@@ -60,6 +62,53 @@ def _run_topic_worker(state: SessionState, oai_key: str, oai_model: str):
                 if isinstance(t, dict) and "topic" in t:
                     _print_line(f"# 💡論点: {t['topic']}（{t.get('speaker', '?')}）")
         state.topic_cursor = n
+
+
+def _run_drift_checker(state: SessionState, oai_key: str, oai_model: str):
+    """脱線検出のバックグラウンドワーカー（並列監視）.
+
+    _run_topic_worker が抽出した論点(state.topics)を使い、
+    直近の発話が論点からズレていないかを軽量モデルで高頻度チェック。
+    脱線検出時はファシリテーターの即時トリガーを発火する。
+    """
+    from das.asr.live._bootstrap import check_drift as _check_drift
+
+    while not state.stop.is_set():
+        time.sleep(2)
+        agent = state.agent
+        if not oai_key or agent is None or not agent.enabled:
+            continue
+        if agent.mode == "conversation":
+            continue
+        # 論点がまだなければスキップ
+        with state.topics_lock:
+            if not state.topics:
+                continue
+            topics = list(state.topics)
+        # 新しい発話が _DRIFT_CHECK_INTERVAL 以上溜まったらチェック
+        with state.state_lock:
+            _skip = {AGENT_SPEAKER, "パートナー"}
+            talk_rs = [r for r in state.records
+                       if "speaker" in r and r.get("text")
+                       and r.get("speaker") not in _skip]
+        n = len(talk_rs)
+        if n - state.drift_cursor < _DRIFT_CHECK_INTERVAL:
+            continue
+        # 直近の発話を取得
+        window = talk_rs[max(0, n - _DRIFT_CHECK_WINDOW):]
+        utts = [{"speaker": state.disp_name(r["speaker"]), "text": r["text"]}
+                for r in window]
+        state.drift_cursor = n
+        # 脱線判定
+        result = _check_drift(utts, topics, oai_key, oai_model)
+        if result.get("drift"):
+            reason = result.get("reason", "")
+            _print_line(f"# 🔀 脱線検出: {reason}")
+            # ファシリテーターが応答中でなければ即トリガー
+            if not agent._responding and not agent.ai_speaking:
+                with state.topics_lock:
+                    _topics = list(state.topics) if state.topics else None
+                agent.trigger(topics=_topics)
 
 
 def _on_agent_text_factory(state: SessionState):

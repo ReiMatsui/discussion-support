@@ -13,7 +13,7 @@ import os
 import threading
 from dataclasses import dataclass
 
-from das.asr.live._constants import _TOPIC_PROMPT, OPENAI_API, SR
+from das.asr.live._constants import _DRIFT_PROMPT, _TOPIC_PROMPT, OPENAI_API, SR
 from das.asr.live._recv_loop import RecvLoop
 from das.asr.live._session_state import SessionState
 from das.asr.live._ui import _UIHandler
@@ -23,6 +23,7 @@ from das.asr.live._workers import (
     _connect_agent,
     _on_agent_text_factory,
     _on_partner_text_factory,
+    _run_drift_checker,
     _run_from_mic,
     _run_from_wav,
     _run_sender,
@@ -140,6 +141,43 @@ def extract_topics(utterances: list[dict], existing: list[str],
         return json.loads(text)
     except Exception:
         return []
+
+
+def check_drift(utterances: list[dict], topics: list[dict],
+                api_key: str, model: str) -> dict:
+    """論点からの脱線を判定する（同期呼び出し、バックグラウンドスレッド用）.
+
+    Returns:
+        {"drift": bool, "reason": str} or {"drift": False} on error.
+    """
+    if not utterances or not topics or not api_key:
+        return {"drift": False}
+    utt_text = "\n".join(f"- {u['speaker']}: {u['text']}" for u in utterances)
+    topic_text = "\n".join(f"- {t['topic']}" for t in topics)
+    prompt = _DRIFT_PROMPT.format(topics=topic_text, utterances=utt_text)
+    name = model.lower()
+    is_new = name.startswith(("gpt-5", "o1", "o3", "o4"))
+    params: dict = {"model": model,
+                    "messages": [{"role": "user", "content": prompt}]}
+    if not is_new:
+        params["temperature"] = 0.0
+        params["max_tokens"] = 128
+    else:
+        params["max_completion_tokens"] = 128
+    body = json.dumps(params).encode()
+    import urllib.request
+    req = urllib.request.Request(OPENAI_API, data=body, method="POST")
+    req.add_header("Authorization", f"Bearer {api_key}")
+    req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            resp = json.loads(r.read())
+        text = resp["choices"][0]["message"]["content"].strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        return json.loads(text)
+    except Exception:
+        return {"drift": False}
 
 
 # ---------------------------------------------------------------------------
@@ -310,6 +348,10 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
             threading.Thread(target=_run_topic_worker,
                             args=(state, _oai_key, _oai_model), daemon=True).start()
             print("# 論点抽出: 有効（5発話ごとにLLMで分析）", flush=True)
+            if state.agent is not None:
+                threading.Thread(target=_run_drift_checker,
+                                args=(state, _oai_key, _oai_model), daemon=True).start()
+                print("# 脱線検出: 有効（3発話ごとに並列チェック）", flush=True)
         else:
             print("# 論点抽出: 無効（OPENAI_API_KEYが未設定）", flush=True)
         if state.agent is not None:
