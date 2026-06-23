@@ -18,6 +18,7 @@ import contextlib
 from ._constants import (
     _AGENT_CONV_SILENCE,
     _AGENT_DEBATE_SILENCE,
+    _AGENT_RETRY_SILENCE,
     _AGENT_SILENCE,
     _BACKCHANNEL_RE,
     _INTERRUPT_MIN_CHARS,
@@ -199,9 +200,16 @@ def _run_agent_worker(state: SessionState):
                   f" trigger_n={agent.trigger_n} responding={agent._responding}"
                   f" silence={_elapsed:.1f}s echo={agent.in_echo_window}"
                   f" partner_talk={partner.ai_speaking if partner else '?'}", flush=True)
-        if agent.mode == "conversation":
+        # --- 割り込まれた介入の即時再開: 沈黙2秒で再トリガー ---
+        _has_retry = agent._pending_intervention is not None
+        _silence_elapsed = time.monotonic() - _last_utt_time[0]
+        if _has_retry and _silence_elapsed > _AGENT_RETRY_SILENCE:
+            print(f"# [diag] TRIGGER by retry: silence={_silence_elapsed:.1f}s"
+                  f" > {_AGENT_RETRY_SILENCE}s (pending_intervention)", flush=True)
+            agent.trigger()
+        elif agent.mode == "conversation":
             if (agent.pending_count > 0
-                    and time.monotonic() - _last_utt_time[0] > _AGENT_CONV_SILENCE):
+                    and _silence_elapsed > _AGENT_CONV_SILENCE):
                 agent.trigger()
         else:
             _silence_thresh = (_AGENT_DEBATE_SILENCE if partner is not None
@@ -210,8 +218,8 @@ def _run_agent_worker(state: SessionState):
                 print(f"# [diag] TRIGGER by count: {agent.pending_count}>={agent.trigger_n}", flush=True)
                 agent.trigger()
             elif (agent.pending_count > 0
-                  and time.monotonic() - _last_utt_time[0] > _silence_thresh):
-                print(f"# [diag] TRIGGER by silence: {time.monotonic() - _last_utt_time[0]:.1f}s > {_silence_thresh}s", flush=True)
+                  and _silence_elapsed > _silence_thresh):
+                print(f"# [diag] TRIGGER by silence: {_silence_elapsed:.1f}s > {_silence_thresh}s", flush=True)
                 agent.trigger()
 
 

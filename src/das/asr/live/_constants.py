@@ -217,6 +217,7 @@ _AGENT_TRIGGER = 10           # N発話ごとに応答検討(facilitator)
 _AGENT_SILENCE = 5.0          # N秒沈黙で応答検討(facilitator)
 _AGENT_DEBATE_SILENCE = 15.0  # N秒沈黙で応答検討(debate — Partner会話が主なので長め)
 _AGENT_CONV_SILENCE = 1.5     # N秒沈黙で応答(conversation — 発話断片をまとめる)
+_AGENT_RETRY_SILENCE = 2.0    # 割り込まれた介入の再試行までの沈黙（短め）
 _INTERRUPT_MIN_CHARS = 8      # ファシリテーター割り込みの最小文字数
 # 相槌判定: 相槌パターンに一致する発話ではPartnerを止めない
 _BACKCHANNEL_RE = re.compile(

@@ -321,7 +321,7 @@ class RealtimeAgent:
         if self._responding:
             return  # 応答生成中は新規リクエストを抑止
         with self._lock:
-            if not self._pending:
+            if not self._pending and self._pending_intervention is None:
                 return
             conv = "\n".join(f"{u['speaker']}: {u['text']}" for u in self._pending)
             self._pending.clear()
@@ -330,15 +330,18 @@ class RealtimeAgent:
         if pi is not None:
             age = time.monotonic() - pi["created_at"]
             if age < self._INTERVENTION_TTL:
-                conv += (f"\n\n[システム注記: あなたは先ほど以下の発言を試みましたが、"
-                         f"参加者の発言と重なり中断されました。"
-                         f"まだ重要であれば、簡潔に再度伝えてください]\n"
-                         f"あなたの中断された発言: {pi['delivered']}")
+                retry_note = (f"[システム注記: あなたは先ほど以下の発言を試みましたが、"
+                              f"参加者の発言と重なり中断されました。"
+                              f"まだ重要であれば、簡潔に再度伝えてください]\n"
+                              f"あなたの中断された発言: {pi['delivered']}")
+                conv = f"{conv}\n\n{retry_note}" if conv else retry_note
                 print("# AI Agent: 中断された介入を再試行コンテキストに追加", flush=True)
             else:
                 print(f"# AI Agent: 中断された介入を期限切れで破棄（{age:.0f}秒経過）",
                       flush=True)
             self._pending_intervention = None
+        if not conv:
+            return  # 期限切れで破棄された場合など、送るものがない
         try:
             self.ws.send(json.dumps({
                 "type": "conversation.item.create",
