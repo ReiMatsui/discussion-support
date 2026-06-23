@@ -7,10 +7,10 @@ OpenAI TTS APIで各話者の発言を生成し、適切な間（ま）を入れ
 
 使い方:
   # 組み込みシナリオで生成
-  uv run python tools/generate_conversation_wav.py --scenario stalled
+  uv run python scripts/generate_conversation_wav.py --scenario stalled
 
   # 全シナリオを生成
-  uv run python tools/generate_conversation_wav.py --all
+  uv run python scripts/generate_conversation_wav.py --all
 
   # 生成したWAVでファシリテーターをテスト（trigger=5で短いシナリオでも発火しやすく）
   uv run python -m das.asr.soniox_live --wav test_wavs/stalled.wav --agent --play --agent-trigger 5

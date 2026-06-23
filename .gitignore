@@ -55,6 +55,9 @@ data/runs/
 # 一時的な検証スペース (本体に組み込む前の実験置き場、後で削除する)
 experiments/
 
+# 一時ファイル
+COMMIT_MSG.txt
+
 # 生成物・バイナリ（gitに入れない）
 *.wav
 *.mp3
