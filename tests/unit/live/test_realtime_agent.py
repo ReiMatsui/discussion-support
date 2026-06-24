@@ -94,6 +94,28 @@ def test_trigger_keeps_utterances_fed_during_send(agent):
     assert "送信対象の発言" in agent.ws.last_create_text()
 
 
+def test_trigger_does_not_clobber_newer_intervention(agent):
+    """送信中に新しい介入が入った場合、消費クリアで上書きしない（R1 compare-and-clear）."""
+    import json as _json
+    import time
+    pi_old = {"delivered": "古い介入", "created_at": time.monotonic(), "attempts": 1}
+    pi_new = {"delivered": "新しい介入", "created_at": time.monotonic(), "attempts": 1}
+    agent._pending_intervention = pi_old
+    agent.feed("人間", "発言")
+
+    def _send_then_new_intervention(raw):
+        msg = _json.loads(raw)
+        agent.ws.sent.append(msg)
+        # 送信の最中に別スレッドの割り込みで新しい介入が保存されたと仮定
+        if msg.get("type") == "conversation.item.create":
+            agent._pending_intervention = pi_new
+    agent.ws.send = _send_then_new_intervention  # type: ignore[method-assign]
+
+    agent.trigger()
+    # 古い介入は消費したが、送信中に入った新しい介入は残っている
+    assert agent._pending_intervention is pi_new
+
+
 def test_trigger_no_double_response_on_reentry(agent):
     """送信中に別経路からtriggerが再入しても二重にresponse.createしない（Bug 4）.
 

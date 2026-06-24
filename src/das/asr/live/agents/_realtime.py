@@ -53,7 +53,12 @@ class RealtimeAgent:
         self.trigger_n = trigger_n
         self.ws = None
         self._stop = threading.Event()
-        self._lock = threading.Lock()
+        # 状態ロック: 複数スレッドから触られる可変状態を保護する（Phase 3 R1）。
+        #   - _pending（送信待ち発話）
+        #   - _responding の test-and-set（trigger確保。Fix 4）
+        #   - _pending_intervention（interrupt/trigger/cancelの3スレッドが触る）
+        # 鉄則: このロックを保持したまま ws.send() やコールバックを呼ばない。
+        self._state_lock = threading.Lock()
         self._pending: list[dict] = []     # 送信待ち発話
         self.ai_speaking = False           # AI音声再生中フラグ
         self._ai_text_buf = ""             # ストリーミング転写バッファ
@@ -392,7 +397,7 @@ class RealtimeAgent:
         """
         if not self._connected or not self.enabled:
             return
-        with self._lock:
+        with self._state_lock:
             self._pending.append({"speaker": speaker, "text": text,
                                   "_count": trigger_count})
 
@@ -414,7 +419,7 @@ class RealtimeAgent:
         # 複数スレッドからの同時triggerで二重にresponse.createが飛ぶのを防ぐ。
         # ここで確保した後に送信できなかった場合（送るものがない/送信例外）は、
         # 必ず False に戻して固着を避ける。
-        with self._lock:
+        with self._state_lock:
             if self._responding:
                 return  # 既に応答生成中、または別スレッドが確保済み
             if (not self._pending and self._pending_intervention is None
@@ -444,7 +449,8 @@ class RealtimeAgent:
         # --- 保存された介入内容をコンテキストに追加 ---
         # 注: 有効な介入は送信成功までクリアしない（Bug 2）。
         #     期限切れの介入のみ、送信成否に関わらずここで破棄する。
-        pi = self._pending_intervention
+        with self._state_lock:
+            pi = self._pending_intervention   # スナップショット（dictは再代入のみ）
         include_pi = False
         if pi is not None:
             age = time.monotonic() - pi["created_at"]
@@ -457,7 +463,11 @@ class RealtimeAgent:
                 include_pi = True
                 print("# AI Agent: 中断された介入を再試行コンテキストに追加", flush=True)
             else:
-                self._pending_intervention = None  # 期限切れは即破棄
+                # 期限切れは即破棄。ただし送信処理中に新しい介入が入った場合は
+                # 上書きしないよう compare-and-clear する。
+                with self._state_lock:
+                    if self._pending_intervention is pi:
+                        self._pending_intervention = None
                 print(f"# AI Agent: 中断された介入を期限切れで破棄（{age:.0f}秒経過）",
                       flush=True)
         if not conv:
@@ -479,11 +489,12 @@ class RealtimeAgent:
             print(f"# AI Agent 送信エラー（内容を保持して再試行）: {e}", flush=True)
             return
         # --- 送信成功（_responding は確保済みのまま維持） ---
-        with self._lock:
+        with self._state_lock:
             # 送信したスナップショット分だけ削除（送信中にfeedされた新発話は残す）
             del self._pending[:len(pending_snapshot)]
-        if include_pi:
-            self._pending_intervention = None
+            # 消費した介入をクリア。送信中に新しい介入が入っていたら残す。
+            if include_pi and self._pending_intervention is pi:
+                self._pending_intervention = None
         self._log_state("→RESPONDING (trigger送信)")
 
     def interrupt(self):
@@ -499,22 +510,23 @@ class RealtimeAgent:
         if not self.ai_speaking and not self._responding:
             return
         self._interrupted = True
-        # --- 介入内容の保存: 割り込まれた内容を記憶 ---
+        # --- 介入内容の保存: 割り込まれた内容を記憶（read-modify-writeを原子化, R1） ---
         delivered = self._ai_text_buf.strip()
-        if delivered and "介入不要" not in delivered:
-            existing = self._pending_intervention
-            attempts = (existing["attempts"] if existing else 0) + 1
-            if attempts <= self._INTERVENTION_MAX_RETRIES:
-                self._pending_intervention = {
-                    "delivered": delivered,
-                    "created_at": time.monotonic(),
-                    "attempts": attempts,
-                }
-                print(f"# AI Agent: 介入内容を保存（試行{attempts}回目、次の機会で再試行）",
-                      flush=True)
-            else:
-                self._pending_intervention = None
-                print("# AI Agent: 介入内容を破棄（再試行上限に達した）", flush=True)
+        if delivered and self._CANCEL_MARKER not in delivered:
+            with self._state_lock:
+                existing = self._pending_intervention
+                attempts = (existing["attempts"] if existing else 0) + 1
+                if attempts <= self._INTERVENTION_MAX_RETRIES:
+                    self._pending_intervention = {
+                        "delivered": delivered,
+                        "created_at": time.monotonic(),
+                        "attempts": attempts,
+                    }
+                    _msg = f"# AI Agent: 介入内容を保存（試行{attempts}回目、次の機会で再試行）"
+                else:
+                    self._pending_intervention = None
+                    _msg = "# AI Agent: 介入内容を破棄（再試行上限に達した）"
+            print(_msg, flush=True)
         # --- Graceful yield: キュー内の音声を少しだけ残して自然に終了 ---
         # 24kHz 16bit PCM = 48000 bytes/sec → 300ms ≒ 14400 bytes
         _yield_keep_bytes = 14400
@@ -583,7 +595,8 @@ class RealtimeAgent:
         self._last_noop_at = time.monotonic()  # デッドエア対策（Fix 10）
         self._preflight_buf.clear()        # バッファも破棄
         self._preflight_cleared = False
-        self._pending_intervention = None  # 介入不要の内容は再試行しない
+        with self._state_lock:
+            self._pending_intervention = None  # 介入不要の内容は再試行しない
         # 再生キューを空にして停止
         while True:
             try:
@@ -611,7 +624,7 @@ class RealtimeAgent:
     @property
     def pending_count(self) -> int:
         """trigger_n判定に使うカウント（trigger_count=Falseのものは除外）."""
-        with self._lock:
+        with self._state_lock:
             return sum(1 for u in self._pending if u.get("_count", True))
 
     @property
