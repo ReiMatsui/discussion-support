@@ -329,6 +329,14 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
         if tracker is not None:
             state.partner.set_tracker(tracker)
 
+    # --- 議題を脱線検出の基準論点としてシード（Fix 8） ---
+    # 明示的な議題があれば、論点抽出LLMの成否に依存せず最初から脱線検出を効かせる。
+    if state.agent is not None:
+        _agenda = args.debate or args.simulate
+        if _agenda:
+            state.seed_topic(_agenda)
+            print(f"# 脱線検出: 議題を基準論点としてシード → {_agenda}", flush=True)
+
     print(f"# {backend.name} に接続中…", flush=True)
     with connect(backend.ws_url(), additional_headers=backend.ws_headers()) as ws:
         ws.send(json.dumps(backend.start_message(args.model, args.lang)))

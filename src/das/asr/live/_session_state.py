@@ -121,6 +121,19 @@ class SessionState:
         with self.state_lock:
             self.records.append({"ms": ms, "sys": text})
 
+    def seed_topic(self, topic: str | None, speaker: str = "議題"):
+        """明示的な議題を脱線検出の基準論点としてシードする（Fix 8）.
+
+        debate/simulate モードのように議題が分かっている場合、論点抽出LLMの
+        成否を待たずに最初から脱線検出を効かせるための初期基準を入れる。
+        既に論点があれば何もしない（抽出済みを優先）。
+        """
+        if not topic:
+            return
+        with self.topics_lock:
+            if not self.topics:
+                self.topics.append({"topic": topic, "speaker": speaker})
+
     def key_of(self, tok: str) -> str:
         """コマンド引数を表示キーへ: 人物名はそのまま、数字はそのラベルの現在の表示先."""
         if self.tracker is not None:
