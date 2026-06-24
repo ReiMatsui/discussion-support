@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -39,10 +40,43 @@ class _UIHandler:
             def do_GET(self):
                 if self.path == "/api/state":
                     self._json(200, self._state.api_snapshot())
+                elif self.path == "/api/stream":
+                    self._stream()
                 elif self.path == "/" or self.path.startswith("/?"):
                     self._serve_html()
                 else:
                     self.send_error(404)
+
+            def _stream(self):
+                """SSE: 状態が変わるたびに最新スナップショットを配信する（F2）.
+
+                rev の変化を見て差分配信。無変化時はハートビートで接続を保つ。
+                stop でセッションが終了したら end イベントを送って閉じる。
+                """
+                s = self._state
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Connection", "keep-alive")
+                self.end_headers()
+                last_rev = -1
+                try:
+                    while not s.stop.is_set():
+                        rev = s.rev
+                        if rev != last_rev:
+                            payload = json.dumps(s.api_snapshot(), ensure_ascii=False)
+                            self.wfile.write(f"data: {payload}\n\n".encode())
+                            last_rev = rev
+                        else:
+                            self.wfile.write(b": ping\n\n")  # ハートビート
+                        self.wfile.flush()
+                        time.sleep(1.0)
+                    self.wfile.write(b"event: end\ndata: {}\n\n")
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass  # クライアント切断は正常
+                except OSError:
+                    pass
 
             def _serve_html(self):
                 try:

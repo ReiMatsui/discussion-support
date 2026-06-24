@@ -82,6 +82,8 @@ class SessionState:
         self.proactivity: dict = dict(_PROACTIVITY_PROFILES[_PROACTIVITY_DEFAULT])
         # UIからの停止フック（F1）。run_sessionが「stopを立ててwsを閉じる」関数を設定する。
         self.request_stop: Callable[[], None] | None = None
+        # 変更リビジョン（F2）。save()ごとに+1。SSEはこの変化を見て差分配信する。
+        self.rev = 0
 
         # PCMバッファ
         self.pcm_buf = bytearray()
@@ -184,6 +186,7 @@ class SessionState:
             agent = {"enabled": self.agent.enabled, "mode": self.agent.mode,
                      "voice": self.agent.voice}
         return {
+            "rev": self.rev,
             "mode": self.session_mode(),
             "running": not self.stop.is_set(),
             "started": self.started.strftime("%Y-%m-%d %H:%M"),
@@ -459,6 +462,7 @@ class SessionState:
             os.replace(tmp, dst)
 
     def save(self, live: bool = True):
+        self.rev += 1  # 変更を通知（SSEの差分配信用, F2）
         self.write_md()
         self.write_html(live)
         self.write_turns()

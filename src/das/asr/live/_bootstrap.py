@@ -352,9 +352,11 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
     # --- UIサーバー ---
     _httpd = None
     if _serve:
-        from http.server import HTTPServer
+        # SSE(長時間接続)が他リクエストを塞がないよう、スレッド対応サーバーを使う
+        from http.server import ThreadingHTTPServer
         try:
-            _httpd = HTTPServer(("127.0.0.1", args.port), _UIHandler.create(state))
+            _httpd = ThreadingHTTPServer(("127.0.0.1", args.port),
+                                         _UIHandler.create(state))
             threading.Thread(target=_httpd.serve_forever, daemon=True).start()
         except OSError as e:
             print(f"# 警告: UIサーバーをポート{args.port}で起動できません ({e})", flush=True)

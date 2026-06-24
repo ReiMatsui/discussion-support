@@ -5,7 +5,7 @@ import datetime
 import json
 import threading
 import urllib.request
-from http.server import HTTPServer
+from http.server import ThreadingHTTPServer
 
 from das.asr.live._session_state import SessionState
 from das.asr.live._ui import _UIHandler
@@ -77,7 +77,7 @@ def test_api_snapshot_structure():
 # --- HTTP API ---------------------------------------------------------------
 
 def _serve(state):
-    httpd = HTTPServer(("127.0.0.1", 0), _UIHandler.create(state))
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), _UIHandler.create(state))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     return httpd, httpd.server_address[1]
 
@@ -114,4 +114,29 @@ def test_http_stop_fallback_sets_event():
             json.loads(r.read())
         assert state.stop.is_set()
     finally:
+        httpd.shutdown()
+
+
+def test_sse_stream_sends_snapshot():
+    """/api/stream が SSE で最新スナップショットを配信する（F2）."""
+    state = _make_state()
+    state.records = [{"speaker": "話者1", "text": "やあ", "ms": 0, "end_ms": 500}]
+    httpd, port = _serve(state)
+    resp = None
+    try:
+        resp = urllib.request.urlopen(f"http://127.0.0.1:{port}/api/stream", timeout=5)
+        data_line = None
+        for _ in range(20):
+            line = resp.readline().decode("utf-8")
+            if line.startswith("data: "):
+                data_line = line[len("data: "):].strip()
+                break
+        assert data_line is not None
+        snap = json.loads(data_line)
+        assert snap["records"][0]["text"] == "やあ"
+        assert "rev" in snap
+    finally:
+        if resp is not None:
+            resp.close()
+        state.stop.set()
         httpd.shutdown()
