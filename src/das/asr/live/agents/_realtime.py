@@ -19,10 +19,11 @@ from .._constants import (
     AGENT_VOICES,
     REALTIME_URL,
 )
-from .._voice_profiles import VoiceProfiles, _best_text_similarity, _resample_24_to_16
+from .._voice_profiles import VoiceProfiles, _resample_24_to_16
+from ._base import _RealtimeBase
 
 
-class RealtimeAgent:
+class RealtimeAgent(_RealtimeBase):
     """OpenAI Realtime API v2 WebSocket で会議に参加するAIエージェント.
 
     エコー防止（マイク常時オン — 人間の割り込みを維持）:
@@ -134,10 +135,6 @@ class RealtimeAgent:
     def enabled(self) -> bool:
         return self.mode != "off"
 
-    def set_tracker(self, tracker: VoiceProfiles):
-        """VoiceProfilesを外部から注入。connect()の前後いつでも可。"""
-        self._voice_tracker = tracker
-
     def _try_enroll_ai_voice(self):
         """蓄積したAI音声から声紋を計算しVoiceProfilesに登録する。
 
@@ -232,24 +229,6 @@ class RealtimeAgent:
             self._send_session_update()
 
     # --- ストリーミング音声再生 ---
-
-    def _q_put(self, payload: bytes | None):
-        """再生キューに現在の応答世代(epoch)タグを付けて積む。
-
-        payload=None は応答の終端マーカー。再生スレッドはこのepochを見て、
-        既に新しい応答が始まっている場合は ai_speaking を倒さない（Bug 6）。
-        """
-        self._audio_q.put((self._play_epoch, payload))
-
-    def _on_playback_terminator(self, epoch: int):
-        """再生スレッドが終端マーカーを取り出したときの処理（Bug 6）.
-
-        その終端が最新応答のもの(epoch >= 最新)のときだけ ai_speaking を倒す。
-        古い応答の終端(epoch < 最新)は、新応答がまだ再生中なので無視する。
-        """
-        if epoch >= self._play_epoch:
-            self.ai_speaking = False
-            self._last_speech_end = time.monotonic()
 
     def _log_state(self, transition: str):
         """状態遷移の軽量ログ（観測性、Phase 3 R4）.
@@ -636,10 +615,6 @@ class RealtimeAgent:
         if self._last_speech_end == 0.0:
             return False
         return time.monotonic() - self._last_speech_end < self._echo_cooldown
-
-    def _best_similarity(self, text: str) -> float:
-        return _best_text_similarity(text, list(self._recent_ai_texts),
-                                     self._ai_text_buf)
 
     def close(self):
         self._stop.set()

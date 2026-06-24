@@ -12,10 +12,11 @@ import time
 import numpy as np
 
 from .._constants import _ECHO_COOLDOWN, _PROMPT_DEBATE_PARTNER, REALTIME_URL
-from .._voice_profiles import VoiceProfiles, _best_text_similarity, _resample_24_to_16
+from .._voice_profiles import VoiceProfiles, _resample_24_to_16
+from ._base import _RealtimeBase
 
 
-class ConversationPartner:
+class ConversationPartner(_RealtimeBase):
     """人間と音声で直接議論するRealtime APIエージェント.
 
     人間のマイク音声をinput_audio_buffer.appendで受け取り、
@@ -77,9 +78,6 @@ class ConversationPartner:
         if self._last_speech_end > 0:
             return (time.monotonic() - self._last_speech_end) < self._echo_cooldown
         return False
-
-    def set_tracker(self, tracker: VoiceProfiles):
-        self._voice_tracker = tracker
 
     def connect(self):
         """WebSocket接続を開始."""
@@ -214,19 +212,6 @@ class ConversationPartner:
 
     # --- ストリーミング音声再生 ---
 
-    def _q_put(self, payload: bytes | None):
-        """再生キューに現在の応答世代(epoch)タグを付けて積む（Bug 6）.
-
-        payload=None は応答の終端マーカー。
-        """
-        self._audio_q.put((self._play_epoch, payload))
-
-    def _on_playback_terminator(self, epoch: int):
-        """終端マーカー取り出し時の処理。最新応答の終端のみ ai_speaking を倒す（Bug 6）."""
-        if epoch >= self._play_epoch:
-            self.ai_speaking = False
-            self._last_speech_end = time.monotonic()
-
     def _start_playback_thread(self):
         def _player():
             try:
@@ -286,10 +271,6 @@ class ConversationPartner:
                 break
             self._handle(ev)
         self._connected = False
-
-    def _best_similarity(self, text: str) -> float:
-        return _best_text_similarity(text, list(self._recent_ai_texts),
-                                     self._ai_text_buf)
 
     def _handle(self, ev: dict):
         etype = ev.get("type", "")
