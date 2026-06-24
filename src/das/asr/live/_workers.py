@@ -24,6 +24,9 @@ if TYPE_CHECKING:
 import contextlib
 
 from ._constants import (
+    _AGENDA_MIN_UTTS,
+    _AGENDA_RETRY_SEC,
+    _AGENDA_WINDOW,
     _AGENT_CONV_SILENCE,
     _AGENT_DEBATE_SILENCE,
     _AGENT_SILENCE,
@@ -40,6 +43,42 @@ from ._constants import (
 )
 from ._polish import polish
 from ._ui import _print_line
+
+
+def _run_agenda_detector(state: SessionState, oai_key: str, oai_model: str):
+    """会議冒頭の発話から議題を1回推定してシードする（S3, --topic未指定時）.
+
+    既に論点があれば（明示シード or 抽出済み）何もしない。十分な発話が
+    たまったらLLMで議題を推定し、成功したら seed_topic して終了する。
+    判断できなければ一定間隔で再試行し、論点が現れたら（topic_worker等が
+    先に論点を作ったら）役目を終えて停止する。
+    """
+    from das.asr.live._bootstrap import detect_agenda as _detect_agenda
+
+    _last_attempt = 0.0
+    while not state.stop.is_set():
+        time.sleep(2)
+        if not oai_key:
+            return
+        with state.topics_lock:
+            if state.topics:
+                return  # 既に議題/論点あり → 役目終了
+        with state.state_lock:
+            talk_rs = [r for r in state.records
+                       if "speaker" in r and r.get("text")
+                       and r.get("speaker") != AGENT_SPEAKER]
+        if len(talk_rs) < _AGENDA_MIN_UTTS:
+            continue
+        if time.monotonic() - _last_attempt < _AGENDA_RETRY_SEC:
+            continue
+        _last_attempt = time.monotonic()
+        utts = [{"speaker": state.disp_name(r["speaker"]), "text": r["text"]}
+                for r in talk_rs[:_AGENDA_WINDOW]]
+        agenda = _detect_agenda(utts, oai_key, oai_model)
+        if agenda:
+            state.seed_topic(agenda, speaker="議題(自動)")
+            _print_line(f"# 議題を自動検出してシード: {agenda}")
+            return
 
 
 def _run_topic_worker(state: SessionState, oai_key: str, oai_model: str):

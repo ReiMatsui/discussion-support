@@ -13,7 +13,13 @@ import os
 import threading
 from dataclasses import dataclass
 
-from das.asr.live._constants import _DRIFT_PROMPT, _TOPIC_PROMPT, OPENAI_API, SR
+from das.asr.live._constants import (
+    _AGENDA_PROMPT,
+    _DRIFT_PROMPT,
+    _TOPIC_PROMPT,
+    OPENAI_API,
+    SR,
+)
 from das.asr.live._recv_loop import RecvLoop
 from das.asr.live._session_state import SessionState
 from das.asr.live._ui import _UIHandler
@@ -23,6 +29,7 @@ from das.asr.live._workers import (
     _connect_agent,
     _on_agent_text_factory,
     _on_partner_text_factory,
+    _run_agenda_detector,
     _run_drift_checker,
     _run_from_mic,
     _run_from_wav,
@@ -192,6 +199,25 @@ def check_drift(utterances: list[dict], topics: list[dict],
     return result
 
 
+def detect_agenda(utterances: list[dict], api_key: str, model: str) -> str | None:
+    """会議冒頭の発話から議題を1回推定する（S3）.
+
+    Returns: 議題の文字列 / 判断できなければ None。
+    """
+    if not utterances or not api_key:
+        return None
+    utt_text = "\n".join(f"- {u['speaker']}: {u['text']}" for u in utterances)
+    prompt = _AGENDA_PROMPT.format(utterances=utt_text)
+    params = _build_chat_params(model, prompt, max_out=400, temperature=0.0)
+    result = _post_chat_json(params, api_key, timeout=20, label="agenda")
+    if not isinstance(result, dict):
+        return None
+    agenda = result.get("agenda")
+    if isinstance(agenda, str) and agenda.strip():
+        return agenda.strip()
+    return None
+
+
 # ---------------------------------------------------------------------------
 # メインのセッション起動
 # ---------------------------------------------------------------------------
@@ -341,10 +367,12 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
     # --- 議題を脱線検出の基準論点としてシード（Fix 8 / 人間モードはS1で--topic対応） ---
     # 明示的な議題があれば、論点抽出LLMの成否に依存せず最初から脱線検出を効かせる。
     # 人間同士モード(--topic)・debate・simulate のいずれの議題でもシードできる。
+    _explicit_agenda = False
     if state.agent is not None:
         _agenda = args.topic or args.debate or args.simulate
         if _agenda:
             state.seed_topic(_agenda)
+            _explicit_agenda = True
             print(f"# 脱線検出: 議題を基準論点としてシード → {_agenda}", flush=True)
 
     print(f"# {backend.name} に接続中…", flush=True)
@@ -373,6 +401,12 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
                 threading.Thread(target=_run_drift_checker,
                                 args=(state, _oai_key, _oai_model), daemon=True).start()
                 print("# 脱線検出: 有効（3発話ごとに並列チェック）", flush=True)
+                # --- 議題未指定なら冒頭アジェンダ自動検出（S3） ---
+                if not _explicit_agenda:
+                    threading.Thread(target=_run_agenda_detector,
+                                    args=(state, _oai_key, _oai_model),
+                                    daemon=True).start()
+                    print("# 議題自動検出: 有効（冒頭の発話から推定）", flush=True)
         else:
             print("# 論点抽出: 無効（OPENAI_API_KEYが未設定）", flush=True)
         if state.agent is not None:
