@@ -13,6 +13,7 @@ import numpy as np
 
 from .._constants import (
     _AGENT_TRIGGER,
+    _ECHO_COOLDOWN,
     _PROMPT_CONVERSATION,
     _PROMPT_FACILITATOR,
     AGENT_VOICES,
@@ -71,7 +72,7 @@ class RealtimeAgent:
         self._interrupted = False          # 割り込みによるキャンセル中（残留音声を破棄）
         self._recent_ai_texts: collections.deque = collections.deque(maxlen=20)
         self._last_speech_end = 0.0        # ai_speaking が False になった時刻
-        self._echo_cooldown = 2.0          # AI発話終了後のエコーウィンドウ秒数
+        self._echo_cooldown = _ECHO_COOLDOWN  # AI発話終了後のエコーウィンドウ秒数
         # --- truncate用: 再生済み音声の追跡 ---
         self._current_item_id: str | None = None    # 現在の応答のoutput item ID
         self._played_bytes = 0                       # 再生スレッドが出力したPCMバイト数
@@ -245,6 +246,15 @@ class RealtimeAgent:
             self.ai_speaking = False
             self._last_speech_end = time.monotonic()
 
+    def _log_state(self, transition: str):
+        """状態遷移の軽量ログ（観測性、Phase 3 R4）.
+
+        介入1サイクルに数回しか呼ばれない要所のみで使う。
+        """
+        print(f"# [state] {transition} "
+              f"(responding={self._responding} speaking={self.ai_speaking} "
+              f"epoch={self._play_epoch})", flush=True)
+
     def _start_playback_thread(self):
         """PCMキューから読み出して逐次再生するスレッド。
         再生済みバイト数を_played_bytesに蓄積（truncate用）。
@@ -357,6 +367,7 @@ class RealtimeAgent:
             self._current_item_id = None
             self._preflight_buf.clear()
             self._preflight_cleared = False
+            self._log_state("→IDLE (response.done)")
 
         elif etype == "error":
             msg = ev.get("error", {}).get("message", "unknown")
@@ -473,6 +484,7 @@ class RealtimeAgent:
             del self._pending[:len(pending_snapshot)]
         if include_pi:
             self._pending_intervention = None
+        self._log_state("→RESPONDING (trigger送信)")
 
     def interrupt(self):
         """人間の割り込みを検出。現在のAI応答をキャンセルし再生を停止する。
@@ -542,6 +554,7 @@ class RealtimeAgent:
                     }))
         self._current_item_id = None
         print("# AI Agent: 割り込み検出 — 応答を中断", flush=True)
+        self._log_state("→INTERRUPTED (割り込み)")
 
     def _flush_preflight(self):
         """プリフライトバッファの音声を再生キューに一括フラッシュ.
@@ -553,6 +566,7 @@ class RealtimeAgent:
         if self._preflight_cleared:
             return
         self._preflight_cleared = True
+        self._log_state("→SPEAKING (preflightフラッシュ)")
         # 音声再生開始を通知（Partner停止用）
         if self.on_speech_start:
             with contextlib.suppress(Exception):
@@ -564,6 +578,7 @@ class RealtimeAgent:
     def _cancel_response(self):
         """「介入不要」応答を静かにキャンセル。音声再生を止め、会話履歴から削除する."""
         print("# AI Agent: 介入不要と判断 — 応答をキャンセル", flush=True)
+        self._log_state("→NOOP (介入不要)")
         self._interrupted = True
         self._last_noop_at = time.monotonic()  # デッドエア対策（Fix 10）
         self._preflight_buf.clear()        # バッファも破棄

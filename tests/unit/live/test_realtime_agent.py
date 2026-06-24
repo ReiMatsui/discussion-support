@@ -293,6 +293,19 @@ def test_latest_terminator_clears_ai_speaking(agent):
 # in_echo_window
 # ---------------------------------------------------------------------------
 
+def test_log_state_runs_without_error(agent, capsys):
+    """状態遷移ログ（R4）が例外なく # [state] 行を出力する."""
+    agent._log_state("→TEST")
+    out = capsys.readouterr().out
+    assert "# [state]" in out
+    assert "→TEST" in out
+
+
+def test_echo_cooldown_uses_shared_constant(agent):
+    from das.asr.live._constants import _ECHO_COOLDOWN
+    assert agent._echo_cooldown == _ECHO_COOLDOWN
+
+
 def test_echo_window_states(agent):
     import time
     assert agent.in_echo_window is False           # idle

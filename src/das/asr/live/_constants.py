@@ -232,17 +232,37 @@ _PROMPT_CONVERSATION = """\
 
 REALTIME_URL = "wss://api.openai.com/v1/realtime?model=gpt-realtime-2"
 AGENT_SPEAKER = "ファシリテーター"   # recordsに使うスピーカーキー
+# =====================================================================
+# タイミング定数（介入・割り込みロジック）
+# ---------------------------------------------------------------------
+# 関係の概要:
+#   - ファシリテーターの通常トリガーは「N発話到達」または「一定時間の沈黙」。
+#     debateモードはPartner会話が主なので沈黙閾値を長めにする。
+#   - 並列ドリフトチェッカーは、ウォームアップ後、INTERVAL発話ごとに
+#     直近WINDOW発話を見て脱線判定する。
+#   - 介入不要後にデッドエアになったら STALL_SILENCE 秒で一押し（COOLDOWNで抑制）。
+#   - エコーウィンドウ = AI発話終了後 ECHO_COOLDOWN 秒。この間はトリガー抑止＆
+#     テキスト類似エコー除去を適用する。
+# =====================================================================
+
+# --- ファシリテーターの通常トリガー ---
 _AGENT_TRIGGER = 10           # N発話ごとに応答検討(facilitator)
-_AGENT_SILENCE = 5.0          # N秒沈黙で応答検討(facilitator)
+_AGENT_SILENCE = 5.0          # N秒沈黙で応答検討(facilitator, Partnerなし)
 _AGENT_DEBATE_SILENCE = 15.0  # N秒沈黙で応答検討(debate — Partner会話が主なので長め)
 _AGENT_CONV_SILENCE = 1.5     # N秒沈黙で応答(conversation — 発話断片をまとめる)
-_AGENT_RETRY_SILENCE = 2.0    # 割り込まれた介入の再試行までの沈黙（短め）
 _INTERRUPT_MIN_CHARS = 8      # ファシリテーター割り込みの最小文字数
+
+# --- 並列ドリフト（脱線）検出 ---
 _DRIFT_CHECK_INTERVAL = 1     # ドリフトチェックの発話間隔（1=最後の1言でも即評価）
 _DRIFT_CHECK_WINDOW = 6       # チェック時に参照する最近の発話数
 _DRIFT_WARMUP = 3             # この発話数に達するまで脱線判定しない（開始時の挨拶の猶予）
-_STALL_SILENCE = 7.0          # 介入不要後この秒数沈黙したら一押し（デッドエア対策）
+
+# --- デッドエア対策（介入不要後の沈黙ブレーカー） ---
+_STALL_SILENCE = 7.0          # 介入不要後この秒数沈黙したら一押し
 _STALL_COOLDOWN = 30.0        # 一押しの最小間隔（ループ防止）
+
+# --- エコー防止 ---
+_ECHO_COOLDOWN = 2.0          # AI発話終了後のエコーウィンドウ秒数（agent/partner共通）
 # 相槌判定: 相槌パターンに一致する発話ではPartnerを止めない
 _BACKCHANNEL_RE = re.compile(
     r'^[\s、。,.!?！？]*'
