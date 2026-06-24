@@ -78,6 +78,7 @@ class LiveArgs:
     debate: str | None = None
     debate_voice: str = "echo"
     topic: str | None = None   # 人間同士モードの議題（脱線判定の基準）
+    proactivity: str = "standard"  # 介入の積極性（controlled/standard/active）
 
 
 # ---------------------------------------------------------------------------
@@ -393,6 +394,12 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
     # --- 議題を脱線検出の基準論点としてシード（Fix 8 / 人間モードはS1で--topic対応） ---
     # 明示的な議題があれば、論点抽出LLMの成否に依存せず最初から脱線検出を効かせる。
     # 人間同士モード(--topic)・debate・simulate のいずれの議題でもシードできる。
+    # --- 積極性プロファイルを適用（S5） ---
+    from das.asr.live._constants import _PROACTIVITY_PROFILES
+    if args.proactivity in _PROACTIVITY_PROFILES:
+        state.proactivity = dict(_PROACTIVITY_PROFILES[args.proactivity])
+        print(f"# 介入の積極性: {args.proactivity}", flush=True)
+
     _explicit_agenda = False
     if state.agent is not None:
         _agenda = args.topic or args.debate or args.simulate

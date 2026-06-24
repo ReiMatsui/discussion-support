@@ -10,6 +10,8 @@ import threading
 import time
 
 from ._constants import (
+    _PROACTIVITY_DEFAULT,
+    _PROACTIVITY_PROFILES,
     AGENT_VOICES,
     CLEAR_LINE,
     DIM,
@@ -73,6 +75,8 @@ class SessionState:
         self.drift_requests: queue.Queue[str] = queue.Queue()
         # 参加度の声かけ要求キュー（S4）。対象話者の表示名を積む。
         self.invite_requests: queue.Queue[str] = queue.Queue()
+        # 積極性プロファイル（S5）。bootstrapで --proactivity から上書きされる。
+        self.proactivity: dict = dict(_PROACTIVITY_PROFILES[_PROACTIVITY_DEFAULT])
 
         # PCMバッファ
         self.pcm_buf = bytearray()

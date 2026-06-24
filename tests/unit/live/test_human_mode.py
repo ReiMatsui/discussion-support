@@ -19,6 +19,31 @@ def test_cli_has_topic_option():
     assert "topic" in names
 
 
+def test_liveargs_has_proactivity():
+    assert LiveArgs().proactivity == "standard"
+    assert LiveArgs(proactivity="controlled").proactivity == "controlled"
+
+
+def test_cli_has_proactivity_option():
+    from das.asr.live import main
+    for p in main.params:
+        if p.name == "proactivity":
+            assert set(p.type.choices) == {"controlled", "standard", "active"}
+            break
+    else:
+        raise AssertionError("proactivity option not found")
+
+
+def test_proactivity_profiles():
+    from das.asr.live._constants import _PROACTIVITY_PROFILES
+    assert _PROACTIVITY_PROFILES["controlled"]["silence_summarize"] is None
+    assert _PROACTIVITY_PROFILES["standard"]["silence_summarize"] == 18.0
+    # 控えめ寄り: 標準でも以前の5秒よりかなり長い
+    assert _PROACTIVITY_PROFILES["standard"]["silence_summarize"] > 10
+    assert _PROACTIVITY_PROFILES["active"]["cooldown"] < \
+        _PROACTIVITY_PROFILES["standard"]["cooldown"]
+
+
 def test_cli_has_imbalanced_scenario():
     """一人で声かけ(invite)を試せる imbalanced シナリオが選択肢にある."""
     from das.asr.live import main

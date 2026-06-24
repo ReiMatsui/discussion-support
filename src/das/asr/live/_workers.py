@@ -29,7 +29,6 @@ from ._constants import (
     _AGENDA_WINDOW,
     _AGENT_CONV_SILENCE,
     _AGENT_DEBATE_SILENCE,
-    _AGENT_SILENCE,
     _BACKCHANNEL_RE,
     _DRIFT_CHECK_INTERVAL,
     _DRIFT_CHECK_WINDOW,
@@ -327,6 +326,9 @@ def _run_agent_worker(state: SessionState):
                       f" conn={agent._connected if agent else '?'}"
                       f" enabled={agent.enabled if agent else '?'}", flush=True)
             continue
+        # 積極性プロファイル（S5）: 介入クールダウンと沈黙要約の閾値
+        _cooldown = state.proactivity.get("cooldown", _INTERVENTION_COOLDOWN)
+        _silence_summarize = state.proactivity.get("silence_summarize")
         with state.state_lock:
             _skip = {AGENT_SPEAKER, "パートナー"}
             talk_rs = [r for r in state.records
@@ -386,7 +388,7 @@ def _run_agent_worker(state: SessionState):
                     _bargein_topics = list(state.topics) if state.topics else None
             if _pending_drift_reason is not None:
                 # クールダウン中は連発を避けるため要求を破棄（再脱線なら再検出される）
-                if time.monotonic() - _last_intervention_at < _INTERVENTION_COOLDOWN:
+                if time.monotonic() - _last_intervention_at < _cooldown:
                     print("# [trigger] skip: クールダウン中の脱線介入", flush=True)
                     _pending_drift_reason = None
                 else:
@@ -435,13 +437,16 @@ def _run_agent_worker(state: SessionState):
                     and _silence_elapsed > _AGENT_CONV_SILENCE):
                 agent.trigger()
         else:
+            # 沈黙要約の閾値: debateは従来通り、人間モードは積極性プロファイルに従う
+            # （None なら沈黙だけでは要約介入しない＝過剰介入の抑制, S5）
             _silence_thresh = (_AGENT_DEBATE_SILENCE if partner is not None
-                               else _AGENT_SILENCE)
+                               else _silence_summarize)
             if agent.pending_count >= agent.trigger_n:
                 print(f"# [trigger] count: {agent.pending_count}>={agent.trigger_n}", flush=True)
                 agent.trigger(topics=_topics)
                 _last_intervention_at = time.monotonic()
-            elif (agent.pending_count > 0
+            elif (_silence_thresh is not None
+                  and agent.pending_count > 0
                   and _silence_elapsed > _silence_thresh):
                 print(f"# [trigger] silence: {_silence_elapsed:.1f}s > {_silence_thresh}s", flush=True)
                 agent.trigger(topics=_topics)
@@ -465,7 +470,7 @@ def _run_agent_worker(state: SessionState):
             # クールダウン共有＋同じ人を連続では誘わない。
             elif (_pending_invite is not None
                   and _silence_elapsed > _INVITE_SILENCE
-                  and time.monotonic() - _last_intervention_at > _INTERVENTION_COOLDOWN):
+                  and time.monotonic() - _last_intervention_at > _cooldown):
                 if _pending_invite == _last_invited:
                     _pending_invite = None  # 同じ人を連続では誘わない
                 else:

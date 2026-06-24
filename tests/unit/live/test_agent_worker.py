@@ -74,6 +74,7 @@ class FakeState:
         self.drift_cursor = 0
         self.drift_requests: queue.Queue[str] = queue.Queue()
         self.invite_requests: queue.Queue[str] = queue.Queue()
+        self.proactivity = {"silence_summarize": 18.0, "cooldown": 25.0}
 
     def disp_name(self, k):  # pragma: no cover
         return str(k)
@@ -145,6 +146,29 @@ def test_stall_breaker_fires_after_noop_silence():
     assert agent.trigger_calls, "介入不要後の沈黙で一押しが入るべき"
     assert "止まって" in (agent.trigger_calls[0]["drift_reason"] or "")
     assert agent._last_noop_at == 0.0  # 発火後はマーカーを解除
+
+
+def test_controlled_proactivity_no_silence_summarize():
+    """controlledでは沈黙だけでは要約介入しない（過剰介入の抑制, S5）."""
+    agent = FakeAgent()
+    agent._pending = [{"speaker": "人間", "text": "x", "_count": True}]
+    state = FakeState(agent, None)
+    state.proactivity = {"silence_summarize": None, "cooldown": 40.0}
+    state._last_utt_time[0] = time.monotonic() - 100  # 長い沈黙
+
+    _run_worker_briefly(state, until=lambda: False, timeout=1.0)
+    assert agent.trigger_calls == []
+
+
+def test_standard_proactivity_silence_summarize_fires():
+    """standardでは沈黙が閾値を超えたら要約介入する（S5）."""
+    agent = FakeAgent()
+    agent._pending = [{"speaker": "人間", "text": "x", "_count": True}]
+    state = FakeState(agent, None)  # default standard: silence_summarize=18
+    state._last_utt_time[0] = time.monotonic() - 100
+
+    _run_worker_briefly(state, until=lambda: bool(agent.trigger_calls))
+    assert agent.trigger_calls
 
 
 def test_drift_request_triggers_with_reason():

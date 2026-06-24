@@ -172,13 +172,13 @@ class DiscussionSimulator:
             print(f"# Simulator [{turn}] {speaker}({voice}): {utterance[:50]}...",
                   flush=True)
 
-            # ファシリテーターが話している間は待機
-            while not self._stop.is_set() and self._agent_ref is not None and (
-                    self._agent_ref.ai_speaking or self._agent_ref._responding):
-                time.sleep(0.1)
+            # ファシリテーターが話している間は待機（被り防止）
+            self._wait_for_facilitator()
 
             # TTS → PCM → パイプライン
             pcm = self._tts_to_pcm(client, utterance, voice)
+            # TTS生成中にファシリテーターが話し始めた可能性 → 送信直前に再度待機
+            self._wait_for_facilitator()
             if pcm and not self._stop.is_set():
                 self._send_pcm(pcm)
                 self._send_silence(self.DEFAULT_PAUSE)
@@ -190,6 +190,12 @@ class DiscussionSimulator:
         if self._audio_q is not None:
             self._audio_q.put(None)
         print("# Simulator: 終了", flush=True)
+
+    def _wait_for_facilitator(self):
+        """ファシリテーターが話している/応答生成中の間は待機（被り防止）."""
+        while not self._stop.is_set() and self._agent_ref is not None and (
+                self._agent_ref.ai_speaking or self._agent_ref._responding):
+            time.sleep(0.1)
 
     def _parse_turn(self, text: str) -> tuple[str | None, str | None]:
         """「話者名: 発言」をパースする."""

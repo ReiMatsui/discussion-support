@@ -199,10 +199,11 @@ _DRIFT_PROMPT = """\
 {utterances}
 
 ## 判定基準
-- 発話が論点と無関係な話題（雑談、私的な話題など）→ drift=true
-- 論点に関連する議論の展開・深掘り → drift=false
-- 会議開始時の挨拶・自己紹介・進行の発言（「こんにちは」「よろしく」「始めましょう」等）
-  → drift=false（脱線ではない）
+- 議題と明らかに無関係な話題が続いている（雑談・私的な話題・別の話への脱線）→ drift=true
+- 議題に関連する議論なら、論点が多少移動しても・別の角度でも → drift=false
+- 一時的な余談、合意形成・要約・整理・進行の発言、関連する具体例 → drift=false
+- 会議開始時の挨拶・自己紹介・進行の発言 → drift=false
+迷ったら drift=false にしてください（過剰な介入を避けるため、明らかな脱線のみ true）。
 
 JSON1つのみ出力。形式: {{"drift": true/false, "reason": "10字以内"}}"""
 
@@ -301,6 +302,17 @@ _STALL_COOLDOWN = 30.0        # 一押しの最小間隔（ループ防止）
 
 # --- エコー防止 ---
 _ECHO_COOLDOWN = 2.0          # AI発話終了後のエコーウィンドウ秒数（agent/partner共通）
+
+# --- 積極性プロファイル（人間ファシリテーションの介入頻度, S5） ---
+# silence_summarize: 沈黙がこの秒数続いたら要約/整理の介入を検討（None=しない）。
+# cooldown: 脱線介入・声かけの最小間隔（しつこさ防止）。
+# 既定は standard。控えめ寄りに調整（過剰介入のフィードバックを反映）。
+_PROACTIVITY_PROFILES = {
+    "controlled": {"silence_summarize": None, "cooldown": 40.0},  # 明確な問題時のみ
+    "standard":   {"silence_summarize": 18.0, "cooldown": 25.0},
+    "active":     {"silence_summarize": 8.0,  "cooldown": 15.0},
+}
+_PROACTIVITY_DEFAULT = "standard"
 # 相槌判定: 相槌パターンに一致する発話ではPartnerを止めない
 _BACKCHANNEL_RE = re.compile(
     r'^[\s、。,.!?！？]*'
