@@ -231,6 +231,39 @@ def test_preflight_flushes_for_real_intervention(agent):
 
 
 # ---------------------------------------------------------------------------
+# 応答世代(epoch)による ai_speaking 管理（Bug 6）
+# ---------------------------------------------------------------------------
+
+def test_output_item_added_bumps_epoch_and_tags_queue(agent):
+    """新しい出力アイテムでepochが進み、音声・終端が現epochでタグ付けされる."""
+    agent._handle({"type": "response.output_item.added", "item": {"id": "it1"}})
+    assert agent._play_epoch == 1
+    agent._preflight_cleared = True  # フラッシュ済みとして直接エンキューさせる
+    agent._handle({"type": "response.output_audio.delta", "delta": make_chunk()})
+    agent._handle({"type": "response.output_audio.done"})
+    epochs = [e for (e, _payload) in list(agent._audio_q.queue)]
+    assert epochs == [1, 1]  # チャンクと終端の両方が epoch=1
+
+
+def test_stale_terminator_does_not_clear_ai_speaking(agent):
+    """古い応答の終端マーカーでは、新応答の再生中フラグを倒さない（Bug 6の核心）."""
+    agent._play_epoch = 2          # 最新は第2応答
+    agent.ai_speaking = True       # 第2応答が再生中
+    # 第1応答（古い）の終端が遅れて処理される
+    agent._on_playback_terminator(epoch=1)
+    assert agent.ai_speaking is True, "古い終端で再生中フラグを倒してはならない"
+
+
+def test_latest_terminator_clears_ai_speaking(agent):
+    """最新応答の終端では ai_speaking を倒す."""
+    agent._play_epoch = 2
+    agent.ai_speaking = True
+    agent._on_playback_terminator(epoch=2)
+    assert agent.ai_speaking is False
+    assert agent._last_speech_end > 0
+
+
+# ---------------------------------------------------------------------------
 # in_echo_window
 # ---------------------------------------------------------------------------
 

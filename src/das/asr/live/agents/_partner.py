@@ -38,7 +38,10 @@ class ConversationPartner:
         self.ai_speaking = False
         self._responding = False
         self._interrupted = False          # interrupt後の残留イベント破棄用
-        self._audio_q: queue.Queue[bytes | None] = queue.Queue()
+        # 再生キュー要素は (epoch, payload)。payload=None は応答の終端マーカー。
+        # epochは応答世代。古い応答の終端で新応答の再生中フラグを倒さない（Bug 6）。
+        self._audio_q: queue.Queue[tuple[int, bytes | None]] = queue.Queue()
+        self._play_epoch = 0               # 応答世代カウンタ（output_item.addedで+1）
         self._playback_thread: threading.Thread | None = None
         self._ai_text_buf = ""
         self.on_ai_utterance = None       # callback(text: str)
@@ -192,7 +195,7 @@ class ConversationPartner:
                 self._audio_q.get_nowait()
             except queue.Empty:
                 break
-        self._audio_q.put(None)  # playback threadにEOSを通知
+        self._q_put(None)  # playback threadにEOSを通知（現epochタグ付き）
         self.ai_speaking = False
         self._responding = False
         self._last_speech_end = time.monotonic()
@@ -211,6 +214,19 @@ class ConversationPartner:
 
     # --- ストリーミング音声再生 ---
 
+    def _q_put(self, payload: bytes | None):
+        """再生キューに現在の応答世代(epoch)タグを付けて積む（Bug 6）.
+
+        payload=None は応答の終端マーカー。
+        """
+        self._audio_q.put((self._play_epoch, payload))
+
+    def _on_playback_terminator(self, epoch: int):
+        """終端マーカー取り出し時の処理。最新応答の終端のみ ai_speaking を倒す（Bug 6）."""
+        if epoch >= self._play_epoch:
+            self.ai_speaking = False
+            self._last_speech_end = time.monotonic()
+
     def _start_playback_thread(self):
         def _player():
             try:
@@ -219,10 +235,9 @@ class ConversationPartner:
                                          dtype="float32", blocksize=2400)
                 stream.start()
                 while not self._stop.is_set():
-                    chunk = self._audio_q.get()
+                    epoch, chunk = self._audio_q.get()
                     if chunk is None:
-                        self.ai_speaking = False
-                        self._last_speech_end = time.monotonic()
+                        self._on_playback_terminator(epoch)
                         continue
                     self._played_bytes += len(chunk)
                     pcm = np.frombuffer(chunk, dtype="<i2").astype(np.float32) / 32768.0
@@ -283,13 +298,14 @@ class ConversationPartner:
             item = ev.get("item", {})
             self._current_item_id = item.get("id")
             self._played_bytes = 0
+            self._play_epoch += 1  # 応答世代を進める（Bug 6）
 
         elif etype == "response.output_audio.delta":
             if self._interrupted:
                 return  # interrupt後の残留チャンクを破棄
             chunk = ev.get("delta", "")
             if chunk:
-                self._audio_q.put(base64.b64decode(chunk))
+                self._q_put(base64.b64decode(chunk))
                 self.ai_speaking = True
                 self._responding = True
 
@@ -310,7 +326,7 @@ class ConversationPartner:
 
         elif etype == "response.output_audio.done":
             if not self._interrupted:
-                self._audio_q.put(None)
+                self._q_put(None)
 
         elif etype == "response.done":
             resp = ev.get("response", {})
@@ -346,7 +362,7 @@ class ConversationPartner:
 
     def close(self):
         self._stop.set()
-        self._audio_q.put(None)
+        self._q_put(None)  # playback threadを起こして終了させる
         if self._playback_thread:
             self._playback_thread.join(timeout=2.0)
         # 声紋プロファイルのクリーンアップ

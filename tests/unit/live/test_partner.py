@@ -60,6 +60,33 @@ def test_echo_window_includes_responding(partner):
 
 
 # ---------------------------------------------------------------------------
+# 応答世代(epoch)による ai_speaking 管理（Bug 6）
+# ---------------------------------------------------------------------------
+
+def test_stale_terminator_does_not_clear_ai_speaking(partner):
+    partner._play_epoch = 2
+    partner.ai_speaking = True
+    partner._on_playback_terminator(epoch=1)
+    assert partner.ai_speaking is True
+
+
+def test_latest_terminator_clears_ai_speaking(partner):
+    partner._play_epoch = 2
+    partner.ai_speaking = True
+    partner._on_playback_terminator(epoch=2)
+    assert partner.ai_speaking is False
+
+
+def test_output_item_added_bumps_epoch(partner):
+    partner._handle({"type": "response.output_item.added", "item": {"id": "p1"}})
+    assert partner._play_epoch == 1
+    partner._handle({"type": "response.output_audio.delta",
+                     "delta": __import__("base64").b64encode(b"\x01\x02" * 10).decode()})
+    epochs = [e for (e, _payload) in list(partner._audio_q.queue)]
+    assert epochs == [1]
+
+
+# ---------------------------------------------------------------------------
 # error イベントの扱い（Bug 5: cancel→create と VAD自動応答の競合）
 # ---------------------------------------------------------------------------
 

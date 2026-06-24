@@ -56,7 +56,11 @@ class RealtimeAgent:
         self._pending: list[dict] = []     # 送信待ち発話
         self.ai_speaking = False           # AI音声再生中フラグ
         self._ai_text_buf = ""             # ストリーミング転写バッファ
-        self._audio_q: queue.Queue[bytes | None] = queue.Queue()  # ストリーミング再生用
+        # 再生キュー要素は (epoch, payload)。payload=None は応答の終端マーカー。
+        # epochは応答世代。古い応答の終端で新しい応答の再生中フラグを
+        # 倒さないために用いる（Bug 6）。
+        self._audio_q: queue.Queue[tuple[int, bytes | None]] = queue.Queue()
+        self._play_epoch = 0               # 応答世代カウンタ（output_item.addedで+1）
         self._connected = False
         self._conn_error = ""              # 接続エラーメッセージ（UI表示用）
         self.on_ai_utterance = None        # callback(text: str) AI発話確定時
@@ -215,6 +219,24 @@ class RealtimeAgent:
 
     # --- ストリーミング音声再生 ---
 
+    def _q_put(self, payload: bytes | None):
+        """再生キューに現在の応答世代(epoch)タグを付けて積む。
+
+        payload=None は応答の終端マーカー。再生スレッドはこのepochを見て、
+        既に新しい応答が始まっている場合は ai_speaking を倒さない（Bug 6）。
+        """
+        self._audio_q.put((self._play_epoch, payload))
+
+    def _on_playback_terminator(self, epoch: int):
+        """再生スレッドが終端マーカーを取り出したときの処理（Bug 6）.
+
+        その終端が最新応答のもの(epoch >= 最新)のときだけ ai_speaking を倒す。
+        古い応答の終端(epoch < 最新)は、新応答がまだ再生中なので無視する。
+        """
+        if epoch >= self._play_epoch:
+            self.ai_speaking = False
+            self._last_speech_end = time.monotonic()
+
     def _start_playback_thread(self):
         """PCMキューから読み出して逐次再生するスレッド。
         再生済みバイト数を_played_bytesに蓄積（truncate用）。
@@ -226,10 +248,9 @@ class RealtimeAgent:
                                          dtype="float32", blocksize=2400)
                 stream.start()
                 while not self._stop.is_set():
-                    chunk = self._audio_q.get()
+                    epoch, chunk = self._audio_q.get()
                     if chunk is None:          # 1応答の終端
-                        self.ai_speaking = False
-                        self._last_speech_end = time.monotonic()
+                        self._on_playback_terminator(epoch)
                         continue
                     pcm = np.frombuffer(chunk, dtype="<i2").astype(np.float32) / 32768.0
                     stream.write(pcm.reshape(-1, 1))
@@ -272,6 +293,7 @@ class RealtimeAgent:
             item = ev.get("item", {})
             self._current_item_id = item.get("id")
             self._played_bytes = 0
+            self._play_epoch += 1  # 応答世代を進める（Bug 6）
             # プリフライトバッファをリセット（新応答の開始）
             self._preflight_buf.clear()
             self._preflight_cleared = False
@@ -284,7 +306,7 @@ class RealtimeAgent:
                 pcm = base64.b64decode(chunk)
                 if self._preflight_cleared:
                     # テキスト確認済み → そのまま再生キューへ
-                    self._audio_q.put(pcm)
+                    self._q_put(pcm)
                 else:
                     # まだテキスト未確認 → バッファに溜める
                     self._preflight_buf.append(pcm)
@@ -318,7 +340,7 @@ class RealtimeAgent:
 
         elif etype == "response.output_audio.done":
             if not self._interrupted:
-                self._audio_q.put(None)   # 再生終端マーカー
+                self._q_put(None)   # 再生終端マーカー（現epochタグ付き）
 
         elif etype == "response.done":
             self._ai_text_buf = ""
@@ -475,22 +497,22 @@ class RealtimeAgent:
         _yield_keep_bytes = 14400
         played = self._played_bytes
         kept_bytes = 0
-        kept_chunks: list[bytes] = []
+        kept_items: list[tuple[int, bytes]] = []
         while True:
             try:
-                chunk = self._audio_q.get_nowait()
+                epoch_i, payload = self._audio_q.get_nowait()
             except queue.Empty:
                 break
-            if chunk is not None and kept_bytes < _yield_keep_bytes:
-                kept_chunks.append(chunk)
-                kept_bytes += len(chunk)
+            if payload is not None and kept_bytes < _yield_keep_bytes:
+                kept_items.append((epoch_i, payload))  # 元のepochを保持
+                kept_bytes += len(payload)
             # それ以降は破棄
-        for c in kept_chunks:
-            self._audio_q.put(c)
-        self._audio_q.put(None)  # 終端マーカー → playback threadが停止処理
-        self.ai_speaking = bool(kept_chunks)  # 残りがあれば再生中のまま
+        for it in kept_items:
+            self._audio_q.put(it)
+        self._q_put(None)  # 終端マーカー（現epochタグ付き） → playback threadが停止処理
+        self.ai_speaking = bool(kept_items)  # 残りがあれば再生中のまま
         self._responding = False
-        if not kept_chunks:
+        if not kept_items:
             self._last_speech_end = time.monotonic()
         # Realtime APIの応答をキャンセル + 会話履歴をtruncate
         if self.ws:
@@ -525,7 +547,7 @@ class RealtimeAgent:
             with contextlib.suppress(Exception):
                 self.on_speech_start()
         for chunk in self._preflight_buf:
-            self._audio_q.put(chunk)
+            self._q_put(chunk)
         self._preflight_buf.clear()
 
     def _cancel_response(self):
@@ -541,7 +563,7 @@ class RealtimeAgent:
                 self._audio_q.get_nowait()
             except queue.Empty:
                 break
-        self._audio_q.put(None)
+        self._q_put(None)
         self.ai_speaking = False
         self._responding = False
         self._ai_text_buf = ""
@@ -581,7 +603,7 @@ class RealtimeAgent:
 
     def close(self):
         self._stop.set()
-        self._audio_q.put(None)
+        self._q_put(None)  # playback threadを起こして終了させる
         if self._playback_thread is not None:
             self._playback_thread.join(timeout=2.0)
         if self.ws:

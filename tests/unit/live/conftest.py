@@ -53,8 +53,12 @@ def make_chunk(n_samples: int = 1200) -> str:
 
 
 def queue_real_chunks(agent: RealtimeAgent | ConversationPartner) -> int:
-    """再生キューに積まれた実音声チャンク数（None終端を除く）."""
-    return sum(1 for x in list(agent._audio_q.queue) if x is not None)
+    """再生キューに積まれた実音声チャンク数（None終端を除く）.
+
+    キュー要素は (epoch, payload) のタプル。payload が None でないものを数える。
+    """
+    return sum(1 for (_epoch, payload) in list(agent._audio_q.queue)
+               if payload is not None)
 
 
 @pytest.fixture
