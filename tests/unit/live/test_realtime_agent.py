@@ -159,6 +159,15 @@ def test_trigger_with_topics_includes_topic_note(agent):
     assert "AI導入の是非" in text
 
 
+def test_trigger_with_invite_target(agent):
+    """invite_target指定時、_pendingが空でも声かけコンテキスト付きで送信する（S4）."""
+    agent.trigger(invite_target="田中")
+    text = agent.ws.last_create_text()
+    assert "[声かけ]" in text
+    assert "田中" in text
+    assert agent._responding is True
+
+
 # ---------------------------------------------------------------------------
 # interrupt() と介入内容の保存
 # ---------------------------------------------------------------------------

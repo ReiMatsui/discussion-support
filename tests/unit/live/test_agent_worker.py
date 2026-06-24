@@ -33,8 +33,9 @@ class FakeAgent:
     def feed(self, speaker: str, text: str, **kw) -> None:  # pragma: no cover
         pass
 
-    def trigger(self, *, topics=None, drift_reason=None) -> None:
-        self.trigger_calls.append({"topics": topics, "drift_reason": drift_reason})
+    def trigger(self, *, topics=None, drift_reason=None, invite_target=None) -> None:
+        self.trigger_calls.append({"topics": topics, "drift_reason": drift_reason,
+                                   "invite_target": invite_target})
         # 実エージェントの挙動を模倣: トリガーで介入と保留発話を消費
         self._pending_intervention = None
         self._pending.clear()
@@ -72,6 +73,7 @@ class FakeState:
         self.agent_cursor = 0
         self.drift_cursor = 0
         self.drift_requests: queue.Queue[str] = queue.Queue()
+        self.invite_requests: queue.Queue[str] = queue.Queue()
 
     def disp_name(self, k):  # pragma: no cover
         return str(k)
@@ -213,6 +215,31 @@ def test_drift_intervention_cooldown_suppresses_repeats():
 
     # クールダウンが十分長いこと（テストが秒単位で破綻しない範囲）を確認
     assert _INTERVENTION_COOLDOWN >= 10.0
+
+
+def test_invite_fires_at_pause_with_target():
+    """声かけ要求は、沈黙の間が空いてから対象話者付きでトリガーされる（S4）."""
+    agent = FakeAgent()
+    state = FakeState(agent, None)
+    state.invite_requests.put("田中")
+    state._last_utt_time[0] = time.monotonic() - 100  # 十分な沈黙(間)
+
+    _run_worker_briefly(state, until=lambda: bool(agent.trigger_calls))
+
+    assert agent.trigger_calls, "沈黙の間で声かけがトリガーされるべき"
+    assert agent.trigger_calls[0]["invite_target"] == "田中"
+
+
+def test_invite_waits_for_pause():
+    """沈黙の間が無い（直前に発話があった）うちは声かけしない（割り込まない）（S4）."""
+    agent = FakeAgent()
+    state = FakeState(agent, None)
+    state.invite_requests.put("田中")
+    state._last_utt_time[0] = time.monotonic()  # たった今発話があった → 間が無い
+
+    _run_worker_briefly(state, until=lambda: False, timeout=1.0)
+
+    assert agent.trigger_calls == []
 
 
 def test_no_stall_breaker_without_noop():

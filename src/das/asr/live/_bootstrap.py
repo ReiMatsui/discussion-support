@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from das.asr.live._constants import (
     _AGENDA_PROMPT,
     _DRIFT_PROMPT,
+    _PARTICIPATION_PROMPT,
     _TOPIC_PROMPT,
     OPENAI_API,
     SR,
@@ -33,6 +34,7 @@ from das.asr.live._workers import (
     _run_drift_checker,
     _run_from_mic,
     _run_from_wav,
+    _run_participation_checker,
     _run_sender,
     _run_stdin_commands,
     _run_topic_worker,
@@ -218,6 +220,30 @@ def detect_agenda(utterances: list[dict], api_key: str, model: str) -> str | Non
     return None
 
 
+def check_participation(participation: list[dict], utterances: list[dict],
+                        api_key: str, model: str) -> dict:
+    """発話量の偏りから、誰かに声かけすべきか判定する（S4）.
+
+    participation: [{"speaker": 名前, "time_share": 0-1, "turns": int,
+                     "silent_sec": float}, ...]
+    Returns: {"invite": bool, "speaker": 名前|None, "reason": str}
+    """
+    if not participation or not api_key:
+        return {"invite": False}
+    part_text = "\n".join(
+        f"- {p['speaker']}: 発話時間{p['time_share'] * 100:.0f}% / "
+        f"{p['turns']}回 / 最終発言{p['silent_sec']:.0f}秒前"
+        for p in participation)
+    utt_text = "\n".join(f"- {u['speaker']}: {u['text']}" for u in utterances)
+    prompt = _PARTICIPATION_PROMPT.format(participation=part_text,
+                                          utterances=utt_text)
+    params = _build_chat_params(model, prompt, max_out=400, temperature=0.0)
+    result = _post_chat_json(params, api_key, timeout=15, label="invite")
+    if not isinstance(result, dict):
+        return {"invite": False}
+    return result
+
+
 # ---------------------------------------------------------------------------
 # メインのセッション起動
 # ---------------------------------------------------------------------------
@@ -401,6 +427,10 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
                 threading.Thread(target=_run_drift_checker,
                                 args=(state, _oai_key, _oai_model), daemon=True).start()
                 print("# 脱線検出: 有効（3発話ごとに並列チェック）", flush=True)
+                # --- 参加度の声かけ（発言の少ない人を誘う, S4） ---
+                threading.Thread(target=_run_participation_checker,
+                                args=(state, _oai_key, _oai_model), daemon=True).start()
+                print("# 参加度の声かけ: 有効（発話量の偏りを監視）", flush=True)
                 # --- 議題未指定なら冒頭アジェンダ自動検出（S3） ---
                 if not _explicit_agenda:
                     threading.Thread(target=_run_agenda_detector,

@@ -52,13 +52,22 @@ def test_detect_agenda_returns_none(monkeypatch):
     assert bootstrap.detect_agenda([{"speaker": "A", "text": "x"}], "key", "m") is None
 
 
-def _make_state():
+class _FakeAgent:
+    """participation_checker が参照する最小限のエージェント."""
+    enabled = True
+    mode = "facilitator"
+
+
+def _make_state(*, with_agent: bool = False):
     from das.asr.live._session_state import SessionState
-    return SessionState(
+    s = SessionState(
         args=object(), started=datetime.datetime(2026, 1, 1),
         out_path="/tmp/o.md", html_path="/tmp/o.html", diag_path="/tmp/o.diag",
         turns_path="/tmp/o.turns", wav_path="/tmp/o.wav",
     )
+    if with_agent:
+        s.agent = _FakeAgent()  # type: ignore[assignment]
+    return s
 
 
 def test_agenda_detector_seeds_when_detected(monkeypatch):
@@ -81,6 +90,87 @@ def test_agenda_detector_seeds_when_detected(monkeypatch):
     t.join(timeout=2)
 
     assert [tp["topic"] for tp in state.topics] == ["AI導入の是非"]
+
+
+# ---------------------------------------------------------------------------
+# S4: 参加度の声かけ
+# ---------------------------------------------------------------------------
+
+def test_check_participation_parses(monkeypatch):
+    import das.asr.live._bootstrap as bootstrap
+    monkeypatch.setattr(bootstrap, "_post_chat_json",
+                        lambda *a, **k: {"invite": True, "speaker": "田中",
+                                         "reason": "発言が少ない"})
+    r = bootstrap.check_participation(
+        [{"speaker": "田中", "time_share": 0.1, "turns": 1, "silent_sec": 60}],
+        [], "key", "m")
+    assert r["invite"] is True
+    assert r["speaker"] == "田中"
+
+
+def test_check_participation_empty_is_no_invite():
+    import das.asr.live._bootstrap as bootstrap
+    assert bootstrap.check_participation([], [], "key", "m") == {"invite": False}
+
+
+def test_participation_checker_enqueues_invite(monkeypatch):
+    """発言の少ない人がいる時、LLM判定YESで声かけ要求をキューに積む（S4）."""
+    import das.asr.live._bootstrap as bootstrap
+    from das.asr.live._workers import _run_participation_checker
+
+    monkeypatch.setattr(bootstrap, "check_participation",
+                        lambda *a, **k: {"invite": True, "speaker": "話者2",
+                                         "reason": "静か"})
+    state = _make_state(with_agent=True)
+    recs = []
+    t = 0
+    for i in range(8):   # 話者1 はよく話す（warmup超え）
+        recs.append({"speaker": "話者1", "text": f"a{i}", "ms": t, "end_ms": t + 2000})
+        t += 2000
+    recs.append({"speaker": "話者2", "text": "はい", "ms": t, "end_ms": t + 200})
+    state.records = recs
+
+    th = threading.Thread(target=_run_participation_checker,
+                          args=(state, "key", "gpt-5-mini"), daemon=True)
+    th.start()
+    got = None
+    deadline = time.monotonic() + 4
+    while time.monotonic() < deadline and got is None:
+        try:
+            got = state.invite_requests.get_nowait()
+        except Exception:
+            time.sleep(0.05)
+    state.stop.set()
+    th.join(timeout=2)
+
+    assert got == "話者2"
+
+
+def test_participation_checker_skips_when_balanced(monkeypatch):
+    """発話量が均衡していれば（事前ゲート）LLMを呼ばず声かけしない（S4）."""
+    import das.asr.live._bootstrap as bootstrap
+    from das.asr.live._workers import _run_participation_checker
+
+    calls = []
+    monkeypatch.setattr(bootstrap, "check_participation",
+                        lambda *a, **k: calls.append(1) or {"invite": False})
+    state = _make_state(with_agent=True)
+    recs = []
+    t = 0
+    for i in range(8):  # 話者1/話者2 が交互に同程度
+        sp = "話者1" if i % 2 == 0 else "話者2"
+        recs.append({"speaker": sp, "text": f"u{i}", "ms": t, "end_ms": t + 1000})
+        t += 1000
+    state.records = recs
+
+    th = threading.Thread(target=_run_participation_checker,
+                          args=(state, "key", "gpt-5-mini"), daemon=True)
+    th.start()
+    time.sleep(2.5)
+    state.stop.set()
+    th.join(timeout=2)
+
+    assert calls == []  # 均衡 → 事前ゲートでLLM未呼び出し
 
 
 def test_agenda_detector_skips_when_topics_exist(monkeypatch):
