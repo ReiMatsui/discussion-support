@@ -154,9 +154,15 @@ class RecvLoop:
         """WebSocket受信ループのメイン."""
         args = self.args
         try:
-            while True:
-                res = self.backend.parse_message(
-                    json.loads(ws.recv()), args.lang)
+            while not self.state.stop.is_set():
+                try:
+                    raw = ws.recv()
+                except Exception:
+                    # UIからの停止などで ws が閉じられた場合は正常終了扱い
+                    if self.state.stop.is_set():
+                        break
+                    raise
+                res = self.backend.parse_message(json.loads(raw), args.lang)
                 if res.get("error_code") is not None:
                     _print_line(f"# エラー: {res['error_code']} - {res.get('error_message')}")
                     break

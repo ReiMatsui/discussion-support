@@ -8,10 +8,12 @@ import re
 import sys
 import threading
 import time
+from collections.abc import Callable
 
 from ._constants import (
     _PROACTIVITY_DEFAULT,
     _PROACTIVITY_PROFILES,
+    AGENT_SPEAKER,
     AGENT_VOICES,
     CLEAR_LINE,
     DIM,
@@ -22,6 +24,7 @@ from ._constants import (
     SR,
     fmt_ts,
 )
+from ._participation import participation_stats
 from ._voice_profiles import VoiceProfiles
 from .agents._partner import ConversationPartner
 from .agents._realtime import RealtimeAgent
@@ -77,6 +80,8 @@ class SessionState:
         self.invite_requests: queue.Queue[str] = queue.Queue()
         # 積極性プロファイル（S5）。bootstrapで --proactivity から上書きされる。
         self.proactivity: dict = dict(_PROACTIVITY_PROFILES[_PROACTIVITY_DEFAULT])
+        # UIからの停止フック（F1）。run_sessionが「stopを立ててwsを閉じる」関数を設定する。
+        self.request_stop: Callable[[], None] | None = None
 
         # PCMバッファ
         self.pcm_buf = bytearray()
@@ -129,6 +134,65 @@ class SessionState:
         """システムイベントを議事録のタイムラインに残す."""
         with self.state_lock:
             self.records.append({"ms": ms, "sys": text})
+
+    # ------------------------------------------------------------------
+    # UI(API)向けの状態スナップショット（F1）
+    # ------------------------------------------------------------------
+    def session_mode(self) -> str:
+        """現在のセッションモード: transcribe / converse / facilitate.
+
+        - transcribe : 議事録のみ（エージェントoff or 無し）
+        - converse   : AIと会話（パートナー有り＋ファシリテーター）
+        - facilitate : 人間同士に介入（ファシリテーター単体）
+        """
+        if self.agent is None or not self.agent.enabled:
+            return "transcribe"
+        if self.partner is not None:
+            return "converse"
+        return "facilitate"
+
+    def api_snapshot(self) -> dict:
+        """UI(API)向けの現在状態（JSON化可能なdict）を返す."""
+        with self.state_lock:
+            raw = list(self.records)
+            records = []
+            for r in raw:
+                if "sys" in r:
+                    records.append({"type": "sys", "ms": r.get("ms"),
+                                    "text": r["sys"]})
+                elif "speaker" in r:
+                    records.append({
+                        "type": "utt",
+                        "ms": r.get("ms"), "end_ms": r.get("end_ms"),
+                        "speaker": self.disp_name(r["speaker"]),
+                        "text": r.get("text", ""),
+                        "corrected": r.get("vp") == "補正",
+                    })
+            speakers = list(dict.fromkeys(
+                self.disp_name(r["speaker"]) for r in raw if "speaker" in r))
+        with self.topics_lock:
+            topics = [{"topic": t.get("topic", ""), "speaker": t.get("speaker", "")}
+                      for t in self.topics]
+        stats = participation_stats(raw, exclude_speakers=(AGENT_SPEAKER, "パートナー"))
+        participation = [
+            {"speaker": self.disp_name(sp),
+             "time_share": round(d["time_share"], 3), "turns": d["turns"]}
+            for sp, d in stats.items()
+        ]
+        agent = None
+        if self.agent is not None:
+            agent = {"enabled": self.agent.enabled, "mode": self.agent.mode,
+                     "voice": self.agent.voice}
+        return {
+            "mode": self.session_mode(),
+            "running": not self.stop.is_set(),
+            "started": self.started.strftime("%Y-%m-%d %H:%M"),
+            "speakers": speakers,
+            "records": records,
+            "topics": topics,
+            "participation": participation,
+            "agent": agent,
+        }
 
     def seed_topic(self, topic: str | None, speaker: str = "議題"):
         """明示的な議題を脱線検出の基準論点としてシードする（Fix 8）.

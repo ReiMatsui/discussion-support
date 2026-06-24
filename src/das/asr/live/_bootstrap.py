@@ -468,6 +468,15 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
             else:
                 webbrowser.open("file://" + os.path.abspath(html_path))
 
+        # UIからの停止フック: stopを立て、STTのWebSocketを閉じて受信ループを抜ける（F1）
+        import contextlib as _contextlib
+
+        def _request_stop():
+            state.stop.set()
+            with _contextlib.suppress(Exception):
+                ws.close()
+        state.request_stop = _request_stop
+
         recv = RecvLoop(state, args, backend)
         try:
             recv.run(ws)

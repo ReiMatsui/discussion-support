@@ -37,25 +37,34 @@ class _UIHandler:
             _state = state
 
             def do_GET(self):
-                if self.path == "/" or self.path.startswith("/?"):
-                    try:
-                        with open(self._state.html_path, "rb") as f:
-                            content = f.read()
-                        self.send_response(200)
-                        self.send_header("Content-Type", "text/html; charset=utf-8")
-                        self.end_headers()
-                        self.wfile.write(content)
-                    except FileNotFoundError:
-                        self.send_response(200)
-                        self.send_header("Content-Type", "text/html; charset=utf-8")
-                        self.end_headers()
-                        self.wfile.write("<p>準備中…</p>".encode())
+                if self.path == "/api/state":
+                    self._json(200, self._state.api_snapshot())
+                elif self.path == "/" or self.path.startswith("/?"):
+                    self._serve_html()
                 else:
                     self.send_error(404)
 
+            def _serve_html(self):
+                try:
+                    with open(self._state.html_path, "rb") as f:
+                        content = f.read()
+                except FileNotFoundError:
+                    content = "<p>準備中…</p>".encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(content)
+
             def do_POST(self):
                 s = self._state
-                if self.path == "/rename":
+                if self.path == "/api/stop":
+                    _print_line("# セッションを停止します（UIから）")
+                    if s.request_stop is not None:
+                        s.request_stop()
+                    else:
+                        s.stop.set()
+                    self._json(200, {"ok": True, "running": False})
+                elif self.path == "/rename":
                     length = int(self.headers.get("Content-Length", 0))
                     body = json.loads(self.rfile.read(length))
                     label = str(body.get("label", ""))
