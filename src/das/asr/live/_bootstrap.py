@@ -402,6 +402,12 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
         state.proactivity = dict(_PROACTIVITY_PROFILES[args.proactivity])
         print(f"# 介入の積極性: {args.proactivity}", flush=True)
 
+    # 会話モード(converse)で動的にパートナーを生成するための設定を保持（F3）
+    if state.agent is not None:
+        state._partner_cfg = {"api_key": _oai_key,
+                              "voice": args.debate_voice,
+                              "topic": args.topic or args.debate}
+
     _explicit_agenda = False
     if state.agent is not None:
         _agenda = args.topic or args.debate or args.simulate

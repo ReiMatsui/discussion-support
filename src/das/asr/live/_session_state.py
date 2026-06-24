@@ -65,6 +65,9 @@ class SessionState:
         self.agent: RealtimeAgent | None = None
         self.partner: ConversationPartner | None = None
         self.simulator: DiscussionSimulator | None = None
+        # 会話モード(converse)でパートナーを動的生成するための設定（F3）。
+        # bootstrapで {api_key, voice, topic} をセットする。
+        self._partner_cfg: dict | None = None
 
         # 論点
         self.topics: list[dict] = []

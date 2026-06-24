@@ -256,27 +256,27 @@ def _on_agent_text_factory(state: SessionState):
 def _connect_agent(state: SessionState, on_text):
     """ファシリテーターAgentのコールバック設定・接続・ワーカー起動."""
     agent = state.agent
-    partner = state.partner
-    simulator = state.simulator
-    if simulator is not None:
-        def _on_agent_with_sim(text: str):
-            on_text(text)
-            if "介入不要" not in text:
-                simulator.inject_facilitator(text)
-        agent.on_ai_utterance = _on_agent_with_sim
-    elif partner is not None:
-        def _on_agent_with_partner(text: str):
-            on_text(text)
-            if "介入不要" not in text and partner._connected:
-                partner.interrupt()
-                partner.inject_context("ファシリテーター", text)
-        agent.on_ai_utterance = _on_agent_with_partner
-        def _on_facilitator_speech_start():
-            if partner._connected and (partner.ai_speaking or partner._responding):
-                partner.interrupt()
-        agent.on_speech_start = _on_facilitator_speech_start
-    else:
-        agent.on_ai_utterance = on_text
+    # コールバックは state.partner / state.simulator を「動的参照」する。
+    # これにより実行中にパートナーを接続/切断してもコールバックの貼り替えが不要（F3）。
+    def _on_agent_utterance(text: str):
+        on_text(text)
+        if "介入不要" in text:
+            return
+        p = state.partner
+        if p is not None and p._connected:
+            p.interrupt()
+            p.inject_context("ファシリテーター", text)
+        sim = state.simulator
+        if sim is not None:
+            sim.inject_facilitator(text)
+    agent.on_ai_utterance = _on_agent_utterance
+
+    def _on_agent_speech_start():
+        p = state.partner
+        if p is not None and p._connected and (p.ai_speaking or p._responding):
+            p.interrupt()
+    agent.on_speech_start = _on_agent_speech_start
+
     agent.connect()
     threading.Thread(target=_run_agent_worker, args=(state,),
                      daemon=True).start()
@@ -299,6 +299,65 @@ def _on_partner_text_factory(state: SessionState):
     return _on_partner_text
 
 
+# ---------------------------------------------------------------------------
+# 実行中のモード切替（F3）
+# ---------------------------------------------------------------------------
+
+def _attach_partner(state: SessionState):
+    """AIパートナーを生成・接続して state.partner にセットする（会話モード）."""
+    if state.partner is not None:
+        return  # 既に接続済み
+    cfg = state._partner_cfg or {}
+    if not cfg.get("api_key"):
+        _print_line("# 会話モードにできません（OPENAI_API_KEYが未設定）")
+        return
+    from das.asr.live.agents._partner import ConversationPartner
+    p = ConversationPartner(api_key=cfg["api_key"],
+                            voice=cfg.get("voice") or "echo",
+                            topic=cfg.get("topic") or "")
+    if state.tracker is not None:
+        p.set_tracker(state.tracker)
+    p.on_ai_utterance = _on_partner_text_factory(state)
+    p.connect()
+    state.partner = p
+    _print_line("# モード: AIと会話（パートナーを接続）")
+
+
+def _detach_partner(state: SessionState):
+    """AIパートナーを切断して state.partner を None にする."""
+    p = state.partner
+    if p is None:
+        return
+    state.partner = None  # 先にNoneにして利用側(動的参照)を即座に切り離す
+    with contextlib.suppress(Exception):
+        p.close()
+    _print_line("# パートナーを切断しました")
+
+
+def set_session_mode(state: SessionState, mode: str) -> dict:
+    """セッションモードを切り替える（transcribe / converse / facilitate）.
+
+    エージェントのon/offとパートナーの接続/切断をまとめて行う。
+    戻り値: {"ok": bool, "mode": str} or {"ok": False, "error": str}
+    """
+    if mode not in ("transcribe", "converse", "facilitate"):
+        return {"ok": False, "error": f"未知のモード: {mode}"}
+    if state.agent is None:
+        return {"ok": False,
+                "error": "AIエージェントが無効です（--agentで起動してください）"}
+    if mode == "transcribe":
+        state.agent.apply_config(mode="off")
+        _detach_partner(state)
+    elif mode == "facilitate":
+        state.agent.apply_config(mode="facilitator")
+        _detach_partner(state)
+    else:  # converse
+        state.agent.apply_config(mode="facilitator")
+        _attach_partner(state)
+    state.save()
+    return {"ok": True, "mode": state.session_mode()}
+
+
 def _run_agent_worker(state: SessionState):
     """バックグラウンドでAI応答のトリガーを管理（ターンテイキング）.
 
@@ -308,7 +367,6 @@ def _run_agent_worker(state: SessionState):
       - AIターン終了: フロアを人間に返す（沈黙タイマーをリセット）
     """
     agent = state.agent
-    partner = state.partner
     _last_utt_time = state._last_utt_time
     _was_in_echo = state._was_in_echo
     _diag_tick = 0
@@ -320,6 +378,7 @@ def _run_agent_worker(state: SessionState):
     while not state.stop.is_set():
         time.sleep(0.5)
         _diag_tick += 1
+        partner = state.partner  # 動的参照: 実行中のパートナー接続/切断に追従（F3）
         if agent is None or not agent._connected or not agent.enabled:
             if _diag_tick % 20 == 0:
                 print(f"# [diag] _agent_worker skip: agent={agent is not None}"
@@ -521,12 +580,12 @@ def _run_stdin_commands(state: SessionState):
 def _run_from_mic(state: SessionState, device):
     """マイクからPCMを読み取り audio_q に送信."""
     import sounddevice as sd
-    partner = state.partner
     agent = state.agent
 
     def cb(indata, frames, t, status):
         pcm = (np.clip(indata[:, 0], -1, 1) * 32767).astype("<i2").tobytes()
         state.audio_q.put(pcm)
+        partner = state.partner  # 動的参照: 実行中の接続/切断に追従（F3）
         if (partner is not None and partner._connected
                 and not partner.in_echo_window
                 and not (agent is not None and agent.in_echo_window)):
