@@ -331,11 +331,15 @@ class RealtimeAgent:
             self._pending.append({"speaker": speaker, "text": text,
                                   "_count": trigger_count})
 
-    def trigger(self, *, topics: list[dict] | None = None):
+    def trigger(self, *, topics: list[dict] | None = None,
+                drift_reason: str | None = None):
         """蓄積した発話をRealtimeAPIに送信し応答を要求.
 
         topics: 現在の論点一覧（_topic_workerが抽出したもの）。
                 渡された場合、コンテキストに含めて脱線検出の精度を上げる。
+        drift_reason: 並列ドリフトチェッカーが検出した脱線理由。
+                設定されている場合、_pendingが空でも送信し、
+                ファシリテーターに介入を強く促す。
         保存された介入内容（割り込みで中断された発言）がある場合、
         コンテキストに追加して再試行の機会を与える。
         """
@@ -344,7 +348,8 @@ class RealtimeAgent:
         if self._responding:
             return  # 応答生成中は新規リクエストを抑止
         with self._lock:
-            if not self._pending and self._pending_intervention is None:
+            if (not self._pending and self._pending_intervention is None
+                    and not drift_reason):
                 return
             conv = "\n".join(f"{u['speaker']}: {u['text']}" for u in self._pending)
             self._pending.clear()
@@ -358,6 +363,12 @@ class RealtimeAgent:
                           f"議論がこれらの論点からズレていたら、"
                           f"簡潔に指摘して元のテーマに戻してください。")
             conv = f"{topic_note}\n\n{conv}" if conv else topic_note
+        # --- 脱線検出コンテキスト ---
+        if drift_reason:
+            drift_note = (f"[脱線検出] {drift_reason}\n"
+                          f"議論が論点からズレています。"
+                          f"簡潔に指摘して元のテーマに戻してください。")
+            conv = f"{drift_note}\n\n{conv}" if conv else drift_note
         # --- 保存された介入内容をコンテキストに追加 ---
         pi = self._pending_intervention
         if pi is not None:

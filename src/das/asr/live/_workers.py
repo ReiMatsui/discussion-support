@@ -69,7 +69,10 @@ def _run_drift_checker(state: SessionState, oai_key: str, oai_model: str):
 
     _run_topic_worker が抽出した論点(state.topics)を使い、
     直近の発話が論点からズレていないかを軽量モデルで高頻度チェック。
-    脱線検出時はファシリテーターの即時トリガーを発火する。
+    脱線検出時はファシリテーターに脱線理由を伝えて即時トリガーする。
+
+    人間・パートナー双方の発話をチェック対象に含める。
+    パートナーが脱線に付き合っている状態も検出するため。
     """
     from das.asr.live._bootstrap import check_drift as _check_drift
 
@@ -85,12 +88,11 @@ def _run_drift_checker(state: SessionState, oai_key: str, oai_model: str):
             if not state.topics:
                 continue
             topics = list(state.topics)
-        # 新しい発話が _DRIFT_CHECK_INTERVAL 以上溜まったらチェック
+        # ファシリテーター以外の全発話をカウント＆チェック対象にする
         with state.state_lock:
-            _skip = {AGENT_SPEAKER, "パートナー"}
             talk_rs = [r for r in state.records
                        if "speaker" in r and r.get("text")
-                       and r.get("speaker") not in _skip]
+                       and r.get("speaker") != AGENT_SPEAKER]
         n = len(talk_rs)
         if n - state.drift_cursor < _DRIFT_CHECK_INTERVAL:
             continue
@@ -108,7 +110,7 @@ def _run_drift_checker(state: SessionState, oai_key: str, oai_model: str):
             if not agent._responding and not agent.ai_speaking:
                 with state.topics_lock:
                     _topics = list(state.topics) if state.topics else None
-                agent.trigger(topics=_topics)
+                agent.trigger(topics=_topics, drift_reason=reason)
 
 
 def _on_agent_text_factory(state: SessionState):
