@@ -234,7 +234,7 @@ _AGENT_DEBATE_SILENCE = 15.0  # N秒沈黙で応答検討(debate — Partner会�
 _AGENT_CONV_SILENCE = 1.5     # N秒沈黙で応答(conversation — 発話断片をまとめる)
 _AGENT_RETRY_SILENCE = 2.0    # 割り込まれた介入の再試行までの沈黙（短め）
 _INTERRUPT_MIN_CHARS = 8      # ファシリテーター割り込みの最小文字数
-_DRIFT_CHECK_INTERVAL = 3     # ドリフトチェックの発話間隔
+_DRIFT_CHECK_INTERVAL = 2     # ドリフトチェックの発話間隔
 _DRIFT_CHECK_WINDOW = 6       # チェック時に参照する最近の発話数
 # 相槌判定: 相槌パターンに一致する発話ではPartnerを止めない
 _BACKCHANNEL_RE = re.compile(

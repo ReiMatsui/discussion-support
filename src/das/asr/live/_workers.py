@@ -73,24 +73,41 @@ def _run_drift_checker(state: SessionState, oai_key: str, oai_model: str):
 
     人間・パートナー双方の発話をチェック対象に含める。
     パートナーが脱線に付き合っている状態も検出するため。
+
+    _pending_drift: 検出済みだがtriggerできなかった脱線理由。
+    agentがbusy(応答中/発話中)の間は保持し、freeになった瞬間にtriggerする。
+    これにより脱線検出結果が消失しない。
     """
     from das.asr.live._bootstrap import check_drift as _check_drift
 
     _diag_tick = 0
+    _pending_drift: str | None = None  # 検出済み・未配信の脱線理由
     while not state.stop.is_set():
-        time.sleep(2)
+        time.sleep(1)  # 保留中のリトライを素早く行うため短めに
         _diag_tick += 1
         agent = state.agent
         if not oai_key or agent is None or not agent.enabled:
             continue
         if agent.mode == "conversation":
             continue
+
+        # --- 保留中の脱線トリガーをリトライ ---
+        if _pending_drift is not None:
+            if not agent._responding and not agent.ai_speaking:
+                with state.topics_lock:
+                    _topics = list(state.topics) if state.topics else None
+                print(f"# [drift] → 保留トリガーをリトライ: {_pending_drift}",
+                      flush=True)
+                agent.trigger(topics=_topics, drift_reason=_pending_drift)
+                _pending_drift = None
+            continue  # リトライ待ち中は新規チェックしない
+
         # 論点がまだなければスキップ
         with state.topics_lock:
             _has_topics = bool(state.topics)
             topics = list(state.topics) if _has_topics else []
         if not _has_topics:
-            if _diag_tick % 15 == 0:
+            if _diag_tick % 30 == 0:
                 print("# [drift] 待機中: 論点未抽出", flush=True)
             continue
         # ファシリテーター以外の全発話をカウント＆チェック対象にする
@@ -113,11 +130,11 @@ def _run_drift_checker(state: SessionState, oai_key: str, oai_model: str):
         if result.get("drift"):
             reason = result.get("reason", "")
             _print_line(f"# 🔀 脱線検出: {reason}")
-            # ファシリテーターが応答中でなければ即トリガー
-            if agent._responding:
-                print("# [drift] トリガー保留: agent応答中", flush=True)
-            elif agent.ai_speaking:
-                print("# [drift] トリガー保留: agent発話中", flush=True)
+            if agent._responding or agent.ai_speaking:
+                # agentがbusy → 保留して次のループで即リトライ
+                _pending_drift = reason
+                print("# [drift] トリガー保留（agentがbusy、1秒後リトライ）",
+                      flush=True)
             else:
                 with state.topics_lock:
                     _topics = list(state.topics) if state.topics else None
