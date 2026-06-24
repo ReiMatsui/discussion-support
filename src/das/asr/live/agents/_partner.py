@@ -221,6 +221,8 @@ class ConversationPartner(_RealtimeBase):
             self._current_item_id = item.get("id")
             self._played_bytes = 0
             self._play_epoch += 1  # 応答世代を進める（Bug 6）
+            # 新応答の開始 → 前の中断状態を解除（response.done取りこぼし時の固着防止）
+            self._interrupted = False
 
         elif etype == "response.output_audio.delta":
             if self._interrupted:

@@ -227,6 +227,10 @@ class RealtimeAgent(_RealtimeBase):
             self._current_item_id = item.get("id")
             self._played_bytes = 0
             self._play_epoch += 1  # 応答世代を進める（Bug 6）
+            # 新応答の開始 → 前の中断状態(_interrupted)を解除する。
+            # これにより _interrupted のリセットが response.done の到着に依存せず、
+            # done取りこぼし時に次応答が無音になる固着を防ぐ（堅牢化）。
+            self._interrupted = False
             # プリフライトバッファをリセット（新応答の開始）
             self._preflight_buf.clear()
             self._preflight_cleared = False
