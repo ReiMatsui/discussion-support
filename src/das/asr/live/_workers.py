@@ -25,6 +25,7 @@ from ._constants import (
     _DRIFT_CHECK_WINDOW,
     _DRIFT_WARMUP,
     _INTERRUPT_MIN_CHARS,
+    _INTERVENTION_COOLDOWN,
     _STALL_COOLDOWN,
     _STALL_SILENCE,
     AGENT_SPEAKER,
@@ -207,6 +208,7 @@ def _run_agent_worker(state: SessionState):
     _was_in_echo = state._was_in_echo
     _diag_tick = 0
     _last_stall_at = 0.0  # 沈黙ブレーカーの最終発火時刻（ループ防止、Fix 10）
+    _last_intervention_at = 0.0  # 直近の介入時刻（脱線介入のクールダウン用）
     _pending_drift_reason: str | None = None  # drift_checkerからの未処理介入要求（R2）
     while not state.stop.is_set():
         time.sleep(0.5)
@@ -270,16 +272,23 @@ def _run_agent_worker(state: SessionState):
                 with state.topics_lock:
                     _bargein_topics = list(state.topics) if state.topics else None
             if _pending_drift_reason is not None:
-                print(f"# [diag] TRIGGER by drift: 脱線介入「{_pending_drift_reason}」",
-                      flush=True)
-                agent.trigger(topics=_bargein_topics,
-                              drift_reason=_pending_drift_reason)
-                _pending_drift_reason = None
-                continue
+                # クールダウン中は連発を避けるため要求を破棄（再脱線なら再検出される）
+                if time.monotonic() - _last_intervention_at < _INTERVENTION_COOLDOWN:
+                    print("# [diag] 脱線介入をスキップ（クールダウン中）", flush=True)
+                    _pending_drift_reason = None
+                else:
+                    print(f"# [diag] TRIGGER by drift: 脱線介入「{_pending_drift_reason}」",
+                          flush=True)
+                    agent.trigger(topics=_bargein_topics,
+                                  drift_reason=_pending_drift_reason)
+                    _pending_drift_reason = None
+                    _last_intervention_at = time.monotonic()
+                    continue
             if agent._pending_intervention is not None:
                 print("# [diag] TRIGGER by retry: 中断された介入を再送（ガードバイパス）",
                       flush=True)
                 agent.trigger(topics=_bargein_topics)
+                _last_intervention_at = time.monotonic()
                 continue
         # エコーウィンドウ中はtriggerしない
         if agent is not None and agent.in_echo_window:
@@ -318,10 +327,12 @@ def _run_agent_worker(state: SessionState):
             if agent.pending_count >= agent.trigger_n:
                 print(f"# [diag] TRIGGER by count: {agent.pending_count}>={agent.trigger_n}", flush=True)
                 agent.trigger(topics=_topics)
+                _last_intervention_at = time.monotonic()
             elif (agent.pending_count > 0
                   and _silence_elapsed > _silence_thresh):
                 print(f"# [diag] TRIGGER by silence: {_silence_elapsed:.1f}s > {_silence_thresh}s", flush=True)
                 agent.trigger(topics=_topics)
+                _last_intervention_at = time.monotonic()
             # --- 沈黙ブレーカー: 介入不要後にデッドエアになった場合の一押し（Fix 10） ---
             # 「介入不要」の判断自体は尊重する（一度黙る）が、その後に会話が止まって
             # しまったら、本題へ戻す一言を促す。クールダウンで繰り返しを防ぐ。
@@ -334,6 +345,7 @@ def _run_agent_worker(state: SessionState):
                     topics=_topics,
                     drift_reason="会話が止まっています。本題に戻す一言を簡潔に述べてください。")
                 _last_stall_at = time.monotonic()
+                _last_intervention_at = time.monotonic()
                 agent._last_noop_at = 0.0
 
 

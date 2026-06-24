@@ -185,6 +185,36 @@ def test_drift_request_held_until_agent_free():
     assert agent.trigger_calls[0]["drift_reason"] == "脱線理由"
 
 
+def test_drift_intervention_cooldown_suppresses_repeats():
+    """介入直後のクールダウン中は、続く脱線要求を抑制して連発を防ぐ（しつこさ緩和）."""
+    from das.asr.live._constants import _INTERVENTION_COOLDOWN
+
+    agent = FakeAgent()
+    state = FakeState(agent, None)
+    state.drift_requests.put("脱線1")
+
+    t = threading.Thread(target=_run_agent_worker, args=(state,), daemon=True)
+    t.start()
+    try:
+        # 1回目の脱線で介入が入る
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and not agent.trigger_calls:
+            time.sleep(0.05)
+        assert len(agent.trigger_calls) == 1
+
+        # クールダウン中に続けて脱線要求しても介入は増えない
+        for _ in range(3):
+            state.drift_requests.put("脱線2")
+            time.sleep(0.6)
+        assert len(agent.trigger_calls) == 1, "クールダウン中は連発しない"
+    finally:
+        state.stop.set()
+        t.join(timeout=2.0)
+
+    # クールダウンが十分長いこと（テストが秒単位で破綻しない範囲）を確認
+    assert _INTERVENTION_COOLDOWN >= 10.0
+
+
 def test_no_stall_breaker_without_noop():
     """介入不要の履歴がなければ、沈黙していても一押しはしない（通常の間は尊重）."""
     agent = FakeAgent()

@@ -256,6 +256,7 @@ _INTERRUPT_MIN_CHARS = 8      # ファシリテーター割り込みの最小文
 _DRIFT_CHECK_INTERVAL = 1     # ドリフトチェックの発話間隔（1=最後の1言でも即評価）
 _DRIFT_CHECK_WINDOW = 6       # チェック時に参照する最近の発話数
 _DRIFT_WARMUP = 3             # この発話数に達するまで脱線判定しない（開始時の挨拶の猶予）
+_INTERVENTION_COOLDOWN = 25.0 # 介入後この秒数は脱線介入を抑制（連発=しつこさの防止）
 
 # --- デッドエア対策（介入不要後の沈黙ブレーカー） ---
 _STALL_SILENCE = 7.0          # 介入不要後この秒数沈黙したら一押し
