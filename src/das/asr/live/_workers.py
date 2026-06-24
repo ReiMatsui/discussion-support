@@ -18,12 +18,14 @@ import contextlib
 from ._constants import (
     _AGENT_CONV_SILENCE,
     _AGENT_DEBATE_SILENCE,
-    _AGENT_RETRY_SILENCE,
     _AGENT_SILENCE,
     _BACKCHANNEL_RE,
     _DRIFT_CHECK_INTERVAL,
     _DRIFT_CHECK_WINDOW,
+    _DRIFT_WARMUP,
     _INTERRUPT_MIN_CHARS,
+    _STALL_COOLDOWN,
+    _STALL_SILENCE,
     AGENT_SPEAKER,
     SR,
 )
@@ -102,18 +104,7 @@ def _run_drift_checker(state: SessionState, oai_key: str, oai_model: str):
                 _pending_drift = None
             continue  # リトライ待ち中は新規チェックしない
 
-        # --- 中断された介入のリトライ（agent_workerの3重ガードをバイパス） ---
-        # agent_workerのリトライは①エコーウィンドウ②パートナー発話中③沈黙閾値
-        # の全てに阻まれ、会話中は発火しない。drift checkerはこれらを無視し、
-        # agentがfree(応答中でなく発話中でもない)になった瞬間にリトライする。
-        if (agent._pending_intervention is not None
-                and not agent._responding and not agent.ai_speaking):
-            with state.topics_lock:
-                _topics = list(state.topics) if state.topics else None
-            print("# [drift] → 中断された介入をリトライ（ガードバイパス）",
-                  flush=True)
-            agent.trigger(topics=_topics)
-            continue
+        # （中断された介入のリトライは _run_agent_worker に集約。Bug 3）
 
         # 論点がまだなければスキップ
         with state.topics_lock:
@@ -129,6 +120,11 @@ def _run_drift_checker(state: SessionState, oai_key: str, oai_model: str):
                        if "speaker" in r and r.get("text")
                        and r.get("speaker") != AGENT_SPEAKER]
         n = len(talk_rs)
+        # ウォームアップ: 会議開始直後の挨拶などで誤検出しないよう猶予を置く（Fix 11）
+        if n < _DRIFT_WARMUP:
+            if _diag_tick % 30 == 0:
+                print(f"# [drift] ウォームアップ中: {n}/{_DRIFT_WARMUP}発話", flush=True)
+            continue
         if n - state.drift_cursor < _DRIFT_CHECK_INTERVAL:
             continue
         # 直近の発話を取得
@@ -231,6 +227,7 @@ def _run_agent_worker(state: SessionState):
     _last_utt_time = state._last_utt_time
     _was_in_echo = state._was_in_echo
     _diag_tick = 0
+    _last_stall_at = 0.0  # 沈黙ブレーカーの最終発火時刻（ループ防止、Fix 10）
     while not state.stop.is_set():
         time.sleep(0.5)
         _diag_tick += 1
@@ -248,6 +245,7 @@ def _run_agent_worker(state: SessionState):
         n = len(talk_rs)
         if n > state.agent_cursor:
             _last_utt_time[0] = time.monotonic()
+            agent._last_noop_at = 0.0  # 新たな発話で会話が動いた → 沈黙ブレーカー解除
             new_texts = [r.get("text", "") for r in talk_rs[state.agent_cursor:]]
             for r in talk_rs[state.agent_cursor:]:
                 agent.feed(state.disp_name(r.get("speaker", "")), r.get("text", ""))
@@ -274,6 +272,20 @@ def _run_agent_worker(state: SessionState):
                 and agent is not None
                 and agent.ai_speaking):
             partner.interrupt()
+        # --- 中断された介入の最優先リトライ（ガードバイパス、Bug 3で集約） ---
+        # agentがfree(応答中でなく発話中でもない)になった瞬間に、エコーウィンドウ・
+        # パートナー発話・沈黙閾値を無視して再送する。会話が活発でも中断された介入を
+        # 取りこぼさない。リトライ責務はこの1箇所に集約（drift_checker側は廃止）。
+        if (agent._pending_intervention is not None
+                and not agent._responding and not agent.ai_speaking):
+            _retry_topics = None
+            if agent.mode != "conversation":
+                with state.topics_lock:
+                    _retry_topics = list(state.topics) if state.topics else None
+            print("# [diag] TRIGGER by retry: 中断された介入を再送（ガードバイパス）",
+                  flush=True)
+            agent.trigger(topics=_retry_topics)
+            continue
         # エコーウィンドウ中はtriggerしない
         if agent is not None and agent.in_echo_window:
             _was_in_echo[0] = True
@@ -298,14 +310,10 @@ def _run_agent_worker(state: SessionState):
         if agent.mode != "conversation":
             with state.topics_lock:
                 _topics = list(state.topics) if state.topics else None
-        # --- 割り込まれた介入の即時再開: 沈黙2秒で再トリガー ---
-        _has_retry = agent._pending_intervention is not None
+        # --- モード別トリガー判定 ---
+        # （中断された介入のリトライは上のガードバイパス節に集約済み）
         _silence_elapsed = time.monotonic() - _last_utt_time[0]
-        if _has_retry and _silence_elapsed > _AGENT_RETRY_SILENCE:
-            print(f"# [diag] TRIGGER by retry: silence={_silence_elapsed:.1f}s"
-                  f" > {_AGENT_RETRY_SILENCE}s (pending_intervention)", flush=True)
-            agent.trigger(topics=_topics)
-        elif agent.mode == "conversation":
+        if agent.mode == "conversation":
             if (agent.pending_count > 0
                     and _silence_elapsed > _AGENT_CONV_SILENCE):
                 agent.trigger()
@@ -319,6 +327,19 @@ def _run_agent_worker(state: SessionState):
                   and _silence_elapsed > _silence_thresh):
                 print(f"# [diag] TRIGGER by silence: {_silence_elapsed:.1f}s > {_silence_thresh}s", flush=True)
                 agent.trigger(topics=_topics)
+            # --- 沈黙ブレーカー: 介入不要後にデッドエアになった場合の一押し（Fix 10） ---
+            # 「介入不要」の判断自体は尊重する（一度黙る）が、その後に会話が止まって
+            # しまったら、本題へ戻す一言を促す。クールダウンで繰り返しを防ぐ。
+            elif (agent._last_noop_at > 0
+                  and _silence_elapsed > _STALL_SILENCE
+                  and time.monotonic() - _last_stall_at > _STALL_COOLDOWN):
+                print(f"# [diag] TRIGGER by stall: 介入不要後の沈黙{_silence_elapsed:.1f}s"
+                      f"を解消", flush=True)
+                agent.trigger(
+                    topics=_topics,
+                    drift_reason="会話が止まっています。本題に戻す一言を簡潔に述べてください。")
+                _last_stall_at = time.monotonic()
+                agent._last_noop_at = 0.0
 
 
 def _run_stdin_commands(state: SessionState):

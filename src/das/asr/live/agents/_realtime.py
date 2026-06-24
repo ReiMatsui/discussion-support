@@ -56,7 +56,11 @@ class RealtimeAgent:
         self._pending: list[dict] = []     # 送信待ち発話
         self.ai_speaking = False           # AI音声再生中フラグ
         self._ai_text_buf = ""             # ストリーミング転写バッファ
-        self._audio_q: queue.Queue[bytes | None] = queue.Queue()  # ストリーミング再生用
+        # 再生キュー要素は (epoch, payload)。payload=None は応答の終端マーカー。
+        # epochは応答世代。古い応答の終端で新しい応答の再生中フラグを
+        # 倒さないために用いる（Bug 6）。
+        self._audio_q: queue.Queue[tuple[int, bytes | None]] = queue.Queue()
+        self._play_epoch = 0               # 応答世代カウンタ（output_item.addedで+1）
         self._connected = False
         self._conn_error = ""              # 接続エラーメッセージ（UI表示用）
         self.on_ai_utterance = None        # callback(text: str) AI発話確定時
@@ -84,9 +88,37 @@ class RealtimeAgent:
         self._pending_intervention: dict | None = None  # 割り込みで中断された介入内容
         self._INTERVENTION_TTL = 60.0                   # 保存した介入の有効期限（秒）
         self._INTERVENTION_MAX_RETRIES = 2              # 再試行上限
+        # --- デッドエア対策: 「介入不要」と判断した時刻（Fix 10） ---
+        self._last_noop_at = 0.0
 
     AI_VOICE_KEY = "__AI__"             # VoiceProfiles内のAI声紋キー（セッション限り）
     _AI_ENROLL_SEC = 3.0                 # 声紋登録に必要な最小秒数
+    _CANCEL_MARKER = "介入不要"          # この語が転写に現れたら応答をキャンセル
+    # 良性エラー（実害なし）の判定用部分文字列。すべて小文字で比較する。
+    _BENIGN_ERROR_SUBSTRINGS = (
+        "no active response",
+        "cancellation failed",
+        "already has an active response",
+    )
+
+    @staticmethod
+    def _is_cancel_prefix(buf: str) -> bool:
+        """buf がキャンセルマーカー「介入不要」に到達しうる前置きか.
+
+        モデルは介入不要時に「（介入不要）」とだけ返す。転写が1文字ずつ届く間、
+        先頭の空白・引用符・括弧を無視した中身がマーカーの prefix（途中まで一致）
+        である限り、まだ介入不要かどうか確定できない。この間は再生を保留する。
+
+        これにより、マーカー確定前にフラッシュして音声が漏れたり
+        on_speech_start でパートナーを誤って中断したりするのを防ぐ。
+        """
+        core = buf.strip().lstrip("（(「『\"' 　")
+        if core == "":
+            # まだ記号・括弧のみ → マーカー先頭の「（」かもしれない
+            return True
+        marker = RealtimeAgent._CANCEL_MARKER
+        # core が marker の途中まで一致（完全一致は in 判定側でキャンセル済み）
+        return marker.startswith(core) and core != marker
 
     @property
     def _prompt(self) -> str:
@@ -195,6 +227,24 @@ class RealtimeAgent:
 
     # --- ストリーミング音声再生 ---
 
+    def _q_put(self, payload: bytes | None):
+        """再生キューに現在の応答世代(epoch)タグを付けて積む。
+
+        payload=None は応答の終端マーカー。再生スレッドはこのepochを見て、
+        既に新しい応答が始まっている場合は ai_speaking を倒さない（Bug 6）。
+        """
+        self._audio_q.put((self._play_epoch, payload))
+
+    def _on_playback_terminator(self, epoch: int):
+        """再生スレッドが終端マーカーを取り出したときの処理（Bug 6）.
+
+        その終端が最新応答のもの(epoch >= 最新)のときだけ ai_speaking を倒す。
+        古い応答の終端(epoch < 最新)は、新応答がまだ再生中なので無視する。
+        """
+        if epoch >= self._play_epoch:
+            self.ai_speaking = False
+            self._last_speech_end = time.monotonic()
+
     def _start_playback_thread(self):
         """PCMキューから読み出して逐次再生するスレッド。
         再生済みバイト数を_played_bytesに蓄積（truncate用）。
@@ -206,10 +256,9 @@ class RealtimeAgent:
                                          dtype="float32", blocksize=2400)
                 stream.start()
                 while not self._stop.is_set():
-                    chunk = self._audio_q.get()
+                    epoch, chunk = self._audio_q.get()
                     if chunk is None:          # 1応答の終端
-                        self.ai_speaking = False
-                        self._last_speech_end = time.monotonic()
+                        self._on_playback_terminator(epoch)
                         continue
                     pcm = np.frombuffer(chunk, dtype="<i2").astype(np.float32) / 32768.0
                     stream.write(pcm.reshape(-1, 1))
@@ -252,6 +301,7 @@ class RealtimeAgent:
             item = ev.get("item", {})
             self._current_item_id = item.get("id")
             self._played_bytes = 0
+            self._play_epoch += 1  # 応答世代を進める（Bug 6）
             # プリフライトバッファをリセット（新応答の開始）
             self._preflight_buf.clear()
             self._preflight_cleared = False
@@ -264,7 +314,7 @@ class RealtimeAgent:
                 pcm = base64.b64decode(chunk)
                 if self._preflight_cleared:
                     # テキスト確認済み → そのまま再生キューへ
-                    self._audio_q.put(pcm)
+                    self._q_put(pcm)
                 else:
                     # まだテキスト未確認 → バッファに溜める
                     self._preflight_buf.append(pcm)
@@ -274,11 +324,12 @@ class RealtimeAgent:
             if not self._interrupted:
                 self._ai_text_buf += ev.get("delta", "")
                 # 「介入不要」を検出したら即座に応答をキャンセル
-                if "介入不要" in self._ai_text_buf:
+                if self._CANCEL_MARKER in self._ai_text_buf:
                     self._cancel_response()
-                # プリフライト判定: 十分なテキストが来て「介入不要」でなければ再生開始
+                # プリフライト判定: キャンセルマーカーのprefixでなくなった時点で再生開始。
+                # マーカー確定前にフラッシュしないため、介入不要応答の音声漏れを防ぐ。
                 elif (not self._preflight_cleared
-                      and len(self._ai_text_buf) >= self._preflight_chars):
+                      and not self._is_cancel_prefix(self._ai_text_buf)):
                     self._flush_preflight()
 
         elif etype == "response.output_audio_transcript.done":
@@ -286,18 +337,18 @@ class RealtimeAgent:
             self._ai_text_buf = ""
             # transcript.doneが来たのにまだプリフライト中なら確定フラッシュ
             if not self._preflight_cleared and not self._interrupted:
-                if "介入不要" in (transcript or ""):
+                if self._CANCEL_MARKER in (transcript or ""):
                     self._cancel_response()
                 else:
                     self._flush_preflight()
-            if transcript and "介入不要" not in transcript:
+            if transcript and self._CANCEL_MARKER not in transcript:
                 self._recent_ai_texts.append(transcript)
                 if not self._interrupted and self.on_ai_utterance:
                     self.on_ai_utterance(transcript)
 
         elif etype == "response.output_audio.done":
             if not self._interrupted:
-                self._audio_q.put(None)   # 再生終端マーカー
+                self._q_put(None)   # 再生終端マーカー（現epochタグ付き）
 
         elif etype == "response.done":
             self._ai_text_buf = ""
@@ -309,6 +360,9 @@ class RealtimeAgent:
 
         elif etype == "error":
             msg = ev.get("error", {}).get("message", "unknown")
+            low = msg.lower()
+            if any(s in low for s in self._BENIGN_ERROR_SUBSTRINGS):
+                return  # response.cancel空振り等の良性エラーは静かに無視（Fix 10）
             print(f"# AI Agent エラー: {msg}", flush=True)
             # エラーでresponse生成が中断された場合、_respondingをリセット
             # （固着するとtrigger()が永遠にスキップされる）
@@ -345,14 +399,21 @@ class RealtimeAgent:
         """
         if not self._connected or not self.enabled or not self.ws:
             return
-        if self._responding:
-            return  # 応答生成中は新規リクエストを抑止
+        # --- _responding を test-and-set でアトミックに確保（Bug 4） ---
+        # 複数スレッドからの同時triggerで二重にresponse.createが飛ぶのを防ぐ。
+        # ここで確保した後に送信できなかった場合（送るものがない/送信例外）は、
+        # 必ず False に戻して固着を避ける。
         with self._lock:
+            if self._responding:
+                return  # 既に応答生成中、または別スレッドが確保済み
             if (not self._pending and self._pending_intervention is None
                     and not drift_reason):
                 return
-            conv = "\n".join(f"{u['speaker']}: {u['text']}" for u in self._pending)
-            self._pending.clear()
+            self._responding = True  # 確保（この時点でレースは閉じる）
+            # スナップショットのみ取得。実際のクリアは送信成功後に行い、
+            # 送信例外で発話内容が失われないようにする（Bug 2）。
+            pending_snapshot = list(self._pending)
+            conv = "\n".join(f"{u['speaker']}: {u['text']}" for u in pending_snapshot)
         # --- 論点一覧をコンテキストに追加 ---
         if topics:
             topic_lines = "\n".join(
@@ -370,7 +431,10 @@ class RealtimeAgent:
                           f"簡潔に指摘して元のテーマに戻してください。")
             conv = f"{drift_note}\n\n{conv}" if conv else drift_note
         # --- 保存された介入内容をコンテキストに追加 ---
+        # 注: 有効な介入は送信成功までクリアしない（Bug 2）。
+        #     期限切れの介入のみ、送信成否に関わらずここで破棄する。
         pi = self._pending_intervention
+        include_pi = False
         if pi is not None:
             age = time.monotonic() - pi["created_at"]
             if age < self._INTERVENTION_TTL:
@@ -379,12 +443,14 @@ class RealtimeAgent:
                               f"まだ重要であれば、簡潔に再度伝えてください]\n"
                               f"あなたの中断された発言: {pi['delivered']}")
                 conv = f"{conv}\n\n{retry_note}" if conv else retry_note
+                include_pi = True
                 print("# AI Agent: 中断された介入を再試行コンテキストに追加", flush=True)
             else:
+                self._pending_intervention = None  # 期限切れは即破棄
                 print(f"# AI Agent: 中断された介入を期限切れで破棄（{age:.0f}秒経過）",
                       flush=True)
-            self._pending_intervention = None
         if not conv:
+            self._responding = False  # 送るものがない → 確保を解放（Bug 4）
             return  # 期限切れで破棄された場合など、送るものがない
         try:
             self.ws.send(json.dumps({
@@ -396,9 +462,17 @@ class RealtimeAgent:
                 },
             }))
             self.ws.send(json.dumps({"type": "response.create"}))
-            self._responding = True
         except Exception as e:
-            print(f"# AI Agent 送信エラー: {e}", flush=True)
+            # 送信失敗: 確保を解放し、状態は一切クリアせず保持して次回再試行する。
+            self._responding = False
+            print(f"# AI Agent 送信エラー（内容を保持して再試行）: {e}", flush=True)
+            return
+        # --- 送信成功（_responding は確保済みのまま維持） ---
+        with self._lock:
+            # 送信したスナップショット分だけ削除（送信中にfeedされた新発話は残す）
+            del self._pending[:len(pending_snapshot)]
+        if include_pi:
+            self._pending_intervention = None
 
     def interrupt(self):
         """人間の割り込みを検出。現在のAI応答をキャンセルし再生を停止する。
@@ -434,22 +508,22 @@ class RealtimeAgent:
         _yield_keep_bytes = 14400
         played = self._played_bytes
         kept_bytes = 0
-        kept_chunks: list[bytes] = []
+        kept_items: list[tuple[int, bytes]] = []
         while True:
             try:
-                chunk = self._audio_q.get_nowait()
+                epoch_i, payload = self._audio_q.get_nowait()
             except queue.Empty:
                 break
-            if chunk is not None and kept_bytes < _yield_keep_bytes:
-                kept_chunks.append(chunk)
-                kept_bytes += len(chunk)
+            if payload is not None and kept_bytes < _yield_keep_bytes:
+                kept_items.append((epoch_i, payload))  # 元のepochを保持
+                kept_bytes += len(payload)
             # それ以降は破棄
-        for c in kept_chunks:
-            self._audio_q.put(c)
-        self._audio_q.put(None)  # 終端マーカー → playback threadが停止処理
-        self.ai_speaking = bool(kept_chunks)  # 残りがあれば再生中のまま
+        for it in kept_items:
+            self._audio_q.put(it)
+        self._q_put(None)  # 終端マーカー（現epochタグ付き） → playback threadが停止処理
+        self.ai_speaking = bool(kept_items)  # 残りがあれば再生中のまま
         self._responding = False
-        if not kept_chunks:
+        if not kept_items:
             self._last_speech_end = time.monotonic()
         # Realtime APIの応答をキャンセル + 会話履歴をtruncate
         if self.ws:
@@ -484,13 +558,14 @@ class RealtimeAgent:
             with contextlib.suppress(Exception):
                 self.on_speech_start()
         for chunk in self._preflight_buf:
-            self._audio_q.put(chunk)
+            self._q_put(chunk)
         self._preflight_buf.clear()
 
     def _cancel_response(self):
         """「介入不要」応答を静かにキャンセル。音声再生を止め、会話履歴から削除する."""
         print("# AI Agent: 介入不要と判断 — 応答をキャンセル", flush=True)
         self._interrupted = True
+        self._last_noop_at = time.monotonic()  # デッドエア対策（Fix 10）
         self._preflight_buf.clear()        # バッファも破棄
         self._preflight_cleared = False
         self._pending_intervention = None  # 介入不要の内容は再試行しない
@@ -500,7 +575,7 @@ class RealtimeAgent:
                 self._audio_q.get_nowait()
             except queue.Empty:
                 break
-        self._audio_q.put(None)
+        self._q_put(None)
         self.ai_speaking = False
         self._responding = False
         self._ai_text_buf = ""
@@ -540,7 +615,7 @@ class RealtimeAgent:
 
     def close(self):
         self._stop.set()
-        self._audio_q.put(None)
+        self._q_put(None)  # playback threadを起こして終了させる
         if self._playback_thread is not None:
             self._playback_thread.join(timeout=2.0)
         if self.ws:
