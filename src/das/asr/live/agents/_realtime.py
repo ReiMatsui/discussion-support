@@ -372,8 +372,10 @@ class RealtimeAgent:
             if (not self._pending and self._pending_intervention is None
                     and not drift_reason):
                 return
-            conv = "\n".join(f"{u['speaker']}: {u['text']}" for u in self._pending)
-            self._pending.clear()
+            # スナップショットのみ取得。実際のクリアは送信成功後に行い、
+            # 送信例外で発話内容が失われないようにする（Bug 2）。
+            pending_snapshot = list(self._pending)
+            conv = "\n".join(f"{u['speaker']}: {u['text']}" for u in pending_snapshot)
         # --- 論点一覧をコンテキストに追加 ---
         if topics:
             topic_lines = "\n".join(
@@ -391,7 +393,10 @@ class RealtimeAgent:
                           f"簡潔に指摘して元のテーマに戻してください。")
             conv = f"{drift_note}\n\n{conv}" if conv else drift_note
         # --- 保存された介入内容をコンテキストに追加 ---
+        # 注: 有効な介入は送信成功までクリアしない（Bug 2）。
+        #     期限切れの介入のみ、送信成否に関わらずここで破棄する。
         pi = self._pending_intervention
+        include_pi = False
         if pi is not None:
             age = time.monotonic() - pi["created_at"]
             if age < self._INTERVENTION_TTL:
@@ -400,11 +405,12 @@ class RealtimeAgent:
                               f"まだ重要であれば、簡潔に再度伝えてください]\n"
                               f"あなたの中断された発言: {pi['delivered']}")
                 conv = f"{conv}\n\n{retry_note}" if conv else retry_note
+                include_pi = True
                 print("# AI Agent: 中断された介入を再試行コンテキストに追加", flush=True)
             else:
+                self._pending_intervention = None  # 期限切れは即破棄
                 print(f"# AI Agent: 中断された介入を期限切れで破棄（{age:.0f}秒経過）",
                       flush=True)
-            self._pending_intervention = None
         if not conv:
             return  # 期限切れで破棄された場合など、送るものがない
         try:
@@ -417,9 +423,17 @@ class RealtimeAgent:
                 },
             }))
             self.ws.send(json.dumps({"type": "response.create"}))
-            self._responding = True
         except Exception as e:
-            print(f"# AI Agent 送信エラー: {e}", flush=True)
+            # 送信失敗: 状態を一切クリアせず保持し、次のトリガー機会で再試行する。
+            print(f"# AI Agent 送信エラー（内容を保持して再試行）: {e}", flush=True)
+            return
+        # --- 送信成功 → ここで初めて状態を確定的にクリアする ---
+        self._responding = True
+        with self._lock:
+            # 送信したスナップショット分だけ削除（送信中にfeedされた新発話は残す）
+            del self._pending[:len(pending_snapshot)]
+        if include_pi:
+            self._pending_intervention = None
 
     def interrupt(self):
         """人間の割り込みを検出。現在のAI応答をキャンセルし再生を停止する。

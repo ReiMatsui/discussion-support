@@ -39,6 +39,62 @@ def test_trigger_with_drift_reason_injects_context(agent):
     assert agent._responding is True
 
 
+def test_trigger_preserves_pending_on_send_failure(agent):
+    """送信が例外を投げても、蓄積発話は失われず再試行できる（Bug 2）."""
+    agent.feed("人間", "失われては困る発言")
+
+    def _boom(_raw):
+        raise ConnectionError("WS切断")
+    agent.ws.send = _boom  # type: ignore[method-assign]
+
+    agent.trigger()
+    assert agent.pending_count == 1                 # 保持されている
+    assert agent._responding is False               # 応答中フラグも立てない
+
+    # WSが復旧したら同じ発話を送信できる
+    agent.ws.send = lambda raw: agent.ws.sent.append(__import__("json").loads(raw))  # type: ignore[method-assign]
+    agent.trigger()
+    assert "失われては困る発言" in agent.ws.last_create_text()
+    assert agent.pending_count == 0
+
+
+def test_trigger_preserves_intervention_on_send_failure(agent):
+    """送信失敗時、保存された介入内容(_pending_intervention)も保持される（Bug 2）."""
+    import time
+    agent._pending_intervention = {
+        "delivered": "中断された重要な指摘",
+        "created_at": time.monotonic(),
+        "attempts": 1,
+    }
+
+    def _boom(_raw):
+        raise ConnectionError("WS切断")
+    agent.ws.send = _boom  # type: ignore[method-assign]
+
+    agent.trigger()
+    assert agent._pending_intervention is not None
+    assert agent._pending_intervention["delivered"] == "中断された重要な指摘"
+
+
+def test_trigger_keeps_utterances_fed_during_send(agent):
+    """送信中にfeedされた新発話は、送信成功後のクリアで消えない（スナップショット削除）."""
+    import json as _json
+    agent.feed("人間", "送信対象の発言")
+
+    # 最初の create 送信時に、並行feedを模して新発話を追加する
+    def _send_with_concurrent_feed(raw):
+        msg = _json.loads(raw)
+        agent.ws.sent.append(msg)
+        if msg.get("type") == "conversation.item.create":
+            agent.feed("人間", "送信中に届いた新発言")
+    agent.ws.send = _send_with_concurrent_feed  # type: ignore[method-assign]
+
+    agent.trigger()
+    # 送信した1件は消え、送信中に届いた1件は残る
+    assert agent.pending_count == 1
+    assert "送信対象の発言" in agent.ws.last_create_text()
+
+
 def test_trigger_with_topics_includes_topic_note(agent):
     agent.feed("人間", "本題の発言")
     agent.trigger(topics=[{"topic": "AI導入の是非", "speaker": "松井"}])
