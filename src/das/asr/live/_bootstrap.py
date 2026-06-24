@@ -109,6 +109,55 @@ def build_backend(args: LiveArgs) -> STTBackend:
         return SonioxBackend(api_key=api_key)
 
 
+def _build_chat_params(model: str, prompt: str, *, max_out: int,
+                       temperature: float) -> dict:
+    """Chat Completions のリクエストパラメータを構築する（モデル系統別）.
+
+    gpt-5系/o系は推論モデルで、temperature指定不可・max_tokensは
+    max_completion_tokensに改名。さらに推論トークンが出力枠を消費するため、
+    枠が小さいと本文(JSON)が空のまま返る → 静かに失敗する（Fix 9の根因）。
+    対策として reasoning_effort を抑え、出力枠を十分に確保する。
+    """
+    name = model.lower()
+    params: dict = {"model": model,
+                    "messages": [{"role": "user", "content": prompt}]}
+    if name.startswith("gpt-5"):
+        params["reasoning_effort"] = "minimal"  # 短いJSON抽出に推論は不要
+        params["max_completion_tokens"] = max_out
+    elif name.startswith(("o1", "o3", "o4")):
+        params["reasoning_effort"] = "low"       # o系は minimal 非対応
+        params["max_completion_tokens"] = max_out
+    else:
+        params["temperature"] = temperature
+        params["max_tokens"] = max_out
+    return params
+
+
+def _post_chat_json(params: dict, api_key: str, *, timeout: int, label: str):
+    """Chat Completions を叩き、本文をJSONとして返す。失敗時はNone（理由をログ）."""
+    import urllib.request
+    body = json.dumps(params).encode()
+    req = urllib.request.Request(OPENAI_API, data=body, method="POST")
+    req.add_header("Authorization", f"Bearer {api_key}")
+    req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            resp = json.loads(r.read())
+        text = (resp["choices"][0]["message"].get("content") or "").strip()
+        if not text:
+            # 空応答（推論で出力枠を使い切った等）— 静かに失敗させず可視化する
+            finish = resp["choices"][0].get("finish_reason")
+            print(f"# [{label}] 空応答（finish_reason={finish}）。"
+                  f"max_completion_tokens不足の可能性", flush=True)
+            return None
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        return json.loads(text)
+    except Exception as e:
+        print(f"# [{label}] API/解析エラー: {type(e).__name__}: {e}", flush=True)
+        return None
+
+
 def extract_topics(utterances: list[dict], existing: list[str],
                    api_key: str, model: str) -> list[dict]:
     """OpenAI APIで新論点を抽出する（同期呼び出し、バックグラウンドスレッド用）."""
@@ -117,30 +166,9 @@ def extract_topics(utterances: list[dict], existing: list[str],
     utt_text = "\n".join(f"- {u['speaker']}: {u['text']}" for u in utterances)
     ex_text = "\n".join(f"- {t}" for t in existing) if existing else "（まだなし）"
     prompt = _TOPIC_PROMPT.format(existing=ex_text, utterances=utt_text)
-    # GPT-5系/o系はtemperature指定不可、max_tokensはmax_completion_tokensに改名
-    name = model.lower()
-    is_new = name.startswith(("gpt-5", "o1", "o3", "o4"))
-    params: dict = {"model": model,
-                    "messages": [{"role": "user", "content": prompt}]}
-    if not is_new:
-        params["temperature"] = 0.3
-        params["max_tokens"] = 512
-    else:
-        params["max_completion_tokens"] = 512
-    body = json.dumps(params).encode()
-    import urllib.request
-    req = urllib.request.Request(OPENAI_API, data=body, method="POST")
-    req.add_header("Authorization", f"Bearer {api_key}")
-    req.add_header("Content-Type", "application/json")
-    try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            resp = json.loads(r.read())
-        text = resp["choices"][0]["message"]["content"].strip()
-        if text.startswith("```"):
-            text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-        return json.loads(text)
-    except Exception:
-        return []
+    params = _build_chat_params(model, prompt, max_out=2000, temperature=0.3)
+    result = _post_chat_json(params, api_key, timeout=30, label="topic")
+    return result if isinstance(result, list) else []
 
 
 def check_drift(utterances: list[dict], topics: list[dict],
@@ -155,32 +183,12 @@ def check_drift(utterances: list[dict], topics: list[dict],
     utt_text = "\n".join(f"- {u['speaker']}: {u['text']}" for u in utterances)
     topic_text = "\n".join(f"- {t['topic']}" for t in topics)
     prompt = _DRIFT_PROMPT.format(topics=topic_text, utterances=utt_text)
-    name = model.lower()
-    is_new = name.startswith(("gpt-5", "o1", "o3", "o4"))
-    params: dict = {"model": model,
-                    "messages": [{"role": "user", "content": prompt}]}
-    if not is_new:
-        params["temperature"] = 0.0
-        params["max_tokens"] = 128
-    else:
-        params["max_completion_tokens"] = 128
-    body = json.dumps(params).encode()
-    import urllib.request
-    req = urllib.request.Request(OPENAI_API, data=body, method="POST")
-    req.add_header("Authorization", f"Bearer {api_key}")
-    req.add_header("Content-Type", "application/json")
-    try:
-        with urllib.request.urlopen(req, timeout=15) as r:
-            resp = json.loads(r.read())
-        text = resp["choices"][0]["message"]["content"].strip()
-        if text.startswith("```"):
-            text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-        result = json.loads(text)
-        print(f"# [drift] 判定結果: {result}", flush=True)
-        return result
-    except Exception as e:
-        print(f"# [drift] API/解析エラー: {type(e).__name__}: {e}", flush=True)
+    params = _build_chat_params(model, prompt, max_out=800, temperature=0.0)
+    result = _post_chat_json(params, api_key, timeout=15, label="drift")
+    if not isinstance(result, dict):
         return {"drift": False}
+    print(f"# [drift] 判定結果: {result}", flush=True)
+    return result
 
 
 # ---------------------------------------------------------------------------
