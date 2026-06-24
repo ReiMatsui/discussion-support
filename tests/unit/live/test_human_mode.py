@@ -19,6 +19,17 @@ def test_cli_has_topic_option():
     assert "topic" in names
 
 
+def test_cli_has_imbalanced_scenario():
+    """一人で声かけ(invite)を試せる imbalanced シナリオが選択肢にある."""
+    from das.asr.live import main
+    for p in main.params:
+        if p.name == "sim_scenario":
+            assert "imbalanced" in p.type.choices
+            break
+    else:
+        raise AssertionError("sim_scenario option not found")
+
+
 def test_agenda_precedence_prefers_topic():
     """議題シードの優先順位は topic > debate > simulate."""
     # run_session の該当ロジックと同じ式を検証（args.topic or args.debate or args.simulate）

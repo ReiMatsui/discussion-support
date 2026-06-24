@@ -90,7 +90,7 @@ def post_system(text: str) -> None:
               help="AI議論シミュレーション（Chat+TTSで自動生成）")
 @click.option("--sim-scenario", default=None,
               type=click.Choice(["stalled", "biased", "derailed",
-                                 "consensus_needed", "healthy"]),
+                                 "consensus_needed", "healthy", "imbalanced"]),
               help="シミュレーションの議論パターン")
 @click.option("--debate", metavar="TOPIC", default=None,
               help="AI会話相手と議論（Realtime APIで音声対話）")
