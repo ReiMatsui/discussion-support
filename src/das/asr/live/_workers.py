@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import queue
 import re
 import threading
 import time
@@ -71,40 +72,25 @@ def _run_drift_checker(state: SessionState, oai_key: str, oai_model: str):
 
     _run_topic_worker が抽出した論点(state.topics)を使い、
     直近の発話が論点からズレていないかを軽量モデルで高頻度チェック。
-    脱線検出時はファシリテーターに脱線理由を伝えて即時トリガーする。
 
     人間・パートナー双方の発話をチェック対象に含める。
     パートナーが脱線に付き合っている状態も検出するため。
 
-    _pending_drift: 検出済みだがtriggerできなかった脱線理由。
-    agentがbusy(応答中/発話中)の間は保持し、freeになった瞬間にtriggerする。
-    これにより脱線検出結果が消失しない。
+    R2: このワーカーは trigger() を呼ばない。脱線を検出したら理由を
+    state.drift_requests キューに積むだけ。実際のトリガーは
+    _run_agent_worker が一元的に行う（トリガー経路の単一化）。
     """
     from das.asr.live._bootstrap import check_drift as _check_drift
 
     _diag_tick = 0
-    _pending_drift: str | None = None  # 検出済み・未配信の脱線理由
     while not state.stop.is_set():
-        time.sleep(1)  # 保留中のリトライを素早く行うため短めに
+        time.sleep(1)
         _diag_tick += 1
         agent = state.agent
         if not oai_key or agent is None or not agent.enabled:
             continue
         if agent.mode == "conversation":
             continue
-
-        # --- 保留中の脱線トリガーをリトライ ---
-        if _pending_drift is not None:
-            if not agent._responding and not agent.ai_speaking:
-                with state.topics_lock:
-                    _topics = list(state.topics) if state.topics else None
-                print(f"# [drift] → 保留トリガーをリトライ: {_pending_drift}",
-                      flush=True)
-                agent.trigger(topics=_topics, drift_reason=_pending_drift)
-                _pending_drift = None
-            continue  # リトライ待ち中は新規チェックしない
-
-        # （中断された介入のリトライは _run_agent_worker に集約。Bug 3）
 
         # 論点がまだなければスキップ
         with state.topics_lock:
@@ -139,16 +125,9 @@ def _run_drift_checker(state: SessionState, oai_key: str, oai_model: str):
         if result.get("drift"):
             reason = result.get("reason", "")
             _print_line(f"# 🔀 脱線検出: {reason}")
-            if agent._responding or agent.ai_speaking:
-                # agentがbusy → 保留して次のループで即リトライ
-                _pending_drift = reason
-                print("# [drift] トリガー保留（agentがbusy、1秒後リトライ）",
-                      flush=True)
-            else:
-                with state.topics_lock:
-                    _topics = list(state.topics) if state.topics else None
-                print("# [drift] → ファシリテーターをトリガー", flush=True)
-                agent.trigger(topics=_topics, drift_reason=reason)
+            # R2: trigger()は呼ばず、要求をキューに積む。agent_workerが裁定する。
+            state.drift_requests.put(reason)
+            print("# [drift] → 介入要求をキューに投入", flush=True)
 
 
 def _on_agent_text_factory(state: SessionState):
@@ -228,6 +207,7 @@ def _run_agent_worker(state: SessionState):
     _was_in_echo = state._was_in_echo
     _diag_tick = 0
     _last_stall_at = 0.0  # 沈黙ブレーカーの最終発火時刻（ループ防止、Fix 10）
+    _pending_drift_reason: str | None = None  # drift_checkerからの未処理介入要求（R2）
     while not state.stop.is_set():
         time.sleep(0.5)
         _diag_tick += 1
@@ -272,20 +252,35 @@ def _run_agent_worker(state: SessionState):
                 and agent is not None
                 and agent.ai_speaking):
             partner.interrupt()
-        # --- 中断された介入の最優先リトライ（ガードバイパス、Bug 3で集約） ---
+        # --- drift_checkerからの介入要求を回収（R2: トリガー経路の単一化） ---
+        # busyでも取りこぼさないよう、キューは毎ループ必ずdrainして最新理由を保持する。
+        while True:
+            try:
+                _pending_drift_reason = state.drift_requests.get_nowait()
+            except queue.Empty:
+                break
+
+        # --- 最優先のバージイン（ガードバイパス）: ①脱線介入 ②中断介入のリトライ ---
         # agentがfree(応答中でなく発話中でもない)になった瞬間に、エコーウィンドウ・
-        # パートナー発話・沈黙閾値を無視して再送する。会話が活発でも中断された介入を
-        # 取りこぼさない。リトライ責務はこの1箇所に集約（drift_checker側は廃止）。
-        if (agent._pending_intervention is not None
-                and not agent._responding and not agent.ai_speaking):
-            _retry_topics = None
+        # パートナー発話・沈黙閾値を無視してトリガーする。会話が活発でも取りこぼさない。
+        # trigger()の呼び出しはこの _run_agent_worker に一元化されている（R2）。
+        if not agent._responding and not agent.ai_speaking:
+            _bargein_topics = None
             if agent.mode != "conversation":
                 with state.topics_lock:
-                    _retry_topics = list(state.topics) if state.topics else None
-            print("# [diag] TRIGGER by retry: 中断された介入を再送（ガードバイパス）",
-                  flush=True)
-            agent.trigger(topics=_retry_topics)
-            continue
+                    _bargein_topics = list(state.topics) if state.topics else None
+            if _pending_drift_reason is not None:
+                print(f"# [diag] TRIGGER by drift: 脱線介入「{_pending_drift_reason}」",
+                      flush=True)
+                agent.trigger(topics=_bargein_topics,
+                              drift_reason=_pending_drift_reason)
+                _pending_drift_reason = None
+                continue
+            if agent._pending_intervention is not None:
+                print("# [diag] TRIGGER by retry: 中断された介入を再送（ガードバイパス）",
+                      flush=True)
+                agent.trigger(topics=_bargein_topics)
+                continue
         # エコーウィンドウ中はtriggerしない
         if agent is not None and agent.in_echo_window:
             _was_in_echo[0] = True

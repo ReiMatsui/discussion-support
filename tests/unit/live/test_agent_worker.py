@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import queue
 import threading
 import time
 
@@ -70,6 +71,7 @@ class FakeState:
         self._was_in_echo = [False]
         self.agent_cursor = 0
         self.drift_cursor = 0
+        self.drift_requests: queue.Queue[str] = queue.Queue()
 
     def disp_name(self, k):  # pragma: no cover
         return str(k)
@@ -141,6 +143,46 @@ def test_stall_breaker_fires_after_noop_silence():
     assert agent.trigger_calls, "介入不要後の沈黙で一押しが入るべき"
     assert "止まって" in (agent.trigger_calls[0]["drift_reason"] or "")
     assert agent._last_noop_at == 0.0  # 発火後はマーカーを解除
+
+
+def test_drift_request_triggers_with_reason():
+    """drift_requestsに積まれた脱線要求を、agent_workerがdrift_reason付きでトリガーする（R2）."""
+    agent = FakeAgent()
+    state = FakeState(agent, None)
+    state.drift_requests.put("ラーメンの雑談")
+
+    _run_worker_briefly(state, until=lambda: bool(agent.trigger_calls))
+
+    assert agent.trigger_calls, "脱線要求でトリガーされるべき"
+    assert agent.trigger_calls[0]["drift_reason"] == "ラーメンの雑談"
+
+
+def test_drift_request_held_until_agent_free():
+    """agentがbusy(応答中)の間は脱線介入を保持し、freeになってから発火する（R2）.
+
+    保持状態はワーカースレッドのローカルに持つため、単一スレッドのまま
+    busy→free に切り替えて検証する（本番もワーカーは1本の長命スレッド）。
+    """
+    agent = FakeAgent()
+    agent._responding = True            # busy
+    state = FakeState(agent, None)
+    state.drift_requests.put("脱線理由")
+
+    t = threading.Thread(target=_run_agent_worker, args=(state,), daemon=True)
+    t.start()
+    try:
+        time.sleep(1.2)
+        assert agent.trigger_calls == [], "busy中はトリガーされない（要求は保持）"
+        agent._responding = False       # free化
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and not agent.trigger_calls:
+            time.sleep(0.05)
+    finally:
+        state.stop.set()
+        t.join(timeout=2.0)
+
+    assert agent.trigger_calls, "freeになったら保持していた要求で発火するべき"
+    assert agent.trigger_calls[0]["drift_reason"] == "脱線理由"
 
 
 def test_no_stall_breaker_without_noop():
