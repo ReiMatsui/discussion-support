@@ -24,22 +24,65 @@ if TYPE_CHECKING:
 import contextlib
 
 from ._constants import (
+    _AGENDA_MIN_UTTS,
+    _AGENDA_RETRY_SEC,
+    _AGENDA_WINDOW,
     _AGENT_CONV_SILENCE,
     _AGENT_DEBATE_SILENCE,
-    _AGENT_SILENCE,
     _BACKCHANNEL_RE,
     _DRIFT_CHECK_INTERVAL,
     _DRIFT_CHECK_WINDOW,
     _DRIFT_WARMUP,
     _INTERRUPT_MIN_CHARS,
     _INTERVENTION_COOLDOWN,
+    _INVITE_CHECK_SEC,
+    _INVITE_QUIET_RATIO,
+    _INVITE_SILENCE,
+    _INVITE_WARMUP,
     _STALL_COOLDOWN,
     _STALL_SILENCE,
     AGENT_SPEAKER,
     SR,
 )
+from ._participation import participation_stats
 from ._polish import polish
 from ._ui import _print_line
+
+
+def _run_agenda_detector(state: SessionState, oai_key: str, oai_model: str):
+    """会議冒頭の発話から議題を1回推定してシードする（S3, --topic未指定時）.
+
+    既に論点があれば（明示シード or 抽出済み）何もしない。十分な発話が
+    たまったらLLMで議題を推定し、成功したら seed_topic して終了する。
+    判断できなければ一定間隔で再試行し、論点が現れたら（topic_worker等が
+    先に論点を作ったら）役目を終えて停止する。
+    """
+    from das.asr.live._bootstrap import detect_agenda as _detect_agenda
+
+    _last_attempt = 0.0
+    while not state.stop.is_set():
+        time.sleep(2)
+        if not oai_key:
+            return
+        with state.topics_lock:
+            if state.topics:
+                return  # 既に議題/論点あり → 役目終了
+        with state.state_lock:
+            talk_rs = [r for r in state.records
+                       if "speaker" in r and r.get("text")
+                       and r.get("speaker") != AGENT_SPEAKER]
+        if len(talk_rs) < _AGENDA_MIN_UTTS:
+            continue
+        if time.monotonic() - _last_attempt < _AGENDA_RETRY_SEC:
+            continue
+        _last_attempt = time.monotonic()
+        utts = [{"speaker": state.disp_name(r["speaker"]), "text": r["text"]}
+                for r in talk_rs[:_AGENDA_WINDOW]]
+        agenda = _detect_agenda(utts, oai_key, oai_model)
+        if agenda:
+            state.seed_topic(agenda, speaker="議題(自動)")
+            _print_line(f"# 議題を自動検出してシード: {agenda}")
+            return
 
 
 def _run_topic_worker(state: SessionState, oai_key: str, oai_model: str):
@@ -138,6 +181,61 @@ def _run_drift_checker(state: SessionState, oai_key: str, oai_model: str):
             print("# [drift] → 介入要求をキューに投入", flush=True)
 
 
+def _run_participation_checker(state: SessionState, oai_key: str, oai_model: str):
+    """発話量の偏りを監視し、発言の少ない人への声かけ要求を積む（S4）.
+
+    決定的に算出した参加度（時間シェア/回数）で「明らかに静かな人がいるか」を
+    事前ゲートし、いる時だけ軽量LLMに最終判断（誰に声をかけるか）を委ねる。
+    invite=true なら対象話者名を state.invite_requests に積む。実際の発話タイミングは
+    _run_agent_worker が「沈黙の間」で裁定する（人間を割り込まない）。
+    """
+    from das.asr.live._bootstrap import check_participation as _check
+
+    _skip = (AGENT_SPEAKER, "パートナー")
+    _last_check = 0.0
+    while not state.stop.is_set():
+        time.sleep(1)
+        agent = state.agent
+        if not oai_key or agent is None or not agent.enabled:
+            continue
+        if agent.mode == "conversation":
+            continue
+        with state.state_lock:
+            talk_rs = [r for r in state.records
+                       if "speaker" in r and r.get("text")
+                       and r.get("speaker") not in _skip]
+        if len(talk_rs) < _INVITE_WARMUP:
+            continue
+        if time.monotonic() - _last_check < _INVITE_CHECK_SEC:
+            continue
+        stats = participation_stats(state.records, exclude_speakers=_skip)
+        if len(stats) < 2:
+            continue  # 参加者が2人未満なら声かけの意味がない
+        # 事前ゲート: 公平シェアの_INVITE_QUIET_RATIO未満の人がいる時だけLLMを呼ぶ
+        equal = 1.0 / len(stats)
+        if min(d["time_share"] for d in stats.values()) >= equal * _INVITE_QUIET_RATIO:
+            continue
+        _last_check = time.monotonic()
+        now_ms = max((d["last_end_ms"] for d in stats.values()
+                      if d["last_end_ms"] is not None), default=None)
+        participation = []
+        for sp, d in stats.items():
+            silent = ((now_ms - d["last_end_ms"]) / 1000.0
+                      if now_ms is not None and d["last_end_ms"] is not None else 0.0)
+            participation.append({"speaker": state.disp_name(sp),
+                                  "time_share": d["time_share"],
+                                  "turns": d["turns"], "silent_sec": silent})
+        window = talk_rs[-_DRIFT_CHECK_WINDOW:]
+        utts = [{"speaker": state.disp_name(r["speaker"]), "text": r["text"]}
+                for r in window]
+        result = _check(participation, utts, oai_key, oai_model)
+        if result.get("invite") and result.get("speaker"):
+            target = result["speaker"]
+            _print_line(f"# 🙋 声かけ候補: {target}（{result.get('reason', '')}）")
+            state.invite_requests.put(target)
+            print("# [invite] → 声かけ要求をキューに投入", flush=True)
+
+
 def _on_agent_text_factory(state: SessionState):
     """ファシリテーター発言コールバックを生成."""
     def _on_agent_text(text: str):
@@ -217,6 +315,8 @@ def _run_agent_worker(state: SessionState):
     _last_stall_at = 0.0  # 沈黙ブレーカーの最終発火時刻（ループ防止、Fix 10）
     _last_intervention_at = 0.0  # 直近の介入時刻（脱線介入のクールダウン用）
     _pending_drift_reason: str | None = None  # drift_checkerからの未処理介入要求（R2）
+    _pending_invite: str | None = None  # participation_checkerからの声かけ要求（S4）
+    _last_invited: str | None = None    # 直近に声をかけた相手（連続回避）
     while not state.stop.is_set():
         time.sleep(0.5)
         _diag_tick += 1
@@ -226,6 +326,9 @@ def _run_agent_worker(state: SessionState):
                       f" conn={agent._connected if agent else '?'}"
                       f" enabled={agent.enabled if agent else '?'}", flush=True)
             continue
+        # 積極性プロファイル（S5）: 介入クールダウンと沈黙要約の閾値
+        _cooldown = state.proactivity.get("cooldown", _INTERVENTION_COOLDOWN)
+        _silence_summarize = state.proactivity.get("silence_summarize")
         with state.state_lock:
             _skip = {AGENT_SPEAKER, "パートナー"}
             talk_rs = [r for r in state.records
@@ -261,11 +364,16 @@ def _run_agent_worker(state: SessionState):
                 and agent is not None
                 and agent.ai_speaking):
             partner.interrupt()
-        # --- drift_checkerからの介入要求を回収（R2: トリガー経路の単一化） ---
-        # busyでも取りこぼさないよう、キューは毎ループ必ずdrainして最新理由を保持する。
+        # --- drift_checker/participation_checkerからの要求を回収（R2/S4） ---
+        # busyでも取りこぼさないよう、キューは毎ループ必ずdrainして最新を保持する。
         while True:
             try:
                 _pending_drift_reason = state.drift_requests.get_nowait()
+            except queue.Empty:
+                break
+        while True:
+            try:
+                _pending_invite = state.invite_requests.get_nowait()
             except queue.Empty:
                 break
 
@@ -280,7 +388,7 @@ def _run_agent_worker(state: SessionState):
                     _bargein_topics = list(state.topics) if state.topics else None
             if _pending_drift_reason is not None:
                 # クールダウン中は連発を避けるため要求を破棄（再脱線なら再検出される）
-                if time.monotonic() - _last_intervention_at < _INTERVENTION_COOLDOWN:
+                if time.monotonic() - _last_intervention_at < _cooldown:
                     print("# [trigger] skip: クールダウン中の脱線介入", flush=True)
                     _pending_drift_reason = None
                 else:
@@ -329,13 +437,16 @@ def _run_agent_worker(state: SessionState):
                     and _silence_elapsed > _AGENT_CONV_SILENCE):
                 agent.trigger()
         else:
+            # 沈黙要約の閾値: debateは従来通り、人間モードは積極性プロファイルに従う
+            # （None なら沈黙だけでは要約介入しない＝過剰介入の抑制, S5）
             _silence_thresh = (_AGENT_DEBATE_SILENCE if partner is not None
-                               else _AGENT_SILENCE)
+                               else _silence_summarize)
             if agent.pending_count >= agent.trigger_n:
                 print(f"# [trigger] count: {agent.pending_count}>={agent.trigger_n}", flush=True)
                 agent.trigger(topics=_topics)
                 _last_intervention_at = time.monotonic()
-            elif (agent.pending_count > 0
+            elif (_silence_thresh is not None
+                  and agent.pending_count > 0
                   and _silence_elapsed > _silence_thresh):
                 print(f"# [trigger] silence: {_silence_elapsed:.1f}s > {_silence_thresh}s", flush=True)
                 agent.trigger(topics=_topics)
@@ -354,6 +465,20 @@ def _run_agent_worker(state: SessionState):
                 _last_stall_at = time.monotonic()
                 _last_intervention_at = time.monotonic()
                 agent._last_noop_at = 0.0
+            # --- 声かけ（参加度）: 沈黙の“間”で、発言の少ない人を誘う（S4） ---
+            # 脱線(バージイン)と違い、声かけは人間を割り込まないよう間を待つ。
+            # クールダウン共有＋同じ人を連続では誘わない。
+            elif (_pending_invite is not None
+                  and _silence_elapsed > _INVITE_SILENCE
+                  and time.monotonic() - _last_intervention_at > _cooldown):
+                if _pending_invite == _last_invited:
+                    _pending_invite = None  # 同じ人を連続では誘わない
+                else:
+                    print(f"# [trigger] invite: {_pending_invite}さんに声かけ", flush=True)
+                    agent.trigger(topics=_topics, invite_target=_pending_invite)
+                    _last_intervention_at = time.monotonic()
+                    _last_invited = _pending_invite
+                    _pending_invite = None
 
 
 def _run_stdin_commands(state: SessionState):

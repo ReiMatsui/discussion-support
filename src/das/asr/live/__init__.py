@@ -90,11 +90,18 @@ def post_system(text: str) -> None:
               help="AI議論シミュレーション（Chat+TTSで自動生成）")
 @click.option("--sim-scenario", default=None,
               type=click.Choice(["stalled", "biased", "derailed",
-                                 "consensus_needed", "healthy"]),
+                                 "consensus_needed", "healthy", "imbalanced"]),
               help="シミュレーションの議論パターン")
 @click.option("--debate", metavar="TOPIC", default=None,
               help="AI会話相手と議論（Realtime APIで音声対話）")
 @click.option("--debate-voice", default="echo", help="会話相手の声")
+@click.option("--topic", metavar="TOPIC", default=None,
+              help="人間同士の議論の議題（--agentと併用。脱線判定の基準。"
+                   "未指定なら会議冒頭から自動推定）")
+@click.option("--proactivity", default="standard",
+              type=click.Choice(["controlled", "standard", "active"]),
+              help="ファシリテーターの介入の積極性（既定standard。"
+                   "controlled=明確な問題時のみ）")
 def main(**kwargs):
     """リアルタイム議事録 + AIファシリテーション."""
     from das.asr.live._bootstrap import LiveArgs, run_session

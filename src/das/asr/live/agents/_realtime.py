@@ -316,7 +316,8 @@ class RealtimeAgent(_RealtimeBase):
                                   "_count": trigger_count})
 
     def trigger(self, *, topics: list[dict] | None = None,
-                drift_reason: str | None = None):
+                drift_reason: str | None = None,
+                invite_target: str | None = None):
         """蓄積した発話をRealtimeAPIに送信し応答を要求.
 
         topics: 現在の論点一覧（_topic_workerが抽出したもの）。
@@ -324,6 +325,8 @@ class RealtimeAgent(_RealtimeBase):
         drift_reason: 並列ドリフトチェッカーが検出した脱線理由。
                 設定されている場合、_pendingが空でも送信し、
                 ファシリテーターに介入を強く促す。
+        invite_target: 発言の少ない参加者の名前（S4）。設定されていると、
+                _pendingが空でも送信し、その人に声をかける発話を促す。
         保存された介入内容（割り込みで中断された発言）がある場合、
         コンテキストに追加して再試行の機会を与える。
         """
@@ -337,7 +340,7 @@ class RealtimeAgent(_RealtimeBase):
             if self._responding:
                 return  # 既に応答生成中、または別スレッドが確保済み
             if (not self._pending and self._pending_intervention is None
-                    and not drift_reason):
+                    and not drift_reason and not invite_target):
                 return
             self._responding = True  # 確保（この時点でレースは閉じる）
             # スナップショットのみ取得。実際のクリアは送信成功後に行い、
@@ -360,6 +363,12 @@ class RealtimeAgent(_RealtimeBase):
                           f"議論が論点からズレています。"
                           f"簡潔に指摘して元のテーマに戻してください。")
             conv = f"{drift_note}\n\n{conv}" if conv else drift_note
+        # --- 声かけ（参加度）コンテキスト（S4） ---
+        if invite_target:
+            invite_note = (f"[声かけ] {invite_target}さんがしばらく発言していません。"
+                           f"{invite_target}さんに、今の論点について意見を尋ねる"
+                           f"短い一言を自然に述べてください。")
+            conv = f"{invite_note}\n\n{conv}" if conv else invite_note
         # --- 保存された介入内容をコンテキストに追加 ---
         # 注: 有効な介入は送信成功までクリアしない（Bug 2）。
         #     期限切れの介入のみ、送信成否に関わらずここで破棄する。

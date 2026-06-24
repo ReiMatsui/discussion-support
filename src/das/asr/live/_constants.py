@@ -199,12 +199,39 @@ _DRIFT_PROMPT = """\
 {utterances}
 
 ## 判定基準
-- 発話が論点と無関係な話題（雑談、私的な話題など）→ drift=true
-- 論点に関連する議論の展開・深掘り → drift=false
-- 会議開始時の挨拶・自己紹介・進行の発言（「こんにちは」「よろしく」「始めましょう」等）
-  → drift=false（脱線ではない）
+- 議題と明らかに無関係な話題が続いている（雑談・私的な話題・別の話への脱線）→ drift=true
+- 議題に関連する議論なら、論点が多少移動しても・別の角度でも → drift=false
+- 一時的な余談、合意形成・要約・整理・進行の発言、関連する具体例 → drift=false
+- 会議開始時の挨拶・自己紹介・進行の発言 → drift=false
+迷ったら drift=false にしてください（過剰な介入を避けるため、明らかな脱線のみ true）。
 
 JSON1つのみ出力。形式: {{"drift": true/false, "reason": "10字以内"}}"""
+
+_AGENDA_PROMPT = """\
+会議の冒頭の発話から、今日の主な議題（テーマ）を一言で推定してください。
+まだ議題が定まっていない・挨拶や雑談のみで判断できない場合は null を返してください。
+
+## 冒頭の発話
+{utterances}
+
+JSON1つのみ出力。形式: {{"agenda": "短い議題" または null}}"""
+
+_PARTICIPATION_PROMPT = """\
+会議の参加者の発話量と直近の会話から、発言の少ない人にファシリテーターが
+声をかけるべきか判定してください。
+
+## 参加者の発話量（直近）
+{participation}
+
+## 直近の会話
+{utterances}
+
+## 判定基準
+- 明らかに発言が少なく、しばらく黙っている人がいて、声かけが自然なら invite=true
+- まだ序盤、偏りが小さい、または本人が聞き役で問題ない場合は invite=false
+- 一度に声をかけるのは1人だけ
+
+JSON1つのみ出力。形式: {{"invite": true/false, "speaker": "名前" または null, "reason": "短い理由"}}"""
 
 _PROMPT_FACILITATOR = """\
 あなたは会議のファシリテーターAIです。
@@ -258,12 +285,34 @@ _DRIFT_CHECK_WINDOW = 6       # チェック時に参照する最近の発話数
 _DRIFT_WARMUP = 3             # この発話数に達するまで脱線判定しない（開始時の挨拶の猶予）
 _INTERVENTION_COOLDOWN = 25.0 # 介入後この秒数は脱線介入を抑制（連発=しつこさの防止）
 
+# --- 冒頭アジェンダ自動検出（人間モードで--topic未指定時, S3） ---
+_AGENDA_MIN_UTTS = 4          # この発話数たまったら議題推定を試みる
+_AGENDA_WINDOW = 12           # 推定に使う冒頭の発話数
+_AGENDA_RETRY_SEC = 10.0      # 推定失敗時の再試行間隔（LLM呼び出しの抑制）
+
+# --- 参加度の声かけ（発言の少ない人を誘う, S4） ---
+_INVITE_WARMUP = 8            # この発話数たまるまで声かけしない（序盤の偏りは自然）
+_INVITE_CHECK_SEC = 8.0       # 参加度チェックの最小間隔（LLM呼び出しの抑制）
+_INVITE_QUIET_RATIO = 0.5     # 公平シェアのこの割合を下回る人がいる時のみLLM判定にかける
+_INVITE_SILENCE = 2.0         # 声かけは沈黙(間)がこの秒数続いてから（人間を割り込まない）
+
 # --- デッドエア対策（介入不要後の沈黙ブレーカー） ---
 _STALL_SILENCE = 7.0          # 介入不要後この秒数沈黙したら一押し
 _STALL_COOLDOWN = 30.0        # 一押しの最小間隔（ループ防止）
 
 # --- エコー防止 ---
 _ECHO_COOLDOWN = 2.0          # AI発話終了後のエコーウィンドウ秒数（agent/partner共通）
+
+# --- 積極性プロファイル（人間ファシリテーションの介入頻度, S5） ---
+# silence_summarize: 沈黙がこの秒数続いたら要約/整理の介入を検討（None=しない）。
+# cooldown: 脱線介入・声かけの最小間隔（しつこさ防止）。
+# 既定は standard。控えめ寄りに調整（過剰介入のフィードバックを反映）。
+_PROACTIVITY_PROFILES = {
+    "controlled": {"silence_summarize": None, "cooldown": 40.0},  # 明確な問題時のみ
+    "standard":   {"silence_summarize": 18.0, "cooldown": 25.0},
+    "active":     {"silence_summarize": 8.0,  "cooldown": 15.0},
+}
+_PROACTIVITY_DEFAULT = "standard"
 # 相槌判定: 相槌パターンに一致する発話ではPartnerを止めない
 _BACKCHANNEL_RE = re.compile(
     r'^[\s、。,.!?！？]*'
