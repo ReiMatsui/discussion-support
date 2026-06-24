@@ -18,7 +18,6 @@ import contextlib
 from ._constants import (
     _AGENT_CONV_SILENCE,
     _AGENT_DEBATE_SILENCE,
-    _AGENT_RETRY_SILENCE,
     _AGENT_SILENCE,
     _BACKCHANNEL_RE,
     _DRIFT_CHECK_INTERVAL,
@@ -102,18 +101,7 @@ def _run_drift_checker(state: SessionState, oai_key: str, oai_model: str):
                 _pending_drift = None
             continue  # リトライ待ち中は新規チェックしない
 
-        # --- 中断された介入のリトライ（agent_workerの3重ガードをバイパス） ---
-        # agent_workerのリトライは①エコーウィンドウ②パートナー発話中③沈黙閾値
-        # の全てに阻まれ、会話中は発火しない。drift checkerはこれらを無視し、
-        # agentがfree(応答中でなく発話中でもない)になった瞬間にリトライする。
-        if (agent._pending_intervention is not None
-                and not agent._responding and not agent.ai_speaking):
-            with state.topics_lock:
-                _topics = list(state.topics) if state.topics else None
-            print("# [drift] → 中断された介入をリトライ（ガードバイパス）",
-                  flush=True)
-            agent.trigger(topics=_topics)
-            continue
+        # （中断された介入のリトライは _run_agent_worker に集約。Bug 3）
 
         # 論点がまだなければスキップ
         with state.topics_lock:
@@ -274,6 +262,20 @@ def _run_agent_worker(state: SessionState):
                 and agent is not None
                 and agent.ai_speaking):
             partner.interrupt()
+        # --- 中断された介入の最優先リトライ（ガードバイパス、Bug 3で集約） ---
+        # agentがfree(応答中でなく発話中でもない)になった瞬間に、エコーウィンドウ・
+        # パートナー発話・沈黙閾値を無視して再送する。会話が活発でも中断された介入を
+        # 取りこぼさない。リトライ責務はこの1箇所に集約（drift_checker側は廃止）。
+        if (agent._pending_intervention is not None
+                and not agent._responding and not agent.ai_speaking):
+            _retry_topics = None
+            if agent.mode != "conversation":
+                with state.topics_lock:
+                    _retry_topics = list(state.topics) if state.topics else None
+            print("# [diag] TRIGGER by retry: 中断された介入を再送（ガードバイパス）",
+                  flush=True)
+            agent.trigger(topics=_retry_topics)
+            continue
         # エコーウィンドウ中はtriggerしない
         if agent is not None and agent.in_echo_window:
             _was_in_echo[0] = True
@@ -298,14 +300,10 @@ def _run_agent_worker(state: SessionState):
         if agent.mode != "conversation":
             with state.topics_lock:
                 _topics = list(state.topics) if state.topics else None
-        # --- 割り込まれた介入の即時再開: 沈黙2秒で再トリガー ---
-        _has_retry = agent._pending_intervention is not None
+        # --- モード別トリガー判定 ---
+        # （中断された介入のリトライは上のガードバイパス節に集約済み）
         _silence_elapsed = time.monotonic() - _last_utt_time[0]
-        if _has_retry and _silence_elapsed > _AGENT_RETRY_SILENCE:
-            print(f"# [diag] TRIGGER by retry: silence={_silence_elapsed:.1f}s"
-                  f" > {_AGENT_RETRY_SILENCE}s (pending_intervention)", flush=True)
-            agent.trigger(topics=_topics)
-        elif agent.mode == "conversation":
+        if agent.mode == "conversation":
             if (agent.pending_count > 0
                     and _silence_elapsed > _AGENT_CONV_SILENCE):
                 agent.trigger()
