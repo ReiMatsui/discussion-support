@@ -76,8 +76,10 @@ def _run_drift_checker(state: SessionState, oai_key: str, oai_model: str):
     """
     from das.asr.live._bootstrap import check_drift as _check_drift
 
+    _diag_tick = 0
     while not state.stop.is_set():
         time.sleep(2)
+        _diag_tick += 1
         agent = state.agent
         if not oai_key or agent is None or not agent.enabled:
             continue
@@ -85,9 +87,12 @@ def _run_drift_checker(state: SessionState, oai_key: str, oai_model: str):
             continue
         # 論点がまだなければスキップ
         with state.topics_lock:
-            if not state.topics:
-                continue
-            topics = list(state.topics)
+            _has_topics = bool(state.topics)
+            topics = list(state.topics) if _has_topics else []
+        if not _has_topics:
+            if _diag_tick % 15 == 0:
+                print("# [drift] 待機中: 論点未抽出", flush=True)
+            continue
         # ファシリテーター以外の全発話をカウント＆チェック対象にする
         with state.state_lock:
             talk_rs = [r for r in state.records
@@ -101,15 +106,22 @@ def _run_drift_checker(state: SessionState, oai_key: str, oai_model: str):
         utts = [{"speaker": state.disp_name(r["speaker"]), "text": r["text"]}
                 for r in window]
         state.drift_cursor = n
+        print(f"# [drift] チェック実行: {len(utts)}発話, "
+              f"cursor={n}, topics={len(topics)}件", flush=True)
         # 脱線判定
         result = _check_drift(utts, topics, oai_key, oai_model)
         if result.get("drift"):
             reason = result.get("reason", "")
             _print_line(f"# 🔀 脱線検出: {reason}")
             # ファシリテーターが応答中でなければ即トリガー
-            if not agent._responding and not agent.ai_speaking:
+            if agent._responding:
+                print("# [drift] トリガー保留: agent応答中", flush=True)
+            elif agent.ai_speaking:
+                print("# [drift] トリガー保留: agent発話中", flush=True)
+            else:
                 with state.topics_lock:
                     _topics = list(state.topics) if state.topics else None
+                print("# [drift] → ファシリテーターをトリガー", flush=True)
                 agent.trigger(topics=_topics, drift_reason=reason)
 
 

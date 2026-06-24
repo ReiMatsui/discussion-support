@@ -175,8 +175,11 @@ def check_drift(utterances: list[dict], topics: list[dict],
         text = resp["choices"][0]["message"]["content"].strip()
         if text.startswith("```"):
             text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-        return json.loads(text)
-    except Exception:
+        result = json.loads(text)
+        print(f"# [drift] 判定結果: {result}", flush=True)
+        return result
+    except Exception as e:
+        print(f"# [drift] API/解析エラー: {type(e).__name__}: {e}", flush=True)
         return {"drift": False}
 
 
