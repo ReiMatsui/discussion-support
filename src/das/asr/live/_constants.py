@@ -201,6 +201,8 @@ _DRIFT_PROMPT = """\
 ## 判定基準
 - 発話が論点と無関係な話題（雑談、私的な話題など）→ drift=true
 - 論点に関連する議論の展開・深掘り → drift=false
+- 会議開始時の挨拶・自己紹介・進行の発言（「こんにちは」「よろしく」「始めましょう」等）
+  → drift=false（脱線ではない）
 
 JSON1つのみ出力。形式: {{"drift": true/false, "reason": "10字以内"}}"""
 
@@ -238,6 +240,7 @@ _AGENT_RETRY_SILENCE = 2.0    # 割り込まれた介入の再試行までの沈
 _INTERRUPT_MIN_CHARS = 8      # ファシリテーター割り込みの最小文字数
 _DRIFT_CHECK_INTERVAL = 1     # ドリフトチェックの発話間隔（1=最後の1言でも即評価）
 _DRIFT_CHECK_WINDOW = 6       # チェック時に参照する最近の発話数
+_DRIFT_WARMUP = 3             # この発話数に達するまで脱線判定しない（開始時の挨拶の猶予）
 _STALL_SILENCE = 7.0          # 介入不要後この秒数沈黙したら一押し（デッドエア対策）
 _STALL_COOLDOWN = 30.0        # 一押しの最小間隔（ループ防止）
 # 相槌判定: 相槌パターンに一致する発話ではPartnerを止めない

@@ -22,6 +22,7 @@ from ._constants import (
     _BACKCHANNEL_RE,
     _DRIFT_CHECK_INTERVAL,
     _DRIFT_CHECK_WINDOW,
+    _DRIFT_WARMUP,
     _INTERRUPT_MIN_CHARS,
     _STALL_COOLDOWN,
     _STALL_SILENCE,
@@ -119,6 +120,11 @@ def _run_drift_checker(state: SessionState, oai_key: str, oai_model: str):
                        if "speaker" in r and r.get("text")
                        and r.get("speaker") != AGENT_SPEAKER]
         n = len(talk_rs)
+        # ウォームアップ: 会議開始直後の挨拶などで誤検出しないよう猶予を置く（Fix 11）
+        if n < _DRIFT_WARMUP:
+            if _diag_tick % 30 == 0:
+                print(f"# [drift] ウォームアップ中: {n}/{_DRIFT_WARMUP}発話", flush=True)
+            continue
         if n - state.drift_cursor < _DRIFT_CHECK_INTERVAL:
             continue
         # 直近の発話を取得

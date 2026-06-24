@@ -69,6 +69,7 @@ class FakeState:
         self._last_utt_time = [time.monotonic()]
         self._was_in_echo = [False]
         self.agent_cursor = 0
+        self.drift_cursor = 0
 
     def disp_name(self, k):  # pragma: no cover
         return str(k)
@@ -151,3 +152,52 @@ def test_no_stall_breaker_without_noop():
     _run_worker_briefly(state, until=lambda: False, timeout=1.0)
 
     assert agent.trigger_calls == []
+
+
+# ---------------------------------------------------------------------------
+# ドリフトチェッカーのウォームアップ（Fix 11）
+# ---------------------------------------------------------------------------
+
+def _run_drift_checker_briefly(state, monkeypatch, *, records, seconds=2.5):
+    """check_drift をモックして _run_drift_checker を短時間動かし、呼び出しを記録."""
+    import das.asr.live._bootstrap as bootstrap
+    from das.asr.live._workers import _run_drift_checker
+
+    calls: list = []
+
+    def _fake_check(*_a, **_k):
+        calls.append(1)
+        return {"drift": False}
+
+    monkeypatch.setattr(bootstrap, "check_drift", _fake_check)
+    state.topics = [{"topic": "AI導入の是非", "speaker": "議題"}]
+    state.records = records
+    t = threading.Thread(target=_run_drift_checker,
+                         args=(state, "key", "gpt-5-mini"), daemon=True)
+    t.start()
+    time.sleep(seconds)
+    state.stop.set()
+    t.join(timeout=2.0)
+    return calls
+
+
+def test_drift_warmup_skips_opening_greeting(monkeypatch):
+    """開始直後（発話数 < ウォームアップ）は脱線判定しない（Fix 11）."""
+    agent = FakeAgent()
+    state = FakeState(agent, None)
+    records = [{"speaker": "話者1", "text": "こんにちは、よろしくお願いします。"}]
+    calls = _run_drift_checker_briefly(state, monkeypatch, records=records)
+    assert calls == [], "開始直後の挨拶で脱線判定を走らせてはならない"
+
+
+def test_drift_runs_after_warmup(monkeypatch):
+    """ウォームアップ発話数に達したら脱線判定が走る（Fix 11）."""
+    agent = FakeAgent()
+    state = FakeState(agent, None)
+    records = [
+        {"speaker": "話者1", "text": "AI導入は段階的にやるべき"},
+        {"speaker": "話者2", "text": "データ管理のルールが先だと思う"},
+        {"speaker": "話者1", "text": "ところでリゾット食べたい"},
+    ]
+    calls = _run_drift_checker_briefly(state, monkeypatch, records=records)
+    assert calls, "ウォームアップ後は脱線判定が走るべき"
