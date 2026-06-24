@@ -12,7 +12,7 @@ import time
 import numpy as np
 
 from .._constants import _ECHO_COOLDOWN, _PROMPT_DEBATE_PARTNER, REALTIME_URL
-from .._voice_profiles import VoiceProfiles, _resample_24_to_16
+from .._voice_profiles import VoiceProfiles
 from ._base import _RealtimeBase
 
 
@@ -59,6 +59,7 @@ class ConversationPartner(_RealtimeBase):
         self._ai_voice_enrolled = False
 
     AI_VOICE_KEY = "__PARTNER__"   # ファシリテーターの__AI__と区別
+    _LABEL = "Partner"             # ログ用ラベル（基底クラス用）
     # 良性エラー（実害なし）の判定用部分文字列。すべて小文字で比較する。
     #   - no active response: キャンセル対象の応答が無い
     #   - already has an active response: cancel→create と server VAD 自動応答の競合。
@@ -209,54 +210,6 @@ class ConversationPartner(_RealtimeBase):
                     }))
             except Exception:
                 pass
-
-    # --- ストリーミング音声再生 ---
-
-    def _start_playback_thread(self):
-        def _player():
-            try:
-                import sounddevice as sd
-                stream = sd.OutputStream(samplerate=24000, channels=1,
-                                         dtype="float32", blocksize=2400)
-                stream.start()
-                while not self._stop.is_set():
-                    epoch, chunk = self._audio_q.get()
-                    if chunk is None:
-                        self._on_playback_terminator(epoch)
-                        continue
-                    self._played_bytes += len(chunk)
-                    pcm = np.frombuffer(chunk, dtype="<i2").astype(np.float32) / 32768.0
-                    stream.write(pcm.reshape(-1, 1))
-                    # AI声紋登録用
-                    if not self._ai_voice_enrolled and self._voice_tracker is not None:
-                        ref16 = _resample_24_to_16(pcm)
-                        if len(ref16) > 0:
-                            self._ai_voice_buf.append(ref16.copy())
-                            self._ai_voice_sec += len(ref16) / 16000.0
-                            if self._ai_voice_sec >= 3.0:
-                                self._try_enroll_voice()
-                stream.stop()
-                stream.close()
-            except Exception as e:
-                print(f"# Partner 音声再生異常: {e}", flush=True)
-
-        self._playback_thread = threading.Thread(target=_player, daemon=True)
-        self._playback_thread.start()
-
-    def _try_enroll_voice(self):
-        if self._ai_voice_enrolled or self._voice_tracker is None:
-            return
-        wav = np.concatenate(self._ai_voice_buf)
-        emb = self._voice_tracker._embed(wav)
-        if emb is None:
-            return
-        with self._voice_tracker._lock:
-            self._voice_tracker.profiles[self.AI_VOICE_KEY] = emb
-            self._voice_tracker._active_keys.add(self.AI_VOICE_KEY)
-        self._ai_voice_enrolled = True
-        self._ai_voice_buf.clear()
-        print(f"# Partner: 声紋を登録しました（{self._ai_voice_sec:.1f}秒の音声から）",
-              flush=True)
 
     # --- WebSocket受信 ---
 

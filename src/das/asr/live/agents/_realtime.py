@@ -19,7 +19,7 @@ from .._constants import (
     AGENT_VOICES,
     REALTIME_URL,
 )
-from .._voice_profiles import VoiceProfiles, _resample_24_to_16
+from .._voice_profiles import VoiceProfiles
 from ._base import _RealtimeBase
 
 
@@ -99,7 +99,7 @@ class RealtimeAgent(_RealtimeBase):
         self._last_noop_at = 0.0
 
     AI_VOICE_KEY = "__AI__"             # VoiceProfiles内のAI声紋キー（セッション限り）
-    _AI_ENROLL_SEC = 3.0                 # 声紋登録に必要な最小秒数
+    _LABEL = "AI Agent"                  # ログ用ラベル（基底クラス用）
     _CANCEL_MARKER = "介入不要"          # この語が転写に現れたら応答をキャンセル
     # 良性エラー（実害なし）の判定用部分文字列。すべて小文字で比較する。
     _BENIGN_ERROR_SUBSTRINGS = (
@@ -134,27 +134,6 @@ class RealtimeAgent(_RealtimeBase):
     @property
     def enabled(self) -> bool:
         return self.mode != "off"
-
-    def _try_enroll_ai_voice(self):
-        """蓄積したAI音声から声紋を計算しVoiceProfilesに登録する。
-
-        再生スレッドから呼ばれる。十分な音声が溜まったら1回だけ実行。
-        """
-        if self._ai_voice_enrolled or self._voice_tracker is None:
-            return
-        if self._ai_voice_sec < self._AI_ENROLL_SEC:
-            return
-        wav = np.concatenate(self._ai_voice_buf)
-        tracker = self._voice_tracker
-        emb = tracker._embed(wav)
-        if emb is None:
-            return
-        with tracker._lock:
-            tracker.profiles[self.AI_VOICE_KEY] = emb
-            tracker._active_keys.add(self.AI_VOICE_KEY)
-        self._ai_voice_enrolled = True
-        self._ai_voice_buf.clear()   # メモリ解放
-        print(f"# AI Agent: AI声紋を登録しました（{self._ai_voice_sec:.1f}秒の音声から）", flush=True)
 
     def connect(self):
         """WebSocket接続を開始し、受信スレッドを起動."""
@@ -228,8 +207,6 @@ class RealtimeAgent(_RealtimeBase):
         if changed and self._connected:
             self._send_session_update()
 
-    # --- ストリーミング音声再生 ---
-
     def _log_state(self, transition: str):
         """状態遷移の軽量ログ（観測性、Phase 3 R4）.
 
@@ -238,39 +215,6 @@ class RealtimeAgent(_RealtimeBase):
         print(f"# [state] {transition} "
               f"(responding={self._responding} speaking={self.ai_speaking} "
               f"epoch={self._play_epoch})", flush=True)
-
-    def _start_playback_thread(self):
-        """PCMキューから読み出して逐次再生するスレッド。
-        再生済みバイト数を_played_bytesに蓄積（truncate用）。
-        声紋未登録時は16kHzリサンプル音声を蓄積して自動登録。"""
-        def _player():
-            try:
-                import sounddevice as sd
-                stream = sd.OutputStream(samplerate=24000, channels=1,
-                                         dtype="float32", blocksize=2400)
-                stream.start()
-                while not self._stop.is_set():
-                    epoch, chunk = self._audio_q.get()
-                    if chunk is None:          # 1応答の終端
-                        self._on_playback_terminator(epoch)
-                        continue
-                    pcm = np.frombuffer(chunk, dtype="<i2").astype(np.float32) / 32768.0
-                    stream.write(pcm.reshape(-1, 1))
-                    self._played_bytes += len(chunk)
-                    # AI声紋登録用: 16kHzにリサンプルして蓄積
-                    if not self._ai_voice_enrolled:
-                        ref16 = _resample_24_to_16(pcm)
-                        if len(ref16) > 0:
-                            self._ai_voice_buf.append(ref16.copy())
-                            self._ai_voice_sec += len(ref16) / 16000.0
-                            self._try_enroll_ai_voice()
-                stream.stop()
-                stream.close()
-            except Exception as e:
-                print(f"# AI音声再生スレッド異常: {e}", flush=True)
-
-        self._playback_thread = threading.Thread(target=_player, daemon=True)
-        self._playback_thread.start()
 
     # --- WebSocket受信 ---
 
