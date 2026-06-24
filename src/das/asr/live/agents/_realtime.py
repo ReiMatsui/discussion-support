@@ -470,12 +470,17 @@ class RealtimeAgent:
         print("# AI Agent: 割り込み検出 — 応答を中断", flush=True)
 
     def _flush_preflight(self):
-        """プリフライトバッファの音声を再生キューに一括フラッシュ."""
+        """プリフライトバッファの音声を再生キューに一括フラッシュ.
+
+        注: ai_speakingはaudio.deltaで先にTrueになるため、
+        on_speech_startの発火条件にai_speakingを使ってはならない。
+        _preflight_clearedガードで重複呼び出しは既に防がれている。
+        """
         if self._preflight_cleared:
             return
         self._preflight_cleared = True
-        # 音声生成開始を通知（Partner停止用）
-        if not self.ai_speaking and self.on_speech_start:
+        # 音声再生開始を通知（Partner停止用）
+        if self.on_speech_start:
             with contextlib.suppress(Exception):
                 self.on_speech_start()
         for chunk in self._preflight_buf:

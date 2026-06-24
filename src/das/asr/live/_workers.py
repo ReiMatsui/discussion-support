@@ -102,6 +102,19 @@ def _run_drift_checker(state: SessionState, oai_key: str, oai_model: str):
                 _pending_drift = None
             continue  # リトライ待ち中は新規チェックしない
 
+        # --- 中断された介入のリトライ（agent_workerの3重ガードをバイパス） ---
+        # agent_workerのリトライは①エコーウィンドウ②パートナー発話中③沈黙閾値
+        # の全てに阻まれ、会話中は発火しない。drift checkerはこれらを無視し、
+        # agentがfree(応答中でなく発話中でもない)になった瞬間にリトライする。
+        if (agent._pending_intervention is not None
+                and not agent._responding and not agent.ai_speaking):
+            with state.topics_lock:
+                _topics = list(state.topics) if state.topics else None
+            print("# [drift] → 中断された介入をリトライ（ガードバイパス）",
+                  flush=True)
+            agent.trigger(topics=_topics)
+            continue
+
         # 論点がまだなければスキップ
         with state.topics_lock:
             _has_topics = bool(state.topics)
