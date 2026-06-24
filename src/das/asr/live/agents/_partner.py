@@ -213,18 +213,6 @@ class ConversationPartner(_RealtimeBase):
 
     # --- WebSocket受信 ---
 
-    def _recv_loop(self):
-        while not self._stop.is_set():
-            try:
-                raw = self.ws.recv()
-                ev = json.loads(raw)
-            except Exception as e:
-                if not self._stop.is_set():
-                    print(f"# Partner: WebSocket切断 ({e})", flush=True)
-                break
-            self._handle(ev)
-        self._connected = False
-
     def _handle(self, ev: dict):
         etype = ev.get("type", "")
 
@@ -294,16 +282,4 @@ class ConversationPartner(_RealtimeBase):
                 self._responding = False
                 self._interrupted = False
 
-    def close(self):
-        self._stop.set()
-        self._q_put(None)  # playback threadを起こして終了させる
-        if self._playback_thread:
-            self._playback_thread.join(timeout=2.0)
-        # 声紋プロファイルのクリーンアップ
-        if self._voice_tracker is not None and self.AI_VOICE_KEY in self._voice_tracker.profiles:
-            with self._voice_tracker._lock:
-                self._voice_tracker.profiles.pop(self.AI_VOICE_KEY, None)
-                self._voice_tracker._active_keys.discard(self.AI_VOICE_KEY)
-        if self.ws:
-            with contextlib.suppress(Exception):
-                self.ws.close()
+    # close() は _RealtimeBase の共通実装を使用（R3c）

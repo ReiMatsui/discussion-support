@@ -6,10 +6,12 @@
 from __future__ import annotations
 
 import collections
+import contextlib
+import json
 import queue
 import threading
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -34,6 +36,7 @@ class _RealtimeBase:
     AI_VOICE_KEY: str = "__BASE__"   # VoiceProfiles内のAI声紋キー
     _AI_ENROLL_SEC: float = 3.0      # 声紋登録に必要な最小秒数
     _LABEL: str = "Agent"            # ログ用ラベル
+    _conn_error: str = ""            # 接続エラーメッセージ（UI表示用、共通デフォルト）
 
     # サブクラスが __init__ で設定する共有属性（mypy strict 用の型注釈）
     _audio_q: queue.Queue[tuple[int, bytes | None]]
@@ -49,6 +52,8 @@ class _RealtimeBase:
     _ai_voice_buf: list[np.ndarray]
     _ai_voice_sec: float
     _playback_thread: threading.Thread | None
+    _connected: bool
+    ws: Any
 
     def set_tracker(self, tracker: VoiceProfiles):
         """VoiceProfilesを外部から注入。connect()の前後いつでも可。"""
@@ -132,3 +137,41 @@ class _RealtimeBase:
 
         self._playback_thread = threading.Thread(target=_player, daemon=True)
         self._playback_thread.start()
+
+    # --- WebSocket受信 ---
+
+    def _handle(self, ev: dict):  # pragma: no cover - サブクラスで実装
+        """Realtimeイベントを処理する。サブクラスで必ず実装する。"""
+        raise NotImplementedError
+
+    def _recv_loop(self):
+        """WebSocketからイベントを受信し _handle に渡すループ（共通）."""
+        while not self._stop.is_set():
+            try:
+                raw = self.ws.recv()
+                ev = json.loads(raw)
+            except Exception as e:
+                if not self._stop.is_set():
+                    self._conn_error = f"切断: {e}"[:80]
+                    print(f"# {self._LABEL}: WebSocket切断 ({e})", flush=True)
+                break
+            self._handle(ev)
+        self._connected = False
+
+    # --- 終了処理 ---
+
+    def close(self):
+        """停止フラグを立て、再生スレッド・声紋・WebSocketを片付ける（共通）."""
+        self._stop.set()
+        self._q_put(None)  # playback threadを起こして終了させる
+        if self._playback_thread is not None:
+            self._playback_thread.join(timeout=2.0)
+        # セッション限りのAI声紋をクリーンアップ
+        if (self._voice_tracker is not None
+                and self.AI_VOICE_KEY in self._voice_tracker.profiles):
+            with self._voice_tracker._lock:
+                self._voice_tracker.profiles.pop(self.AI_VOICE_KEY, None)
+                self._voice_tracker._active_keys.discard(self.AI_VOICE_KEY)
+        if self.ws:
+            with contextlib.suppress(Exception):
+                self.ws.close()

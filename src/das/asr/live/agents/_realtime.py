@@ -218,19 +218,6 @@ class RealtimeAgent(_RealtimeBase):
 
     # --- WebSocket受信 ---
 
-    def _recv_loop(self):
-        while not self._stop.is_set():
-            try:
-                raw = self.ws.recv()
-                ev = json.loads(raw)
-            except Exception as e:
-                if not self._stop.is_set():
-                    self._conn_error = f"切断: {e}"[:80]
-                    print(f"# AI Agent: WebSocket切断 ({e})", flush=True)
-                break
-            self._handle(ev)
-        self._connected = False
-
     def _handle(self, ev: dict):
         etype = ev.get("type", "")
 
@@ -560,16 +547,4 @@ class RealtimeAgent(_RealtimeBase):
             return False
         return time.monotonic() - self._last_speech_end < self._echo_cooldown
 
-    def close(self):
-        self._stop.set()
-        self._q_put(None)  # playback threadを起こして終了させる
-        if self._playback_thread is not None:
-            self._playback_thread.join(timeout=2.0)
-        if self.ws:
-            with contextlib.suppress(Exception):
-                self.ws.close()
-        # セッション限りのAI声紋をクリーンアップ
-        if self._voice_tracker is not None and self.AI_VOICE_KEY in self._voice_tracker.profiles:
-            with self._voice_tracker._lock:
-                self._voice_tracker.profiles.pop(self.AI_VOICE_KEY, None)
-                self._voice_tracker._active_keys.discard(self.AI_VOICE_KEY)
+    # close() は _RealtimeBase の共通実装を使用（R3c）
