@@ -1,4 +1,11 @@
-"""main()から抽出されたワーカー関数群."""
+"""main()から抽出されたワーカー関数群.
+
+ログ接頭辞の規約（Phase 3 R4）:
+  # [state]   ... エージェントの状態遷移（RESPONDING/SPEAKING/INTERRUPTED/IDLE等）
+  # [trigger] ... ファシリテーターのトリガー理由（drift/retry/count/silence/stall/skip）
+  # [drift]   ... 並列ドリフト（脱線）検出の動作
+  # [diag]    ... 定期的な状態ダンプ・スキップ理由などの診断
+"""
 from __future__ import annotations
 
 import os
@@ -274,10 +281,10 @@ def _run_agent_worker(state: SessionState):
             if _pending_drift_reason is not None:
                 # クールダウン中は連発を避けるため要求を破棄（再脱線なら再検出される）
                 if time.monotonic() - _last_intervention_at < _INTERVENTION_COOLDOWN:
-                    print("# [diag] 脱線介入をスキップ（クールダウン中）", flush=True)
+                    print("# [trigger] skip: クールダウン中の脱線介入", flush=True)
                     _pending_drift_reason = None
                 else:
-                    print(f"# [diag] TRIGGER by drift: 脱線介入「{_pending_drift_reason}」",
+                    print(f"# [trigger] drift: 脱線介入「{_pending_drift_reason}」",
                           flush=True)
                     agent.trigger(topics=_bargein_topics,
                                   drift_reason=_pending_drift_reason)
@@ -285,7 +292,7 @@ def _run_agent_worker(state: SessionState):
                     _last_intervention_at = time.monotonic()
                     continue
             if agent._pending_intervention is not None:
-                print("# [diag] TRIGGER by retry: 中断された介入を再送（ガードバイパス）",
+                print("# [trigger] retry: 中断された介入を再送（ガードバイパス）",
                       flush=True)
                 agent.trigger(topics=_bargein_topics)
                 _last_intervention_at = time.monotonic()
@@ -325,12 +332,12 @@ def _run_agent_worker(state: SessionState):
             _silence_thresh = (_AGENT_DEBATE_SILENCE if partner is not None
                                else _AGENT_SILENCE)
             if agent.pending_count >= agent.trigger_n:
-                print(f"# [diag] TRIGGER by count: {agent.pending_count}>={agent.trigger_n}", flush=True)
+                print(f"# [trigger] count: {agent.pending_count}>={agent.trigger_n}", flush=True)
                 agent.trigger(topics=_topics)
                 _last_intervention_at = time.monotonic()
             elif (agent.pending_count > 0
                   and _silence_elapsed > _silence_thresh):
-                print(f"# [diag] TRIGGER by silence: {_silence_elapsed:.1f}s > {_silence_thresh}s", flush=True)
+                print(f"# [trigger] silence: {_silence_elapsed:.1f}s > {_silence_thresh}s", flush=True)
                 agent.trigger(topics=_topics)
                 _last_intervention_at = time.monotonic()
             # --- 沈黙ブレーカー: 介入不要後にデッドエアになった場合の一押し（Fix 10） ---
@@ -339,7 +346,7 @@ def _run_agent_worker(state: SessionState):
             elif (agent._last_noop_at > 0
                   and _silence_elapsed > _STALL_SILENCE
                   and time.monotonic() - _last_stall_at > _STALL_COOLDOWN):
-                print(f"# [diag] TRIGGER by stall: 介入不要後の沈黙{_silence_elapsed:.1f}s"
+                print(f"# [trigger] stall: 介入不要後の沈黙{_silence_elapsed:.1f}s"
                       f"を解消", flush=True)
                 agent.trigger(
                     topics=_topics,
