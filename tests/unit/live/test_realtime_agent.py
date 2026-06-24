@@ -215,6 +215,35 @@ def test_cancel_response_clears_intervention_and_deletes_item(agent):
     assert "conversation.item.delete" in agent.ws.types()
 
 
+def test_interrupted_self_heals_on_new_response(agent):
+    """response.done取りこぼしで_interruptedが残っても、新応答開始で解除される（堅牢化）.
+
+    旧挙動: _interrupted のリセットは response.done 頼み。これが来ないと次応答の
+    output_audio.delta が全破棄され無音になる。output_item.added で解除して固着を防ぐ。
+    """
+    # 中断状態が残ったまま新しい応答が始まる状況を再現
+    agent._interrupted = True
+    agent._handle({"type": "response.output_item.added", "item": {"id": "new-item"}})
+    assert agent._interrupted is False, "新応答開始で中断状態を解除すべき"
+
+    # 解除後は新応答の音声がちゃんとキューに積まれる（preflight確認後）
+    agent._preflight_cleared = True
+    agent._handle({"type": "response.output_audio.delta", "delta": make_chunk()})
+    assert agent.ai_speaking is True
+    payloads = [p for (_e, p) in list(agent._audio_q.queue) if p is not None]
+    assert len(payloads) == 1
+
+
+def test_interrupt_residuals_still_discarded_within_same_response(agent):
+    """同一応答内では、interrupt後の残留deltaは従来どおり破棄される（退行なし）."""
+    agent._preflight_cleared = True
+    agent._interrupted = True   # interrupt済み（新しいoutput_item.addedは来ていない）
+    agent._handle({"type": "response.output_audio.delta", "delta": make_chunk()})
+    # 新応答境界が無いので破棄され続ける
+    payloads = [p for (_e, p) in list(agent._audio_q.queue) if p is not None]
+    assert payloads == []
+
+
 def test_cancel_response_marks_noop_time(agent):
     """介入不要の判断時刻を記録する（デッドエア対策のトリガー、Fix 10）."""
     assert agent._last_noop_at == 0.0

@@ -63,6 +63,19 @@ def test_echo_window_includes_responding(partner):
 # 応答世代(epoch)による ai_speaking 管理（Bug 6）
 # ---------------------------------------------------------------------------
 
+def test_interrupted_self_heals_on_new_response(partner):
+    """partnerでも、新応答開始で_interruptedが解除される（response.done非依存の堅牢化）."""
+    partner._interrupted = True
+    partner._handle({"type": "response.output_item.added", "item": {"id": "p-new"}})
+    assert partner._interrupted is False
+
+    partner._handle({"type": "response.output_audio.delta",
+                     "delta": __import__("base64").b64encode(b"\x01\x02" * 10).decode()})
+    assert partner.ai_speaking is True
+    payloads = [p for (_e, p) in list(partner._audio_q.queue) if p is not None]
+    assert len(payloads) == 1
+
+
 def test_stale_terminator_does_not_clear_ai_speaking(partner):
     partner._play_epoch = 2
     partner.ai_speaking = True
