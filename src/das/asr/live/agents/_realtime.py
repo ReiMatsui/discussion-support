@@ -87,6 +87,26 @@ class RealtimeAgent:
 
     AI_VOICE_KEY = "__AI__"             # VoiceProfiles内のAI声紋キー（セッション限り）
     _AI_ENROLL_SEC = 3.0                 # 声紋登録に必要な最小秒数
+    _CANCEL_MARKER = "介入不要"          # この語が転写に現れたら応答をキャンセル
+
+    @staticmethod
+    def _is_cancel_prefix(buf: str) -> bool:
+        """buf がキャンセルマーカー「介入不要」に到達しうる前置きか.
+
+        モデルは介入不要時に「（介入不要）」とだけ返す。転写が1文字ずつ届く間、
+        先頭の空白・引用符・括弧を無視した中身がマーカーの prefix（途中まで一致）
+        である限り、まだ介入不要かどうか確定できない。この間は再生を保留する。
+
+        これにより、マーカー確定前にフラッシュして音声が漏れたり
+        on_speech_start でパートナーを誤って中断したりするのを防ぐ。
+        """
+        core = buf.strip().lstrip("（(「『\"' 　")
+        if core == "":
+            # まだ記号・括弧のみ → マーカー先頭の「（」かもしれない
+            return True
+        marker = RealtimeAgent._CANCEL_MARKER
+        # core が marker の途中まで一致（完全一致は in 判定側でキャンセル済み）
+        return marker.startswith(core) and core != marker
 
     @property
     def _prompt(self) -> str:
@@ -274,11 +294,12 @@ class RealtimeAgent:
             if not self._interrupted:
                 self._ai_text_buf += ev.get("delta", "")
                 # 「介入不要」を検出したら即座に応答をキャンセル
-                if "介入不要" in self._ai_text_buf:
+                if self._CANCEL_MARKER in self._ai_text_buf:
                     self._cancel_response()
-                # プリフライト判定: 十分なテキストが来て「介入不要」でなければ再生開始
+                # プリフライト判定: キャンセルマーカーのprefixでなくなった時点で再生開始。
+                # マーカー確定前にフラッシュしないため、介入不要応答の音声漏れを防ぐ。
                 elif (not self._preflight_cleared
-                      and len(self._ai_text_buf) >= self._preflight_chars):
+                      and not self._is_cancel_prefix(self._ai_text_buf)):
                     self._flush_preflight()
 
         elif etype == "response.output_audio_transcript.done":
@@ -286,11 +307,11 @@ class RealtimeAgent:
             self._ai_text_buf = ""
             # transcript.doneが来たのにまだプリフライト中なら確定フラッシュ
             if not self._preflight_cleared and not self._interrupted:
-                if "介入不要" in (transcript or ""):
+                if self._CANCEL_MARKER in (transcript or ""):
                     self._cancel_response()
                 else:
                     self._flush_preflight()
-            if transcript and "介入不要" not in transcript:
+            if transcript and self._CANCEL_MARKER not in transcript:
                 self._recent_ai_texts.append(transcript)
                 if not self._interrupted and self.on_ai_utterance:
                     self.on_ai_utterance(transcript)

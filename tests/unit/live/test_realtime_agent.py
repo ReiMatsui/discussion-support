@@ -1,8 +1,6 @@
 """RealtimeAgent（ファシリテーター）の介入・割り込みロジックのユニットテスト."""
 from __future__ import annotations
 
-import pytest
-
 from .conftest import make_chunk
 
 
@@ -109,10 +107,6 @@ def test_cancel_response_clears_intervention_and_deletes_item(agent):
 # プリフライト: 「介入不要」応答で音声を漏らさない（Bug 1 の回帰テスト）
 # ---------------------------------------------------------------------------
 
-@pytest.mark.xfail(
-    reason="Bug 1 未修正: _preflight_chars(3) < マーカー長のため判定前にflushしてしまう",
-    strict=True,
-)
 def test_preflight_no_leak_on_cancel_marker(agent):
     """「（介入不要）」と判定される応答では、音声再生も on_speech_start も起きない。
 
