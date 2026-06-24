@@ -68,6 +68,9 @@ class SessionState:
         self._TOPIC_WINDOW = 10
         self._TOPIC_TRIGGER = 5
         self.drift_cursor = 0
+        # 脱線検出→介入トリガーの受け渡しキュー（R2: トリガー経路の単一化）。
+        # _run_drift_checker が積み、_run_agent_worker が裁定して trigger する。
+        self.drift_requests: queue.Queue[str] = queue.Queue()
 
         # PCMバッファ
         self.pcm_buf = bytearray()

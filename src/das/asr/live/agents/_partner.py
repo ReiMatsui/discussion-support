@@ -11,7 +11,7 @@ import time
 
 import numpy as np
 
-from .._constants import _PROMPT_DEBATE_PARTNER, REALTIME_URL
+from .._constants import _ECHO_COOLDOWN, _PROMPT_DEBATE_PARTNER, REALTIME_URL
 from .._voice_profiles import VoiceProfiles, _best_text_similarity, _resample_24_to_16
 
 
@@ -47,7 +47,7 @@ class ConversationPartner:
         self.on_ai_utterance = None       # callback(text: str)
         self._recent_ai_texts: collections.deque = collections.deque(maxlen=20)
         self._last_speech_end = 0.0
-        self._echo_cooldown = 2.0
+        self._echo_cooldown = _ECHO_COOLDOWN
         # --- truncate用: 再生済み音声の追跡 ---
         self._current_item_id: str | None = None
         self._played_bytes = 0
