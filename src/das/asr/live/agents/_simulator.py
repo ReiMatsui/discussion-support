@@ -34,13 +34,14 @@ class DiscussionSimulator:
         "田中": "nova",
         "佐藤": "onyx",
     }
-    DEFAULT_PAUSE = 0.8   # 発話間の無音（秒）
+    DEFAULT_PAUSE = 1.6   # 発話間の無音（秒）。話者分離の切れ目を作るため長めに
 
     _SYSTEM_PROMPT = """\
 あなたは3人の会議参加者（松井、田中、佐藤）の議論を生成するシミュレーターです。
 
 ルール:
-- 1回の応答で **1人の発言だけ** を生成してください
+- 1回の応答で **1人の発言だけ** を生成してください（複数人の発言を含めない）
+- 必ず1行で、改行や2人目の「話者名:」を入れないでください
 - フォーマット: 「話者名: 発言内容」（例: 松井: コストの問題を議論しましょう）
 - 話者を自然に交代させてください
 - 各発言は1〜3文、自然な会話の長さにしてください
@@ -198,15 +199,21 @@ class DiscussionSimulator:
             time.sleep(0.1)
 
     def _parse_turn(self, text: str) -> tuple[str | None, str | None]:
-        """「話者名: 発言」をパースする."""
-        # 「松井: テキスト」or 「松井：テキスト」
-        m = re.match(r"^([\w]+)\s*[:：]\s*(.+)", text, re.DOTALL)
-        if m:
-            speaker = m.group(1)
-            utterance = m.group(2).strip()
-            # 既知の話者か確認
-            if speaker in self.SPEAKERS:
-                return speaker, utterance
+        """「話者名: 発言」をパースする.
+
+        モデルが複数話者の行をまとめて返すことがあるため、最初の1人の発言だけを
+        採用する（DOTALLで全部を1人に取り込むと、別々の声に分離できなくなる）。
+        """
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            # 「松井: テキスト」or 「松井：テキスト」（発言は次の話者行直前まで）
+            m = re.match(r"^([^\s:：]+)\s*[:：]\s*(.+)$", line)
+            if m and m.group(1) in self.SPEAKERS:
+                return m.group(1), m.group(2).strip()
+            # 最初の非空行が話者形式でなければパース失敗扱い
+            return None, None
         return None, None
 
     def _tts_to_pcm(self, client, text: str, voice: str) -> bytes:
