@@ -95,6 +95,9 @@ def post_system(text: str) -> None:
 @click.option("--debate", metavar="TOPIC", default=None,
               help="AI会話相手と議論（Realtime APIで音声対話）")
 @click.option("--debate-voice", default="echo", help="会話相手の声")
+@click.option("--topic", metavar="TOPIC", default=None,
+              help="人間同士の議論の議題（--agentと併用。脱線判定の基準。"
+                   "未指定なら会議冒頭から自動推定）")
 def main(**kwargs):
     """リアルタイム議事録 + AIファシリテーション."""
     from das.asr.live._bootstrap import LiveArgs, run_session

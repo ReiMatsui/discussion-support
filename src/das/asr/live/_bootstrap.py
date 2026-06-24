@@ -68,6 +68,7 @@ class LiveArgs:
     sim_scenario: str | None = None
     debate: str | None = None
     debate_voice: str = "echo"
+    topic: str | None = None   # 人間同士モードの議題（脱線判定の基準）
 
 
 # ---------------------------------------------------------------------------
@@ -337,10 +338,11 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
         if tracker is not None:
             state.partner.set_tracker(tracker)
 
-    # --- 議題を脱線検出の基準論点としてシード（Fix 8） ---
+    # --- 議題を脱線検出の基準論点としてシード（Fix 8 / 人間モードはS1で--topic対応） ---
     # 明示的な議題があれば、論点抽出LLMの成否に依存せず最初から脱線検出を効かせる。
+    # 人間同士モード(--topic)・debate・simulate のいずれの議題でもシードできる。
     if state.agent is not None:
-        _agenda = args.debate or args.simulate
+        _agenda = args.topic or args.debate or args.simulate
         if _agenda:
             state.seed_topic(_agenda)
             print(f"# 脱線検出: 議題を基準論点としてシード → {_agenda}", flush=True)
