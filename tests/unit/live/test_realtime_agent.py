@@ -94,6 +94,41 @@ def test_trigger_keeps_utterances_fed_during_send(agent):
     assert "送信対象の発言" in agent.ws.last_create_text()
 
 
+def test_trigger_no_double_response_on_reentry(agent):
+    """送信中に別経路からtriggerが再入しても二重にresponse.createしない（Bug 4）.
+
+    旧実装は _responding を送信後に立てていたため、送信中の再入で
+    _responding=False が見えてしまい、2本目の response.create が飛んだ。
+    """
+    import json as _json
+    agent.feed("人間", "発言A")
+    reentered = {"done": False}
+
+    def _send_reentrant(raw):
+        msg = _json.loads(raw)
+        agent.ws.sent.append(msg)
+        # 最初の create 送信中に別スレッドからの trigger を模擬（再入）
+        if msg.get("type") == "conversation.item.create" and not reentered["done"]:
+            reentered["done"] = True
+            agent.feed("人間", "発言B")
+            agent.trigger()  # _responding を確保済みなら何もしないはず
+    agent.ws.send = _send_reentrant  # type: ignore[method-assign]
+
+    agent.trigger()
+    assert agent.ws.types().count("response.create") == 1
+
+
+def test_trigger_releases_responding_when_nothing_to_send(agent):
+    """期限切れ介入だけで送るものがない場合、確保した_respondingを解放する（Bug 4）."""
+    agent._pending_intervention = {
+        "delivered": "古い介入", "created_at": 0.0, "attempts": 1,  # TTL超過
+    }
+    agent.trigger()
+    assert agent.ws.sent == []
+    assert agent._responding is False
+    assert agent._pending_intervention is None  # 期限切れは破棄
+
+
 def test_trigger_with_topics_includes_topic_note(agent):
     agent.feed("人間", "本題の発言")
     agent.trigger(topics=[{"topic": "AI導入の是非", "speaker": "松井"}])

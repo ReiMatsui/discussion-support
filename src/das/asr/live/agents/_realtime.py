@@ -366,12 +366,17 @@ class RealtimeAgent:
         """
         if not self._connected or not self.enabled or not self.ws:
             return
-        if self._responding:
-            return  # 応答生成中は新規リクエストを抑止
+        # --- _responding を test-and-set でアトミックに確保（Bug 4） ---
+        # 複数スレッドからの同時triggerで二重にresponse.createが飛ぶのを防ぐ。
+        # ここで確保した後に送信できなかった場合（送るものがない/送信例外）は、
+        # 必ず False に戻して固着を避ける。
         with self._lock:
+            if self._responding:
+                return  # 既に応答生成中、または別スレッドが確保済み
             if (not self._pending and self._pending_intervention is None
                     and not drift_reason):
                 return
+            self._responding = True  # 確保（この時点でレースは閉じる）
             # スナップショットのみ取得。実際のクリアは送信成功後に行い、
             # 送信例外で発話内容が失われないようにする（Bug 2）。
             pending_snapshot = list(self._pending)
@@ -412,6 +417,7 @@ class RealtimeAgent:
                 print(f"# AI Agent: 中断された介入を期限切れで破棄（{age:.0f}秒経過）",
                       flush=True)
         if not conv:
+            self._responding = False  # 送るものがない → 確保を解放（Bug 4）
             return  # 期限切れで破棄された場合など、送るものがない
         try:
             self.ws.send(json.dumps({
@@ -424,11 +430,11 @@ class RealtimeAgent:
             }))
             self.ws.send(json.dumps({"type": "response.create"}))
         except Exception as e:
-            # 送信失敗: 状態を一切クリアせず保持し、次のトリガー機会で再試行する。
+            # 送信失敗: 確保を解放し、状態は一切クリアせず保持して次回再試行する。
+            self._responding = False
             print(f"# AI Agent 送信エラー（内容を保持して再試行）: {e}", flush=True)
             return
-        # --- 送信成功 → ここで初めて状態を確定的にクリアする ---
-        self._responding = True
+        # --- 送信成功（_responding は確保済みのまま維持） ---
         with self._lock:
             # 送信したスナップショット分だけ削除（送信中にfeedされた新発話は残す）
             del self._pending[:len(pending_snapshot)]
