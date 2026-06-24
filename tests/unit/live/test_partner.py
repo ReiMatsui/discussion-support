@@ -57,3 +57,39 @@ def test_echo_window_includes_responding(partner):
     assert partner.in_echo_window is False
     partner._responding = True
     assert partner.in_echo_window is True
+
+
+# ---------------------------------------------------------------------------
+# error イベントの扱い（Bug 5: cancel→create と VAD自動応答の競合）
+# ---------------------------------------------------------------------------
+
+def test_benign_error_already_active_response_is_ignored(partner):
+    """「already has an active response」は良性として無視し、状態を変えない."""
+    partner._responding = True
+    partner._handle({
+        "type": "error",
+        "error": {"message": "Conversation already has an active response"},
+    })
+    # 良性なので _responding をリセットしない（VAD応答が進行中）
+    assert partner._responding is True
+
+
+def test_benign_error_no_active_response_is_ignored(partner):
+    partner._responding = True
+    partner._handle({
+        "type": "error",
+        "error": {"message": "Cancellation failed: no active response found"},
+    })
+    assert partner._responding is True
+
+
+def test_unexpected_error_resets_responding(partner):
+    """想定外エラーでは _responding を解放して固着を防ぐ."""
+    partner._responding = True
+    partner._interrupted = True
+    partner._handle({
+        "type": "error",
+        "error": {"message": "internal_server_error: something broke"},
+    })
+    assert partner._responding is False
+    assert partner._interrupted is False

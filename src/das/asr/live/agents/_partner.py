@@ -55,6 +55,16 @@ class ConversationPartner:
         self._ai_voice_enrolled = False
 
     AI_VOICE_KEY = "__PARTNER__"   # ファシリテーターの__AI__と区別
+    # 良性エラー（実害なし）の判定用部分文字列。すべて小文字で比較する。
+    #   - no active response: キャンセル対象の応答が無い
+    #   - already has an active response: cancel→create と server VAD 自動応答の競合。
+    #     VAD 側が応答するため、明示的な response.create が弾かれても問題ない。
+    _BENIGN_ERROR_SUBSTRINGS = (
+        "no active response",
+        "already has an active response",
+        "already an active response",
+        "active response already",
+    )
 
     @property
     def in_echo_window(self) -> bool:
@@ -323,9 +333,16 @@ class ConversationPartner:
 
         elif etype == "error":
             msg = ev.get("error", {}).get("message", "unknown")
-            # response.cancel が active response なしに到達した場合は無視
-            if "no active response" not in msg.lower():
-                print(f"# Partner エラー: {msg}", flush=True)
+            low = msg.lower()
+            if any(s in low for s in self._BENIGN_ERROR_SUBSTRINGS):
+                # cancel/create と VAD 自動応答の競合など。実害がないので静かに無視。
+                return
+            print(f"# Partner エラー: {msg}", flush=True)
+            # 想定外エラーで応答生成が中断された場合、_responding の固着を防ぐ
+            # （固着すると in_echo_window が True のままになり進行が止まる）。
+            if self._responding:
+                self._responding = False
+                self._interrupted = False
 
     def close(self):
         self._stop.set()
