@@ -88,10 +88,18 @@ class RealtimeAgent:
         self._pending_intervention: dict | None = None  # 割り込みで中断された介入内容
         self._INTERVENTION_TTL = 60.0                   # 保存した介入の有効期限（秒）
         self._INTERVENTION_MAX_RETRIES = 2              # 再試行上限
+        # --- デッドエア対策: 「介入不要」と判断した時刻（Fix 10） ---
+        self._last_noop_at = 0.0
 
     AI_VOICE_KEY = "__AI__"             # VoiceProfiles内のAI声紋キー（セッション限り）
     _AI_ENROLL_SEC = 3.0                 # 声紋登録に必要な最小秒数
     _CANCEL_MARKER = "介入不要"          # この語が転写に現れたら応答をキャンセル
+    # 良性エラー（実害なし）の判定用部分文字列。すべて小文字で比較する。
+    _BENIGN_ERROR_SUBSTRINGS = (
+        "no active response",
+        "cancellation failed",
+        "already has an active response",
+    )
 
     @staticmethod
     def _is_cancel_prefix(buf: str) -> bool:
@@ -352,6 +360,9 @@ class RealtimeAgent:
 
         elif etype == "error":
             msg = ev.get("error", {}).get("message", "unknown")
+            low = msg.lower()
+            if any(s in low for s in self._BENIGN_ERROR_SUBSTRINGS):
+                return  # response.cancel空振り等の良性エラーは静かに無視（Fix 10）
             print(f"# AI Agent エラー: {msg}", flush=True)
             # エラーでresponse生成が中断された場合、_respondingをリセット
             # （固着するとtrigger()が永遠にスキップされる）
@@ -554,6 +565,7 @@ class RealtimeAgent:
         """「介入不要」応答を静かにキャンセル。音声再生を止め、会話履歴から削除する."""
         print("# AI Agent: 介入不要と判断 — 応答をキャンセル", flush=True)
         self._interrupted = True
+        self._last_noop_at = time.monotonic()  # デッドエア対策（Fix 10）
         self._preflight_buf.clear()        # バッファも破棄
         self._preflight_cleared = False
         self._pending_intervention = None  # 介入不要の内容は再試行しない

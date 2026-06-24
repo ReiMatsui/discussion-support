@@ -23,6 +23,8 @@ from ._constants import (
     _DRIFT_CHECK_INTERVAL,
     _DRIFT_CHECK_WINDOW,
     _INTERRUPT_MIN_CHARS,
+    _STALL_COOLDOWN,
+    _STALL_SILENCE,
     AGENT_SPEAKER,
     SR,
 )
@@ -219,6 +221,7 @@ def _run_agent_worker(state: SessionState):
     _last_utt_time = state._last_utt_time
     _was_in_echo = state._was_in_echo
     _diag_tick = 0
+    _last_stall_at = 0.0  # 沈黙ブレーカーの最終発火時刻（ループ防止、Fix 10）
     while not state.stop.is_set():
         time.sleep(0.5)
         _diag_tick += 1
@@ -236,6 +239,7 @@ def _run_agent_worker(state: SessionState):
         n = len(talk_rs)
         if n > state.agent_cursor:
             _last_utt_time[0] = time.monotonic()
+            agent._last_noop_at = 0.0  # 新たな発話で会話が動いた → 沈黙ブレーカー解除
             new_texts = [r.get("text", "") for r in talk_rs[state.agent_cursor:]]
             for r in talk_rs[state.agent_cursor:]:
                 agent.feed(state.disp_name(r.get("speaker", "")), r.get("text", ""))
@@ -317,6 +321,19 @@ def _run_agent_worker(state: SessionState):
                   and _silence_elapsed > _silence_thresh):
                 print(f"# [diag] TRIGGER by silence: {_silence_elapsed:.1f}s > {_silence_thresh}s", flush=True)
                 agent.trigger(topics=_topics)
+            # --- 沈黙ブレーカー: 介入不要後にデッドエアになった場合の一押し（Fix 10） ---
+            # 「介入不要」の判断自体は尊重する（一度黙る）が、その後に会話が止まって
+            # しまったら、本題へ戻す一言を促す。クールダウンで繰り返しを防ぐ。
+            elif (agent._last_noop_at > 0
+                  and _silence_elapsed > _STALL_SILENCE
+                  and time.monotonic() - _last_stall_at > _STALL_COOLDOWN):
+                print(f"# [diag] TRIGGER by stall: 介入不要後の沈黙{_silence_elapsed:.1f}s"
+                      f"を解消", flush=True)
+                agent.trigger(
+                    topics=_topics,
+                    drift_reason="会話が止まっています。本題に戻す一言を簡潔に述べてください。")
+                _last_stall_at = time.monotonic()
+                agent._last_noop_at = 0.0
 
 
 def _run_stdin_commands(state: SessionState):

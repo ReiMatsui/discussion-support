@@ -19,6 +19,7 @@ class FakeAgent:
         self.ai_speaking = False
         self._responding = False
         self._pending_intervention: dict | None = None
+        self._last_noop_at = 0.0
         self.trigger_n = 10
         self.in_echo_window = False
         self._pending: list = []
@@ -121,6 +122,31 @@ def test_no_retry_when_no_pending_intervention():
     """保留介入がなければ（沈黙も短ければ）トリガーしない."""
     agent = FakeAgent()
     state = FakeState(agent, None)
+
+    _run_worker_briefly(state, until=lambda: False, timeout=1.0)
+
+    assert agent.trigger_calls == []
+
+
+def test_stall_breaker_fires_after_noop_silence():
+    """介入不要後に沈黙が続いたら、本題に戻す一押しをトリガーする（Fix 10）."""
+    agent = FakeAgent()
+    agent._last_noop_at = time.monotonic()      # 直前に「介入不要」と判断
+    state = FakeState(agent, None)
+    state._last_utt_time[0] = time.monotonic() - 100  # 十分な沈黙を模擬
+
+    _run_worker_briefly(state, until=lambda: bool(agent.trigger_calls))
+
+    assert agent.trigger_calls, "介入不要後の沈黙で一押しが入るべき"
+    assert "止まって" in (agent.trigger_calls[0]["drift_reason"] or "")
+    assert agent._last_noop_at == 0.0  # 発火後はマーカーを解除
+
+
+def test_no_stall_breaker_without_noop():
+    """介入不要の履歴がなければ、沈黙していても一押しはしない（通常の間は尊重）."""
+    agent = FakeAgent()
+    state = FakeState(agent, None)
+    state._last_utt_time[0] = time.monotonic() - 100
 
     _run_worker_briefly(state, until=lambda: False, timeout=1.0)
 

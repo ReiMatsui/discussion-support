@@ -238,6 +238,8 @@ _AGENT_RETRY_SILENCE = 2.0    # 割り込まれた介入の再試行までの沈
 _INTERRUPT_MIN_CHARS = 8      # ファシリテーター割り込みの最小文字数
 _DRIFT_CHECK_INTERVAL = 1     # ドリフトチェックの発話間隔（1=最後の1言でも即評価）
 _DRIFT_CHECK_WINDOW = 6       # チェック時に参照する最近の発話数
+_STALL_SILENCE = 7.0          # 介入不要後この秒数沈黙したら一押し（デッドエア対策）
+_STALL_COOLDOWN = 30.0        # 一押しの最小間隔（ループ防止）
 # 相槌判定: 相槌パターンに一致する発話ではPartnerを止めない
 _BACKCHANNEL_RE = re.compile(
     r'^[\s、。,.!?！？]*'

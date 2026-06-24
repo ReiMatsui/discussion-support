@@ -193,6 +193,32 @@ def test_cancel_response_clears_intervention_and_deletes_item(agent):
     assert "conversation.item.delete" in agent.ws.types()
 
 
+def test_cancel_response_marks_noop_time(agent):
+    """介入不要の判断時刻を記録する（デッドエア対策のトリガー、Fix 10）."""
+    assert agent._last_noop_at == 0.0
+    agent._cancel_response()
+    assert agent._last_noop_at > 0.0
+
+
+def test_facilitator_benign_error_ignored(agent):
+    """「Cancellation failed: no active response found」は良性として無視（Fix 10）."""
+    agent._responding = True
+    agent._handle({
+        "type": "error",
+        "error": {"message": "Cancellation failed: no active response found"},
+    })
+    assert agent._responding is True  # 良性なのでフラグを触らない
+
+
+def test_facilitator_unexpected_error_resets_responding(agent):
+    agent._responding = True
+    agent._handle({
+        "type": "error",
+        "error": {"message": "internal_server_error"},
+    })
+    assert agent._responding is False
+
+
 # ---------------------------------------------------------------------------
 # プリフライト: 「介入不要」応答で音声を漏らさない（Bug 1 の回帰テスト）
 # ---------------------------------------------------------------------------
