@@ -69,6 +69,18 @@ def test_short_utterances_accumulate_then_register():
     assert vp.classify(mid, "1", count=True, chars=12) == "人物1"  # 48 >= 45
 
 
+def test_short_exchange_utterances_accumulate_and_register():
+    """min_sec未満の短い発話の応酬でも、累積で登録される（ショートパス経由）."""
+    vp = _tracker()
+    vp._embed = lambda wav: _unit(1, 0, 0)  # type: ignore[method-assign]
+    short = np.ones(int(SR * 0.6), dtype=np.float32)   # < min_sec → ショートパス
+    last = None
+    for _ in range(5):                                  # 5×10字 = 50 >= 45
+        last = vp.classify(short, "1", count=True, chars=10)
+    assert last == "人物1"
+    assert "人物1" in vp.profiles
+
+
 def test_low_total_chars_never_registers():
     """累積が閾値に届かない（中身の薄い発話ばかり）なら登録しない."""
     vp = _tracker()
