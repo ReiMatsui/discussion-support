@@ -70,7 +70,6 @@ class LiveArgs:
     vp_no_auto: bool = False
     vp_debug: bool = False
     polish: bool = False
-    speaker_polish: bool = False
     stt: str = "soniox"
     # Sonioxのエンドポイント検出（文の切れ目で区切る＝議事録が読みやすい）。既定ON。
     soniox_endpoint: bool = True
