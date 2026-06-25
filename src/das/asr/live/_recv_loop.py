@@ -25,7 +25,7 @@ class RecvLoop:
     STTプロバイダには依存しない（バックエンドが変換済みトークンを供給）。
     """
 
-    _FLUSH_SILENCE = 1.6      # 最終トークンが来ない無音がこの秒数続いたら確定（自前の区切り）
+    _FLUSH_TIMEOUT = 30.0     # トークンが来なくなってからの強制flush（秒）
     _FLUSH_SOFT_CHARS = 500   # この文字数を超えたら文の切れ目でflush
     _FLUSH_HARD_CHARS = 1000  # この文字数を超えたら問答無用で強制flush
 
@@ -203,15 +203,11 @@ class RecvLoop:
                     else:
                         partial += text
                         partial_sp = token.get("speaker") or partial_sp
-                # --- 強制flush ---
-                # 区切りは「話者変化」(上)＋「無音」＋文字数で行う。エンドポイント検出OFF時の
-                # 主な区切りはこの無音flush。Sonioxの確定タイミングには影響しない
-                # （既に is_final になったトークンをまとめるだけ）。
+                # --- 強制flush（区切りは Soniox の <end>(エンドポイント)＋話者変化＋文字数）---
                 if self.cur_text:
                     clen = len(self.cur_text)
-                    idle = time.monotonic() - self.cur_last_token_time
-                    if (idle > self._FLUSH_SILENCE
-                            or clen > self._FLUSH_HARD_CHARS
+                    if ((time.monotonic() - self.cur_last_token_time > self._FLUSH_TIMEOUT
+                            or clen > self._FLUSH_HARD_CHARS)
                             or (clen > self._FLUSH_SOFT_CHARS
                                 and self.cur_text.rstrip()[-1:] in "。？！.?!\n")):
                         self.flush()

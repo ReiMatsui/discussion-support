@@ -12,11 +12,10 @@ class SonioxBackend:
     Sonioxのトークン形式がそのまま内部形式なので、parse_messageはパススルー。
     """
 
-    def __init__(self, api_key: str, enable_endpoint_detection: bool = False):
+    def __init__(self, api_key: str, enable_endpoint_detection: bool = True):
         self._api_key = api_key
-        # 公式ドキュメント: エンドポイント検出はトークンを早期確定させ、揺れている
-        # 途中の話者ラベルをロックして話者分離の精度を下げる。既定はOFF。
-        # https://soniox.com/docs/stt/concepts/speaker-diarization
+        # エンドポイント検出ON: Sonioxが文の切れ目で自然に区切るので議事録が読みやすい。
+        # （OFFにすると理論上は話者分離精度が上がるが、実環境では音声入力が壁のため効果なし）
         self._enable_endpoint_detection = enable_endpoint_detection
 
     @property

@@ -68,9 +68,8 @@ class LiveArgs:
     vp_debug: bool = False
     polish: bool = False
     stt: str = "soniox"
-    # Sonioxのエンドポイント検出。公式は「話者分離の精度を下げる(早期確定で揺れる
-    # ラベルをロックする)」と明記しているため既定はOFF。A/B比較用に切替可能。
-    soniox_endpoint: bool = False
+    # Sonioxのエンドポイント検出（文の切れ目で区切る＝議事録が読みやすい）。既定ON。
+    soniox_endpoint: bool = True
     port: int = 8231
     agent: bool = False
     agent_voice: str = "shimmer"
