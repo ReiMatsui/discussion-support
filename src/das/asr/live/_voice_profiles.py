@@ -410,41 +410,25 @@ class VoiceProfiles:
                     if target is not None:
                         return target
         elif count and wav.size >= SR * self.short_floor:
-            # 短い発話: 取り違えの安定化に加え、登録の累積にも寄与させる
-            # （短い応酬ばかりでも登録が進むように）。
-            emb = self._embed(wav)
-            if emb is not None:
-                active = self._active_human()
-                # ① AI声紋エコーは先に弾く（登録を汚さないため、短い発話でも）
-                ai = self._ai_echo(emb, active)
-                if ai is not None:
-                    self.sp_map[sp] = ai[0]
-                    self._note("AI声紋一致", label=sp, sim=round(ai[1], 3), key=ai[0])
-                    return ai[0]
-                # ② 既知2人以上なら厳格照合で取り違えを正す
-                if len(active) >= 2:
-                    ranked = self._rank_active(emb, active)
-                    if ranked is not None:
-                        cand, sim, second = ranked
-                        strict_th = self._person_th(cand, self.thresh) + self.short_bonus
-                        if (sim >= strict_th
-                                and sim - second >= self.margin * self.short_margin_mult):
-                            self.sp_map[sp] = cand
-                            self._note("補正" if (prev is not None and not prev.startswith("#")
-                                                  and prev != cand) else "声紋一致",
-                                       label=sp, sim=round(sim, 3), second=round(second, 3),
-                                       name=cand, prev=prev, short=True)
-                            return cand
-                # ③ 登録の累積（短い発話も声の総量に寄与）。閾値に達したら確定。
-                if self.auto and chars > 0:
-                    ecs = self.consist + self.enroll_consist_bonus
-                    samples = self._segment_samples(wav, emb, chars)
-                    target = self._enroll_accumulate(samples, sp, prev, ecs)
-                    if target is not None:
-                        return target
-                # ④ 既知2人以上で決められない短い発話は、確定済みの人へ追従せず未確定に。
-                # sp_map は触らない（次の確信ある発話の連続性を保つため）。
-                if len(active) >= 2 and prev is not None and not prev.startswith("#"):
+            # 短い発話の取り違え安定化: 既知の2人以上を厳格に区別できるときだけ正す。
+            # 登録・蓄積はしない（声が短く不安定なため、登録に混ぜると精度が落ちる）。
+            active = self._active_human()
+            if len(active) >= 2:
+                emb = self._embed(wav)
+                ranked = self._rank_active(emb, active) if emb is not None else None
+                if ranked is not None:
+                    cand, sim, second = ranked
+                    strict_th = self._person_th(cand, self.thresh) + self.short_bonus
+                    if (sim >= strict_th
+                            and sim - second >= self.margin * self.short_margin_mult):
+                        self.sp_map[sp] = cand
+                        self._note("補正" if (prev is not None and not prev.startswith("#")
+                                              and prev != cand) else "声紋一致",
+                                   label=sp, sim=round(sim, 3), second=round(second, 3),
+                                   name=cand, prev=prev, short=True)
+                        return cand
+                # 厳格に決められない短い発話は、確定済みの人へ追従せず未確定に。
+                if prev is not None and not prev.startswith("#"):
                     self._note("未確定", label=sp, prev=prev, short=True)
                     return UNSURE_SPEAKER
         # 声紋で決められない（重なり/短い相槌/蓄積中）→ ラベルの直近判定に追従
