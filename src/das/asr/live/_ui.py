@@ -60,13 +60,16 @@ class _UIHandler:
                 self.send_header("Connection", "keep-alive")
                 self.end_headers()
                 last_rev = -1
+                last_partial = None
                 try:
                     while not s.stop.is_set():
                         rev = s.rev
-                        if rev != last_rev:
+                        partial = s.partial_text  # 認識途中経過も変化を見る（課題①）
+                        if rev != last_rev or partial != last_partial:
                             payload = json.dumps(s.api_snapshot(), ensure_ascii=False)
                             self.wfile.write(f"data: {payload}\n\n".encode())
                             last_rev = rev
+                            last_partial = partial
                         else:
                             self.wfile.write(b": ping\n\n")  # ハートビート
                         self.wfile.flush()

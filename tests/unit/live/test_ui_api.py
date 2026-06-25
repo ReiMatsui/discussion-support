@@ -115,11 +115,13 @@ def _serve(state):
 
 
 def test_reset_for_new_meeting():
-    """リセットで議事録・論点・カーソルはクリア、話者名は引き継ぐ（F6）."""
+    """リセットで議事録・論点・カーソル・話者ラベリングをクリアする（課題③）."""
     s = _make_state()
     s.records = [{"speaker": "#1", "text": "前の会議", "ms": 0, "end_ms": 500}]
     s.topics = [{"topic": "古い論点", "speaker": "#1"}]
     s.names["#1"] = "松井"
+    s.colors["#1"] = "\033[36m"
+    s.partial_text = "認識中…"
     s.agent_cursor = 1
     s.drift_cursor = 1
     s.drift_requests.put("脱線")
@@ -132,9 +134,60 @@ def test_reset_for_new_meeting():
     assert s.topics == []                  # 論点クリア
     assert s.agent_cursor == 0 and s.drift_cursor == 0
     assert s.drift_requests.empty()        # キューもクリア
-    assert s.names["#1"] == "松井"          # 話者名は引き継ぐ
+    assert s.names == {}                   # 話者名もリセット（課題③）
+    assert s.colors == {}                  # 色割り当てもリセット
+    assert s.partial_text == ""            # 認識途中もクリア
     assert s.out_path != old_out           # 新しい出力先
     assert s.started >= old_started        # 新しい開始時刻
+
+
+def test_reset_calls_tracker_reset_session():
+    """リセット時に声紋トラッカーのセッション状態もリセットする（課題③）."""
+    s = _make_state()
+    calls = []
+    s.tracker = type("T", (), {
+        "reset_session": lambda self: calls.append(True),
+        "all_profile_names": lambda self: [],
+        "active_profile_names": lambda self: [],
+        "profiles": {},
+    })()
+    s.reset_for_new_meeting()
+    assert calls == [True]
+
+
+# --- 課題①: 認識途中(partial)の配信 -----------------------------------------
+
+def test_show_partial_updates_state_and_snapshot():
+    """show_partial が partial を保持し、api_snapshot に載る（課題①）."""
+    s = _make_state()
+    s.records = [{"speaker": "#1", "text": "x", "ms": 0, "end_ms": 100}]
+    s.show_partial("1", "いまここを認識中")
+    assert s.partial_text == "いまここを認識中"
+    snap = s.api_snapshot()
+    assert snap["partial"]["text"] == "いまここを認識中"
+    assert snap["partial"]["speaker"] == "話者1"
+    # 空文字でクリアされる
+    s.show_partial("1", "")
+    assert s.api_snapshot()["partial"] == {"speaker": "", "text": ""}
+
+
+# --- 課題②: 安定した話者色 --------------------------------------------------
+
+def test_snapshot_speaker_colors_are_stable():
+    """同じ話者には常に同じ色が付き、records/participation で一致する（課題②）."""
+    s = _make_state()
+    s.records = [
+        {"speaker": "#1", "text": "a", "ms": 0, "end_ms": 500},
+        {"speaker": "#2", "text": "b", "ms": 500, "end_ms": 1000},
+        {"speaker": "#1", "text": "c", "ms": 1000, "end_ms": 1500},
+    ]
+    snap1 = s.api_snapshot()
+    snap2 = s.api_snapshot()
+    c1 = [r["color"] for r in snap1["records"]]
+    assert c1[0] == c1[2] and c1[0] != c1[1]      # 同一話者は同色・別話者は別色
+    assert c1 == [r["color"] for r in snap2["records"]]  # 再取得でも不変
+    part = {p["speaker"]: p["color"] for p in snap1["participation"]}
+    assert part["話者1"] == c1[0]                  # participationの色もrecordsと一致
 
 
 def test_http_reset_clears_records():
