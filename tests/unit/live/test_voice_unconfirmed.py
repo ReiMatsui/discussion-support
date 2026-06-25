@@ -37,8 +37,10 @@ def _tracker(emb: np.ndarray) -> VoiceProfiles:
     vp.short_floor = 0.45
     vp.short_bonus = 0.05
     vp.short_margin_mult = 2.0
-    vp.enroll_min_sec = 1.5
+    vp.enroll_min_total_chars = 45
+    vp.enroll_win_sec = 1.5
     vp.enroll_consist_bonus = 0.08
+    vp._POOL_CAP = 24
     vp.margin = 0.05
     vp.thresh = 0.5
     vp.consist = 0.6
@@ -49,7 +51,7 @@ def _tracker(emb: np.ndarray) -> VoiceProfiles:
     return vp
 
 
-_LONG = np.ones(int(SR * 1.6), dtype=np.float32)   # enroll_min_sec を超える
+_LONG = np.ones(int(SR * 1.6), dtype=np.float32)
 
 
 def test_new_voice_not_shown_as_registered_person():
@@ -60,11 +62,11 @@ def test_new_voice_not_shown_as_registered_person():
 
 
 def test_registration_retroactively_renames_unconfirmed():
-    """別人の声が3発話たまると人物登録され、#2→人物Nの遡及リネームが出る."""
+    """別人の声が累積して人物登録されると、#2→人物Nの遡及リネームが出る."""
     vp = _tracker(_unit(0, 1, 0))
-    assert vp.classify(_LONG, "2", count=True) == "#2"   # 1
-    assert vp.classify(_LONG, "2", count=True) == "#2"   # 2
-    assert vp.classify(_LONG, "2", count=True) == "人物1"  # 3でlabel登録
+    assert vp.classify(_LONG, "2", count=True, chars=20) == "#2"   # 20
+    assert vp.classify(_LONG, "2", count=True, chars=20) == "#2"   # 40
+    assert vp.classify(_LONG, "2", count=True, chars=20) == "人物1"  # 60 >= 45
     assert vp.last["kind"] == "自動登録"
     assert vp.last["rename"] == ("#2", "人物1")          # 過去分を遡及で確定
 

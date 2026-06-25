@@ -145,10 +145,13 @@ class VoiceProfiles:
         self.short_floor = 0.45        # 厳格照合する下限秒数（これ未満は声が短すぎるので追従）
         self.short_bonus = 0.05        # 採用閾値を本人閾値からどれだけ引き上げるか
         self.short_margin_mult = 2.0   # 要求する2位とのmargin倍率
-        # 新規人物の自動登録を厳しめに（誤登録＝以後の取り違えの種を減らす）。
-        # 照合(min_sec)よりも長いクリーンな発話だけを登録に使い、3発話の一貫性も上げる。
-        self.enroll_min_sec = 1.5         # 登録に使う発話の長さ下限（min_secより長く）
-        self.enroll_consist_bonus = 0.08  # 3発話の一貫性しきい値(cs)への上乗せ
+        # 新規人物の自動登録は「発話数」ではなく「声ごとのクリーンな発声の累積文字数」で
+        # 判定する。声紋の質は本質的に発声の総量で決まり、文字数はその良い代理（長いだけで
+        # 無音・雑音の区間を弾く）。連続して長く話す人も、短く何度も話す人も同じ原理で確定。
+        self.enroll_min_total_chars = 45  # 一貫クラスタの累積文字数がこれを超えたら登録
+        self.enroll_win_sec = 1.5         # 長い発話を分割する窓の長さ（内部一貫性の確認用）
+        self.enroll_consist_bonus = 0.08  # 一貫性しきい値(cs)への上乗せ（混入抑制）
+        self._POOL_CAP = 24               # 保留サンプルの上限（古いものから捨てる）
         self.profiles: dict[str, np.ndarray] = {}
         if os.path.exists(path):
             with open(path, encoding="utf-8") as f:
@@ -159,10 +162,10 @@ class VoiceProfiles:
                 print(f"# 注意: {path} は別の声紋モデルで作成されたため読み込みません", flush=True)
         self.sp_map: dict[str, str] = {}                    # Sonioxラベル -> 表示キー
         self.label_embs: dict[str, list[np.ndarray]] = {}   # ラベル -> 直近声紋（手動登録・校正用）
-        # 未確定の声のプール（ラベルで仕切らない）。Sonioxは新しい声を既存ラベルに混ぜて
-        # 出すことがあり、ラベル別バッファだと他話者の混入で3発話一貫が永遠に成立しない
-        # （実セッション診断: 蓄積33回vs登録3回）。声は声同士で束ねる。
-        self.pool: list[np.ndarray] = []
+        # 未確定の声の保留プール（ラベルで仕切らない）。Sonioxは新しい声を既存ラベルに混ぜて
+        # 出すことがあるので、声は声同士で束ねる。各サンプルは (声紋, 文字数) を持ち、
+        # 一貫したクラスタの累積文字数が閾値に達した時点で人物として確定する。
+        self.pool: list[tuple[np.ndarray, float]] = []
         self.n_anon = 0
         # 部屋の分布計測（表示・診断専用、判定には使わない）。かつてしきい値の自動校正に
         # 使っていたが、実セッションで未発動＋「ラベル=人物」前提が崩れている(Sonioxは
@@ -219,6 +222,81 @@ class VoiceProfiles:
         second = ranked[1][0] if len(ranked) > 1 else -1.0
         return cand, sim, second
 
+    # ------------------------------------------------------------------
+    # 自動登録（累積文字数ベース）
+    # ------------------------------------------------------------------
+    def _weighted_mean(self, embs: list[np.ndarray], weights: list[float]) -> np.ndarray:
+        """文字数で重み付けした平均声紋（長い＝信頼できるサンプルを重視）."""
+        w = np.asarray(weights, dtype=np.float64)
+        if w.sum() <= 0:
+            w = np.ones(len(embs))
+        prof = np.average(np.stack(embs), axis=0, weights=w)
+        return prof / np.linalg.norm(prof)
+
+    def _segment_samples(self, wav: np.ndarray, emb: np.ndarray,
+                         chars: float) -> list[tuple[np.ndarray, float]]:
+        """登録用サンプル列 [(声紋, 文字数), ...] を返す.
+
+        長い発話は窓に分割して複数サンプルにし、文字数を比例配分する。これにより
+        連続して長く話す人でも声紋サンプルが増え（＝登録が進む）、同時に窓どうしの
+        一貫性で「実は2人が混ざった1ターン」を弾ける。短い発話はそのまま1サンプル。
+        """
+        n = int((wav.size / SR) // self.enroll_win_sec)
+        if n <= 1:
+            return [(emb, float(chars))]
+        n = min(n, 6)   # 過剰な埋め込み計算を抑制
+        win = wav.size // n
+        samples: list[tuple[np.ndarray, float]] = []
+        for i in range(n):
+            e = self._embed(wav[i * win:(i + 1) * win])
+            if e is not None:
+                samples.append((e, chars / n))
+        return samples or [(emb, float(chars))]
+
+    def _enroll_accumulate(self, samples: list[tuple[np.ndarray, float]],
+                           sp: str, prev, ecs: float) -> str | None:
+        """サンプルを声ごとに貯め、一貫クラスタの累積文字数が閾値を超えたら登録.
+
+        現在の声(anchor)と一貫する保留サンプルを集め、その累積文字数が閾値に達したら
+        その人物を確定する。戻り値: 確定した人物キー、まだ足りなければ None。
+        """
+        self.pool.extend(samples)
+        if len(self.pool) > self._POOL_CAP:
+            del self.pool[:-self._POOL_CAP]
+        anchor = samples[-1][0]
+        idx = [i for i, (e, _c) in enumerate(self.pool)
+               if float(np.dot(e, anchor)) >= ecs]
+        total = sum(self.pool[i][1] for i in idx)
+        if total < self.enroll_min_total_chars:
+            return None
+        embs = [self.pool[i][0] for i in idx]
+        wts = [self.pool[i][1] for i in idx]
+        prof = self._weighted_mean(embs, wts)
+        drop = set(idx)
+        self.pool = [s for i, s in enumerate(self.pool) if i not in drop]
+        return self._commit_profile(prof, sp, prev, total)
+
+    def _commit_profile(self, prof: np.ndarray, sp: str, prev,
+                        total_chars: float) -> str:
+        """クラスタの代表声紋を、既存人物に合流 or 新規人物として確定する."""
+        active = self._active_human()
+        hit_sim, hit = max(((float(np.dot(p, prof)), n) for n, p in active.items()),
+                           default=(-1.0, None))
+        if hit is not None and hit_sim >= self.dedupe:
+            target, is_new = hit, False   # 既存人物の声だった → 合流（重複登録を防ぐ）
+        else:
+            self.n_anon += 1
+            target = f"人物{self.n_anon}"
+            self.profiles[target] = prof   # 新規人物（以後凍結）
+            self._active_keys.add(target)
+            is_new = True
+        # 遡及置換は未確定キー(#ラベル)の昇格のみ。人物キーは絶対に書き換えない。
+        rename = ("#" + sp, target) if (prev is None or prev.startswith("#")) else None
+        self.sp_map[sp] = target
+        self._note("自動登録" if is_new else "合流", label=sp, name=target,
+                   rename=rename, chars=round(total_chars))
+        return target
+
     def _note(self, kind: str, **info) -> None:
         self.counts[kind] = self.counts.get(kind, 0) + 1
         self.last = {"kind": kind, **info}
@@ -250,21 +328,21 @@ class VoiceProfiles:
         return emb / np.linalg.norm(emb)
 
     def classify(self, wav: np.ndarray, sp, overlapped: bool = False,
-                 count: bool = True, enroll: bool = True) -> str:
+                 count: bool = True, chars: int = 0) -> str:
         """発話を人物キーに割り当てる（経路はクラスドキュメント参照）.
 
         overlapped=True の発話は声が混ざっていて声紋がデタラメになるため、
         声での判定をスキップして直前の対応を維持する。
         count=False（相槌など）の発話は声紋の蓄積・人物登録に使わず、
         既存の割り当てに追従するだけにする（課題④）。
-        enroll=False の発話は照合には使うが、新規人物の自動登録には使わない
-        （文字数が少ない等、中身が薄く登録素材に適さない発話）。
+        chars はその発話の文字数。新規人物の自動登録は、声ごとにこの文字数を
+        累積し、一貫したクラスタが閾値を超えた時点で確定する（発話数では数えない）。
         """
         with self._lock:
-            return self._classify(wav, sp, overlapped, count, enroll)
+            return self._classify(wav, sp, overlapped, count, chars)
 
     def _classify(self, wav: np.ndarray, sp, overlapped: bool,
-                  count: bool = True, enroll: bool = True) -> str:
+                  count: bool = True, chars: int = 0) -> str:
         sp = str(sp)
         prev = self.sp_map.get(sp)
         kind, info = "相槌追従", {}
@@ -278,7 +356,7 @@ class VoiceProfiles:
                 self._update_room_stats(sp, emb)   # 部屋の同一/別人分布を実測(表示・診断用)
                 self.label_embs.setdefault(sp, []).append(emb)
                 del self.label_embs[sp][:-10]    # 手動登録用に直近10発話だけ保持
-                th, dd, cs = self.thresh, self.dedupe, self.consist
+                th, cs = self.thresh, self.consist
                 # AI声紋は通常の話者ランキングから分離（margin/dedupeへの干渉を防ぐ）
                 # __AI__ (ファシリテーター) と __PARTNER__ (会話相手) の両方を対象
                 _ai_keys = {k for k in self._active_keys if k.startswith("__") and k.endswith("__")}
@@ -317,42 +395,15 @@ class VoiceProfiles:
                     pv = active.get(prev)
                     if pv is None or float(np.dot(pv, emb)) < self._person_th(prev, th):
                         prev = None
-                # 登録は厳しめ: 照合より長いクリーンな発話で、かつ中身のある発話だけ使う
-                eligible = enroll and wav.size >= SR * self.enroll_min_sec
-                kind = "蓄積中" if (self.auto and eligible) else "未確定"
-                if self.auto and eligible:
-                    # 声プール: ラベル不問で、互いに一貫する3発話が揃ったら人物化。
-                    # 一貫性しきい値は cs に bonus を上乗せして締める（誤登録抑制）。
+                # 登録: 発話数ではなく「声ごとのクリーンな発声の累積文字数」で確定する。
+                # 長い発話は窓分割して複数サンプル化（連続発話でも登録が進み、内部一貫性も確認）。
+                kind = "蓄積中" if (self.auto and chars > 0) else "未確定"
+                if self.auto and chars > 0:
                     ecs = cs + self.enroll_consist_bonus
-                    sims = sorted(((float(np.dot(p, emb)), i) for i, p in enumerate(self.pool)),
-                                  reverse=True)
-                    cand = [i for s, i in sims[:2] if s >= ecs]
-                    if len(cand) == 2 and float(np.dot(self.pool[cand[0]],
-                                                       self.pool[cand[1]])) >= ecs:
-                        triple = [self.pool[cand[0]], self.pool[cand[1]], emb]
-                        for i in sorted(cand, reverse=True):
-                            self.pool.pop(i)
-                        prof = np.mean(triple, axis=0)
-                        prof = prof / np.linalg.norm(prof)
-                        hit_sim, hit = max(((float(np.dot(p, prof)), n)
-                                            for n, p in active.items()), default=(-1.0, None))
-                        if hit is not None and hit_sim >= dd:
-                            target = hit          # アクティブな既存人物の声だった → 合流
-                            is_new = False
-                        else:
-                            self.n_anon += 1
-                            target = f"人物{self.n_anon}"
-                            self.profiles[target] = prof   # 新規人物（以後凍結）
-                            self._active_keys.add(target)  # セッション中の新規人物は自動アクティブ
-                            is_new = True
-                        # 遡及置換は未確定キー(#ラベル)の昇格のみ。人物キーは絶対に書き換えない。
-                        rename = ("#" + sp, target) if (prev is None or prev.startswith("#")) else None
-                        self.sp_map[sp] = target
-                        kind = "自動登録" if is_new else "合流"
-                        self._note(kind, label=sp, name=target, rename=rename)
+                    samples = self._segment_samples(wav, emb, chars)
+                    target = self._enroll_accumulate(samples, sp, prev, ecs)
+                    if target is not None:
                         return target
-                    self.pool.append(emb)
-                    del self.pool[:-12]
         elif count and wav.size >= SR * self.short_floor:
             # 短い発話の取り違え安定化: 既知の2人以上を厳格に区別できるときだけ正す。
             # 登録・蓄積はせず（声が短く不安定）、はっきり別人と分かる場合のみ割り当てを変える。

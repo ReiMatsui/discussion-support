@@ -1,7 +1,8 @@
-"""自動登録を厳しめにする条件（長さ下限・一貫性しきい値の上乗せ）のテスト.
+"""累積文字数ベースの自動登録のテスト.
 
-VoiceProfiles.__init__ はMLモデルを読むため、__new__ で必要フィールドだけ用意し、
-_embed をスタブして登録ゲートの挙動を検証する。
+「発話数」ではなく「声ごとのクリーンな発声の累積文字数」で登録する。長い連続発話は
+窓分割で複数サンプル化して即登録でき、短い発話は累積で登録される。混在した声は
+束ねられず、十分量に達した声だけが確定する。
 """
 from __future__ import annotations
 
@@ -35,57 +36,67 @@ def _tracker() -> VoiceProfiles:
     vp.short_floor = 0.45
     vp.short_bonus = 0.05
     vp.short_margin_mult = 2.0
-    vp.enroll_min_sec = 1.5
+    vp.enroll_min_total_chars = 45
+    vp.enroll_win_sec = 1.5
     vp.enroll_consist_bonus = 0.08
+    vp._POOL_CAP = 24
     vp.margin = 0.05
     vp.thresh = 0.5
-    vp.consist = 0.34   # redimnet既定
+    vp.consist = 0.34
     vp.dedupe = 0.5
     vp.model = "redimnet"
     vp.auto = True
     return vp
 
 
-_LONG = np.ones(int(SR * 1.6), dtype=np.float32)          # >= enroll_min_sec
-_MID = np.ones(int(SR * 1.2), dtype=np.float32)           # min_sec <= x < enroll_min_sec
-
-
-def test_clean_long_utterances_register():
-    """十分長くクリーンな3発話がそろえば従来どおり人物登録される."""
+def test_long_continuous_utterance_registers_at_once():
+    """1回の長い連続発話（窓分割で複数サンプル化）だけで即登録される."""
     vp = _tracker()
     vp._embed = lambda wav: _unit(1, 0, 0)  # type: ignore[method-assign]
-    assert vp.classify(_LONG, "1", count=True) == "#1"
-    assert vp.classify(_LONG, "1", count=True) == "#1"
-    assert vp.classify(_LONG, "1", count=True) == "人物1"
+    long_wav = np.ones(int(SR * 6), dtype=np.float32)   # 6秒 → 4窓
+    assert vp.classify(long_wav, "1", count=True, chars=60) == "人物1"
     assert "人物1" in vp.profiles
 
 
-def test_mid_length_utterances_do_not_register():
-    """min_sec以上でも enroll_min_sec 未満の発話は登録に使わない（蓄積もしない）."""
+def test_short_utterances_accumulate_then_register():
+    """短い発話でも累積文字数が閾値を超えれば登録される."""
     vp = _tracker()
     vp._embed = lambda wav: _unit(1, 0, 0)  # type: ignore[method-assign]
-    for _ in range(4):
-        assert vp.classify(_MID, "1", count=True) == "#1"
-    assert vp.profiles == {}
-    assert vp.pool == []
+    mid = np.ones(int(SR * 1.2), dtype=np.float32)
+    assert vp.classify(mid, "1", count=True, chars=12) == "#1"   # 12
+    assert vp.classify(mid, "1", count=True, chars=12) == "#1"   # 24
+    assert vp.classify(mid, "1", count=True, chars=12) == "#1"   # 36
+    assert vp.classify(mid, "1", count=True, chars=12) == "人物1"  # 48 >= 45
 
 
-def test_low_content_utterances_do_not_register():
-    """長くても enroll=False（文字数が少ない等）の発話は登録に使わない."""
+def test_low_total_chars_never_registers():
+    """累積が閾値に届かない（中身の薄い発話ばかり）なら登録しない."""
     vp = _tracker()
     vp._embed = lambda wav: _unit(1, 0, 0)  # type: ignore[method-assign]
-    for _ in range(4):
-        assert vp.classify(_LONG, "1", count=True, enroll=False) == "#1"
+    mid = np.ones(int(SR * 1.2), dtype=np.float32)
+    for _ in range(6):
+        assert vp.classify(mid, "1", count=True, chars=5) == "#1"
     assert vp.profiles == {}
-    assert vp.pool == []
 
 
-def test_loose_consistency_blocked_by_bonus():
-    """3発話の一貫性が緩い（cs=0.34は超えるがecs=0.42未満）なら登録しない."""
+def test_mixed_voices_do_not_pool_together():
+    """別々の声は束ねられない（混ざって早期登録されない）."""
     vp = _tracker()
-    vp._embed = lambda wav: _unit(1, 0, 0)  # type: ignore[method-assign]
-    vp.classify(_LONG, "1", count=True)     # pool e1
-    vp.classify(_LONG, "1", count=True)     # pool e2
-    vp._embed = lambda wav: _unit(0.38, 0.925, 0)  # vecAと0.38しか似ていない
-    assert vp.classify(_LONG, "1", count=True) == "#1"   # 登録されない
-    assert vp.profiles == {}
+    mid = np.ones(int(SR * 1.2), dtype=np.float32)
+    voice_a, voice_b = _unit(1, 0, 0), _unit(0, 1, 0)
+    for v in (voice_a, voice_b, voice_a, voice_b):   # A,B各40字ぶん貯まるが閾値未満
+        vp._embed = lambda wav, _v=v: _v
+        assert vp.classify(mid, "1", count=True, chars=20) == "#1"
+    assert vp.profiles == {}                    # どちらもまだ登録されない
+    vp._embed = lambda wav: voice_a              # Aがもう1回 → Aだけ60字で登録
+    assert vp.classify(mid, "1", count=True, chars=20) == "人物1"
+
+
+def test_commit_merges_into_existing_person():
+    """累積した声が既存人物と一致すれば、新規ではなく合流（重複登録を防ぐ）."""
+    vp = _tracker()
+    vp.profiles = {"山下くん": _unit(1, 0, 0)}
+    vp._active_keys = {"山下くん"}
+    assert vp._commit_profile(_unit(1, 0, 0), "2", None, 50) == "山下くん"
+    assert vp.last["kind"] == "合流"
+    assert not any(k.startswith("人物") for k in vp.profiles)
