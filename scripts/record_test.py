@@ -23,6 +23,15 @@ import wave
 import numpy as np
 
 
+def _print_device():
+    import sounddevice as sd
+    try:
+        dev = sd.query_devices(kind="input")
+        print(f"# 入力デバイス: {dev['name']}（既定サンプルレート {int(dev['default_samplerate'])}Hz）")
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _record(seconds: int, rate: int) -> np.ndarray:
     import sounddevice as sd
     print(f"  ● {rate}Hz で {seconds}秒 録音します。マイクに普通の距離で喋ってください。")
@@ -56,6 +65,7 @@ def main():
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from check_audio import analyze
 
+    _print_device()
     rates = [args.rate] if args.rate else [16000, 48000]
     outdir = tempfile.mkdtemp(prefix="rectest_")
     paths = []
@@ -68,19 +78,26 @@ def main():
     except Exception as e:
         sys.exit(f"録音に失敗しました（マイク権限/デバイスを確認）: {type(e).__name__}: {e}")
 
+    metrics = {}
     for rate, p in paths:
         tag = "アプリと同じ取り込み" if rate == 16000 else "ネイティブ・参考"
         print(f"\n========== {rate}Hz ({tag}) ==========")
-        analyze(p)
+        metrics[rate] = analyze(p)
 
-    if len(paths) == 2:
-        print("\n=== 切り分け（48kHz vs 16kHz の高域を比べる） ===")
-        print("  48kHzに4kHz以上の高域があるのに16kHzで乏しい")
-        print("    → 16kHz直接取り込みが原因。アプリを『48kHzで録って16kHzに落とす』に変えれば回収可能。")
-        print("  どちらも高域が乏しい")
-        print("    → マイク/距離の問題。近接マイク・卓上USBマイク・距離短縮が要る。")
-        print("  どちらも高域が十分")
-        print("    → 近接ならOK。崩れた本番は『遠かった』のが原因＝位置取りで改善。")
+    if 16000 in metrics and 48000 in metrics:
+        m16, m48 = metrics[16000], metrics[48000]
+        print("\n=== 自動判定 ===")
+        if m48["hi4k"] >= 5 and m48["hi4k"] >= m16["hi4k"] * 2:
+            print("  → 48kHzに高域があるのに16kHzで失われている。"
+                  "原因は16kHz直接取り込み。アプリ改修（48kで録って16kへ）で回収可能。")
+        elif m48["hi4k"] < 3 and m16["hi4k"] < 3:
+            print("  → 48kHz(マイクの素)でも高域がほぼ無い。変換は無実で、"
+                  "原因はマイク/距離/ゲイン/macOS処理。アプリ改修では直らない。")
+            if m48["rms_db"] < -28:
+                print("    ※レベルも低い(-28dBFS未満)。まず System設定→サウンド→入力 の"
+                      "デバイスと入力音量を確認し、近接して録り直すと改善するか見る。")
+        else:
+            print("  → 中間的。近接＋入力レベルを上げて録り直し、再判定を推奨。")
 
     if args.keep:
         print(f"\n録音を残しました: {outdir}")

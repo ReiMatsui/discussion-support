@@ -77,10 +77,12 @@ def analyze(path: str):
         if a >= 2000:
             hi_energy += pct
         print(f"#   {a:5d}-{b:5d}Hz: {pct:5.1f}%  " + "#" * int(pct / 2))
+    above4k = float(acc[freqs >= 4000].sum() / total * 100)
     cum = np.cumsum(acc) / total
     f95 = freqs[min(np.searchsorted(cum, 0.95), len(freqs) - 1)]
+    rms_db = 20 * np.log10(rms + 1e-9)
     print(f"# エネルギー95%到達 {f95:.0f}Hz（{sr // 2}Hzが上限）"
-          f"  / 2kHz以上の割合 {hi_energy:.1f}%")
+          f"  / 2kHz以上 {hi_energy:.1f}%  / 4kHz以上 {above4k:.1f}%")
 
     # 所見
     print("\n=== 所見 ===")
@@ -89,7 +91,7 @@ def analyze(path: str):
         issues.append("こもり（高域が乏しく話者の個人差が入っていない）")
     if snr < 18:
         issues.append("SNRが低い（雑音/反響が多い）")
-    if 20 * np.log10(rms + 1e-9) < -28:
+    if rms_db < -28:
         issues.append("録音レベルが低い")
     if issues:
         print("  問題: " + " / ".join(issues))
@@ -98,6 +100,8 @@ def analyze(path: str):
               "マイク距離短縮・入力レベル調整を検討。")
     else:
         print("  音声品質は良好。分離が崩れるなら入力以外（重なり/短さ/ロジック）が主因。")
+    return {"rms_db": rms_db, "snr": snr, "hi2k": hi_energy,
+            "hi4k": above4k, "f95": float(f95)}
 
 
 def main():
