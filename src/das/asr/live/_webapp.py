@@ -89,6 +89,14 @@ INDEX_HTML = """<!doctype html>
     background: #fff; border: 1px solid var(--line); border-left: 3px solid #8b5cf6;
     border-radius: 6px; }
   .topic .by { font-size: .68rem; color: #9ca3af; }
+  .spk-row { display: flex; align-items: center; gap: 5px; margin-bottom: .4em; }
+  .spk-name { width: 4em; flex-shrink: 0; font-weight: 600; font-size: .82rem;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .spk-input { flex: 1; min-width: 0; font-size: .8rem; border: 1px solid #d1d5db;
+    border-radius: 5px; padding: .2em .4em; }
+  .spk-btn { font-size: .74rem; background: var(--accent); color: #fff; border: none;
+    border-radius: 5px; padding: .25em .55em; cursor: pointer; white-space: nowrap; }
+  .spk-btn:hover { background: #1d4ed8; }
 </style>
 </head>
 <body>
@@ -107,6 +115,9 @@ INDEX_HTML = """<!doctype html>
       <div class="transcript" id="transcript"><div class="empty">まだ発話がありません</div></div>
     </div>
     <div class="side">
+      <div class="panel" id="spk-panel" hidden>
+        <h2>話者の名前を登録</h2><div id="speakers"></div>
+      </div>
       <div class="panel" id="part-panel" hidden>
         <h2>発言量</h2><div id="participation"></div>
       </div>
@@ -191,6 +202,34 @@ function renderParticipation(list) {
   }).join("");
 }
 
+function renderSpeakers(list) {
+  const panel = $("spk-panel");
+  const items = (list || []).filter((s) => s.renameable);
+  if (!items.length) { panel.hidden = true; return; }
+  panel.hidden = false;
+  $("speakers").innerHTML = items.map((s) =>
+    `<div class="spk-row">`
+    + `<span class="spk-name" style="color:${speakerColor(s.name)}" title="${esc(s.name)}">${esc(s.name)}</span>`
+    + `<input class="spk-input" data-label="${esc(s.label)}" placeholder="名前">`
+    + `<button class="spk-btn">登録</button></div>`
+  ).join("");
+  for (const btn of $("speakers").querySelectorAll(".spk-btn")) {
+    btn.onclick = () => rename(btn.previousElementSibling);
+  }
+}
+
+async function rename(input) {
+  const label = input.dataset.label, name = input.value.trim();
+  if (!name) return;
+  try {
+    await fetch("/rename", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ label, name }),
+    });
+    input.value = "";  // 反映はSSEで届く
+  } catch (e) { alert("名前の登録に失敗しました"); }
+}
+
 function renderTopics(list) {
   const panel = $("topic-panel");
   if (!list || !list.length) { panel.hidden = true; return; }
@@ -203,6 +242,7 @@ function renderTopics(list) {
 function render(state) {
   renderModes(state.mode);
   renderTranscript(state.records || []);
+  renderSpeakers(state.speakers);
   renderParticipation(state.participation);
   renderTopics(state.topics);
   setStatus(state.running);

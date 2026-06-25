@@ -156,6 +156,21 @@ class SessionState:
             return "converse"
         return "facilitate"
 
+    def _speaker_label(self, key: str) -> str | None:
+        """話者リネーム(/rename)に渡すラベルを返す。リネーム不可なら None.
+
+        - "#N"（声紋なし）→ "N"
+        - 声紋ありの話者キー → tracker.sp_map(label→key) の逆引きでラベルを得る
+        """
+        key = str(key)
+        if key.startswith("#"):
+            return key[1:]
+        if self.tracker is not None:
+            for lbl, k in self.tracker.sp_map.items():
+                if k == key:
+                    return lbl
+        return None
+
     def api_snapshot(self) -> dict:
         """UI(API)向けの現在状態（JSON化可能なdict）を返す."""
         with self.state_lock:
@@ -173,8 +188,19 @@ class SessionState:
                         "text": r.get("text", ""),
                         "corrected": r.get("vp") == "補正",
                     })
-            speakers = list(dict.fromkeys(
-                self.disp_name(r["speaker"]) for r in raw if "speaker" in r))
+            speakers = []
+            _seen: set[str] = set()
+            for r in raw:
+                key = str(r.get("speaker", "")) if "speaker" in r else ""
+                if not key or key in (AGENT_SPEAKER, "パートナー"):
+                    continue  # AI話者はリネーム対象外
+                name = self.disp_name(key)
+                if name in _seen:
+                    continue
+                _seen.add(name)
+                label = self._speaker_label(key)
+                speakers.append({"name": name, "label": label,
+                                 "renameable": label is not None})
         with self.topics_lock:
             topics = [{"topic": t.get("topic", ""), "speaker": t.get("speaker", "")}
                       for t in self.topics]

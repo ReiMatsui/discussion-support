@@ -56,6 +56,38 @@ def test_session_mode_converse_with_partner():
 
 # --- api_snapshot -----------------------------------------------------------
 
+def test_api_snapshot_speakers_have_rename_labels():
+    """話者にリネーム用ラベルが付き、AI話者は除外される（F5）."""
+    s = _make_state()
+    s.records = [
+        {"speaker": "#1", "text": "a", "ms": 0, "end_ms": 500},
+        {"speaker": "ファシリテーター", "text": "x", "ms": None, "end_ms": None},
+    ]
+    by_name = {sp["name"]: sp for sp in s.api_snapshot()["speakers"]}
+    assert "話者1" in by_name
+    assert by_name["話者1"]["label"] == "1"
+    assert by_name["話者1"]["renameable"] is True
+    assert "ファシリテーター" not in by_name  # AI話者はリネーム対象外
+
+
+def test_http_rename_without_tracker():
+    """/rename（声紋なし）で表示名が更新される（SPAのリネームフロー）."""
+    s = _make_state()
+    s.records = [{"speaker": "#2", "text": "hi", "ms": 0, "end_ms": 500}]
+    httpd, port = _serve(s)
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/rename",
+            data=json.dumps({"label": "2", "name": "田中"}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req) as r:
+            out = json.loads(r.read())
+        assert out.get("ok") is True
+        assert s.names["#2"] == "田中"
+    finally:
+        httpd.shutdown()
+
+
 def test_api_snapshot_structure():
     s = _make_state()
     s.records = [
