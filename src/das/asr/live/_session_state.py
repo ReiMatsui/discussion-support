@@ -32,6 +32,7 @@ from ._voice_profiles import VoiceProfiles
 from .agents._partner import ConversationPartner
 from .agents._realtime import RealtimeAgent
 from .agents._simulator import DiscussionSimulator
+from .facilitation import FacilitationJournal
 
 
 class SessionState:
@@ -45,7 +46,8 @@ class SessionState:
     # 初期化
     # ------------------------------------------------------------------
     def __init__(self, *, args, started, out_path, html_path, diag_path,
-                 turns_path, wav_path, tracker=None, serve=True):
+                 turns_path, wav_path, intervention_path=None,
+                 tracker=None, serve=True):
         self.args = args
         self.started = started
         self.out_path = out_path
@@ -53,6 +55,11 @@ class SessionState:
         self.diag_path = diag_path
         self.turns_path = turns_path
         self.wav_path = wav_path
+        self.intervention_path = (
+            intervention_path
+            or os.path.splitext(out_path)[0] + ".interventions.jsonl"
+        )
+        self.facilitation_journal = FacilitationJournal(self.intervention_path)
         self._serve = serve
 
         # 発話記録
@@ -90,7 +97,7 @@ class SessionState:
         # ファシリテーター発言の副作用イベント（議事録追加・パートナー反応）。
         # agentの受信スレッドはここに積むだけにして、専用ワーカーが処理する。
         # 受信スレッドが partner の WebSocket 送信やファイルI/Oでブロックするのを防ぐ。
-        self.fac_events: queue.Queue[tuple[str, str | None]] = queue.Queue()
+        self.fac_events: queue.Queue = queue.Queue()
         # 積極性プロファイル（S5）。bootstrapで --proactivity から上書きされる。
         self.proactivity: dict = dict(_PROACTIVITY_PROFILES[_PROACTIVITY_DEFAULT])
         # UIからの停止フック（F1）。run_sessionが「stopを立ててwsを閉じる」関数を設定する。
@@ -328,6 +335,8 @@ class SessionState:
         self.html_path = base + ".html"
         self.diag_path = base + ".diag.jsonl"
         self.turns_path = base + ".turns.jsonl"
+        self.intervention_path = base + ".interventions.jsonl"
+        self.facilitation_journal.set_path(self.intervention_path)
         self.wav_path = base + ".wav"
         self.open_wav()        # 新しい録音を開く（PCMバッファもリセットしSTTのmsと整合）
 

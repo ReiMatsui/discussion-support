@@ -10,6 +10,11 @@ import threading
 import time
 
 from das.asr.live._workers import _run_agent_worker
+from das.asr.live.facilitation import (
+    FacilitationEvent,
+    FacilitationEventType,
+    FacilitationJournal,
+)
 
 
 class FakeAgent:
@@ -33,12 +38,15 @@ class FakeAgent:
     def feed(self, speaker: str, text: str, **kw) -> None:  # pragma: no cover
         pass
 
-    def trigger(self, *, topics=None, drift_reason=None, invite_target=None) -> None:
+    def trigger(self, *, topics=None, drift_reason=None, invite_target=None,
+                intervention_id=None, trigger_kind=None,
+                trigger_reason=None) -> bool:
         self.trigger_calls.append({"topics": topics, "drift_reason": drift_reason,
                                    "invite_target": invite_target})
         # 実エージェントの挙動を模倣: トリガーで介入と保留発話を消費
         self._pending_intervention = None
         self._pending.clear()
+        return True
 
     def interrupt(self) -> None:  # pragma: no cover
         pass
@@ -381,3 +389,26 @@ def test_event_worker_speech_start_interrupts_partner():
     state.fac_events.put(("speech_start", None))
     _run_event_worker_briefly(state, lambda t: None, until=lambda: p.interrupts > 0)
     assert p.interrupts == 1
+
+
+def test_event_worker_writes_to_path_captured_when_event_was_emitted(tmp_path):
+    """会議切替後に処理されても、イベント発生時の会議ファイルへ保存する."""
+    state = FakeState(FakeAgent(), None)
+    old_path = tmp_path / "old.interventions.jsonl"
+    new_path = tmp_path / "new.interventions.jsonl"
+    state.intervention_path = str(new_path)
+    state.facilitation_journal = FacilitationJournal(new_path)
+    event = FacilitationEvent.create(
+        FacilitationEventType.RESPONSE_COMPLETED,
+        "int_old_meeting",
+    )
+    state.fac_events.put(("journal", event, str(old_path)))
+
+    _run_event_worker_briefly(
+        state,
+        lambda text: None,
+        until=old_path.exists,
+    )
+
+    assert "int_old_meeting" in old_path.read_text(encoding="utf-8")
+    assert not new_path.exists()

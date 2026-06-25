@@ -47,6 +47,11 @@ from ._constants import (
 from ._participation import participation_stats
 from ._polish import polish
 from ._ui import _print_line
+from .facilitation import (
+    FacilitationEvent,
+    FacilitationEventType,
+    new_intervention_id,
+)
 
 
 def _run_agenda_detector(state: SessionState, oai_key: str, oai_model: str):
@@ -253,6 +258,18 @@ def _on_agent_text_factory(state: SessionState):
     return _on_agent_text
 
 
+def _enqueue_facilitation_event(
+    state: SessionState,
+    event: FacilitationEvent,
+) -> None:
+    """イベント発生時点の会議ログ出力先と一緒にキューへ積む."""
+    target_path = getattr(state, "intervention_path", None)
+    if target_path is None:
+        state.fac_events.put(event)
+    else:
+        state.fac_events.put(("journal", event, target_path))
+
+
 def _run_facilitator_event_worker(state: SessionState, on_text):
     """ファシリテーター発言の副作用を受信スレッドから切り離して処理する.
 
@@ -261,12 +278,25 @@ def _run_facilitator_event_worker(state: SessionState, on_text):
     イベントは FIFO で処理され、順序（speech_start→utterance）は保たれる。
     state.partner / state.simulator は動的参照（実行中の接続/切断に追従, F3）。
     """
-    while not state.stop.is_set():
+    while not state.stop.is_set() or not state.fac_events.empty():
         try:
-            kind, text = state.fac_events.get(timeout=0.5)
+            event = state.fac_events.get(timeout=0.5)
         except queue.Empty:
             continue
         try:
+            if (isinstance(event, tuple) and len(event) == 3
+                    and event[0] == "journal"):
+                _, facilitation_event, target_path = event
+                journal = getattr(state, "facilitation_journal", None)
+                if journal is not None:
+                    journal.append(facilitation_event, path=target_path)
+                continue
+            if isinstance(event, FacilitationEvent):
+                journal = getattr(state, "facilitation_journal", None)
+                if journal is not None:
+                    journal.append(event)
+                continue
+            kind, text = event
             if kind == "utterance" and text is not None:
                 on_text(text)
                 if "介入不要" not in text:
@@ -291,6 +321,7 @@ def _connect_agent(state: SessionState, on_text):
     # 受信スレッドはイベントを積むだけ。副作用は専用ワーカーで処理（受信ブロック回避）。
     agent.on_ai_utterance = lambda text: state.fac_events.put(("utterance", text))
     agent.on_speech_start = lambda: state.fac_events.put(("speech_start", None))
+    agent.on_facilitation_event = lambda event: _enqueue_facilitation_event(state, event)
     threading.Thread(target=_run_facilitator_event_worker,
                      args=(state, on_text), daemon=True).start()
 
@@ -392,6 +423,42 @@ def _run_agent_worker(state: SessionState):
     _pending_drift_reason: str | None = None  # drift_checkerからの未処理介入要求（R2）
     _pending_invite: str | None = None  # participation_checkerからの声かけ要求（S4）
     _last_invited: str | None = None    # 直近に声をかけた相手（連続回避）
+
+    def _request_intervention(
+        trigger_kind: str,
+        *,
+        trigger_reason: str,
+        topics: list[dict] | None = None,
+        drift_reason: str | None = None,
+        invite_target: str | None = None,
+    ) -> bool:
+        """介入IDを発行し、発火要求からRealtime送信までを同じIDで関連付ける."""
+        intervention_id = new_intervention_id()
+        _enqueue_facilitation_event(state, FacilitationEvent.create(
+            FacilitationEventType.TRIGGER_REQUESTED,
+            intervention_id,
+            trigger_kind=trigger_kind,
+            trigger_reason=trigger_reason,
+            details={"pending_count": agent.pending_count},
+        ))
+        accepted = agent.trigger(
+            topics=topics,
+            drift_reason=drift_reason,
+            invite_target=invite_target,
+            intervention_id=intervention_id,
+            trigger_kind=trigger_kind,
+            trigger_reason=trigger_reason,
+        )
+        if not accepted:
+            _enqueue_facilitation_event(state, FacilitationEvent.create(
+                FacilitationEventType.TRIGGER_SUPPRESSED,
+                intervention_id,
+                trigger_kind=trigger_kind,
+                trigger_reason=trigger_reason,
+                details={"reason": "agent_rejected"},
+            ))
+        return bool(accepted)
+
     while not state.stop.is_set():
         time.sleep(0.5)
         _diag_tick += 1
@@ -470,15 +537,23 @@ def _run_agent_worker(state: SessionState):
                 else:
                     print(f"# [trigger] drift: 脱線介入「{_pending_drift_reason}」",
                           flush=True)
-                    agent.trigger(topics=_bargein_topics,
-                                  drift_reason=_pending_drift_reason)
+                    _request_intervention(
+                        "drift",
+                        trigger_reason=_pending_drift_reason,
+                        topics=_bargein_topics,
+                        drift_reason=_pending_drift_reason,
+                    )
                     _pending_drift_reason = None
                     _last_intervention_at = time.monotonic()
                     continue
             if agent._pending_intervention is not None:
                 print("# [trigger] retry: 中断された介入を再送（ガードバイパス）",
                       flush=True)
-                agent.trigger(topics=_bargein_topics)
+                _request_intervention(
+                    "retry",
+                    trigger_reason="中断された介入を再送",
+                    topics=_bargein_topics,
+                )
                 _last_intervention_at = time.monotonic()
                 continue
         # エコーウィンドウ中はtriggerしない
@@ -511,7 +586,13 @@ def _run_agent_worker(state: SessionState):
         if agent.mode == "conversation":
             if (agent.pending_count > 0
                     and _silence_elapsed > _AGENT_CONV_SILENCE):
-                agent.trigger()
+                _request_intervention(
+                    "silence",
+                    trigger_reason=(
+                        f"conversation silence {_silence_elapsed:.1f}s"
+                        f" > {_AGENT_CONV_SILENCE}s"
+                    ),
+                )
         else:
             # 沈黙要約の閾値: debateは従来通り、人間モードは積極性プロファイルに従う
             # （None なら沈黙だけでは要約介入しない＝過剰介入の抑制, S5）
@@ -519,13 +600,21 @@ def _run_agent_worker(state: SessionState):
                                else _silence_summarize)
             if agent.pending_count >= agent.trigger_n:
                 print(f"# [trigger] count: {agent.pending_count}>={agent.trigger_n}", flush=True)
-                agent.trigger(topics=_topics)
+                _request_intervention(
+                    "count",
+                    trigger_reason=f"{agent.pending_count}>={agent.trigger_n}",
+                    topics=_topics,
+                )
                 _last_intervention_at = time.monotonic()
             elif (_silence_thresh is not None
                   and agent.pending_count > 0
                   and _silence_elapsed > _silence_thresh):
                 print(f"# [trigger] silence: {_silence_elapsed:.1f}s > {_silence_thresh}s", flush=True)
-                agent.trigger(topics=_topics)
+                _request_intervention(
+                    "silence",
+                    trigger_reason=f"{_silence_elapsed:.1f}s > {_silence_thresh}s",
+                    topics=_topics,
+                )
                 _last_intervention_at = time.monotonic()
             # --- 沈黙ブレーカー: 介入不要後にデッドエアになった場合の一押し（Fix 10） ---
             # 「介入不要」の判断自体は尊重する（一度黙る）が、その後に会話が止まって
@@ -535,7 +624,9 @@ def _run_agent_worker(state: SessionState):
                   and time.monotonic() - _last_stall_at > _STALL_COOLDOWN):
                 print(f"# [trigger] stall: 介入不要後の沈黙{_silence_elapsed:.1f}s"
                       f"を解消", flush=True)
-                agent.trigger(
+                _request_intervention(
+                    "stall",
+                    trigger_reason=f"介入不要後の沈黙{_silence_elapsed:.1f}s",
                     topics=_topics,
                     drift_reason="会話が止まっています。本題に戻す一言を簡潔に述べてください。")
                 _last_stall_at = time.monotonic()
@@ -551,7 +642,12 @@ def _run_agent_worker(state: SessionState):
                     _pending_invite = None  # 同じ人を連続では誘わない
                 else:
                     print(f"# [trigger] invite: {_pending_invite}さんに声かけ", flush=True)
-                    agent.trigger(topics=_topics, invite_target=_pending_invite)
+                    _request_intervention(
+                        "invite",
+                        trigger_reason=f"{_pending_invite}さんに声かけ",
+                        topics=_topics,
+                        invite_target=_pending_invite,
+                    )
                     _last_intervention_at = time.monotonic()
                     _last_invited = _pending_invite
                     _pending_invite = None

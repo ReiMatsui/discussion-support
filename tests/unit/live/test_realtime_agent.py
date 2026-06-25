@@ -1,6 +1,8 @@
 """RealtimeAgent（ファシリテーター）の介入・割り込みロジックのユニットテスト."""
 from __future__ import annotations
 
+from das.asr.live.facilitation import FacilitationEventType
+
 from .conftest import make_chunk
 
 # ---------------------------------------------------------------------------
@@ -166,6 +168,88 @@ def test_trigger_with_invite_target(agent):
     assert "[声かけ]" in text
     assert "田中" in text
     assert agent._responding is True
+
+
+def test_intervention_lifecycle_events_share_same_id(agent):
+    """発火から完了までの観測イベントが同じintervention_idを持つ."""
+    events = []
+    agent.on_facilitation_event = events.append
+    agent.feed("佐藤", "田中さんの意見も聞きたいです")
+
+    accepted = agent.trigger(
+        intervention_id="int_lifecycle",
+        trigger_kind="invite",
+        trigger_reason="田中さんに声かけ",
+        invite_target="田中",
+    )
+    agent._handle({"type": "response.output_item.added", "item": {"id": "item-1"}})
+    agent._handle({"type": "response.output_audio.delta", "delta": make_chunk()})
+    agent._handle({
+        "type": "response.output_audio_transcript.delta",
+        "delta": "田中さんはいかがですか",
+    })
+    agent._handle({
+        "type": "response.output_audio_transcript.done",
+        "transcript": "田中さんはいかがですか",
+    })
+    agent._handle({"type": "response.done"})
+    agent._on_playback_terminator(agent._play_epoch)
+
+    assert accepted is True
+    assert [event.event_type for event in events] == [
+        FacilitationEventType.RESPONSE_REQUESTED,
+        FacilitationEventType.SPEECH_STARTED,
+        FacilitationEventType.UTTERANCE_COMPLETED,
+        FacilitationEventType.RESPONSE_COMPLETED,
+        FacilitationEventType.SPEECH_COMPLETED,
+    ]
+    assert {event.intervention_id for event in events} == {"int_lifecycle"}
+    assert events[0].input_utterances == (
+        {"speaker": "佐藤", "text": "田中さんの意見も聞きたいです"},
+    )
+
+
+def test_noop_event_records_no_playback(agent):
+    events = []
+    agent.on_facilitation_event = events.append
+    agent.feed("人間", "議論は順調です")
+    agent.trigger(
+        intervention_id="int_noop",
+        trigger_kind="count",
+        trigger_reason="10>=10",
+    )
+
+    agent._cancel_response()
+
+    assert events[-1].event_type == FacilitationEventType.NOOP
+    assert events[-1].intervention_id == "int_noop"
+    assert events[-1].playback is False
+
+
+def test_playback_can_finish_before_response_done_without_losing_completion(agent):
+    """再生終了とresponse.doneの到着順が逆でも両イベントを記録する."""
+    events = []
+    agent.on_facilitation_event = events.append
+    agent.feed("人間", "発言")
+    agent.trigger(
+        intervention_id="int_reverse_order",
+        trigger_kind="count",
+        trigger_reason="10>=10",
+    )
+    agent._handle({"type": "response.output_item.added", "item": {"id": "item-1"}})
+    agent._handle({"type": "response.output_audio.delta", "delta": make_chunk()})
+    agent._handle({
+        "type": "response.output_audio_transcript.delta",
+        "delta": "確認します",
+    })
+
+    agent._on_playback_terminator(agent._play_epoch)
+    agent._handle({"type": "response.done"})
+
+    types = [event.event_type for event in events]
+    assert FacilitationEventType.SPEECH_COMPLETED in types
+    assert FacilitationEventType.RESPONSE_COMPLETED in types
+    assert agent._current_intervention_id is None
 
 
 # ---------------------------------------------------------------------------

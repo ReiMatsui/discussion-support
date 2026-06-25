@@ -20,6 +20,7 @@ from .._constants import (
     REALTIME_URL,
 )
 from .._voice_profiles import VoiceProfiles
+from ..facilitation import FacilitationEvent, FacilitationEventType
 from ._base import _RealtimeBase
 
 
@@ -72,6 +73,13 @@ class RealtimeAgent(_RealtimeBase):
         self._conn_error = ""              # 接続エラーメッセージ（UI表示用）
         self.on_ai_utterance = None        # callback(text: str) AI発話確定時
         self.on_speech_start = None        # callback() 音声生成開始時（即座に通知）
+        self.on_facilitation_event = None  # callback(FacilitationEvent) 観測ログ
+        self._current_intervention_id: str | None = None
+        self._current_trigger_kind: str | None = None
+        self._current_trigger_reason: str | None = None
+        self._current_had_playback = False
+        self._response_done_seen = False
+        self._speech_done_seen = False
         self._playback_thread: threading.Thread | None = None
         # --- エコー防止 ---
         self._responding = False           # response生成中フラグ
@@ -216,11 +224,42 @@ class RealtimeAgent(_RealtimeBase):
               f"(responding={self._responding} speaking={self.ai_speaking} "
               f"epoch={self._play_epoch})", flush=True)
 
+    def _emit_facilitation_event(
+        self,
+        event_type: FacilitationEventType,
+        *,
+        intervention_id: str | None = None,
+        **kwargs,
+    ) -> None:
+        """現在の介入IDを付け、受信スレッドをブロックせずイベント通知する."""
+        callback = self.on_facilitation_event
+        iid = intervention_id or self._current_intervention_id
+        if callback is None or iid is None:
+            return
+        event = FacilitationEvent.create(
+            event_type,
+            iid,
+            trigger_kind=kwargs.pop("trigger_kind", self._current_trigger_kind),
+            trigger_reason=kwargs.pop("trigger_reason", self._current_trigger_reason),
+            **kwargs,
+        )
+        with contextlib.suppress(Exception):
+            callback(event)
+
+    def _clear_current_intervention(self) -> None:
+        self._current_intervention_id = None
+        self._current_trigger_kind = None
+        self._current_trigger_reason = None
+        self._current_had_playback = False
+        self._response_done_seen = False
+        self._speech_done_seen = False
+
     def reset_meeting(self):
         """会議リセット時に蓄積発話・保留介入をクリアする（接続は維持）."""
         with self._state_lock:
             self._pending.clear()
             self._pending_intervention = None
+            self._clear_current_intervention()
         self._last_noop_at = 0.0
 
     # --- WebSocket受信 ---
@@ -279,6 +318,12 @@ class RealtimeAgent(_RealtimeBase):
                     self._flush_preflight()
             if transcript and self._CANCEL_MARKER not in transcript:
                 self._recent_ai_texts.append(transcript)
+                if not self._interrupted:
+                    self._emit_facilitation_event(
+                        FacilitationEventType.UTTERANCE_COMPLETED,
+                        model_output=transcript,
+                        playback=self._preflight_cleared,
+                    )
                 if not self._interrupted and self.on_ai_utterance:
                     self.on_ai_utterance(transcript)
 
@@ -287,6 +332,13 @@ class RealtimeAgent(_RealtimeBase):
                 self._q_put(None)   # 再生終端マーカー（現epochタグ付き）
 
         elif etype == "response.done":
+            had_playback = self._current_had_playback
+            self._response_done_seen = True
+            if self._current_intervention_id is not None:
+                self._emit_facilitation_event(
+                    FacilitationEventType.RESPONSE_COMPLETED,
+                    playback=had_playback,
+                )
             self._ai_text_buf = ""
             self._responding = False
             self._interrupted = False     # 次の応答に備えてリセット
@@ -294,6 +346,9 @@ class RealtimeAgent(_RealtimeBase):
             self._preflight_buf.clear()
             self._preflight_cleared = False
             self._log_state("→IDLE (response.done)")
+            # 実音声がある場合はplayback終端までIDを保持し、実際の再生終了を記録する。
+            if not had_playback or self._speech_done_seen:
+                self._clear_current_intervention()
 
         elif etype == "error":
             msg = ev.get("error", {}).get("message", "unknown")
@@ -301,11 +356,16 @@ class RealtimeAgent(_RealtimeBase):
             if any(s in low for s in self._BENIGN_ERROR_SUBSTRINGS):
                 return  # response.cancel空振り等の良性エラーは静かに無視（Fix 10）
             print(f"# AI Agent エラー: {msg}", flush=True)
+            self._emit_facilitation_event(
+                FacilitationEventType.ERROR,
+                details={"message": msg},
+            )
             # エラーでresponse生成が中断された場合、_respondingをリセット
             # （固着するとtrigger()が永遠にスキップされる）
             if self._responding:
                 self._responding = False
                 self._interrupted = False
+            self._clear_current_intervention()
 
     # --- 発話送信 ---
 
@@ -324,7 +384,10 @@ class RealtimeAgent(_RealtimeBase):
 
     def trigger(self, *, topics: list[dict] | None = None,
                 drift_reason: str | None = None,
-                invite_target: str | None = None):
+                invite_target: str | None = None,
+                intervention_id: str | None = None,
+                trigger_kind: str | None = None,
+                trigger_reason: str | None = None) -> bool:
         """蓄積した発話をRealtimeAPIに送信し応答を要求.
 
         topics: 現在の論点一覧（_topic_workerが抽出したもの）。
@@ -338,17 +401,17 @@ class RealtimeAgent(_RealtimeBase):
         コンテキストに追加して再試行の機会を与える。
         """
         if not self._connected or not self.enabled or not self.ws:
-            return
+            return False
         # --- _responding を test-and-set でアトミックに確保（Bug 4） ---
         # 複数スレッドからの同時triggerで二重にresponse.createが飛ぶのを防ぐ。
         # ここで確保した後に送信できなかった場合（送るものがない/送信例外）は、
         # 必ず False に戻して固着を避ける。
         with self._state_lock:
             if self._responding:
-                return  # 既に応答生成中、または別スレッドが確保済み
+                return False  # 既に応答生成中、または別スレッドが確保済み
             if (not self._pending and self._pending_intervention is None
                     and not drift_reason and not invite_target):
-                return
+                return False
             self._responding = True  # 確保（この時点でレースは閉じる）
             # スナップショットのみ取得。実際のクリアは送信成功後に行い、
             # 送信例外で発話内容が失われないようにする（Bug 2）。
@@ -402,7 +465,14 @@ class RealtimeAgent(_RealtimeBase):
                       flush=True)
         if not conv:
             self._responding = False  # 送るものがない → 確保を解放（Bug 4）
-            return  # 期限切れで破棄された場合など、送るものがない
+            return False  # 期限切れで破棄された場合など、送るものがない
+        # response.create直後に受信スレッドが動いてもIDを失わないよう、送信前に設定する。
+        self._current_intervention_id = intervention_id
+        self._current_trigger_kind = trigger_kind
+        self._current_trigger_reason = trigger_reason
+        self._current_had_playback = False
+        self._response_done_seen = False
+        self._speech_done_seen = False
         try:
             self.ws.send(json.dumps({
                 "type": "conversation.item.create",
@@ -416,8 +486,9 @@ class RealtimeAgent(_RealtimeBase):
         except Exception as e:
             # 送信失敗: 確保を解放し、状態は一切クリアせず保持して次回再試行する。
             self._responding = False
+            self._clear_current_intervention()
             print(f"# AI Agent 送信エラー（内容を保持して再試行）: {e}", flush=True)
-            return
+            return False
         # --- 送信成功（_responding は確保済みのまま維持） ---
         with self._state_lock:
             # 送信したスナップショット分だけ削除（送信中にfeedされた新発話は残す）
@@ -425,7 +496,24 @@ class RealtimeAgent(_RealtimeBase):
             # 消費した介入をクリア。送信中に新しい介入が入っていたら残す。
             if include_pi and self._pending_intervention is pi:
                 self._pending_intervention = None
+        if intervention_id is not None:
+            inputs = tuple(
+                {"speaker": str(u["speaker"]), "text": str(u["text"])}
+                for u in pending_snapshot
+            )
+            self._emit_facilitation_event(
+                FacilitationEventType.RESPONSE_REQUESTED,
+                intervention_id=intervention_id,
+                input_utterances=inputs,
+                details={
+                    "has_topics": bool(topics),
+                    "drift_reason": drift_reason,
+                    "invite_target": invite_target,
+                    "retrying_intervention": include_pi,
+                },
+            )
         self._log_state("→RESPONDING (trigger送信)")
+        return True
 
     def interrupt(self):
         """人間の割り込みを検出。現在のAI応答をキャンセルし再生を停止する。
@@ -439,6 +527,7 @@ class RealtimeAgent(_RealtimeBase):
         """
         if not self.ai_speaking and not self._responding:
             return
+        interrupted_id = self._current_intervention_id
         self._interrupted = True
         # --- 介入内容の保存: 割り込まれた内容を記憶（read-modify-writeを原子化, R1） ---
         delivered = self._ai_text_buf.strip()
@@ -497,6 +586,14 @@ class RealtimeAgent(_RealtimeBase):
         self._current_item_id = None
         print("# AI Agent: 割り込み検出 — 応答を中断", flush=True)
         self._log_state("→INTERRUPTED (割り込み)")
+        self._emit_facilitation_event(
+            FacilitationEventType.INTERRUPTED,
+            intervention_id=interrupted_id,
+            model_output=delivered or None,
+            playback=played > 0,
+            details={"played_bytes": played},
+        )
+        self._clear_current_intervention()
 
     def _flush_preflight(self):
         """プリフライトバッファの音声を再生キューに一括フラッシュ.
@@ -508,7 +605,12 @@ class RealtimeAgent(_RealtimeBase):
         if self._preflight_cleared:
             return
         self._preflight_cleared = True
+        self._current_had_playback = True
         self._log_state("→SPEAKING (preflightフラッシュ)")
+        self._emit_facilitation_event(
+            FacilitationEventType.SPEECH_STARTED,
+            playback=True,
+        )
         # 音声再生開始を通知（Partner停止用）
         if self.on_speech_start:
             with contextlib.suppress(Exception):
@@ -517,10 +619,31 @@ class RealtimeAgent(_RealtimeBase):
             self._q_put(chunk)
         self._preflight_buf.clear()
 
+    def _on_playback_terminator(self, epoch: int):
+        """実際の音声再生終了を介入ライフサイクルへ記録する."""
+        is_latest = epoch >= self._play_epoch
+        super()._on_playback_terminator(epoch)
+        if is_latest and self._current_intervention_id is not None:
+            self._emit_facilitation_event(
+                FacilitationEventType.SPEECH_COMPLETED,
+                playback=True,
+                details={"played_bytes": self._played_bytes},
+            )
+            self._speech_done_seen = True
+            if self._response_done_seen:
+                self._clear_current_intervention()
+
     def _cancel_response(self):
         """「介入不要」応答を静かにキャンセル。音声再生を止め、会話履歴から削除する."""
         print("# AI Agent: 介入不要と判断 — 応答をキャンセル", flush=True)
         self._log_state("→NOOP (介入不要)")
+        noop_id = self._current_intervention_id
+        self._emit_facilitation_event(
+            FacilitationEventType.NOOP,
+            intervention_id=noop_id,
+            model_output=self._CANCEL_MARKER,
+            playback=False,
+        )
         self._interrupted = True
         self._last_noop_at = time.monotonic()  # デッドエア対策（Fix 10）
         self._preflight_buf.clear()        # バッファも破棄
@@ -550,6 +673,7 @@ class RealtimeAgent(_RealtimeBase):
                         "item_id": item_id,
                     }))
         self._current_item_id = None
+        self._clear_current_intervention()
 
     @property
     def pending_count(self) -> int:

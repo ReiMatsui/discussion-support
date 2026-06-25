@@ -279,6 +279,7 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
     html_path = os.path.splitext(out_path)[0] + ".html"
     diag_path = os.path.splitext(out_path)[0] + ".diag.jsonl"
     turns_path = os.path.splitext(out_path)[0] + ".turns.jsonl"
+    intervention_path = os.path.splitext(out_path)[0] + ".interventions.jsonl"
 
     # --- 声紋モデル読み込み ---
     tracker: VoiceProfiles | None = None
@@ -311,6 +312,7 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
     state = SessionState(args=args, started=started, out_path=out_path,
                          html_path=html_path, diag_path=diag_path,
                          turns_path=turns_path, wav_path=wav_path,
+                         intervention_path=intervention_path,
                          tracker=tracker, serve=_serve)
 
     # --- AIエージェント ---
