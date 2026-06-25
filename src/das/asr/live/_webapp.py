@@ -75,6 +75,9 @@ INDEX_HTML = """<!doctype html>
   .u.facil .who { color: var(--facil); }
   .u .badge { background: #fef3c7; color: #92400e; font-size: .68rem;
     border-radius: 5px; padding: .05em .4em; margin-left: .4em; }
+  .vp-banner { margin: 0 0 .6rem; padding: .5rem .75rem; border-radius: 6px;
+    font-size: .85rem; background: #fdecea; color: #8a1c12; border: 1px solid #f3b4ab; }
+  .vp-banner.ok { background: #eef7ee; color: #2c6e2c; border-color: #bfe0bf; }
   .u.partial { opacity: .55; font-style: italic; }
   .u.partial::after { content: "…"; }
   .sys { text-align: center; color: var(--muted); font-size: .78rem; margin: .4rem 0; }
@@ -121,6 +124,8 @@ INDEX_HTML = """<!doctype html>
   </header>
 
   <div class="modes" id="modes"></div>
+
+  <div class="vp-banner" id="vp-banner" hidden></div>
 
   <div class="agenda-bar">
     <span class="agenda-label">議題</span>
@@ -281,8 +286,23 @@ async function setAgenda() {
   } catch (e) { alert("議題の設定に失敗しました"); }
 }
 
+function renderVpBanner(vp) {
+  const el = $("vp-banner");
+  if (!vp) { el.hidden = true; return; }
+  el.hidden = false;
+  if (vp.enabled) {
+    el.className = "vp-banner ok";
+    el.textContent = `声紋オン（${vp.model || "?"}）：話者の取り違えを補正します`;
+  } else {
+    el.className = "vp-banner";
+    el.textContent = "⚠ 声紋オフ：話者の取り違えは補正されません。"
+      + "依存を導入して再起動してください（uv sync --extra soniox）";
+  }
+}
+
 function render(state) {
   renderModes(state.mode);
+  renderVpBanner(state.vp);
   renderAgenda(state.agenda);
   renderTranscript(state.records || [], state.partial);
   renderSpeakers(state.speakers);

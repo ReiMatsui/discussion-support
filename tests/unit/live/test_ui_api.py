@@ -171,6 +171,20 @@ def test_show_partial_updates_state_and_snapshot():
     assert s.api_snapshot()["partial"] == {"speaker": "", "text": ""}
 
 
+# --- 声紋ステータスの可視化 -------------------------------------------------
+
+def test_snapshot_vp_disabled_when_no_tracker():
+    s = _make_state()
+    assert s.api_snapshot()["vp"] == {"enabled": False, "model": None}
+
+
+def test_snapshot_vp_enabled_reports_model():
+    s = _make_state()
+    s.tracker = type("T", (), {"model": "redimnet"})()
+    vp = s.api_snapshot()["vp"]
+    assert vp == {"enabled": True, "model": "redimnet"}
+
+
 # --- 課題②: 安定した話者色 --------------------------------------------------
 
 def test_snapshot_speaker_colors_are_stable():
