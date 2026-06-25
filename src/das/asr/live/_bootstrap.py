@@ -20,6 +20,8 @@ from das.asr.live._constants import (
     _TOPIC_PROMPT,
     OPENAI_API,
 )
+from das.asr.live._diarization import SpeakerResolver
+from das.asr.live._pyannote_diarization import PyannoteStreamingDiarizationProvider
 from das.asr.live._recv_loop import RecvLoop
 from das.asr.live._session_state import SessionState
 from das.asr.live._ui import _UIHandler
@@ -70,6 +72,7 @@ class LiveArgs:
     stt: str = "soniox"
     # Sonioxのエンドポイント検出（文の切れ目で区切る＝議事録が読みやすい）。既定ON。
     soniox_endpoint: bool = True
+    diarization: str = "none"  # none / pyannote
     port: int = 8231
     agent: bool = False
     agent_voice: str = "shimmer"
@@ -312,10 +315,20 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
 
     # --- SessionState ---
     wav_path = os.path.splitext(out_path)[0] + ".wav"
+    diarizer = None
+    if args.diarization == "pyannote":
+        pyannote_key = os.environ.get("PYANNOTEAI_API_KEY")
+        if not pyannote_key:
+            raise SystemExit("環境変数 PYANNOTEAI_API_KEY を設定してください")
+        diarizer = PyannoteStreamingDiarizationProvider(pyannote_key)
+        print("# 話者分離: pyannoteAI streaming を使用", flush=True)
+
     state = SessionState(args=args, started=started, out_path=out_path,
                          html_path=html_path, diag_path=diag_path,
                          turns_path=turns_path, wav_path=wav_path,
-                         tracker=tracker, serve=_serve)
+                         tracker=tracker, serve=_serve,
+                         diarization_provider=diarizer,
+                         speaker_resolver=SpeakerResolver())
 
     # --- AIエージェント ---
     _agent_oai_key = os.environ.get("OPENAI_API_KEY", "")
@@ -419,6 +432,8 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
         return _ws
 
     state.stt_ws = _connect_stt()
+    if state.diarization_provider is not None:
+        state.diarization_provider.start()
     try:
         if state.simulator is not None:
             if state.agent is not None:
@@ -521,4 +536,6 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
         with _contextlib.suppress(Exception):
             if state.stt_ws is not None:
                 state.stt_ws.close()
+        if state.diarization_provider is not None:
+            state.diarization_provider.close()
         _cleanup(state, args, api_key, tracker, wav_path, out_path, html_path)

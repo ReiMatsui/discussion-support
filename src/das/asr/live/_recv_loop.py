@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 import contextlib
 
 from ._constants import _BACKCHANNEL_RE, RESET, UNSURE_SPEAKER, fmt_ts
+from ._diarization import TimeSegment
 from ._ui import _print_line
 
 
@@ -89,7 +90,7 @@ class RecvLoop:
                 self.cur_end = None
                 return
             d = tracker.last
-            rec_extra = {}
+            rec_extra: dict[str, object] = {}
             if d and d["kind"] == "補正":
                 note = (f"声紋でラベル{d['label']}の取り違えを修正"
                         f"（類似{d['sim']:.2f}、放置なら{s.disp_name(d['prev'])}の発言になっていた）")
@@ -112,7 +113,36 @@ class RecvLoop:
                 _print_line(f"# vp判定[{d['kind']}]{extra}")
         else:
             sp_id = "#" + str(self.cur_speaker)
-            rec_extra = {}
+            rec_extra: dict[str, object] = {}
+            d = None
+        if (self.cur_ms is not None and self.cur_end is not None
+                and self.cur_end > self.cur_ms):
+            voiceprint_speaker = None
+            voiceprint_confidence = None
+            if (d and d.get("kind") in {"声紋一致", "補正"}
+                    and sp_id is not None
+                    and not str(sp_id).startswith("#")):
+                voiceprint_speaker = str(sp_id)
+                # VoiceProfiles側のしきい値を通った判定なのでResolver上は高信頼扱いにする。
+                voiceprint_confidence = 1.0
+            diarization_events = s.diarization_window(self.cur_ms, self.cur_end)
+            resolved = s.speaker_resolver.resolve(
+                utterance=TimeSegment(self.cur_ms, self.cur_end),
+                stt_speaker=str(sp_id),
+                diarization_events=diarization_events,
+                voiceprint_speaker=voiceprint_speaker,
+                voiceprint_confidence=voiceprint_confidence,
+            )
+            if resolved.source != "stt":
+                sp_id = resolved.speaker
+                rec_extra["speaker_source"] = resolved.source
+                rec_extra["speaker_confidence"] = round(resolved.confidence, 3)
+                rec_extra["speaker_reason"] = resolved.reason
+                if self.args.vp_debug and resolved.source != "voiceprint":
+                    _print_line(
+                        f"# diarization: {resolved.speaker}"
+                        f" conf={resolved.confidence:.2f} {resolved.reason}"
+                    )
         # --- テキスト類似度エコー判定（安全網） ---
         for _src_name, _src in [("agent", agent), ("partner", partner)]:
             if _src is None:

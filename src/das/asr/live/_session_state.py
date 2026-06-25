@@ -28,6 +28,7 @@ from ._constants import (
     UNSURE_SPEAKER,
     fmt_ts,
 )
+from ._diarization import DiarizationEvent, DiarizationProvider, SpeakerResolver
 from ._participation import participation_stats
 from ._voice_profiles import VoiceProfiles
 from .agents._partner import ConversationPartner
@@ -46,7 +47,9 @@ class SessionState:
     # 初期化
     # ------------------------------------------------------------------
     def __init__(self, *, args, started, out_path, html_path, diag_path,
-                 turns_path, wav_path, tracker=None, serve=True):
+                 turns_path, wav_path, tracker=None, serve=True,
+                 diarization_provider: DiarizationProvider | None = None,
+                 speaker_resolver: SpeakerResolver | None = None):
         self.args = args
         self.started = started
         self.out_path = out_path
@@ -64,6 +67,12 @@ class SessionState:
 
         # 声紋
         self.tracker: VoiceProfiles | None = tracker
+        # 外部話者分離
+        self.diarization_provider = diarization_provider
+        self.speaker_resolver = speaker_resolver or SpeakerResolver()
+        self.diarization_events: list[DiarizationEvent] = []
+        self.diarization_lock = threading.Lock()
+        self._DIARIZATION_KEEP_MS = 10 * 60 * 1000
 
         # AI
         self.agent: RealtimeAgent | None = None
@@ -144,6 +153,36 @@ class SessionState:
         if self.tracker is not None and sp in self.tracker.sp_map:
             return self.tracker.sp_map[sp]
         return "#" + sp
+
+    def drain_diarization_provider(self) -> None:
+        """外部diarization providerから届いた閉区間を取り込む."""
+        provider = self.diarization_provider
+        if provider is None:
+            return
+        events = provider.drain_events()
+        if not events:
+            return
+        with self.diarization_lock:
+            self.diarization_events.extend(events)
+            newest = max((e.end_ms or e.start_ms for e in self.diarization_events),
+                         default=0)
+            cutoff = newest - self._DIARIZATION_KEEP_MS
+            self.diarization_events = [
+                e for e in self.diarization_events
+                if (e.end_ms or e.start_ms) >= cutoff
+            ]
+
+    def diarization_window(self, start_ms: int | None, end_ms: int | None) -> list[DiarizationEvent]:
+        """発話区間と重なる外部diarizationイベントを返す."""
+        if start_ms is None or end_ms is None or end_ms <= start_ms:
+            return []
+        self.drain_diarization_provider()
+        with self.diarization_lock:
+            return [
+                e for e in self.diarization_events
+                if e.end_ms is not None
+                and min(e.end_ms, end_ms) - max(e.start_ms, start_ms) > 0
+            ]
 
     def color_of(self, key) -> str:
         key = str(key)

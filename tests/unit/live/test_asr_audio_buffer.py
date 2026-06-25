@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime
+from typing import Any
 
 from das.asr.live._session_state import SessionState
 from das.asr.live._workers import _run_sender
@@ -24,8 +25,29 @@ class _WS:
         self.sent.append(payload)
 
 
+class _DiarizationProvider:
+    name = "fake"
+
+    def __init__(self) -> None:
+        self.audio: list[bytes] = []
+        self.drains = 0
+
+    def start(self) -> None:
+        pass
+
+    def send_audio(self, pcm16k: bytes) -> None:
+        self.audio.append(pcm16k)
+
+    def drain_events(self) -> list[Any]:
+        self.drains += 1
+        return []
+
+    def close(self) -> None:
+        pass
+
+
 def _make_state() -> SessionState:
-    return SessionState(  # type: ignore[no-untyped-call]
+    return SessionState(
         args=object(),
         started=datetime.datetime(2026, 1, 1),
         out_path="/tmp/o.md",
@@ -39,7 +61,10 @@ def _make_state() -> SessionState:
 
 def test_sender_keeps_only_successfully_sent_audio_for_asr_buffer() -> None:
     state = _make_state()
-    state.stt_ws = _WS(fail_first=True)
+    provider = _DiarizationProvider()
+    state.diarization_provider = provider
+    ws = _WS(fail_first=True)
+    state.stt_ws = ws  # type: ignore[assignment]
     first = b"\x01\x00" * 1600
     second = b"\x02\x00" * 1600
 
@@ -52,7 +77,9 @@ def test_sender_keeps_only_successfully_sent_audio_for_asr_buffer() -> None:
     assert state.pcm_total_bytes == len(first) + len(second)
     assert state.asr_pcm_buf == second
     assert state.asr_pcm_total_bytes == len(second)
-    assert state.stt_ws.sent == [second, "END:1"]
+    assert ws.sent == [second, "END:1"]
+    assert provider.audio == [second]
+    assert provider.drains == 1
 
 
 def test_open_wav_resets_asr_buffer_offsets() -> None:

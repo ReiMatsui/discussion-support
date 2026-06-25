@@ -712,6 +712,10 @@ def _run_sender(state: SessionState, backend: STTBackend):
                         trim = len(state.asr_pcm_buf) - state._PCM_KEEP_BYTES
                         del state.asr_pcm_buf[:trim]
                         state.asr_pcm_buf_offset += trim
+                if state.diarization_provider is not None:
+                    with contextlib.suppress(Exception):
+                        state.diarization_provider.send_audio(pcm)
+                    state.drain_diarization_provider()
                 seq += 1
 
 

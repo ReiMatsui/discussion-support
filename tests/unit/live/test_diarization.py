@@ -1,12 +1,18 @@
 """話者分離の統合・評価ロジックのテスト."""
 from __future__ import annotations
 
+from typing import Any, cast
+
+import click
+
 from das.asr.live._diarization import (
     DiarizationEvent,
     SpeakerResolver,
     TimeSegment,
     score_diarization,
 )
+from das.asr.live._recv_loop import RecvLoop
+from das.asr.live._session_state import SessionState
 
 
 def test_resolver_prefers_high_confidence_voiceprint() -> None:
@@ -81,3 +87,62 @@ def test_score_diarization_maps_provider_labels_by_overlap() -> None:
     assert score.missed_ms == 0
     assert score.false_alarm_ms == 0
     assert score.accuracy == 0.95
+
+
+def test_liveargs_and_cli_have_diarization_option() -> None:
+    from das.asr.live import main
+    from das.asr.live._bootstrap import LiveArgs
+
+    assert LiveArgs().diarization == "none"
+    assert LiveArgs(diarization="pyannote").diarization == "pyannote"
+    for param in main.params:
+        if param.name == "diarization":
+            choice_type = cast(click.Choice, param.type)
+            assert set(choice_type.choices) == {"none", "pyannote"}
+            break
+    else:
+        raise AssertionError("diarization option not found")
+
+
+def test_recv_loop_uses_diarization_when_voiceprint_is_unavailable() -> None:
+    import datetime
+
+    class Args:
+        lang = "ja"
+        vp_debug = False
+
+    class Backend:
+        def parse_message(self, raw: dict[str, Any], lang: str) -> dict[str, Any]:
+            return raw
+
+    state = SessionState(  # type: ignore[no-untyped-call]
+        args=Args(),
+        started=datetime.datetime(2026, 1, 1),
+        out_path="/tmp/o.md",
+        html_path="/tmp/o.html",
+        diag_path="/tmp/o.diag",
+        turns_path="/tmp/o.turns",
+        wav_path="/tmp/o.wav",
+        serve=False,
+    )
+    state.save = lambda *a, **k: None  # type: ignore[method-assign]
+    state.diarization_events = [
+        DiarizationEvent(900, 3100, "SPEAKER_00", "pyannote"),
+    ]
+    loop = RecvLoop(state, Args(), Backend())  # type: ignore[arg-type]
+    loop.cur_speaker = "1"  # type: ignore[assignment]
+    loop.cur_text = "これはテストです"
+    loop.cur_ms = 1000
+    loop.cur_end = 3000
+
+    loop.flush()  # type: ignore[no-untyped-call]
+
+    assert state.records == [{
+        "ms": 1000,
+        "end_ms": 3000,
+        "speaker": "SPEAKER_00",
+        "text": "これはテストです",
+        "speaker_source": "pyannote",
+        "speaker_confidence": 1.0,
+        "speaker_reason": "diarization_overlap_1.00",
+    }]
