@@ -57,7 +57,7 @@ def post_system(text: str) -> None:
 
 @click.command()
 @click.option("--lang", default="ja", help="音声認識の言語")
-@click.option("--model", default="stt-rt-v4", help="STTモデル名")
+@click.option("--model", default="stt-rt-v5", help="STTモデル名")
 @click.option("--wav", default=None, type=click.Path(exists=False),
               help="指定で実マイクの代わりにファイル擬似ライブ")
 @click.option("--play", is_flag=True, help="--wav使用時、スピーカーからも再生する")

@@ -1,7 +1,11 @@
 """論点抽出・脱線判定のLLM呼び出しパラメータ構築（Fix 9）のテスト."""
 from __future__ import annotations
 
-from das.asr.live._bootstrap import _build_chat_params
+from das.asr.live._bootstrap import LiveArgs, _build_chat_params
+
+
+def test_live_args_defaults_to_soniox_realtime_v5():
+    assert LiveArgs().model == "stt-rt-v5"
 
 
 def test_gpt5_uses_minimal_reasoning_and_completion_tokens():

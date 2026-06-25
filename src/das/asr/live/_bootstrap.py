@@ -53,7 +53,7 @@ from das.asr.live.stt._speechmatics import SpeechmaticsBackend
 class LiveArgs:
     """live.py の click オプションを内部に渡すための構造体."""
     lang: str = "ja"
-    model: str = "stt-rt-v4"
+    model: str = "stt-rt-v5"
     wav: str | None = None
     play: bool = False
     join: bool = False
