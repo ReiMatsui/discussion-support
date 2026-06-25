@@ -65,7 +65,7 @@ def main():
             p = os.path.join(outdir, f"test_{rate}.wav")
             _save_wav(p, audio, rate)
             paths.append((rate, p))
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         sys.exit(f"録音に失敗しました（マイク権限/デバイスを確認）: {type(e).__name__}: {e}")
 
     for rate, p in paths:
