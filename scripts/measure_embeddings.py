@@ -45,6 +45,11 @@ def _latest_session() -> str | None:
     return os.path.basename(turns[0])[: -len(".turns.jsonl")]
 
 
+def _read_turns(base: str) -> list[dict]:
+    with open(os.path.join(TR, base + ".turns.jsonl")) as f:
+        return [json.loads(ln) for ln in f]
+
+
 def _read_wav(path: str) -> np.ndarray:
     with wave.open(path, "rb") as w:
         n = w.getnframes()
@@ -56,7 +61,7 @@ def _load_segments(base: str, min_dur: float, speakers: list[str] | None,
                    per_speaker: int):
     """[(speaker, wav_segment, dur_sec), ...] を返す."""
     wav = _read_wav(os.path.join(TR, base + ".wav"))
-    rows = [json.loads(ln) for ln in open(os.path.join(TR, base + ".turns.jsonl"))]
+    rows = _read_turns(base)
     segs, counts = [], {}
     for r in rows:
         sp = r.get("speaker")
@@ -188,7 +193,7 @@ def main():
     speakers = args.speakers
     if not speakers:
         # 命名済み（#/話者/人物/?/AI 以外）の話者を自動抽出
-        rows = [json.loads(ln) for ln in open(os.path.join(TR, base + ".turns.jsonl"))]
+        rows = _read_turns(base)
         from collections import Counter
         c = Counter(r.get("speaker") for r in rows if r.get("speaker"))
         bad = ("#", "話者", "人物", "?", "未確定", "ファシリテーター", "パートナー")
@@ -218,7 +223,7 @@ def main():
     # 候補 ReDimNet2
     if not args.no_redimnet2:
         try:
-            mn, tt, ds = (args.rd2.split(":") + ["lm", "vox2"])[:3]
+            mn, tt, ds = [*args.rd2.split(":"), "lm", "vox2"][:3]
             emb2 = _embedder_redimnet2(mn, tt, ds)
             embs2 = [(sp, e, d) for sp, s, d in segs if (e := emb2(s)) is not None]
             results[f"ReDimNet2-{mn}"] = _report(f"候補: ReDimNet2-{mn} ({tt},{ds})", embs2)
