@@ -114,6 +114,43 @@ def _serve(state):
     return httpd, httpd.server_address[1]
 
 
+def test_reset_for_new_meeting():
+    """リセットで議事録・論点・カーソルはクリア、話者名は引き継ぐ（F6）."""
+    s = _make_state()
+    s.records = [{"speaker": "#1", "text": "前の会議", "ms": 0, "end_ms": 500}]
+    s.topics = [{"topic": "古い論点", "speaker": "#1"}]
+    s.names["#1"] = "松井"
+    s.agent_cursor = 1
+    s.drift_cursor = 1
+    s.drift_requests.put("脱線")
+    old_out, old_started = s.out_path, s.started
+
+    result = s.reset_for_new_meeting()
+
+    assert result["ok"] is True
+    assert s.records == []                 # 議事録クリア
+    assert s.topics == []                  # 論点クリア
+    assert s.agent_cursor == 0 and s.drift_cursor == 0
+    assert s.drift_requests.empty()        # キューもクリア
+    assert s.names["#1"] == "松井"          # 話者名は引き継ぐ
+    assert s.out_path != old_out           # 新しい出力先
+    assert s.started >= old_started        # 新しい開始時刻
+
+
+def test_http_reset_clears_records():
+    s = _make_state()
+    s.records = [{"speaker": "#1", "text": "x", "ms": 0, "end_ms": 100}]
+    httpd, port = _serve(s)
+    try:
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/api/reset", method="POST")
+        with urllib.request.urlopen(req) as r:
+            out = json.loads(r.read())
+        assert out["ok"] is True
+        assert s.records == []
+    finally:
+        httpd.shutdown()
+
+
 def test_http_get_root_serves_spa():
     """GET / が新SPA(HTML)を配信する."""
     state = _make_state()

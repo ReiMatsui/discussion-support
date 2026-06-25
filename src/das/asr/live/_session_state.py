@@ -1,6 +1,7 @@
 """main()内の共有状態を集約するコンテナ."""
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import queue
@@ -225,6 +226,46 @@ class SessionState:
             "participation": participation,
             "agent": agent,
         }
+
+    def reset_for_new_meeting(self) -> dict:
+        """現在の会議を確定保存し、同一プロセスのまま次の会議に切り替える（F6）.
+
+        声紋プロファイル・話者名・色は引き継ぐ（同じメンバーの次の会議向け）。
+        議事録・論点・各カーソル・キュー・エージェントの保留はクリアする。
+        録音(wav)とSTT/エージェント接続は継続する。
+        """
+        self.save(live=False)  # 現在の会議を確定保存（ファイルは残る）
+
+        # 新しい会議の出力先（既存と同じディレクトリ＋新タイムスタンプ）
+        self.started = datetime.datetime.now()
+        base_dir = os.path.dirname(self.out_path) or "transcripts"
+        base = os.path.join(base_dir, self.started.strftime("%Y-%m-%d_%H%M%S"))
+        self.out_path = base + ".md"
+        self.html_path = base + ".html"
+        self.diag_path = base + ".diag.jsonl"
+        self.turns_path = base + ".turns.jsonl"
+
+        # 状態クリア（声紋・名前・色は引き継ぐ）
+        with self.state_lock:
+            self.records = []
+            self.agent_cursor = 0
+        with self.topics_lock:
+            self.topics = []
+        self.topic_cursor = 0
+        self.drift_cursor = 0
+        self._last_utt_time[0] = time.monotonic()
+        self._was_in_echo[0] = False
+        for q in (self.drift_requests, self.invite_requests):
+            while True:
+                try:
+                    q.get_nowait()
+                except queue.Empty:
+                    break
+        if self.agent is not None:
+            self.agent.reset_meeting()
+        self.rev += 1
+        self.save()  # 空の新会議ファイルを作成
+        return {"ok": True, "started": self.started.strftime("%Y-%m-%d %H:%M:%S")}
 
     def seed_topic(self, topic: str | None, speaker: str = "議題"):
         """明示的な議題を脱線検出の基準論点としてシードする（Fix 8）.

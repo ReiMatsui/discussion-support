@@ -105,7 +105,8 @@ INDEX_HTML = """<!doctype html>
     <h1>議論支援</h1>
     <span class="status" id="status"><span class="dot"></span><span id="status-text">接続中…</span></span>
     <span class="spacer"></span>
-    <button class="btn btn-stop" id="stop">停止</button>
+    <button class="btn" id="reset">新しい会議</button>
+    <button class="btn btn-stop" id="end">終了</button>
   </header>
 
   <div class="modes" id="modes"></div>
@@ -251,11 +252,19 @@ function render(state) {
 function setStatus(running) {
   const el = $("status"), txt = $("status-text");
   if (!running || stopped) {
-    el.classList.add("stopped"); txt.textContent = "停止しました";
-    $("stop").disabled = true;
+    el.classList.add("stopped"); txt.textContent = "終了しました";
+    $("end").disabled = true; $("reset").disabled = true;
   } else {
     el.classList.remove("stopped"); txt.textContent = "ライブ";
   }
+}
+
+async function resetMeeting() {
+  if (stopped) return;
+  if (!confirm("今の会議を終了して、新しい会議を始めますか？（声紋・話者名は引き継ぎます）")) return;
+  try {
+    await fetch("/api/reset", { method: "POST" });  // クリア後の状態はSSEで届く
+  } catch (e) { alert("会議の切り替えに失敗しました"); }
 }
 
 async function setMode(mode) {
@@ -276,7 +285,7 @@ async function setMode(mode) {
 
 async function stopSession() {
   if (stopped) return;
-  if (!confirm("セッションを停止しますか？")) return;
+  if (!confirm("アプリを終了しますか？（次の会議に移るだけなら「新しい会議」を使ってください）")) return;
   stopped = true; setStatus(false);
   try { await fetch("/api/stop", { method: "POST" }); } catch (e) {}
 }
@@ -293,7 +302,8 @@ function connect() {
   src.onerror = () => { /* EventSourceが自動再接続する */ };
 }
 
-$("stop").onclick = stopSession;
+$("end").onclick = stopSession;
+$("reset").onclick = resetMeeting;
 // 初期描画 + ライブ接続
 fetch("/api/state").then((r) => r.json()).then(render).catch(() => {});
 connect();
