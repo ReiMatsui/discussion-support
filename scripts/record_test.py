@@ -28,7 +28,7 @@ def _print_device():
     try:
         dev = sd.query_devices(kind="input")
         print(f"# 入力デバイス: {dev['name']}（既定サンプルレート {int(dev['default_samplerate'])}Hz）")
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
 
