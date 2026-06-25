@@ -11,6 +11,9 @@ EER（同一/別の取り違え率）が低いほど良い。
     uv run python scripts/measure_embeddings.py 2026-06-25_1614 --speakers 黒田 としや わっち
     uv run python scripts/measure_embeddings.py 2026-06-25_1614 --no-redimnet2   # 現行モデルだけ
 
+クリーン計測（推奨・循環なし）: 各人が単独で30〜60秒喋ったwavを用意して:
+    uv run python scripts/measure_embeddings.py --clips 黒田=clips/kuroda.wav としや=clips/toshiya.wav わっち=clips/wacchi.wav
+
 出力: モデルごとに、全体と「短い発話(0.4〜1.5秒)」のEER・平均類似度を表示し、
 候補モデルが現行より分離を改善するかの所見を出す。
 
@@ -81,6 +84,27 @@ def _load_segments(base: str, min_dur: float, speakers: list[str] | None,
             continue
         segs.append((sp, seg, dur))
         counts[sp] = counts.get(sp, 0) + 1
+    return segs, counts
+
+
+def _load_clips(clips: list[str], win_sec: float, per_speaker: int):
+    """各人が単独で喋ったwavを窓に切ってクリーンな正解セグメントにする.
+
+    clips: ["黒田=path1.wav", "としや=path2.wav", ...]（1ファイル=1話者）。
+    ラベルも重なりもノイズもない純粋な「この声は分離できるか」のテスト用。
+    """
+    segs, counts = [], {}
+    win = int(SR * win_sec)
+    for spec in clips:
+        if "=" not in spec:
+            sys.exit(f"--clips は 名前=パス の形式: {spec}")
+        name, path = spec.split("=", 1)
+        wav = _read_wav(path)
+        for i in range(0, len(wav) - win + 1, win):
+            if counts.get(name, 0) >= per_speaker:
+                break
+            segs.append((name, wav[i:i + win], win_sec))
+            counts[name] = counts.get(name, 0) + 1
     return segs, counts
 
 
@@ -183,30 +207,37 @@ def main():
     ap.add_argument("--no-redimnet2", action="store_true", help="ReDimNet2比較を省略")
     ap.add_argument("--rd2", default="b6:lm:vb2+vox2_v0",
                     help="ReDimNet2 構成 model:train_type:dataset（例 b6:lm:vb2+vox2_v0, b3:lm:vox2）")
+    ap.add_argument("--clips", nargs="+", default=None, metavar="名前=path.wav",
+                    help="クリーン計測: 各人が単独で喋ったwavを 名前=パス で渡す"
+                         "（ラベル/重なり/ノイズ無しの純粋な分離テスト）")
+    ap.add_argument("--win", type=float, default=2.0, help="--clips時の窓長(秒)")
     args = ap.parse_args()
 
-    base = args.session or _latest_session()
-    if not base or not os.path.exists(os.path.join(TR, base + ".wav")):
-        sys.exit(f"音声が見つかりません: {base}（{TR}/ に *.wav と *.turns.jsonl が必要）")
-    print(f"# セッション: {base}")
-
-    speakers = args.speakers
-    if not speakers:
-        # 命名済み（#/話者/人物/?/AI 以外）の話者を自動抽出
-        rows = _read_turns(base)
-        from collections import Counter
-        c = Counter(r.get("speaker") for r in rows if r.get("speaker"))
-        bad = ("#", "話者", "人物", "?", "未確定", "ファシリテーター", "パートナー")
-        speakers = [s for s, _ in c.most_common()
-                    if s and not any(s.startswith(b) or s == b for b in bad)]
-        print(f"# 対象話者（命名済み・自動抽出）: {speakers}")
-        if len(speakers) < 2:
-            print("# 命名済み話者が2人未満のため、全話者(人物N含む)で計測します"
-                  "（ラベルノイズに注意）")
+    if args.clips:
+        # クリーン計測モード（議事録ラベルを使わない＝循環なし）
+        print("# クリーン計測モード（各人単独wav）")
+        segs, counts = _load_clips(args.clips, args.win, args.per_speaker)
+    else:
+        base = args.session or _latest_session()
+        if not base or not os.path.exists(os.path.join(TR, base + ".wav")):
+            sys.exit(f"音声が見つかりません: {base}（{TR}/ に *.wav と *.turns.jsonl が必要）")
+        print(f"# セッション: {base}")
+        speakers = args.speakers
+        if not speakers:
+            # 命名済み（#/話者/人物/?/AI 以外）の話者を自動抽出
+            rows = _read_turns(base)
+            from collections import Counter
+            c = Counter(r.get("speaker") for r in rows if r.get("speaker"))
+            bad = ("#", "話者", "人物", "?", "未確定", "ファシリテーター", "パートナー")
             speakers = [s for s, _ in c.most_common()
-                        if s and not any(s.startswith(b) for b in ("?", "ファ", "パ"))]
-
-    segs, counts = _load_segments(base, args.min_dur, speakers, args.per_speaker)
+                        if s and not any(s.startswith(b) or s == b for b in bad)]
+            print(f"# 対象話者（命名済み・自動抽出）: {speakers}")
+            if len(speakers) < 2:
+                print("# 命名済み話者が2人未満のため、全話者(人物N含む)で計測します"
+                      "（ラベルノイズに注意）")
+                speakers = [s for s, _ in c.most_common()
+                            if s and not any(s.startswith(b) for b in ("?", "ファ", "パ"))]
+        segs, counts = _load_segments(base, args.min_dur, speakers, args.per_speaker)
     print(f"# セグメント数: {len(segs)}  話者別: {counts}")
     if len({sp for sp, _, _ in segs}) < 2:
         sys.exit("話者が2人未満。--speakers で指定するか別セッションで試してください。")
