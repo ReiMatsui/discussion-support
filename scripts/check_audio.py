@@ -66,8 +66,10 @@ def analyze(path: str):
     freqs = np.fft.rfftfreq(fr, 1 / sr)
     total = acc.sum() or 1.0
     print(f"# 発話フレーム {cnt}個でスペクトル平均")
-    bands = [(0, 500), (500, 1000), (1000, 2000), (2000, 4000),
-             (4000, 6000), (6000, 8000)]
+    nyq = sr // 2
+    bands = [(a, b) for a, b in
+             [(0, 500), (500, 1000), (1000, 2000), (2000, 4000), (4000, 6000),
+              (6000, 8000), (8000, 12000), (12000, 24000)] if a < nyq]
     hi_energy = 0.0
     for a, b in bands:
         m = (freqs >= a) & (freqs < b)
