@@ -46,12 +46,22 @@ uv sync --extra soniox
 echo "SONIOX_API_KEY=..." >> .env
 uv run das listen-soniox            # 録音→話者特定→統合AF構築→ライブ介入
 # 実行中: 「1=松井」で話者の実名登録 / Ctrl-C で停止
-# 介入(💡)はターミナルとライブ議事録HTML(2秒自動更新)の両方に出る
-#   --facilitate-interval 3.0  介入判定の周期(0で無効)
-#   --min-utt-chars 7          相槌をAF構築から除外する文字数しきい値
 # 議事録(MD/HTML/turns.jsonl)は transcripts/ に自動保存
 # バッチでも可: uv run das run-session transcripts/<日時>.turns.jsonl
 ```
+
+### AIファシリテーター付きライブUI (`python -m das.asr.live --agent`)
+
+ブラウザUI（`http://127.0.0.1:8231/`）でライブ議事録・3モード切替（議事録のみ／
+AIと会話／人間に介入）・議題編集・話者リネーム・発言量・「新しい会議」リセット・
+停止が行える。脱線を本題に戻し、発言の少ない人に声をかける。
+
+```bash
+uv run python -m das.asr.live --agent --topic 'AIツール導入の是非'
+# 一人で動作確認: --simulate '議題' --sim-scenario derailed|imbalanced --agent
+```
+
+詳しくは `docs/COMMANDS.md` を参照。
 
 ## CLI
 
