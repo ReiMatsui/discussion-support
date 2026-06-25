@@ -84,6 +84,10 @@ class SessionState:
         self.drift_requests: queue.Queue[str] = queue.Queue()
         # 参加度の声かけ要求キュー（S4）。対象話者の表示名を積む。
         self.invite_requests: queue.Queue[str] = queue.Queue()
+        # ファシリテーター発言の副作用イベント（議事録追加・パートナー反応）。
+        # agentの受信スレッドはここに積むだけにして、専用ワーカーが処理する。
+        # 受信スレッドが partner の WebSocket 送信やファイルI/Oでブロックするのを防ぐ。
+        self.fac_events: queue.Queue[tuple[str, str | None]] = queue.Queue()
         # 積極性プロファイル（S5）。bootstrapで --proactivity から上書きされる。
         self.proactivity: dict = dict(_PROACTIVITY_PROFILES[_PROACTIVITY_DEFAULT])
         # UIからの停止フック（F1）。run_sessionが「stopを立ててwsを閉じる」関数を設定する。
