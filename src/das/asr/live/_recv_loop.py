@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 import contextlib
 
-from ._constants import _BACKCHANNEL_RE, _ENROLL_MIN_CHARS, RESET, UNSURE_SPEAKER, fmt_ts
+from ._constants import _BACKCHANNEL_RE, RESET, UNSURE_SPEAKER, fmt_ts
 from ._ui import _print_line
 
 
@@ -73,12 +73,11 @@ class RecvLoop:
                 wav = np.frombuffer(seg, dtype="<i2").astype(np.float32) / 32768.0
             else:
                 wav = np.zeros(0, dtype=np.float32)
-            # 中身の薄い発話（文字数が少ない）は新規人物の登録素材にしない
-            _enroll_ok = len(self.cur_text.strip()) >= _ENROLL_MIN_CHARS
+            # 登録は声ごとの累積文字数で判定するので、この発話の文字数を渡す
             sp_id = tracker.classify(
                 wav, self.cur_speaker,
                 overlapped=self.overlaps_other(self.cur_ms, self.cur_end, label),
-                count=not _is_backchannel, enroll=_enroll_ok)
+                count=not _is_backchannel, chars=len(self.cur_text.strip()))
             # --- 声紋ベースのAIエコー除去 ---
             if (sp_id is not None
                     and sp_id.startswith("__") and sp_id.endswith("__")):
