@@ -37,6 +37,8 @@ def _tracker(emb: np.ndarray) -> VoiceProfiles:
     vp.short_floor = 0.45
     vp.short_bonus = 0.05
     vp.short_margin_mult = 2.0
+    vp.enroll_min_sec = 1.5
+    vp.enroll_consist_bonus = 0.08
     vp.margin = 0.05
     vp.thresh = 0.5
     vp.consist = 0.6
@@ -47,7 +49,7 @@ def _tracker(emb: np.ndarray) -> VoiceProfiles:
     return vp
 
 
-_LONG = np.ones(int(SR * 1.2), dtype=np.float32)   # min_sec を超える
+_LONG = np.ones(int(SR * 1.6), dtype=np.float32)   # enroll_min_sec を超える
 
 
 def test_new_voice_not_shown_as_registered_person():

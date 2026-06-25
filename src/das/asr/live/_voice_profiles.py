@@ -145,6 +145,10 @@ class VoiceProfiles:
         self.short_floor = 0.45        # 厳格照合する下限秒数（これ未満は声が短すぎるので追従）
         self.short_bonus = 0.05        # 採用閾値を本人閾値からどれだけ引き上げるか
         self.short_margin_mult = 2.0   # 要求する2位とのmargin倍率
+        # 新規人物の自動登録を厳しめに（誤登録＝以後の取り違えの種を減らす）。
+        # 照合(min_sec)よりも長いクリーンな発話だけを登録に使い、3発話の一貫性も上げる。
+        self.enroll_min_sec = 1.5         # 登録に使う発話の長さ下限（min_secより長く）
+        self.enroll_consist_bonus = 0.08  # 3発話の一貫性しきい値(cs)への上乗せ
         self.profiles: dict[str, np.ndarray] = {}
         if os.path.exists(path):
             with open(path, encoding="utf-8") as f:
@@ -311,14 +315,18 @@ class VoiceProfiles:
                     pv = active.get(prev)
                     if pv is None or float(np.dot(pv, emb)) < self._person_th(prev, th):
                         prev = None
-                kind = "蓄積中" if self.auto else "未確定"
-                if self.auto:
-                    # 声プール: ラベル不問で、互いに一貫する3発話が揃ったら人物化
+                # 登録は厳しめ: 照合より長いクリーンな発話だけを使う
+                long_enough = wav.size >= SR * self.enroll_min_sec
+                kind = "蓄積中" if (self.auto and long_enough) else "未確定"
+                if self.auto and long_enough:
+                    # 声プール: ラベル不問で、互いに一貫する3発話が揃ったら人物化。
+                    # 一貫性しきい値は cs に bonus を上乗せして締める（誤登録抑制）。
+                    ecs = cs + self.enroll_consist_bonus
                     sims = sorted(((float(np.dot(p, emb)), i) for i, p in enumerate(self.pool)),
                                   reverse=True)
-                    cand = [i for s, i in sims[:2] if s >= cs]
+                    cand = [i for s, i in sims[:2] if s >= ecs]
                     if len(cand) == 2 and float(np.dot(self.pool[cand[0]],
-                                                       self.pool[cand[1]])) >= cs:
+                                                       self.pool[cand[1]])) >= ecs:
                         triple = [self.pool[cand[0]], self.pool[cand[1]], emb]
                         for i in sorted(cand, reverse=True):
                             self.pool.pop(i)
