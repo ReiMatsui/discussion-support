@@ -216,7 +216,11 @@ class SessionState:
         stats = participation_stats(raw, exclude_speakers=(AGENT_SPEAKER, "パートナー"))
         participation = [
             {"speaker": self.disp_name(sp),
-             "time_share": round(d["time_share"], 3), "turns": d["turns"]}
+             "time_share": round(d["time_share"], 3),
+             "char_share": round(d["char_share"], 3),
+             "turn_share": round(d["turn_share"], 3),
+             "turns": d["turns"], "chars": d["chars"],
+             "has_time": d["talk_ms"] > 0}
             for sp, d in stats.items()
         ]
         agent = None

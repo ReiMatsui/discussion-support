@@ -92,6 +92,8 @@ INDEX_HTML = """<!doctype html>
   .bar-fill { height: 100%; border-radius: 5px; background: var(--accent); }
   .bar-pct { width: 2.6em; text-align: right; color: var(--muted);
     font-size: .74rem; font-variant-numeric: tabular-nums; }
+  .stat-group { margin-bottom: .7em; }
+  .stat-label { font-size: .72rem; color: #9ca3af; margin-bottom: .25em; }
   .topic { font-size: .8rem; padding: .35em .5em; margin-bottom: .3em;
     background: #fff; border: 1px solid var(--line); border-left: 3px solid #8b5cf6;
     border-radius: 6px; }
@@ -203,17 +205,26 @@ function renderTranscript(records) {
   if (atBottom) box.scrollTop = box.scrollHeight;
 }
 
-function renderParticipation(list) {
-  const panel = $("part-panel");
-  if (!list || list.length < 2) { panel.hidden = true; return; }
-  panel.hidden = false;
-  const total = list.reduce((a, p) => a + (p.time_share || 0), 0) || 1;
-  $("participation").innerHTML = list.map((p) => {
-    const pct = Math.round((p.time_share || 0) / total * 100);
+function bars(list, key) {
+  return list.map((p) => {
+    const pct = Math.round((p[key] || 0) * 100);
     return `<div class="bar-row"><span class="bar-name" title="${esc(p.speaker)}">${esc(p.speaker)}</span>`
       + `<span class="bar-bg"><span class="bar-fill" style="width:${pct}%;background:${speakerColor(p.speaker)}"></span></span>`
       + `<span class="bar-pct">${pct}%</span></div>`;
   }).join("");
+}
+
+function renderParticipation(list) {
+  const panel = $("part-panel");
+  if (!list || list.length < 2) { panel.hidden = true; return; }
+  panel.hidden = false;
+  let html = "";
+  if (list.some((p) => p.has_time)) {
+    html += `<div class="stat-group"><div class="stat-label">発話時間</div>${bars(list, "time_share")}</div>`;
+  }
+  html += `<div class="stat-group"><div class="stat-label">文字数</div>${bars(list, "char_share")}</div>`;
+  html += `<div class="stat-group"><div class="stat-label">発話回数</div>${bars(list, "turn_share")}</div>`;
+  $("participation").innerHTML = html;
 }
 
 function renderSpeakers(list) {

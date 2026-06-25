@@ -26,6 +26,18 @@ def test_basic_shares():
     assert s["話者2"]["last_end_ms"] == 4000
 
 
+def test_char_metric():
+    """文字数と文字数シェアも算出される（指標復活）."""
+    records = [
+        {"speaker": "話者1", "text": "あいうえお", "ms": 0, "end_ms": 1000},   # 5字
+        {"speaker": "話者2", "text": "かき", "ms": 1000, "end_ms": 1500},       # 2字
+    ]
+    s = participation_stats(records)
+    assert s["話者1"]["chars"] == 5
+    assert s["話者2"]["chars"] == 2
+    assert abs(s["話者1"]["char_share"] - 5 / 7) < 1e-9
+
+
 def test_excludes_facilitator():
     records = [
         {"speaker": "話者1", "text": "a", "ms": 0, "end_ms": 2000},
