@@ -79,15 +79,13 @@ class _UIHandler:
                     pass
 
             def _serve_html(self):
-                try:
-                    with open(self._state.html_path, "rb") as f:
-                        content = f.read()
-                except FileNotFoundError:
-                    content = "<p>準備中…</p>".encode()
+                # サーバー配信時は新SPA（_webapp.INDEX_HTML）を返す。
+                # 生成済みの議事録HTML(html_path)は file:// 表示・清書用に別途残る。
+                from das.asr.live._webapp import INDEX_HTML
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.end_headers()
-                self.wfile.write(content)
+                self.wfile.write(INDEX_HTML.encode("utf-8"))
 
             def do_POST(self):
                 s = self._state

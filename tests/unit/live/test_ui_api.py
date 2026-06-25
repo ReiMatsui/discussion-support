@@ -82,6 +82,22 @@ def _serve(state):
     return httpd, httpd.server_address[1]
 
 
+def test_http_get_root_serves_spa():
+    """GET / が新SPA(HTML)を配信する."""
+    state = _make_state()
+    httpd, port = _serve(state)
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/") as r:
+            html = r.read().decode("utf-8")
+            ctype = r.headers.get("Content-Type", "")
+        assert "text/html" in ctype
+        assert "<title>議論支援</title>" in html
+        assert "/api/stream" in html   # SSEを使うSPA
+        assert "/api/mode" in html     # モード切替
+    finally:
+        httpd.shutdown()
+
+
 def test_http_get_state_and_post_stop():
     state = _make_state()
     state.records = [{"speaker": "話者1", "text": "やあ", "ms": 0, "end_ms": 500}]

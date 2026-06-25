@@ -466,9 +466,14 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
                          daemon=True).start()
 
         state.save()
-        print("# 開始。話してください（「1=松井」で声を登録 / Ctrl+Cで終了）", flush=True)
+        print("# 開始。話してください（「1=松井」で声を登録 / UIの停止ボタン or Ctrl+Cで終了）",
+              flush=True)
         print(f"# 保存先: {out_path}", flush=True)
-        print(f"# ブラウザ表示: open {html_path}（ライブ中は2秒ごと自動更新）\n", flush=True)
+        if _serve:
+            print(f"# ブラウザUI: http://127.0.0.1:{args.port}/ "
+                  f"（モード切替・ライブ更新・停止）\n", flush=True)
+        else:
+            print(f"# ブラウザ表示: open {html_path}\n", flush=True)
         if not args.no_open:
             import webbrowser
             if _serve:
