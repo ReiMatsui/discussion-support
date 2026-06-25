@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 import contextlib
 
-from ._constants import _BACKCHANNEL_RE, RESET, fmt_ts
+from ._constants import _BACKCHANNEL_RE, RESET, UNSURE_SPEAKER, fmt_ts
 from ._ui import _print_line
 
 
@@ -140,7 +140,10 @@ class RecvLoop:
             except OSError:
                 pass
         if _is_backchannel:
-            rec_extra["bc"] = True   # UIで薄く折りたためるように
+            # 相槌は、話している人とは別人の可能性が高い（Aの話中にBが「はい」）。
+            # 直前の人に追従させず未確定にする。bcフラグでUIでは薄く折りたたむ。
+            sp_id = UNSURE_SPEAKER
+            rec_extra["bc"] = True
         with s.state_lock:
             s.records.append({"ms": self.cur_ms, "end_ms": self.cur_end,
                               "speaker": sp_id, "text": self.cur_text.strip(),

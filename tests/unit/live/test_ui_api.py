@@ -176,16 +176,35 @@ def test_show_partial_updates_state_and_snapshot():
 def test_snapshot_unsure_and_backchannel_flags():
     s = _make_state()
     s.records = [
-        {"speaker": "?", "text": "うーん", "ms": 0, "end_ms": 300},
-        {"speaker": "#1", "text": "はい", "ms": 300, "end_ms": 600, "bc": True},
+        {"speaker": "?", "text": "はい", "ms": 0, "end_ms": 300, "bc": True},   # 相槌=未確定
+        {"speaker": "#1", "text": "本題です", "ms": 300, "end_ms": 600},
     ]
-    recs = s.api_snapshot()["records"]
-    assert recs[0]["speaker"] == "未確定" and recs[0]["unsure"] is True
-    assert recs[1]["bc"] is True
-    # 未確定は参加度・リネーム候補から除外
     snap = s.api_snapshot()
+    recs = snap["records"]
+    assert recs[0]["speaker"] == "未確定"
+    assert recs[0]["unsure"] is True and recs[0]["bc"] is True
+    assert recs[1]["bc"] is False
+    # 未確定は参加度・リネーム候補から除外
     assert all(p["speaker"] != "未確定" for p in snap["participation"])
     assert all(sp["name"] != "未確定" for sp in snap["speakers"])
+
+
+def test_speakers_registration_targets():
+    """登録パネルには未命名の話者だけ（人物N=キー, #N=ラベル）。命名済み/未確定/AIは対象外."""
+    s = _make_state()
+    s.records = [
+        {"speaker": "人物1", "text": "a", "ms": 0, "end_ms": 500},
+        {"speaker": "松井", "text": "b", "ms": 500, "end_ms": 1000},      # 命名済み
+        {"speaker": "#3", "text": "c", "ms": 1000, "end_ms": 1500},
+        {"speaker": "?", "text": "うん", "ms": 1500, "end_ms": 1700},      # 未確定
+        {"speaker": "ファシリテーター", "text": "x", "ms": None, "end_ms": None},
+    ]
+    by = {sp["name"]: sp for sp in s.api_snapshot()["speakers"]}
+    assert by["人物1"]["renameable"] is True and by["人物1"]["label"] == "人物1"
+    assert by["話者3"]["renameable"] is True and by["話者3"]["label"] == "3"
+    assert by["松井"]["renameable"] is False     # 命名済みは登録対象外（パネル非表示）
+    assert "未確定" not in by                      # 未確定は出さない
+    assert "ファシリテーター" not in by             # AIは出さない
 
 
 # --- 声紋ステータスの可視化 -------------------------------------------------
