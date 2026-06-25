@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 import contextlib
 
-from ._constants import RESET, fmt_ts
+from ._constants import _BACKCHANNEL_RE, RESET, fmt_ts
 from ._ui import _print_line
 
 
@@ -71,8 +71,12 @@ class RecvLoop:
                 wav = np.frombuffer(seg, dtype="<i2").astype(np.float32) / 32768.0
             else:
                 wav = np.zeros(0, dtype=np.float32)
-            sp_id = tracker.classify(wav, self.cur_speaker,
-                                     overlapped=self.overlaps_other(self.cur_ms, self.cur_end, label))
+            # 相槌（「はい」等）は声紋の人物確定に使わない（既存割り当てに追従, 課題④）
+            _is_backchannel = bool(_BACKCHANNEL_RE.match(self.cur_text.strip()))
+            sp_id = tracker.classify(
+                wav, self.cur_speaker,
+                overlapped=self.overlaps_other(self.cur_ms, self.cur_end, label),
+                count=not _is_backchannel)
             # --- 声紋ベースのAIエコー除去 ---
             if (sp_id is not None
                     and sp_id.startswith("__") and sp_id.endswith("__")):

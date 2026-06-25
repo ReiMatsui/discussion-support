@@ -175,6 +175,25 @@ class VoiceProfiles:
         # ユーザーが明示的にONにしたもの＋セッション中に自動登録された人物Nのみが照合対象。
         self._active_keys: set[str] = set()
 
+    def reset_session(self) -> None:
+        """会議リセット時に、人間話者の割り当て・蓄積をクリアする（課題③）.
+
+        新しい会議を素の状態から始められるように、Sonioxラベルの割り当て・
+        未確定プール・人物別履歴をクリアし、照合対象（アクティブ）も外す。
+        ただし AI声紋(__AI__/__PARTNER__)はエコー除去に使うため維持する。
+        voices.json（永続化ファイル）は変更しない（永続化は別機能）。
+        """
+        with self._lock:
+            self.sp_map.clear()
+            self.label_embs.clear()
+            self.pool.clear()
+            self.n_anon = 0
+            self.own_sims.clear()
+            self.last = None
+            # 人間話者は照合対象から外す。AI声紋(__..__)だけ残す。
+            self._active_keys = {k for k in self._active_keys
+                                 if k.startswith("__") and k.endswith("__")}
+
     def _note(self, kind: str, **info) -> None:
         self.counts[kind] = self.counts.get(kind, 0) + 1
         self.last = {"kind": kind, **info}
@@ -205,22 +224,26 @@ class VoiceProfiles:
         emb = np.asarray(emb, dtype=np.float64)
         return emb / np.linalg.norm(emb)
 
-    def classify(self, wav: np.ndarray, sp, overlapped: bool = False) -> str:
-        """発話を人物キーに割り当てる（経路はクラスdocstring参照）.
+    def classify(self, wav: np.ndarray, sp, overlapped: bool = False,
+                 count: bool = True) -> str:
+        """発話を人物キーに割り当てる（経路はクラスドキュメント参照）.
 
         overlapped=True の発話は声が混ざっていて声紋がデタラメになるため、
         声での判定をスキップして直前の対応を維持する。
+        count=False（相槌など）の発話は声紋の蓄積・人物登録に使わず、
+        既存の割り当てに追従するだけにする（課題④）。
         """
         with self._lock:
-            return self._classify(wav, sp, overlapped)
+            return self._classify(wav, sp, overlapped, count)
 
-    def _classify(self, wav: np.ndarray, sp, overlapped: bool) -> str:
+    def _classify(self, wav: np.ndarray, sp, overlapped: bool,
+                  count: bool = True) -> str:
         sp = str(sp)
         prev = self.sp_map.get(sp)
         kind, info = "相槌追従", {}
         if overlapped and wav.size >= SR * self.min_sec:
             kind = "重なりスキップ"
-        elif wav.size >= SR * self.min_sec:
+        elif count and wav.size >= SR * self.min_sec:
             emb = self._embed(wav)
             if emb is None:
                 kind = "声紋計算不可"

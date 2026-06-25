@@ -84,6 +84,9 @@ class SessionState:
         self.drift_requests: queue.Queue[str] = queue.Queue()
         # 参加度の声かけ要求キュー（S4）。対象話者の表示名を積む。
         self.invite_requests: queue.Queue[str] = queue.Queue()
+        # 認識途中経過（partial）。UIに「認識中」を見せるため（課題①）。
+        self.partial_text = ""
+        self.partial_speaker = ""
         # ファシリテーター発言の副作用イベント（議事録追加・パートナー反応）。
         # agentの受信スレッドはここに積むだけにして、専用ワーカーが処理する。
         # 受信スレッドが partner の WebSocket 送信やファイルI/Oでブロックするのを防ぐ。
@@ -139,6 +142,17 @@ class SessionState:
             self.colors[key] = PALETTE[len(self.colors) % len(PALETTE)]
         return self.colors[key]
 
+    def html_color(self, key) -> str:
+        """話者キーに対応する安定したHTML色（ブラウザ再読み込みでも一貫, 課題②）.
+
+        色は state.colors の登録順で決まる（サーバー側に保持）。再読み込みでは
+        サーバー状態が変わらないため色がぶれず、新しい会議でリセットされる。
+        """
+        key = str(key)
+        self.color_of(key)  # 未登録なら登録順を確定
+        idx = list(self.colors).index(key)
+        return HTML_PALETTE[idx % len(HTML_PALETTE)]
+
     def rekey(self, old: str, new: str):
         """表示キーの付け替え: recordsと色を一括移行."""
         with self.state_lock:
@@ -188,6 +202,9 @@ class SessionState:
         """UI(API)向けの現在状態（JSON化可能なdict）を返す."""
         with self.state_lock:
             raw = list(self.records)
+            # 色をロック内でまとめて確定（再読み込みでも一貫, 課題②）
+            key_colors = {str(r["speaker"]): self.html_color(r["speaker"])
+                          for r in raw if "speaker" in r}
             records = []
             for r in raw:
                 if "sys" in r:
@@ -198,6 +215,7 @@ class SessionState:
                         "type": "utt",
                         "ms": r.get("ms"), "end_ms": r.get("end_ms"),
                         "speaker": self.disp_name(r["speaker"]),
+                        "color": key_colors[str(r["speaker"])],
                         "text": r.get("text", ""),
                         "corrected": r.get("vp") == "補正",
                     })
@@ -213,6 +231,7 @@ class SessionState:
                 _seen.add(name)
                 label = self._speaker_label(key)
                 speakers.append({"name": name, "label": label,
+                                 "color": key_colors[key],
                                  "renameable": label is not None})
         with self.topics_lock:
             topics = [{"topic": t.get("topic", ""), "speaker": t.get("speaker", "")}
@@ -220,6 +239,7 @@ class SessionState:
         stats = participation_stats(raw, exclude_speakers=(AGENT_SPEAKER, "パートナー"))
         participation = [
             {"speaker": self.disp_name(sp),
+             "color": key_colors.get(str(sp), "#888"),
              "time_share": round(d["time_share"], 3),
              "char_share": round(d["char_share"], 3),
              "turn_share": round(d["turn_share"], 3),
@@ -238,6 +258,7 @@ class SessionState:
             "resetting": self.resetting,
             "agenda": self._current_agenda(),
             "started": self.started.strftime("%Y-%m-%d %H:%M"),
+            "partial": {"speaker": self.partial_speaker, "text": self.partial_text},
             "speakers": speakers,
             "records": records,
             "topics": topics,
@@ -310,10 +331,16 @@ class SessionState:
         self.wav_path = base + ".wav"
         self.open_wav()        # 新しい録音を開く（PCMバッファもリセットしSTTのmsと整合）
 
-        # 状態クリア（声紋・名前・色は引き継ぐ）
+        # 状態クリア（課題③: 話者ラベリングもリセット。永続化は別機能）
         with self.state_lock:
             self.records = []
+            self.names = {}
+            self.colors = {}
             self.agent_cursor = 0
+            self.partial_text = ""
+            self.partial_speaker = ""
+        if self.tracker is not None:
+            self.tracker.reset_session()
         with self.topics_lock:
             self.topics = []
         self.topic_cursor = 0
@@ -380,11 +407,15 @@ class SessionState:
         return "#" + tok
 
     def show_partial(self, sp, text: str):
-        if not text.strip():
+        # UI向けに途中経過(partial)を保持（認識中であることが分かるように, 課題①）
+        t = text.strip()
+        self.partial_text = t
+        self.partial_speaker = self.disp_name(self.key_for_label(sp)) if t else ""
+        if not t:
             sys.stdout.write(CLEAR_LINE)
         else:
             cols = os.get_terminal_size().columns if sys.stdout.isatty() else 120
-            line = f"{self.disp_name(self.key_for_label(sp))}: {text.strip()}"
+            line = f"{self.partial_speaker}: {t}"
             sys.stdout.write(CLEAR_LINE + DIM + line[-(cols - 2):] + RESET)
         sys.stdout.flush()
 

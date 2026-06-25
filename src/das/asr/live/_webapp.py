@@ -75,6 +75,8 @@ INDEX_HTML = """<!doctype html>
   .u.facil .who { color: var(--facil); }
   .u .badge { background: #fef3c7; color: #92400e; font-size: .68rem;
     border-radius: 5px; padding: .05em .4em; margin-left: .4em; }
+  .u.partial { opacity: .55; font-style: italic; }
+  .u.partial::after { content: "…"; }
   .sys { text-align: center; color: var(--muted); font-size: .78rem; margin: .4rem 0; }
   .empty { color: var(--muted); font-size: .9rem; padding: 1rem; text-align: center; }
 
@@ -153,12 +155,6 @@ const MODES = [
   { id: "converse",   name: "AIと会話",   desc: "AIと話しつつ進行も手伝う" },
   { id: "facilitate", name: "人間に介入", desc: "人同士の議論を進行役が支援" },
 ];
-const PALETTE = ["#0e7490","#a16207","#7e22ce","#15803d","#1d4ed8","#dc2626","#be185d","#0f766e"];
-const speakerColor = (() => {
-  const map = {};
-  return (name) => (map[name] ??= PALETTE[Object.keys(map).length % PALETTE.length]);
-})();
-
 const $ = (id) => document.getElementById(id);
 let busyMode = null;   // 切替中のモードid
 let stopped = false;
@@ -182,26 +178,29 @@ function renderModes(active) {
   }
 }
 
-function renderTranscript(records) {
+function renderTranscript(records, partial) {
   const box = $("transcript");
   // 末尾付近にいるなら自動スクロールを維持
   const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
-  if (!records.length) {
-    box.innerHTML = '<div class="empty">まだ発話がありません</div>';
-    return;
-  }
   const parts = [];
   for (const r of records) {
     if (r.type === "sys") { parts.push(`<div class="sys">⚙ ${esc(r.text)}</div>`); continue; }
     const facil = r.speaker === "ファシリテーター";
-    const color = facil ? "var(--facil)" : speakerColor(r.speaker);
+    const color = facil ? "var(--facil)" : (r.color || "#444");
     const badge = r.corrected ? '<span class="badge">声紋補正</span>' : "";
     parts.push(`<div class="u${facil ? " facil" : ""}">`
       + `<span class="ts">${fmtTs(r.ms)}</span>`
       + `<span class="who" style="color:${color}">${esc(r.speaker)}</span>`
       + `${esc(r.text)}${badge}</div>`);
   }
-  box.innerHTML = parts.join("");
+  // 認識途中（partial）を薄字で末尾に表示（課題①）
+  if (partial && partial.text) {
+    parts.push(`<div class="u partial">`
+      + `<span class="who" style="color:var(--muted)">${esc(partial.speaker)}</span>`
+      + `${esc(partial.text)}</div>`);
+  }
+  box.innerHTML = parts.length ? parts.join("")
+    : '<div class="empty">まだ発話がありません</div>';
   if (atBottom) box.scrollTop = box.scrollHeight;
 }
 
@@ -209,7 +208,7 @@ function bars(list, key) {
   return list.map((p) => {
     const pct = Math.round((p[key] || 0) * 100);
     return `<div class="bar-row"><span class="bar-name" title="${esc(p.speaker)}">${esc(p.speaker)}</span>`
-      + `<span class="bar-bg"><span class="bar-fill" style="width:${pct}%;background:${speakerColor(p.speaker)}"></span></span>`
+      + `<span class="bar-bg"><span class="bar-fill" style="width:${pct}%;background:${p.color || "#888"}"></span></span>`
       + `<span class="bar-pct">${pct}%</span></div>`;
   }).join("");
 }
@@ -232,9 +231,11 @@ function renderSpeakers(list) {
   const items = (list || []).filter((s) => s.renameable);
   if (!items.length) { panel.hidden = true; return; }
   panel.hidden = false;
+  // 編集中（入力にフォーカス）なら作り直さない（課題②: ライブ更新で入力が消えるのを防ぐ）
+  if ($("speakers").contains(document.activeElement)) return;
   $("speakers").innerHTML = items.map((s) =>
     `<div class="spk-row">`
-    + `<span class="spk-name" style="color:${speakerColor(s.name)}" title="${esc(s.name)}">${esc(s.name)}</span>`
+    + `<span class="spk-name" style="color:${s.color || "#444"}" title="${esc(s.name)}">${esc(s.name)}</span>`
     + `<input class="spk-input" data-label="${esc(s.label)}" placeholder="名前">`
     + `<button class="spk-btn">登録</button></div>`
   ).join("");
@@ -283,7 +284,7 @@ async function setAgenda() {
 function render(state) {
   renderModes(state.mode);
   renderAgenda(state.agenda);
-  renderTranscript(state.records || []);
+  renderTranscript(state.records || [], state.partial);
   renderSpeakers(state.speakers);
   renderParticipation(state.participation);
   renderTopics(state.topics);
