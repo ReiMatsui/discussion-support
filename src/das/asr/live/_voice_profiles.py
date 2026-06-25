@@ -303,6 +303,14 @@ class VoiceProfiles:
                         self._note("補正" if (prev is not None and not prev.startswith("#")
                                               and prev != cand) else "声紋一致", label=sp, **info)
                         return cand
+                # 既知の誰にも確信を持って一致しなかった。直前が「確定済みの人」でも、
+                # 声紋がその人と一致しないなら追従せず「未確定」に落とす。これにより
+                # 新規話者の登録直前の発話が登録済みの人として表示されるのを防ぎ、
+                # 登録時の遡及リネーム(#ラベル→人物N)で後からまとめて確定できる。
+                if prev is not None and not prev.startswith("#"):
+                    pv = active.get(prev)
+                    if pv is None or float(np.dot(pv, emb)) < self._person_th(prev, th):
+                        prev = None
                 kind = "蓄積中" if self.auto else "未確定"
                 if self.auto:
                     # 声プール: ラベル不問で、互いに一貫する3発話が揃ったら人物化
