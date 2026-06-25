@@ -4,6 +4,7 @@ from __future__ import annotations
 import datetime
 import json
 import threading
+import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
 
@@ -27,6 +28,26 @@ class _FakeAgent:
     @property
     def enabled(self):
         return self.mode != "off"
+
+
+class _FakeTracker:
+    """声紋トラッカーの最小スタブ（事前登録・名簿テスト用）."""
+    def __init__(self, auto=True):
+        self.auto = auto
+        self.model = "redimnet"
+        self.profiles: dict = {}
+        self.enrolled: list = []
+
+    def enroll_from_audio(self, name, wav):
+        self.enrolled.append((name, len(wav)))
+        self.profiles[name] = 1
+        return True
+
+    def all_profile_names(self):
+        return list(self.profiles)
+
+    def active_profile_names(self):
+        return list(self.profiles)
 
 
 # --- session_mode -----------------------------------------------------------
@@ -212,14 +233,78 @@ def test_speakers_registration_targets():
 
 def test_snapshot_vp_disabled_when_no_tracker():
     s = _make_state()
-    assert s.api_snapshot()["vp"] == {"enabled": False, "model": None}
+    assert s.api_snapshot()["vp"] == {"enabled": False, "model": None,
+                                      "locked": False, "roster": []}
 
 
-def test_snapshot_vp_enabled_reports_model():
+def test_snapshot_vp_enabled_reports_model_and_roster():
     s = _make_state()
-    s.tracker = type("T", (), {"model": "redimnet"})()
+    s.tracker = _FakeTracker(auto=False)
+    s.tracker.profiles = {"黒田": 1, "としや": 1}
     vp = s.api_snapshot()["vp"]
-    assert vp == {"enabled": True, "model": "redimnet"}
+    assert vp["enabled"] is True and vp["model"] == "redimnet"
+    assert vp["locked"] is True                  # auto=False → 名簿確定
+    assert set(vp["roster"]) == {"黒田", "としや"}
+
+
+# --- 事前登録・名簿（UI登録フロー） ----------------------------------------
+
+def test_http_enroll_from_buffer():
+    """/api/enroll が直近のPCMバッファからその人を声紋登録する."""
+    s = _make_state()
+    s.tracker = _FakeTracker()
+    s.pcm_buf = bytearray(b"\x01\x00" * (16000 * 3))   # 3秒ぶん
+    httpd, port = _serve(s)
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/enroll",
+            data=json.dumps({"name": "黒田", "seconds": 2}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req) as r:
+            out = json.loads(r.read())
+        assert out["ok"] is True and out["name"] == "黒田"
+        assert s.tracker.enrolled and s.tracker.enrolled[0][0] == "黒田"
+    finally:
+        httpd.shutdown()
+
+
+def test_http_enroll_rejects_too_short():
+    """音声が2秒未満なら登録を拒否する."""
+    s = _make_state()
+    s.tracker = _FakeTracker()
+    s.pcm_buf = bytearray(b"\x01\x00" * 8000)   # 0.5秒
+    httpd, port = _serve(s)
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/enroll",
+            data=json.dumps({"name": "黒田", "seconds": 5}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            urllib.request.urlopen(req)
+            raise AssertionError("拒否されるはず")
+        except urllib.error.HTTPError as e:
+            assert e.code == 400
+        assert not s.tracker.enrolled
+    finally:
+        httpd.shutdown()
+
+
+def test_http_roster_lock_toggles_auto():
+    """/api/roster で名簿を確定すると自動登録がオフになる."""
+    s = _make_state()
+    s.tracker = _FakeTracker(auto=True)
+    httpd, port = _serve(s)
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/roster",
+            data=json.dumps({"locked": True}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req) as r:
+            out = json.loads(r.read())
+        assert out == {"ok": True, "locked": True}
+        assert s.tracker.auto is False
+    finally:
+        httpd.shutdown()
 
 
 # --- 課題②: 安定した話者色 --------------------------------------------------

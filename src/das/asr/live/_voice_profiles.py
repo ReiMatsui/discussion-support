@@ -427,8 +427,10 @@ class VoiceProfiles:
                                    label=sp, sim=round(sim, 3), second=round(second, 3),
                                    name=cand, prev=prev, short=True)
                         return cand
-                # 厳格に決められない短い発話は、確定済みの人へ追従せず未確定に。
-                if prev is not None and not prev.startswith("#"):
+                # 厳格に決められない短い発話。自動登録ありの探索中(open-set)は、確定済みの
+                # 人へ誤って追従しないよう未確定にする。閉じた名簿(auto=False)では、未確定で
+                # 固着させず直近の割り当て/話者ラベルに倒す（話者Nで安定した仮人格を与える）。
+                if self.auto and prev is not None and not prev.startswith("#"):
                     self._note("未確定", label=sp, prev=prev, short=True)
                     return UNSURE_SPEAKER
         # 声紋で決められない（重なり/短い相槌/蓄積中）→ ラベルの直近判定に追従
@@ -535,6 +537,33 @@ class VoiceProfiles:
     def all_profile_names(self) -> list[str]:
         """voices.jsonに保存された全名前付きプロファイル（UI表示用）."""
         return sorted(k for k in self.profiles if not self.ANON.match(k))
+
+    def enroll_from_audio(self, name: str, wav: np.ndarray) -> bool:
+        """生の音声からその人の声紋を作って名前付き登録・有効化する（事前登録用）.
+
+        会議前に各人が単独で喋った音声から、2秒窓の平均で頑健な声紋を作る。
+        既に同名があれば上書きし、有効化して voices.json に永続化する。
+        """
+        name = str(name).strip()
+        if not name:
+            return False
+        with self._lock:
+            embs = []
+            win = int(SR * 2.0)
+            for i in range(0, max(wav.size - win + 1, 0), win):
+                e = self._embed(wav[i:i + win])
+                if e is not None:
+                    embs.append(e)
+            if not embs:   # 2秒に満たない/窓が取れない → 全体で1つ
+                e = self._embed(wav)
+                if e is None:
+                    return False
+                embs = [e]
+            prof = np.mean(embs, axis=0)
+            self.profiles[name] = prof / np.linalg.norm(prof)
+            self._active_keys.add(name)
+            self._persist()
+            return True
 
     def _persist(self):
         named = {k: v.tolist() for k, v in self.profiles.items() if not self.ANON.match(k)}

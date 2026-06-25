@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ._session_state import SessionState
 
-from ._constants import CLEAR_LINE
+from ._constants import CLEAR_LINE, SR
 
 
 def _print_line(text: str):
@@ -168,6 +168,48 @@ class _UIHandler:
                         _print_line(f"# {name} を無効化（UIから）")
                         s.save()
                     self._json(200, {"ok": True, "name": name, "active": active})
+                elif self.path == "/api/enroll":
+                    # 会議前の事前登録: 直近の音声(その人が単独で喋った分)で声紋を作る
+                    import numpy as np
+                    length = int(self.headers.get("Content-Length", 0))
+                    body = json.loads(self.rfile.read(length))
+                    name = str(body.get("name", "")).strip()
+                    seconds = float(body.get("seconds", 20))
+                    if not name:
+                        self._json(400, {"error": "name を指定してください"})
+                        return
+                    if s.tracker is None:
+                        self._json(400, {"error": "声紋照合が無効です（--no-vp 指定中など）"})
+                        return
+                    nbytes = max(int(seconds * SR * 2), 0)
+                    with s.buf_lock:
+                        seg = bytes(s.pcm_buf[-nbytes:]) if nbytes else bytes(s.pcm_buf)
+                    if len(seg) < SR * 2 * 2:   # 2秒未満
+                        self._json(400, {"error": "音声が足りません（もう少し話してから登録してください）"})
+                        return
+                    wav = np.frombuffer(seg, dtype="<i2").astype(np.float32) / 32768.0
+                    if not s.tracker.enroll_from_audio(name, wav):
+                        self._json(400, {"error": "声紋の計算に失敗しました"})
+                        return
+                    s.add_sys(None, f"「{name}」の声を事前登録しました（{len(seg) / (SR * 2):.0f}秒）")
+                    s.save()
+                    _print_line(f"# {name} を事前登録（{len(seg) / (SR * 2):.0f}秒、UIから）")
+                    self._json(200, {"ok": True, "name": name,
+                                     "seconds": round(len(seg) / (SR * 2), 1)})
+                elif self.path == "/api/roster":
+                    # 名簿の確定/解除: 確定すると自動登録オフ（登録済みだけと照合し増殖を止める）
+                    length = int(self.headers.get("Content-Length", 0))
+                    body = json.loads(self.rfile.read(length))
+                    locked = bool(body.get("locked", True))
+                    if s.tracker is None:
+                        self._json(400, {"error": "声紋照合が無効です"})
+                        return
+                    s.tracker.auto = not locked
+                    s.add_sys(None, "名簿を確定しました（登録済みの人だけで進めます）"
+                              if locked else "名簿の確定を解除しました（自動登録ON）")
+                    s.save()
+                    _print_line(f"# 名簿{'確定' if locked else '解除'}（UIから）")
+                    self._json(200, {"ok": True, "locked": locked})
                 elif self.path == "/agent":
                     length = int(self.headers.get("Content-Length", 0))
                     body = json.loads(self.rfile.read(length))

@@ -61,6 +61,14 @@ def test_short_turn_ambiguous_marks_unsure():
     assert vp.sp_map["1"] == "B"             # マッピングは保持（次の確信発話の連続性）
 
 
+def test_short_turn_closed_roster_no_unsure():
+    """閉じた名簿(auto=False)では短い曖昧発話を未確定にせず直近に追従（固着回避）."""
+    vp = _tracker(_unit(1, 1, 0))      # A/Bの中間で判別不能
+    vp.auto = False                    # 名簿確定モード
+    vp.sp_map["1"] = "B"               # 直前はB
+    assert vp.classify(_SHORT, "1", count=True) == "B"   # 未確定(?)ではなくprev
+
+
 def test_short_turn_skipped_for_backchannel():
     """相槌(count=False)は短い厳格照合も通さず、直前に追従（課題④と両立）."""
     vp = _tracker(_unit(1, 0, 0))            # 声はAだが…

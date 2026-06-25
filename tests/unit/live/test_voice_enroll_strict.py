@@ -103,6 +103,19 @@ def test_mixed_voices_do_not_pool_together():
     assert vp.classify(mid, "1", count=True, chars=20) == "人物1"
 
 
+def test_enroll_from_audio_registers_named_active():
+    """事前登録: 生音声から名前付き声紋を作って有効化する."""
+    vp = _tracker()
+    vp.path = "/tmp/_t_enroll.json"
+    vp._embed = lambda wav: _unit(1, 0, 0)  # type: ignore[method-assign]
+    vp._persist = lambda: None              # ファイルIOはスタブ
+    wav = np.ones(int(SR * 6), dtype=np.float32)
+    assert vp.enroll_from_audio("黒田", wav) is True
+    assert "黒田" in vp.profiles
+    assert "黒田" in vp._active_keys
+    assert vp.enroll_from_audio("  ", wav) is False   # 空名は拒否
+
+
 def test_commit_merges_into_existing_person():
     """累積した声が既存人物と一致すれば、新規ではなく合流（重複登録を防ぐ）."""
     vp = _tracker()

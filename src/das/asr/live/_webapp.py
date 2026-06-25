@@ -78,6 +78,17 @@ INDEX_HTML = """<!doctype html>
   .vp-banner { margin: 0 0 .6rem; padding: .5rem .75rem; border-radius: 6px;
     font-size: .85rem; background: #fdecea; color: #8a1c12; border: 1px solid #f3b4ab; }
   .vp-banner.ok { background: #eef7ee; color: #2c6e2c; border-color: #bfe0bf; }
+  .enroll-hint { font-size: .78rem; color: var(--muted); margin: 0 0 .5rem; }
+  .roster { display: flex; flex-wrap: wrap; gap: .3rem; margin-bottom: .5rem; }
+  .roster .chip { background: #eef2ff; color: #3730a3; border-radius: 999px;
+    padding: .12rem .55rem; font-size: .8rem; }
+  .enroll-row { display: flex; gap: .35rem; }
+  .enroll-row input { flex: 1; min-width: 0; border: 1px solid var(--line);
+    border-radius: 6px; padding: .35rem .5rem; }
+  .enroll-status { font-size: .8rem; color: var(--muted); margin-top: .4rem; min-height: 1.1em; }
+  .enroll-status.rec { color: #b91c1c; font-weight: 600; }
+  .roster-lock { display: flex; align-items: center; gap: .4rem; font-size: .8rem;
+    margin-top: .6rem; cursor: pointer; }
   .u.bc { opacity: .5; font-size: .85em; }            /* 相槌は薄く小さく */
   .u.unsure { opacity: .75; }
   .u.unsure .who { font-style: italic; }              /* 未確定は話者名をイタリックに */
@@ -141,6 +152,19 @@ INDEX_HTML = """<!doctype html>
       <div class="transcript" id="transcript"><div class="empty">まだ発話がありません</div></div>
     </div>
     <div class="side">
+      <div class="panel" id="enroll-panel" hidden>
+        <h2>声の事前登録</h2>
+        <p class="enroll-hint">会議の前に、各人が順に20秒ほど一人で話して登録すると精度が上がります。</p>
+        <div id="roster" class="roster"></div>
+        <div class="enroll-row">
+          <input id="enroll-name" placeholder="名前">
+          <button class="btn" id="enroll-btn">20秒録音して登録</button>
+        </div>
+        <div id="enroll-status" class="enroll-status"></div>
+        <label class="roster-lock">
+          <input type="checkbox" id="roster-lock"> 名簿を確定（登録済みの人だけで進める）
+        </label>
+      </div>
       <div class="panel" id="spk-panel" hidden>
         <h2>話者の名前を登録</h2><div id="speakers"></div>
       </div>
@@ -304,9 +328,60 @@ function renderVpBanner(vp) {
   }
 }
 
+function renderEnroll(vp) {
+  const panel = $("enroll-panel");
+  if (!vp || !vp.enabled) { panel.hidden = true; return; }
+  panel.hidden = false;
+  const roster = vp.roster || [];
+  $("roster").innerHTML = roster.length
+    ? roster.map((n) => `<span class="chip">${esc(n)}</span>`).join("")
+    : '<span class="enroll-hint">まだ登録された人はいません</span>';
+  const lock = $("roster-lock");
+  if (document.activeElement !== lock) lock.checked = !!vp.locked;
+}
+
+let enrolling = false;
+async function enrollPerson() {
+  if (enrolling) return;
+  const name = $("enroll-name").value.trim();
+  if (!name) { $("enroll-name").focus(); return; }
+  enrolling = true;
+  const btn = $("enroll-btn"), st = $("enroll-status");
+  btn.disabled = true;
+  const secs = 20;
+  for (let t = secs; t > 0; t--) {
+    st.className = "enroll-status rec";
+    st.textContent = `● 録音中… ${esc(name)} さんに一人で話してもらってください（残り${t}秒）`;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  st.className = "enroll-status";
+  st.textContent = "登録中…";
+  try {
+    const res = await fetch("/api/enroll", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: name, seconds: secs }),
+    });
+    const d = await res.json();
+    if (res.ok) { st.textContent = `✓ ${esc(name)} を登録しました（${d.seconds}秒）`; $("enroll-name").value = ""; }
+    else { st.textContent = "登録失敗: " + (d.error || ""); }
+  } catch (e) { st.textContent = "登録に失敗しました"; }
+  btn.disabled = false; enrolling = false;
+}
+
+async function toggleRoster() {
+  const locked = $("roster-lock").checked;
+  try {
+    await fetch("/api/roster", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ locked: locked }),
+    });
+  } catch (e) { /* SSEで状態が届く */ }
+}
+
 function render(state) {
   renderModes(state.mode);
   renderVpBanner(state.vp);
+  renderEnroll(state.vp);
   renderAgenda(state.agenda);
   renderTranscript(state.records || [], state.partial);
   renderSpeakers(state.speakers);
@@ -376,6 +451,8 @@ $("end").onclick = stopSession;
 $("reset").onclick = resetMeeting;
 $("agenda-set").onclick = setAgenda;
 $("agenda").addEventListener("keydown", (e) => { if (e.key === "Enter") setAgenda(); });
+$("enroll-btn").onclick = enrollPerson;
+$("roster-lock").addEventListener("change", toggleRoster);
 // 初期描画 + ライブ接続
 fetch("/api/state").then((r) => r.json()).then(render).catch(() => {});
 connect();
