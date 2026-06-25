@@ -151,12 +151,22 @@ class RecvLoop:
         self.cur_last_token_time = time.monotonic()
 
     def run(self, ws):
-        """WebSocket受信ループのメイン."""
+        """WebSocket受信ループのメイン.
+
+        stop（終了）または reset_requested（STT作り直し）で正常に抜ける。
+        後者の場合、呼び出し側（run_session）が新しい ws を張り直す。
+        """
         args = self.args
         try:
-            while True:
-                res = self.backend.parse_message(
-                    json.loads(ws.recv()), args.lang)
+            while not self.state.stop.is_set() and not self.state.reset_requested.is_set():
+                try:
+                    raw = ws.recv()
+                except Exception:
+                    # 停止/作り直しで ws が閉じられた場合は正常終了扱い
+                    if self.state.stop.is_set() or self.state.reset_requested.is_set():
+                        break
+                    raise
+                res = self.backend.parse_message(json.loads(raw), args.lang)
                 if res.get("error_code") is not None:
                     _print_line(f"# エラー: {res['error_code']} - {res.get('error_message')}")
                     break

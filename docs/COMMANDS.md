@@ -24,7 +24,21 @@ cd ~/discussion-support
 uv run python -m das.asr.live
 ```
 
-ブラウザに議事録が自動表示され、2秒ごとに更新される。`Ctrl-C`で終了。
+ブラウザUI（`http://127.0.0.1:8231/`）が自動で開き、議事録がライブ更新される
+（Server-Sent Eventsで差分配信。旧来の2秒ごと全リロードは廃止）。
+終了はUIの「終了」ボタン、または `Ctrl-C`。
+
+### ブラウザUIでできること
+
+| 操作 | 説明 |
+|---|---|
+| モード切替 | 議事録のみ / AIと会話 / 人間に介入 を実行中に切替（後述） |
+| 議題 | 脱線判定の基準テーマを入力・変更（空欄なら冒頭から自動推定） |
+| 話者の名前を登録 | 「話者1」等に名前を付ける（声紋で次回以降も認識） |
+| 発言量 | 話者別の発話時間・文字数・発話回数 |
+| 論点 | 会話から自動抽出された論点 |
+| 新しい会議 | アプリを止めず、STT接続を作り直して次の会議へ（声紋・名前は引き継ぐ） |
+| 終了 | アプリを終了 |
 
 ### 主要オプション
 
@@ -48,26 +62,54 @@ uv run python -m das.asr.live --no-vp
 
 ---
 
-## 2. AIエージェント参加モード（Realtime API v2）
+## 2. AIファシリテーター（Realtime API v2）
 
-AIファシリテーターが会議に音声で参加する。`--agent` フラグで有効化。
+AIファシリテーターを `--agent` で有効化する。脱線したら本題に戻し、発言の
+少ない人に声をかける。起動後はブラウザUIで3モードを切り替えられる。
+
+### 3つのモード
+
+| モード | 内容 |
+|---|---|
+| 議事録のみ | 文字起こし＋話者分離だけ（介入なし） |
+| AIと会話 | AIと音声で議論しつつ、進行も手伝う |
+| 人間に介入 | 人同士の議論を進行役として支援（脱線戻し・声かけ） |
 
 ```bash
-# マイクライブ + AIエージェント
+# AIファシリテーターを有効化（議題は冒頭から自動推定）
 uv run python -m das.asr.live --agent
 
-# 声を変える（alloy/ash/ballad/coral/echo/sage/shimmer/verse）
-uv run python -m das.asr.live --agent --agent-voice sage
+# 議題を指定（脱線判定の基準。UIから後で変更も可）
+uv run python -m das.asr.live --agent --topic 'AIツール導入の是非'
 
-# 応答頻度を調整（既定10発話ごと）
-uv run python -m das.asr.live --agent --agent-trigger 5
+# 介入の積極性（controlled=控えめ / standard=既定 / active=積極的）
+uv run python -m das.asr.live --agent --proactivity controlled
+
+# AIと音声で議論する相手を付ける（AIと会話モードで起動）
+uv run python -m das.asr.live --agent --debate 'AIツール導入の是非'
+
+# 声を変える（alloy/ash/ballad/coral/echo/sage/shimmer/verse/marin/cedar）
+uv run python -m das.asr.live --agent --agent-voice sage
 ```
+
+モードは**ブラウザUI上で実行中に切替**できる（AIパートナーの接続/切断も含む）。
+議題もUIから設定・変更でき、次回以降の脱線判定に即反映される。
 
 エコー防止方式（E+B）:
 - **E**: AIのテキストはSTTを経由せず直接議事録に挿入
 - **B**: AI音声をマイクが拾った場合、話者ラベルで自動除去
 
-ブラウザ上で🤖トグルからON/OFFを切り替え可能。
+### シミュレーション（一人で動作確認）
+
+実際の参加者を集めなくても、AI3人の議論を生成して挙動を確認できる。
+
+```bash
+# 脱線→本題に戻す挙動の確認
+uv run python -m das.asr.live --simulate 'AIツール導入の是非' --sim-scenario derailed --agent
+
+# 発言量の偏り→声かけの確認
+uv run python -m das.asr.live --simulate 'AIツール導入の是非' --sim-scenario imbalanced --agent
+```
 
 ---
 
@@ -172,7 +214,10 @@ uv run das visualize            # 議論グラフ可視化
 | ファイル | 内容 |
 |---|---|
 | `<日時>.md` | Markdown議事録 |
-| `<日時>.html` | ブラウザ表示用（ライブ更新対応） |
-| `<日時>.wav` | 録音 |
+| `<日時>.html` | 静的議事録（`file://`表示・清書用。ライブUIはサーバーが配信） |
+| `<日時>.wav` | 録音（「新しい会議」で会議ごとに分割） |
 | `<日時>.turns.jsonl` | ターン単位データ（採点用） |
 | `<日時>.final.md` | 清書版（`--no-polish`未指定時） |
+
+ライブ表示はブラウザUI（`http://127.0.0.1:8231/`）が `/api/state`・SSEで配信する。
+「新しい会議」（リセット）すると、新しいタイムスタンプで別ファイルとして保存される。

@@ -22,8 +22,9 @@ def participation_stats(records: list[dict], *,
         exclude_speakers: 除外する話者キー（ファシリテーター等）。
 
     Returns:
-        {speaker: {"talk_ms": float, "turns": int, "time_share": float,
-                   "turn_share": float, "last_end_ms": int | None}}
+        {speaker: {"talk_ms": float, "turns": int, "chars": int,
+                   "time_share": float, "turn_share": float, "char_share": float,
+                   "last_end_ms": int | None}}
         発話が無ければ空 dict。ms/end_ms が無い発話は時間計算から除外（回数は加算）。
     """
     exclude = set(exclude_speakers)
@@ -48,19 +49,22 @@ def participation_stats(records: list[dict], *,
     stats: dict[str, dict] = {}
     for r in win_rows:
         sp = r["speaker"]
-        d = stats.setdefault(sp, {"talk_ms": 0.0, "turns": 0,
+        d = stats.setdefault(sp, {"talk_ms": 0.0, "turns": 0, "chars": 0,
                                   "last_end_ms": None})
         ms, end = r.get("ms"), r.get("end_ms")
         if ms is not None and end is not None and end > ms:
             d["talk_ms"] += float(end - ms)
         d["turns"] += 1
+        d["chars"] += len(r.get("text", ""))
         t = end if end is not None else ms
         if t is not None and (d["last_end_ms"] is None or t > d["last_end_ms"]):
             d["last_end_ms"] = t
 
     total_ms = sum(d["talk_ms"] for d in stats.values())
     total_turns = sum(d["turns"] for d in stats.values())
+    total_chars = sum(d["chars"] for d in stats.values())
     for d in stats.values():
         d["time_share"] = (d["talk_ms"] / total_ms) if total_ms > 0 else 0.0
         d["turn_share"] = (d["turns"] / total_turns) if total_turns > 0 else 0.0
+        d["char_share"] = (d["chars"] / total_chars) if total_chars > 0 else 0.0
     return stats

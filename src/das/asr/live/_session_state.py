@@ -1,17 +1,22 @@
 """main()内の共有状態を集約するコンテナ."""
 from __future__ import annotations
 
+import contextlib
+import datetime
 import json
 import os
 import queue
 import re
+import struct
 import sys
 import threading
 import time
+from collections.abc import Callable
 
 from ._constants import (
     _PROACTIVITY_DEFAULT,
     _PROACTIVITY_PROFILES,
+    AGENT_SPEAKER,
     AGENT_VOICES,
     CLEAR_LINE,
     DIM,
@@ -22,6 +27,7 @@ from ._constants import (
     SR,
     fmt_ts,
 )
+from ._participation import participation_stats
 from ._voice_profiles import VoiceProfiles
 from .agents._partner import ConversationPartner
 from .agents._realtime import RealtimeAgent
@@ -62,6 +68,9 @@ class SessionState:
         self.agent: RealtimeAgent | None = None
         self.partner: ConversationPartner | None = None
         self.simulator: DiscussionSimulator | None = None
+        # 会話モード(converse)でパートナーを動的生成するための設定（F3）。
+        # bootstrapで {api_key, voice, topic} をセットする。
+        self._partner_cfg: dict | None = None
 
         # 論点
         self.topics: list[dict] = []
@@ -77,6 +86,16 @@ class SessionState:
         self.invite_requests: queue.Queue[str] = queue.Queue()
         # 積極性プロファイル（S5）。bootstrapで --proactivity から上書きされる。
         self.proactivity: dict = dict(_PROACTIVITY_PROFILES[_PROACTIVITY_DEFAULT])
+        # UIからの停止フック（F1）。run_sessionが「stopを立ててwsを閉じる」関数を設定する。
+        self.request_stop: Callable[[], None] | None = None
+        # 変更リビジョン（F2）。save()ごとに+1。SSEはこの変化を見て差分配信する。
+        self.rev = 0
+        # フルリセット（STT接続の作り直し）用。UIは request_reset を呼ぶだけで、
+        # 実際の作り直しは ws を所有するメインスレッドが行う。
+        self.stt_ws = None                       # 現在のSTT WebSocket（動的参照）
+        self.reset_requested = threading.Event()  # メインスレッドへの作り直し要求
+        self.resetting = False                   # UI表示用（リセット処理中）
+        self.request_reset: Callable[[], None] | None = None
 
         # PCMバッファ
         self.pcm_buf = bytearray()
@@ -129,6 +148,210 @@ class SessionState:
         """システムイベントを議事録のタイムラインに残す."""
         with self.state_lock:
             self.records.append({"ms": ms, "sys": text})
+
+    # ------------------------------------------------------------------
+    # UI(API)向けの状態スナップショット（F1）
+    # ------------------------------------------------------------------
+    def session_mode(self) -> str:
+        """現在のセッションモード: transcribe / converse / facilitate.
+
+        - transcribe : 議事録のみ（エージェントoff or 無し）
+        - converse   : AIと会話（パートナー有り＋ファシリテーター）
+        - facilitate : 人間同士に介入（ファシリテーター単体）
+        """
+        if self.agent is None or not self.agent.enabled:
+            return "transcribe"
+        if self.partner is not None:
+            return "converse"
+        return "facilitate"
+
+    def _speaker_label(self, key: str) -> str | None:
+        """話者リネーム(/rename)に渡すラベルを返す。リネーム不可なら None.
+
+        - "#N"（声紋なし）→ "N"
+        - 声紋ありの話者キー → tracker.sp_map(label→key) の逆引きでラベルを得る
+        """
+        key = str(key)
+        if key.startswith("#"):
+            return key[1:]
+        if self.tracker is not None:
+            for lbl, k in self.tracker.sp_map.items():
+                if k == key:
+                    return lbl
+        return None
+
+    def api_snapshot(self) -> dict:
+        """UI(API)向けの現在状態（JSON化可能なdict）を返す."""
+        with self.state_lock:
+            raw = list(self.records)
+            records = []
+            for r in raw:
+                if "sys" in r:
+                    records.append({"type": "sys", "ms": r.get("ms"),
+                                    "text": r["sys"]})
+                elif "speaker" in r:
+                    records.append({
+                        "type": "utt",
+                        "ms": r.get("ms"), "end_ms": r.get("end_ms"),
+                        "speaker": self.disp_name(r["speaker"]),
+                        "text": r.get("text", ""),
+                        "corrected": r.get("vp") == "補正",
+                    })
+            speakers = []
+            _seen: set[str] = set()
+            for r in raw:
+                key = str(r.get("speaker", "")) if "speaker" in r else ""
+                if not key or key in (AGENT_SPEAKER, "パートナー"):
+                    continue  # AI話者はリネーム対象外
+                name = self.disp_name(key)
+                if name in _seen:
+                    continue
+                _seen.add(name)
+                label = self._speaker_label(key)
+                speakers.append({"name": name, "label": label,
+                                 "renameable": label is not None})
+        with self.topics_lock:
+            topics = [{"topic": t.get("topic", ""), "speaker": t.get("speaker", "")}
+                      for t in self.topics]
+        stats = participation_stats(raw, exclude_speakers=(AGENT_SPEAKER, "パートナー"))
+        participation = [
+            {"speaker": self.disp_name(sp),
+             "time_share": round(d["time_share"], 3),
+             "char_share": round(d["char_share"], 3),
+             "turn_share": round(d["turn_share"], 3),
+             "turns": d["turns"], "chars": d["chars"],
+             "has_time": d["talk_ms"] > 0}
+            for sp, d in stats.items()
+        ]
+        agent = None
+        if self.agent is not None:
+            agent = {"enabled": self.agent.enabled, "mode": self.agent.mode,
+                     "voice": self.agent.voice}
+        return {
+            "rev": self.rev,
+            "mode": self.session_mode(),
+            "running": not self.stop.is_set(),
+            "resetting": self.resetting,
+            "agenda": self._current_agenda(),
+            "started": self.started.strftime("%Y-%m-%d %H:%M"),
+            "speakers": speakers,
+            "records": records,
+            "topics": topics,
+            "participation": participation,
+            "agent": agent,
+        }
+
+    # ------------------------------------------------------------------
+    # 録音(WAV)の開始・確定
+    # ------------------------------------------------------------------
+    def open_wav(self):
+        """録音wavを開きヘッダを書く。PCMバッファ関連もリセットする.
+
+        STT接続を作り直す際、新しいSTTのタイムスタンプ(ms=0起点)と
+        PCMバッファの位置を揃えるため、バッファのオフセット類も0に戻す。
+        """
+        self.pcm_buf = bytearray()
+        self.pcm_buf_offset = 0
+        self.pcm_total_bytes = 0
+        try:
+            self.pcm_file = open(self.wav_path, "wb")  # noqa: SIM115
+            self.pcm_file.write(b"RIFF" + struct.pack("<I", 0) + b"WAVEfmt " +
+                                struct.pack("<IHHIIHH", 16, 1, 1, SR, SR * 2, 2, 16) +
+                                b"data" + struct.pack("<I", 0))
+            self.pcm_file.flush()
+        except OSError as e:
+            print(f"# 録音ファイルを開けません: {e}", flush=True)
+            self.pcm_file = None
+
+    def finalize_wav(self) -> str | None:
+        """録音wavのヘッダを確定して閉じる。保存したパスを返す（短すぎ/失敗ならNone）."""
+        if self.pcm_file is None:
+            return None
+        try:
+            self.pcm_file.flush()
+            data_size = self.pcm_total_bytes
+            self.pcm_file.seek(4)
+            self.pcm_file.write(struct.pack("<I", 36 + data_size))
+            self.pcm_file.seek(40)
+            self.pcm_file.write(struct.pack("<I", data_size))
+            self.pcm_file.close()
+        except OSError:
+            self.pcm_file = None
+            return None
+        self.pcm_file = None
+        if data_size > SR * 2 * 10:
+            return self.wav_path
+        with contextlib.suppress(OSError):
+            os.remove(self.wav_path)
+        return None
+
+    def reset_for_new_meeting(self) -> dict:
+        """現在の会議を確定保存し、同一プロセスのまま次の会議に切り替える（F6）.
+
+        声紋プロファイル・話者名・色は引き継ぐ（同じメンバーの次の会議向け）。
+        議事録・論点・各カーソル・キュー・エージェントの保留はクリアする。
+        録音(wav)とSTT/エージェント接続は継続する。
+        """
+        self.save(live=False)  # 現在の会議を確定保存（ファイルは残る）
+        self.finalize_wav()    # 現在の録音を確定（会議ごとにwavを分ける）
+
+        # 新しい会議の出力先（既存と同じディレクトリ＋新タイムスタンプ）
+        self.started = datetime.datetime.now()
+        base_dir = os.path.dirname(self.out_path) or "transcripts"
+        base = os.path.join(base_dir, self.started.strftime("%Y-%m-%d_%H%M%S"))
+        self.out_path = base + ".md"
+        self.html_path = base + ".html"
+        self.diag_path = base + ".diag.jsonl"
+        self.turns_path = base + ".turns.jsonl"
+        self.wav_path = base + ".wav"
+        self.open_wav()        # 新しい録音を開く（PCMバッファもリセットしSTTのmsと整合）
+
+        # 状態クリア（声紋・名前・色は引き継ぐ）
+        with self.state_lock:
+            self.records = []
+            self.agent_cursor = 0
+        with self.topics_lock:
+            self.topics = []
+        self.topic_cursor = 0
+        self.drift_cursor = 0
+        self._last_utt_time[0] = time.monotonic()
+        self._was_in_echo[0] = False
+        for q in (self.drift_requests, self.invite_requests):
+            while True:
+                try:
+                    q.get_nowait()
+                except queue.Empty:
+                    break
+        if self.agent is not None:
+            self.agent.reset_meeting()
+        self.rev += 1
+        self.save()  # 空の新会議ファイルを作成
+        return {"ok": True, "started": self.started.strftime("%Y-%m-%d %H:%M:%S")}
+
+    _AGENDA_SPEAKERS = ("議題", "議題(自動)")
+
+    def set_agenda(self, topic: str) -> dict:
+        """UIから議題（脱線判定の基準）を設定/変更する.
+
+        既存の議題エントリを差し替える（抽出済みの論点は残す）。
+        空文字なら議題を削除する。次回以降の脱線判定に即反映される。
+        """
+        topic = (topic or "").strip()
+        with self.topics_lock:
+            self.topics = [t for t in self.topics
+                           if t.get("speaker") not in self._AGENDA_SPEAKERS]
+            if topic:
+                self.topics.insert(0, {"topic": topic, "speaker": "議題"})
+        self.rev += 1
+        self.save()
+        return {"ok": True, "agenda": topic}
+
+    def _current_agenda(self) -> str:
+        with self.topics_lock:
+            for t in self.topics:
+                if t.get("speaker") in self._AGENDA_SPEAKERS:
+                    return t.get("topic", "")
+        return ""
 
     def seed_topic(self, topic: str | None, speaker: str = "議題"):
         """明示的な議題を脱線検出の基準論点としてシードする（Fix 8）.
@@ -395,6 +618,7 @@ class SessionState:
             os.replace(tmp, dst)
 
     def save(self, live: bool = True):
+        self.rev += 1  # 変更を通知（SSEの差分配信用, F2）
         self.write_md()
         self.write_html(live)
         self.write_turns()

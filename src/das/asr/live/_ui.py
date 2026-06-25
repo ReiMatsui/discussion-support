@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -37,25 +38,86 @@ class _UIHandler:
             _state = state
 
             def do_GET(self):
-                if self.path == "/" or self.path.startswith("/?"):
-                    try:
-                        with open(self._state.html_path, "rb") as f:
-                            content = f.read()
-                        self.send_response(200)
-                        self.send_header("Content-Type", "text/html; charset=utf-8")
-                        self.end_headers()
-                        self.wfile.write(content)
-                    except FileNotFoundError:
-                        self.send_response(200)
-                        self.send_header("Content-Type", "text/html; charset=utf-8")
-                        self.end_headers()
-                        self.wfile.write("<p>準備中…</p>".encode())
+                if self.path == "/api/state":
+                    self._json(200, self._state.api_snapshot())
+                elif self.path == "/api/stream":
+                    self._stream()
+                elif self.path == "/" or self.path.startswith("/?"):
+                    self._serve_html()
                 else:
                     self.send_error(404)
 
+            def _stream(self):
+                """SSE: 状態が変わるたびに最新スナップショットを配信する（F2）.
+
+                rev の変化を見て差分配信。無変化時はハートビートで接続を保つ。
+                stop でセッションが終了したら end イベントを送って閉じる。
+                """
+                s = self._state
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Connection", "keep-alive")
+                self.end_headers()
+                last_rev = -1
+                try:
+                    while not s.stop.is_set():
+                        rev = s.rev
+                        if rev != last_rev:
+                            payload = json.dumps(s.api_snapshot(), ensure_ascii=False)
+                            self.wfile.write(f"data: {payload}\n\n".encode())
+                            last_rev = rev
+                        else:
+                            self.wfile.write(b": ping\n\n")  # ハートビート
+                        self.wfile.flush()
+                        time.sleep(1.0)
+                    self.wfile.write(b"event: end\ndata: {}\n\n")
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass  # クライアント切断は正常
+                except OSError:
+                    pass
+
+            def _serve_html(self):
+                # サーバー配信時は新SPA（_webapp.INDEX_HTML）を返す。
+                # 生成済みの議事録HTML(html_path)は file:// 表示・清書用に別途残る。
+                from das.asr.live._webapp import INDEX_HTML
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(INDEX_HTML.encode("utf-8"))
+
             def do_POST(self):
                 s = self._state
-                if self.path == "/rename":
+                if self.path == "/api/stop":
+                    _print_line("# セッションを停止します（UIから）")
+                    if s.request_stop is not None:
+                        s.request_stop()
+                    else:
+                        s.stop.set()
+                    self._json(200, {"ok": True, "running": False})
+                elif self.path == "/api/reset":
+                    _print_line("# 新しい会議に切り替えます（UIから）")
+                    if s.request_reset is not None:
+                        # STT接続ごと作り直す（実処理はメインスレッド）
+                        s.request_reset()
+                        self._json(200, {"ok": True, "resetting": True})
+                    else:
+                        # 接続なし（テスト等）は状態クリアのみ
+                        self._json(200, s.reset_for_new_meeting())
+                elif self.path == "/api/mode":
+                    from das.asr.live._workers import set_session_mode
+                    length = int(self.headers.get("Content-Length", 0))
+                    body = json.loads(self.rfile.read(length))
+                    result = set_session_mode(s, str(body.get("mode", "")))
+                    self._json(200 if result.get("ok") else 400, result)
+                elif self.path == "/api/topic":
+                    length = int(self.headers.get("Content-Length", 0))
+                    body = json.loads(self.rfile.read(length))
+                    result = s.set_agenda(str(body.get("topic", "")))
+                    _print_line(f"# 議題を設定（UIから）: {result['agenda']}")
+                    self._json(200, result)
+                elif self.path == "/rename":
                     length = int(self.headers.get("Content-Length", 0))
                     body = json.loads(self.rfile.read(length))
                     label = str(body.get("label", ""))

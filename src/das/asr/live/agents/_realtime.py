@@ -216,6 +216,13 @@ class RealtimeAgent(_RealtimeBase):
               f"(responding={self._responding} speaking={self.ai_speaking} "
               f"epoch={self._play_epoch})", flush=True)
 
+    def reset_meeting(self):
+        """会議リセット時に蓄積発話・保留介入をクリアする（接続は維持）."""
+        with self._state_lock:
+            self._pending.clear()
+            self._pending_intervention = None
+        self._last_noop_at = 0.0
+
     # --- WebSocket受信 ---
 
     def _handle(self, ev: dict):
