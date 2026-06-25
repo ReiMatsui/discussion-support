@@ -98,7 +98,13 @@ class _UIHandler:
                     self._json(200, {"ok": True, "running": False})
                 elif self.path == "/api/reset":
                     _print_line("# 新しい会議に切り替えます（UIから）")
-                    self._json(200, s.reset_for_new_meeting())
+                    if s.request_reset is not None:
+                        # STT接続ごと作り直す（実処理はメインスレッド）
+                        s.request_reset()
+                        self._json(200, {"ok": True, "resetting": True})
+                    else:
+                        # 接続なし（テスト等）は状態クリアのみ
+                        self._json(200, s.reset_for_new_meeting())
                 elif self.path == "/api/mode":
                     from das.asr.live._workers import set_session_mode
                     length = int(self.headers.get("Content-Length", 0))

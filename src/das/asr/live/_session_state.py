@@ -1,11 +1,13 @@
 """main()内の共有状態を集約するコンテナ."""
 from __future__ import annotations
 
+import contextlib
 import datetime
 import json
 import os
 import queue
 import re
+import struct
 import sys
 import threading
 import time
@@ -88,6 +90,12 @@ class SessionState:
         self.request_stop: Callable[[], None] | None = None
         # 変更リビジョン（F2）。save()ごとに+1。SSEはこの変化を見て差分配信する。
         self.rev = 0
+        # フルリセット（STT接続の作り直し）用。UIは request_reset を呼ぶだけで、
+        # 実際の作り直しは ws を所有するメインスレッドが行う。
+        self.stt_ws = None                       # 現在のSTT WebSocket（動的参照）
+        self.reset_requested = threading.Event()  # メインスレッドへの作り直し要求
+        self.resetting = False                   # UI表示用（リセット処理中）
+        self.request_reset: Callable[[], None] | None = None
 
         # PCMバッファ
         self.pcm_buf = bytearray()
@@ -219,6 +227,7 @@ class SessionState:
             "rev": self.rev,
             "mode": self.session_mode(),
             "running": not self.stop.is_set(),
+            "resetting": self.resetting,
             "started": self.started.strftime("%Y-%m-%d %H:%M"),
             "speakers": speakers,
             "records": records,
@@ -226,6 +235,50 @@ class SessionState:
             "participation": participation,
             "agent": agent,
         }
+
+    # ------------------------------------------------------------------
+    # 録音(WAV)の開始・確定
+    # ------------------------------------------------------------------
+    def open_wav(self):
+        """録音wavを開きヘッダを書く。PCMバッファ関連もリセットする.
+
+        STT接続を作り直す際、新しいSTTのタイムスタンプ(ms=0起点)と
+        PCMバッファの位置を揃えるため、バッファのオフセット類も0に戻す。
+        """
+        self.pcm_buf = bytearray()
+        self.pcm_buf_offset = 0
+        self.pcm_total_bytes = 0
+        try:
+            self.pcm_file = open(self.wav_path, "wb")  # noqa: SIM115
+            self.pcm_file.write(b"RIFF" + struct.pack("<I", 0) + b"WAVEfmt " +
+                                struct.pack("<IHHIIHH", 16, 1, 1, SR, SR * 2, 2, 16) +
+                                b"data" + struct.pack("<I", 0))
+            self.pcm_file.flush()
+        except OSError as e:
+            print(f"# 録音ファイルを開けません: {e}", flush=True)
+            self.pcm_file = None
+
+    def finalize_wav(self) -> str | None:
+        """録音wavのヘッダを確定して閉じる。保存したパスを返す（短すぎ/失敗ならNone）."""
+        if self.pcm_file is None:
+            return None
+        try:
+            self.pcm_file.flush()
+            data_size = self.pcm_total_bytes
+            self.pcm_file.seek(4)
+            self.pcm_file.write(struct.pack("<I", 36 + data_size))
+            self.pcm_file.seek(40)
+            self.pcm_file.write(struct.pack("<I", data_size))
+            self.pcm_file.close()
+        except OSError:
+            self.pcm_file = None
+            return None
+        self.pcm_file = None
+        if data_size > SR * 2 * 10:
+            return self.wav_path
+        with contextlib.suppress(OSError):
+            os.remove(self.wav_path)
+        return None
 
     def reset_for_new_meeting(self) -> dict:
         """現在の会議を確定保存し、同一プロセスのまま次の会議に切り替える（F6）.
@@ -235,6 +288,7 @@ class SessionState:
         録音(wav)とSTT/エージェント接続は継続する。
         """
         self.save(live=False)  # 現在の会議を確定保存（ファイルは残る）
+        self.finalize_wav()    # 現在の録音を確定（会議ごとにwavを分ける）
 
         # 新しい会議の出力先（既存と同じディレクトリ＋新タイムスタンプ）
         self.started = datetime.datetime.now()
@@ -244,6 +298,8 @@ class SessionState:
         self.html_path = base + ".html"
         self.diag_path = base + ".diag.jsonl"
         self.turns_path = base + ".turns.jsonl"
+        self.wav_path = base + ".wav"
+        self.open_wav()        # 新しい録音を開く（PCMバッファもリセットしSTTのmsと整合）
 
         # 状態クリア（声紋・名前・色は引き継ぐ）
         with self.state_lock:

@@ -19,7 +19,6 @@ from das.asr.live._constants import (
     _PARTICIPATION_PROMPT,
     _TOPIC_PROMPT,
     OPENAI_API,
-    SR,
 )
 from das.asr.live._recv_loop import RecvLoop
 from das.asr.live._session_state import SessionState
@@ -326,16 +325,7 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
                 state.agent.set_tracker(tracker)
 
     # --- WAVストリーミング書き出し ---
-    try:
-        state.pcm_file = open(wav_path, "wb")  # noqa: SIM115
-        import struct as _struct
-        state.pcm_file.write(b"RIFF" + _struct.pack("<I", 0) + b"WAVEfmt " +
-                              _struct.pack("<IHHIIHH", 16, 1, 1, SR, SR * 2, 2, 16) +
-                              b"data" + _struct.pack("<I", 0))
-        state.pcm_file.flush()
-    except OSError as e:
-        print(f"# 警告: 録音ファイルを開けません: {e}", flush=True)
-        state.pcm_file = None
+    state.open_wav()
 
     def _sys_hook(text: str) -> None:
         state.add_sys(None, text)
@@ -417,9 +407,15 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
             print(f"# 脱線検出: 議題を基準論点としてシード → {_agenda}", flush=True)
 
     print(f"# {backend.name} に接続中…", flush=True)
-    with connect(backend.ws_url(), additional_headers=backend.ws_headers()) as ws:
-        ws.send(json.dumps(backend.start_message(args.model, args.lang)))
+    import contextlib as _contextlib
 
+    def _connect_stt():
+        _ws = connect(backend.ws_url(), additional_headers=backend.ws_headers())
+        _ws.send(json.dumps(backend.start_message(args.model, args.lang)))
+        return _ws
+
+    state.stt_ws = _connect_stt()
+    try:
         if state.simulator is not None:
             if state.agent is not None:
                 state.simulator._agent_ref = state.agent
@@ -462,7 +458,7 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
             print(f"# Partner: voice={state.partner.voice} topic={state.partner.topic}",
                   flush=True)
 
-        threading.Thread(target=_run_sender, args=(state, ws, backend),
+        threading.Thread(target=_run_sender, args=(state, backend),
                          daemon=True).start()
 
         state.save()
@@ -471,7 +467,7 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
         print(f"# 保存先: {out_path}", flush=True)
         if _serve:
             print(f"# ブラウザUI: http://127.0.0.1:{args.port}/ "
-                  f"（モード切替・ライブ更新・停止）\n", flush=True)
+                  f"（モード切替・ライブ更新・新しい会議・停止）\n", flush=True)
         else:
             print(f"# ブラウザ表示: open {html_path}\n", flush=True)
         if not args.no_open:
@@ -482,16 +478,43 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
                 webbrowser.open("file://" + os.path.abspath(html_path))
 
         # UIからの停止フック: stopを立て、STTのWebSocketを閉じて受信ループを抜ける（F1）
-        import contextlib as _contextlib
-
         def _request_stop():
             state.stop.set()
             with _contextlib.suppress(Exception):
-                ws.close()
+                if state.stt_ws is not None:
+                    state.stt_ws.close()
         state.request_stop = _request_stop
 
+        # UIからのフルリセット要求: STT接続を作り直す。実処理はメインスレッドが行う。
+        def _request_reset():
+            state.resetting = True
+            state.rev += 1  # UIに「リセット中」を即通知
+            state.reset_requested.set()
+            with _contextlib.suppress(Exception):
+                if state.stt_ws is not None:
+                    state.stt_ws.close()
+        state.request_reset = _request_reset
+
+        # 受信ループ。reset要求が来たらSTTを張り直して次の会議へ。
         recv = RecvLoop(state, args, backend)
-        try:
-            recv.run(ws)
-        finally:
-            _cleanup(state, args, api_key, tracker, wav_path, out_path, html_path)
+        while not state.stop.is_set():
+            recv.run(state.stt_ws)
+            if state.stop.is_set():
+                break
+            if state.reset_requested.is_set():
+                print("# STTセッションを作り直しています…", flush=True)
+                with _contextlib.suppress(Exception):
+                    if state.stt_ws is not None:
+                        state.stt_ws.close()
+                state.reset_for_new_meeting()
+                state.stt_ws = _connect_stt()
+                recv = RecvLoop(state, args, backend)
+                state.reset_requested.clear()
+                state.resetting = False
+                state.rev += 1
+                print("# 新しい会議を開始しました", flush=True)
+    finally:
+        with _contextlib.suppress(Exception):
+            if state.stt_ws is not None:
+                state.stt_ws.close()
+        _cleanup(state, args, api_key, tracker, wav_path, out_path, html_path)

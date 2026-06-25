@@ -246,16 +246,20 @@ function render(state) {
   renderSpeakers(state.speakers);
   renderParticipation(state.participation);
   renderTopics(state.topics);
-  setStatus(state.running);
+  setStatus(state.running, state.resetting);
 }
 
-function setStatus(running) {
+function setStatus(running, resetting) {
   const el = $("status"), txt = $("status-text");
   if (!running || stopped) {
     el.classList.add("stopped"); txt.textContent = "終了しました";
     $("end").disabled = true; $("reset").disabled = true;
+  } else if (resetting) {
+    el.classList.remove("stopped"); txt.textContent = "リセット中…";
+    $("reset").disabled = true;
   } else {
     el.classList.remove("stopped"); txt.textContent = "ライブ";
+    $("reset").disabled = false;
   }
 }
 

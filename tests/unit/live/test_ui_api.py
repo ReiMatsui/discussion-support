@@ -146,9 +146,38 @@ def test_http_reset_clears_records():
         with urllib.request.urlopen(req) as r:
             out = json.loads(r.read())
         assert out["ok"] is True
-        assert s.records == []
+        assert s.records == []  # request_reset未設定 → 状態クリアにフォールバック
     finally:
         httpd.shutdown()
+
+
+def test_http_reset_uses_request_reset_when_set():
+    """STT接続ありの本番では request_reset（メインスレッドが作り直す）を呼ぶ."""
+    s = _make_state()
+    s.records = [{"speaker": "#1", "text": "x", "ms": 0, "end_ms": 100}]
+    calls = []
+    s.request_reset = lambda: calls.append(True)
+    httpd, port = _serve(s)
+    try:
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/api/reset", method="POST")
+        with urllib.request.urlopen(req) as r:
+            out = json.loads(r.read())
+        assert out == {"ok": True, "resetting": True}
+        assert calls == [True]
+        assert s.records != []  # 直接はクリアしない（メインスレッドが行う）
+    finally:
+        httpd.shutdown()
+
+
+def test_reset_resets_recording_and_snapshot_has_resetting():
+    """リセットで録音wavとPCMバッファが作り直され、snapshotにresettingが入る."""
+    s = _make_state()
+    assert s.api_snapshot()["resetting"] is False
+    s.pcm_total_bytes = 12345
+    old_wav = s.wav_path
+    s.reset_for_new_meeting()
+    assert s.wav_path != old_wav        # 会議ごとに新しい録音
+    assert s.pcm_total_bytes == 0       # PCMバッファ（STTのmsと整合）リセット
 
 
 def test_http_get_root_serves_spa():

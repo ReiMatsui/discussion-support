@@ -654,14 +654,20 @@ def _run_from_wav(state: SessionState, args):
     state.audio_q.put(None)
 
 
-def _run_sender(state: SessionState, ws, backend: STTBackend):
-    """audio_qからPCMを読みWebSocketに送信 + PCMバッファ/ファイル書き出し."""
+def _run_sender(state: SessionState, backend: STTBackend):
+    """audio_qからPCMを読みWebSocketに送信 + PCMバッファ/ファイル書き出し.
+
+    送信先は state.stt_ws を毎回参照する。STT接続を作り直しても追従し、
+    作り直し中(古いwsが閉じている瞬間)の送信エラーは無視する（音声を捨てる）。
+    """
     seq = 0
     while True:
         pcm = state.audio_q.get()
+        ws = state.stt_ws
         if pcm is None:
-            end_msg = backend.make_end_message(seq)
-            ws.send(end_msg)
+            if ws is not None:
+                with contextlib.suppress(Exception):
+                    ws.send(backend.make_end_message(seq))
             break
         with state.buf_lock:
             state.pcm_buf.extend(pcm)
@@ -676,7 +682,9 @@ def _run_sender(state: SessionState, ws, backend: STTBackend):
                 state.pcm_file.flush()
             except OSError:
                 pass
-        ws.send(pcm)
+        if ws is not None:
+            with contextlib.suppress(Exception):
+                ws.send(pcm)
         seq += 1
 
 
@@ -695,38 +703,24 @@ def _cleanup(state: SessionState, args, api_key: str,
     state.save(live=False)
     if tracker is not None:
         _print_line(f"# レイテンシ統計: {tracker.stats()}")
-    _print_line(f"# 議事録を保存しました: {out_path} / {html_path}")
-    # WAVファイルのヘッダを更新して正規のWAVにする
-    if state.pcm_file is not None:
-        try:
-            import struct as _struct
-            state.pcm_file.flush()
-            data_size = state.pcm_total_bytes
-            state.pcm_file.seek(4)
-            state.pcm_file.write(_struct.pack("<I", 36 + data_size))
-            state.pcm_file.seek(40)
-            state.pcm_file.write(_struct.pack("<I", data_size))
-            state.pcm_file.close()
-            if state.pcm_total_bytes > SR * 2 * 10:
-                _print_line(f"# 録音を保存しました: {wav_path}")
-            else:
-                os.remove(wav_path)
-        except OSError as e:
-            _print_line(f"# 録音保存に失敗: {e}")
-        state.pcm_file = None
-    # 清書
-    if args.polish and not api_key and state.pcm_total_bytes > SR * 2 * 10:
+    _print_line(f"# 議事録を保存しました: {state.out_path} / {state.html_path}")
+    # WAVファイルのヘッダを確定して正規のWAVにする（state.wav_pathを使用）
+    saved_wav = state.finalize_wav()
+    if saved_wav:
+        _print_line(f"# 録音を保存しました: {saved_wav}")
+    # 清書（直近の会議のwavを対象にする）
+    if args.polish and not api_key and saved_wav:
         _print_line("# 清書はスキップ（SONIOX_API_KEY未設定。清書はSoniox非同期APIを使用）")
-    if args.polish and api_key and state.pcm_total_bytes > SR * 2 * 10:
+    if args.polish and api_key and saved_wav:
         try:
-            with open(wav_path, "rb") as f:
+            with open(saved_wav, "rb") as f:
                 wav_data = f.read()
             recs = polish(api_key, wav_data[44:], args.lang, tracker, log=_print_line)
-            fmd = os.path.splitext(out_path)[0] + ".final.md"
-            fht = os.path.splitext(out_path)[0] + ".final.html"
+            fmd = os.path.splitext(state.out_path)[0] + ".final.md"
+            fht = os.path.splitext(state.out_path)[0] + ".final.html"
             state.write_md(recs, fmd)
             state.write_html(live=False, recs=recs, path=fht, status="清書（非同期再処理済み）")
-            state.write_turns(recs, os.path.splitext(out_path)[0] + ".final.turns.jsonl")
+            state.write_turns(recs, os.path.splitext(state.out_path)[0] + ".final.turns.jsonl")
             _print_line(f"# 清書版を保存しました: {fmd} / {fht}")
             if not args.no_open:
                 import webbrowser
