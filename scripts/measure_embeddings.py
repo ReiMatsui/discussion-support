@@ -5,11 +5,11 @@
 数値で判断する。同一話者ペアと別話者ペアのコサイン類似度の分布が分かれているほど良い。
 EER（同一/別の取り違え率）が低いほど良い。
 
-使い方（プロジェクトの .venv で実行 = torch/torchaudio が必要）:
-    python scripts/measure_embeddings.py                # 最新の長いセッションを自動選択
-    python scripts/measure_embeddings.py 2026-06-25_1614
-    python scripts/measure_embeddings.py 2026-06-25_1614 --speakers 黒田 としや わっち
-    python scripts/measure_embeddings.py 2026-06-25_1614 --no-redimnet2   # 現行モデルだけ
+使い方（uv で実行 = torch/torchaudio が必要）:
+    uv run python scripts/measure_embeddings.py                # 最新の長いセッションを自動選択
+    uv run python scripts/measure_embeddings.py 2026-06-25_1614
+    uv run python scripts/measure_embeddings.py 2026-06-25_1614 --speakers 黒田 としや わっち
+    uv run python scripts/measure_embeddings.py 2026-06-25_1614 --no-redimnet2   # 現行モデルだけ
 
 出力: モデルごとに、全体と「短い発話(0.4〜1.5秒)」のEER・平均類似度を表示し、
 候補モデルが現行より分離を改善するかの所見を出す。
