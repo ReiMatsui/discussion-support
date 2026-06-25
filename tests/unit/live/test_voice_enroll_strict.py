@@ -70,6 +70,16 @@ def test_mid_length_utterances_do_not_register():
     assert vp.pool == []
 
 
+def test_low_content_utterances_do_not_register():
+    """長くても enroll=False（文字数が少ない等）の発話は登録に使わない."""
+    vp = _tracker()
+    vp._embed = lambda wav: _unit(1, 0, 0)  # type: ignore[method-assign]
+    for _ in range(4):
+        assert vp.classify(_LONG, "1", count=True, enroll=False) == "#1"
+    assert vp.profiles == {}
+    assert vp.pool == []
+
+
 def test_loose_consistency_blocked_by_bonus():
     """3発話の一貫性が緩い（cs=0.34は超えるがecs=0.42未満）なら登録しない."""
     vp = _tracker()

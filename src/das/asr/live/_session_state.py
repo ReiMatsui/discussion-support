@@ -189,15 +189,13 @@ class SessionState:
     def _speaker_label(self, key: str) -> str | None:
         """話者リネーム(/rename)に渡すラベルを返す。リネーム不可なら None.
 
-        登録パネルに出すのは「まだ名前の付いていない話者」だけ:
-        - "#N"（声紋なし/暫定）→ "N"（names["#N"] で命名）
-        - "人物N"（声紋で確定した匿名の人物）→ そのキー（profilesへ直接命名）
-        確定済みのSonioxラベル逆引きに頼らないので、その人が直近に話していなくても
-        確実に登録できる。命名済みの実名・AI・未確定(?) は None（パネルに出さない）。
+        登録できるのは「声紋で確定したが名前の付いていない人物（人物N）」だけ。
+        - "人物N" → そのキー（profilesへ直接命名）
+        暫定の "#N"（声紋未確定・Sonioxラベル依存で別人に振り替わりうる）、命名済みの
+        実名、AI、未確定(?) は登録対象外（None）。確定した人だけに名前を付けることで、
+        まだ揺れている話者に誤って名前を固定してしまうのを防ぐ。
         """
         key = str(key)
-        if key.startswith("#"):
-            return key[1:]
         if key.startswith("人物"):
             return key
         return None
