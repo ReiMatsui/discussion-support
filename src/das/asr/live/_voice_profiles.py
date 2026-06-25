@@ -250,19 +250,21 @@ class VoiceProfiles:
         return emb / np.linalg.norm(emb)
 
     def classify(self, wav: np.ndarray, sp, overlapped: bool = False,
-                 count: bool = True) -> str:
+                 count: bool = True, enroll: bool = True) -> str:
         """発話を人物キーに割り当てる（経路はクラスドキュメント参照）.
 
         overlapped=True の発話は声が混ざっていて声紋がデタラメになるため、
         声での判定をスキップして直前の対応を維持する。
         count=False（相槌など）の発話は声紋の蓄積・人物登録に使わず、
         既存の割り当てに追従するだけにする（課題④）。
+        enroll=False の発話は照合には使うが、新規人物の自動登録には使わない
+        （文字数が少ない等、中身が薄く登録素材に適さない発話）。
         """
         with self._lock:
-            return self._classify(wav, sp, overlapped, count)
+            return self._classify(wav, sp, overlapped, count, enroll)
 
     def _classify(self, wav: np.ndarray, sp, overlapped: bool,
-                  count: bool = True) -> str:
+                  count: bool = True, enroll: bool = True) -> str:
         sp = str(sp)
         prev = self.sp_map.get(sp)
         kind, info = "相槌追従", {}
@@ -315,10 +317,10 @@ class VoiceProfiles:
                     pv = active.get(prev)
                     if pv is None or float(np.dot(pv, emb)) < self._person_th(prev, th):
                         prev = None
-                # 登録は厳しめ: 照合より長いクリーンな発話だけを使う
-                long_enough = wav.size >= SR * self.enroll_min_sec
-                kind = "蓄積中" if (self.auto and long_enough) else "未確定"
-                if self.auto and long_enough:
+                # 登録は厳しめ: 照合より長いクリーンな発話で、かつ中身のある発話だけ使う
+                eligible = enroll and wav.size >= SR * self.enroll_min_sec
+                kind = "蓄積中" if (self.auto and eligible) else "未確定"
+                if self.auto and eligible:
                     # 声プール: ラベル不問で、互いに一貫する3発話が揃ったら人物化。
                     # 一貫性しきい値は cs に bonus を上乗せして締める（誤登録抑制）。
                     ecs = cs + self.enroll_consist_bonus

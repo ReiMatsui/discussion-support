@@ -57,17 +57,18 @@ def test_session_mode_converse_with_partner():
 # --- api_snapshot -----------------------------------------------------------
 
 def test_api_snapshot_speakers_have_rename_labels():
-    """話者にリネーム用ラベルが付き、AI話者は除外される（F5）."""
+    """声紋確定の人物Nだけがリネーム可能、暫定#NとAIは対象外（F5）."""
     s = _make_state()
     s.records = [
-        {"speaker": "#1", "text": "a", "ms": 0, "end_ms": 500},
+        {"speaker": "人物1", "text": "a", "ms": 0, "end_ms": 500},
+        {"speaker": "#1", "text": "b", "ms": 500, "end_ms": 1000},
         {"speaker": "ファシリテーター", "text": "x", "ms": None, "end_ms": None},
     ]
     by_name = {sp["name"]: sp for sp in s.api_snapshot()["speakers"]}
-    assert "話者1" in by_name
-    assert by_name["話者1"]["label"] == "1"
-    assert by_name["話者1"]["renameable"] is True
-    assert "ファシリテーター" not in by_name  # AI話者はリネーム対象外
+    assert by_name["人物1"]["label"] == "人物1"
+    assert by_name["人物1"]["renameable"] is True
+    assert by_name["話者1"]["renameable"] is False  # 暫定#Nは登録対象外
+    assert "ファシリテーター" not in by_name        # AI話者はリネーム対象外
 
 
 def test_http_rename_without_tracker():
@@ -190,19 +191,19 @@ def test_snapshot_unsure_and_backchannel_flags():
 
 
 def test_speakers_registration_targets():
-    """登録パネルには未命名の話者だけ（人物N=キー, #N=ラベル）。命名済み/未確定/AIは対象外."""
+    """登録対象は声紋確定の人物Nのみ。暫定#N/命名済み/未確定/AIは対象外."""
     s = _make_state()
     s.records = [
         {"speaker": "人物1", "text": "a", "ms": 0, "end_ms": 500},
         {"speaker": "松井", "text": "b", "ms": 500, "end_ms": 1000},      # 命名済み
-        {"speaker": "#3", "text": "c", "ms": 1000, "end_ms": 1500},
+        {"speaker": "#3", "text": "c", "ms": 1000, "end_ms": 1500},       # 暫定
         {"speaker": "?", "text": "うん", "ms": 1500, "end_ms": 1700},      # 未確定
         {"speaker": "ファシリテーター", "text": "x", "ms": None, "end_ms": None},
     ]
     by = {sp["name"]: sp for sp in s.api_snapshot()["speakers"]}
     assert by["人物1"]["renameable"] is True and by["人物1"]["label"] == "人物1"
-    assert by["話者3"]["renameable"] is True and by["話者3"]["label"] == "3"
-    assert by["松井"]["renameable"] is False     # 命名済みは登録対象外（パネル非表示）
+    assert by["話者3"]["renameable"] is False    # 暫定#Nは登録対象外
+    assert by["松井"]["renameable"] is False      # 命名済みは登録対象外
     assert "未確定" not in by                      # 未確定は出さない
     assert "ファシリテーター" not in by             # AIは出さない
 
