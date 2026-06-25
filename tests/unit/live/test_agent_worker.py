@@ -50,12 +50,13 @@ class FakePartner:
         self.ai_speaking = False
         self._responding = False
         self.interrupts = 0
+        self.injected: list = []
 
     def interrupt(self) -> None:
         self.interrupts += 1
 
-    def inject_context(self, *a, **k) -> None:  # pragma: no cover
-        pass
+    def inject_context(self, speaker=None, text=None, **k) -> None:
+        self.injected.append((speaker, text))
 
 
 class FakeState:
@@ -74,6 +75,7 @@ class FakeState:
         self.drift_cursor = 0
         self.drift_requests: queue.Queue[str] = queue.Queue()
         self.invite_requests: queue.Queue[str] = queue.Queue()
+        self.fac_events: queue.Queue = queue.Queue()
         self.proactivity = {"silence_summarize": 18.0, "cooldown": 25.0}
 
     def disp_name(self, k):  # pragma: no cover
@@ -324,3 +326,58 @@ def test_drift_runs_after_warmup(monkeypatch):
     ]
     calls = _run_drift_checker_briefly(state, monkeypatch, records=records)
     assert calls, "ウォームアップ後は脱線判定が走るべき"
+
+
+# ---------------------------------------------------------------------------
+# ファシリテーターイベントワーカー（受信スレッドの切り離し）
+# ---------------------------------------------------------------------------
+
+def _run_event_worker_briefly(state, on_text, *, until, timeout=2.0):
+    from das.asr.live._workers import _run_facilitator_event_worker
+    t = threading.Thread(target=_run_facilitator_event_worker,
+                         args=(state, on_text), daemon=True)
+    t.start()
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline and not until():
+        time.sleep(0.02)
+    state.stop.set()
+    t.join(timeout=1.0)
+
+
+def test_event_worker_utterance_appends_and_reacts_partner():
+    """utteranceイベントで議事録追記＋パートナー反応（割り込み＋注入）が起きる."""
+    state = FakeState(FakeAgent(), None)
+    p = FakePartner()
+    p.ai_speaking = True
+    state.partner = p
+    texts: list = []
+    state.fac_events.put(("utterance", "本題に戻しましょう"))
+    _run_event_worker_briefly(state, texts.append, until=lambda: bool(texts))
+    assert texts == ["本題に戻しましょう"]
+    assert p.interrupts == 1
+    assert p.injected and p.injected[0][1] == "本題に戻しましょう"
+
+
+def test_event_worker_noop_utterance_does_not_react_partner():
+    """「介入不要」発言では議事録には残すがパートナーは止めない."""
+    state = FakeState(FakeAgent(), None)
+    p = FakePartner()
+    p.ai_speaking = True
+    state.partner = p
+    texts: list = []
+    state.fac_events.put(("utterance", "（介入不要）"))
+    _run_event_worker_briefly(state, texts.append, until=lambda: bool(texts))
+    assert texts == ["（介入不要）"]
+    assert p.interrupts == 0
+    assert p.injected == []
+
+
+def test_event_worker_speech_start_interrupts_partner():
+    """speech_startイベントで、発話中のパートナーを割り込む."""
+    state = FakeState(FakeAgent(), None)
+    p = FakePartner()
+    p._responding = True
+    state.partner = p
+    state.fac_events.put(("speech_start", None))
+    _run_event_worker_briefly(state, lambda t: None, until=lambda: p.interrupts > 0)
+    assert p.interrupts == 1

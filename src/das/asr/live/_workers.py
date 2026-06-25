@@ -253,29 +253,46 @@ def _on_agent_text_factory(state: SessionState):
     return _on_agent_text
 
 
+def _run_facilitator_event_worker(state: SessionState, on_text):
+    """ファシリテーター発言の副作用を受信スレッドから切り離して処理する.
+
+    agentの受信スレッドが、議事録のファイルI/Oや partner の WebSocket 送信で
+    ブロックしないよう、副作用はこのワーカーに委譲する（state.fac_events 経由）。
+    イベントは FIFO で処理され、順序（speech_start→utterance）は保たれる。
+    state.partner / state.simulator は動的参照（実行中の接続/切断に追従, F3）。
+    """
+    while not state.stop.is_set():
+        try:
+            kind, text = state.fac_events.get(timeout=0.5)
+        except queue.Empty:
+            continue
+        try:
+            if kind == "utterance" and text is not None:
+                on_text(text)
+                if "介入不要" not in text:
+                    p = state.partner
+                    if p is not None and p._connected:
+                        p.interrupt()
+                        p.inject_context("ファシリテーター", text)
+                    sim = state.simulator
+                    if sim is not None:
+                        sim.inject_facilitator(text)
+            elif kind == "speech_start":
+                p = state.partner
+                if p is not None and p._connected and (p.ai_speaking or p._responding):
+                    p.interrupt()
+        except Exception as e:
+            print(f"# ファシリテーターイベント処理エラー: {e}", flush=True)
+
+
 def _connect_agent(state: SessionState, on_text):
     """ファシリテーターAgentのコールバック設定・接続・ワーカー起動."""
     agent = state.agent
-    # コールバックは state.partner / state.simulator を「動的参照」する。
-    # これにより実行中にパートナーを接続/切断してもコールバックの貼り替えが不要（F3）。
-    def _on_agent_utterance(text: str):
-        on_text(text)
-        if "介入不要" in text:
-            return
-        p = state.partner
-        if p is not None and p._connected:
-            p.interrupt()
-            p.inject_context("ファシリテーター", text)
-        sim = state.simulator
-        if sim is not None:
-            sim.inject_facilitator(text)
-    agent.on_ai_utterance = _on_agent_utterance
-
-    def _on_agent_speech_start():
-        p = state.partner
-        if p is not None and p._connected and (p.ai_speaking or p._responding):
-            p.interrupt()
-    agent.on_speech_start = _on_agent_speech_start
+    # 受信スレッドはイベントを積むだけ。副作用は専用ワーカーで処理（受信ブロック回避）。
+    agent.on_ai_utterance = lambda text: state.fac_events.put(("utterance", text))
+    agent.on_speech_start = lambda: state.fac_events.put(("speech_start", None))
+    threading.Thread(target=_run_facilitator_event_worker,
+                     args=(state, on_text), daemon=True).start()
 
     agent.connect()
     threading.Thread(target=_run_agent_worker, args=(state,),
