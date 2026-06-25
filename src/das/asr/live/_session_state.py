@@ -72,6 +72,7 @@ class SessionState:
         self.speaker_resolver = speaker_resolver or SpeakerResolver()
         self.diarization_events: list[DiarizationEvent] = []
         self.diarization_lock = threading.Lock()
+        self.diarization_speaker_keys: dict[str, str] = {}
         self._DIARIZATION_KEEP_MS = 10 * 60 * 1000
 
         # AI
@@ -148,6 +149,24 @@ class SessionState:
             return self.names[key]
         return f"話者{key[1:]}" if key.startswith("#") else key
 
+    def key_for_diarization_speaker(self, source: str, speaker: str) -> str:
+        """外部diarizationの生ラベルを、表示用の安定した内部キーに変換する.
+
+        pyannote の ``SPEAKER_00`` は実名でもUI向けラベルでもなく、provider内部の
+        匿名クラスタIDにすぎない。recordsには内部キーを入れ、表示は ``話者N`` に統一する。
+        """
+        raw = f"{source}:{speaker}"
+        if raw not in self.diarization_speaker_keys:
+            idx = len(self.diarization_speaker_keys) + 1
+            key = f"@diar:{idx}"
+            self.diarization_speaker_keys[raw] = key
+            self.names[key] = f"話者{idx}"
+        return self.diarization_speaker_keys[raw]
+
+    def key_for_stt_fallback_speaker(self, speaker: str) -> str:
+        """外部diarizationが薄い時のSTTラベルも表示用の内部キーへ正規化する."""
+        return self.key_for_diarization_speaker("stt", speaker)
+
     def key_for_label(self, sp) -> str:
         sp = str(sp)
         if self.tracker is not None and sp in self.tracker.sp_map:
@@ -177,11 +196,19 @@ class SessionState:
         if start_ms is None or end_ms is None or end_ms <= start_ms:
             return []
         self.drain_diarization_provider()
+        active = getattr(self.diarization_provider, "active_events", None)
+        active_events = (
+            active()
+            if self.diarization_provider is not None and active is not None else []
+        )
         with self.diarization_lock:
             return [
                 e for e in self.diarization_events
                 if e.end_ms is not None
                 and min(e.end_ms, end_ms) - max(e.start_ms, start_ms) > 0
+            ] + [
+                e for e in active_events
+                if min(e.end_ms or end_ms, end_ms) - max(e.start_ms, start_ms) > 0
             ]
 
     def color_of(self, key) -> str:

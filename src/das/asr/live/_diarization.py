@@ -55,6 +55,8 @@ class DiarizationProvider(Protocol):
 
     def drain_events(self) -> list[DiarizationEvent]: ...
 
+    def active_events(self) -> list[DiarizationEvent]: ...
+
     def close(self) -> None: ...
 
 
@@ -81,9 +83,13 @@ class SpeakerResolver:
         self,
         *,
         diarization_min_overlap: float = 0.55,
+        diarization_min_overlap_ms: int = 250,
+        boundary_tolerance_ms: int = 250,
         voiceprint_high_confidence: float = 0.70,
     ) -> None:
         self.diarization_min_overlap = diarization_min_overlap
+        self.diarization_min_overlap_ms = diarization_min_overlap_ms
+        self.boundary_tolerance_ms = boundary_tolerance_ms
         self.voiceprint_high_confidence = voiceprint_high_confidence
 
     def resolve(
@@ -108,27 +114,47 @@ class SpeakerResolver:
             )
 
         duration = max(utterance.duration_ms(), 1)
-        overlaps: defaultdict[str, int] = defaultdict(int)
+        padded = TimeSegment(
+            max(0, utterance.start_ms - self.boundary_tolerance_ms),
+            utterance.end_ms + self.boundary_tolerance_ms,
+        )
+        actual_overlaps: defaultdict[str, int] = defaultdict(int)
+        padded_overlaps: defaultdict[str, int] = defaultdict(int)
         sources: dict[str, str] = {}
         for event in diarization_events:
             seg = event.closed(fallback_end_ms=utterance.end_ms)
             if seg is None:
                 continue
-            ov = utterance.overlap_ms(seg)
-            if ov <= 0:
+            actual_ov = utterance.overlap_ms(seg)
+            padded_ov = padded.overlap_ms(seg)
+            if max(actual_ov, padded_ov) <= 0:
                 continue
-            overlaps[event.speaker] += ov
+            actual_overlaps[event.speaker] += min(actual_ov, duration)
+            padded_overlaps[event.speaker] += min(padded_ov, duration)
             sources.setdefault(event.speaker, event.source)
 
-        if overlaps:
-            speaker, overlap = max(overlaps.items(), key=lambda item: item[1])
-            ratio = overlap / duration
-            if ratio >= self.diarization_min_overlap:
+        if padded_overlaps:
+            ranked = sorted(padded_overlaps.items(), key=lambda item: item[1], reverse=True)
+            speaker, overlap = ranked[0]
+            second = ranked[1][1] if len(ranked) > 1 else 0
+            actual_overlap = actual_overlaps.get(speaker, 0)
+            actual_ratio = actual_overlap / duration
+            padded_ratio = overlap / duration
+            enough_overlap = (
+                actual_ratio >= self.diarization_min_overlap
+                or (
+                    duration <= 1500
+                    and actual_overlap >= self.diarization_min_overlap_ms
+                    and actual_ratio >= 0.25
+                    and overlap >= second * 1.5
+                )
+            )
+            if enough_overlap:
                 return ResolvedSpeaker(
                     speaker=speaker,
-                    confidence=min(1.0, ratio),
+                    confidence=min(1.0, max(actual_ratio, padded_ratio)),
                     source=sources.get(speaker, "diarization"),
-                    reason=f"diarization_overlap_{ratio:.2f}",
+                    reason=f"diarization_overlap_{max(actual_ratio, padded_ratio):.2f}",
                 )
 
         return ResolvedSpeaker(

@@ -134,15 +134,25 @@ class RecvLoop:
                 voiceprint_confidence=voiceprint_confidence,
             )
             if resolved.source != "stt":
-                sp_id = resolved.speaker
+                if resolved.source == "voiceprint":
+                    sp_id = resolved.speaker
+                else:
+                    rec_extra["diarization_raw_speaker"] = resolved.speaker
+                    sp_id = s.key_for_diarization_speaker(resolved.source, resolved.speaker)
                 rec_extra["speaker_source"] = resolved.source
                 rec_extra["speaker_confidence"] = round(resolved.confidence, 3)
                 rec_extra["speaker_reason"] = resolved.reason
                 if self.args.vp_debug and resolved.source != "voiceprint":
                     _print_line(
-                        f"# diarization: {resolved.speaker}"
+                        f"# diarization: {s.disp_name(sp_id)} ({resolved.speaker})"
                         f" conf={resolved.confidence:.2f} {resolved.reason}"
                     )
+            elif s.diarization_provider is not None and voiceprint_speaker is None:
+                rec_extra["stt_raw_speaker"] = resolved.speaker
+                sp_id = s.key_for_stt_fallback_speaker(resolved.speaker)
+                rec_extra["speaker_source"] = "stt_fallback"
+                rec_extra["speaker_confidence"] = 0.0
+                rec_extra["speaker_reason"] = "diarization_no_confident_overlap_stt_fallback"
         # --- テキスト類似度エコー判定（安全網） ---
         for _src_name, _src in [("agent", agent), ("partner", partner)]:
             if _src is None:

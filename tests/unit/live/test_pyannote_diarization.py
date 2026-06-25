@@ -41,6 +41,22 @@ def test_parse_message_returns_closed_turn_on_speaker_end() -> None:
     assert event.source == "pyannote"
 
 
+def test_active_events_exposes_open_speaker_turns() -> None:
+    provider = PyannoteStreamingDiarizationProvider("k")
+    start = {
+        "type": "diarization_speaker_start",
+        "data": {"timestamp": 1.25, "speaker": "SPEAKER_00"},
+    }
+
+    assert provider._parse_message(json.dumps(start)) is None
+
+    event = provider.active_events()[0]
+    assert event.start_ms == 1250
+    assert event.end_ms is None
+    assert event.speaker == "SPEAKER_00"
+    assert event.source == "pyannote"
+
+
 def test_send_audio_uses_pyannote_float_payload() -> None:
     class WS:
         def __init__(self) -> None:

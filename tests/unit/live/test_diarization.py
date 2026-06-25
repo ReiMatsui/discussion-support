@@ -47,8 +47,8 @@ def test_resolver_uses_diarization_when_overlap_is_large() -> None:
 
     assert got.speaker == "SPEAKER_02"
     assert got.source == "pyannote"
-    assert got.confidence == 0.7
-    assert got.reason == "diarization_overlap_0.70"
+    assert got.confidence == 0.75
+    assert got.reason == "diarization_overlap_0.75"
 
 
 def test_resolver_falls_back_to_stt_when_all_signals_are_weak() -> None:
@@ -67,6 +67,22 @@ def test_resolver_falls_back_to_stt_when_all_signals_are_weak() -> None:
     assert got.speaker == "#1"
     assert got.source == "stt"
     assert got.reason == "fallback_stt_label"
+
+
+def test_resolver_accepts_short_boundary_shifted_diarization_overlap() -> None:
+    resolver = SpeakerResolver()
+
+    got = resolver.resolve(
+        utterance=TimeSegment(1000, 2000),
+        stt_speaker="#1",
+        diarization_events=[
+            DiarizationEvent(750, 1300, "SPEAKER_02", "pyannote"),
+        ],
+    )
+
+    assert got.speaker == "SPEAKER_02"
+    assert got.source == "pyannote"
+    assert got.reason == "diarization_overlap_0.55"
 
 
 def test_score_diarization_maps_provider_labels_by_overlap() -> None:
@@ -140,9 +156,73 @@ def test_recv_loop_uses_diarization_when_voiceprint_is_unavailable() -> None:
     assert state.records == [{
         "ms": 1000,
         "end_ms": 3000,
-        "speaker": "SPEAKER_00",
+        "speaker": "@diar:1",
         "text": "これはテストです",
+        "diarization_raw_speaker": "SPEAKER_00",
         "speaker_source": "pyannote",
         "speaker_confidence": 1.0,
         "speaker_reason": "diarization_overlap_1.00",
     }]
+    assert state.disp_name(state.records[0]["speaker"]) == "話者1"
+
+
+def test_recv_loop_normalizes_stt_label_when_diarization_is_enabled_but_unresolved() -> None:
+    import datetime
+
+    class Args:
+        lang = "ja"
+        vp_debug = False
+
+    class Backend:
+        def parse_message(self, raw: dict[str, Any], lang: str) -> dict[str, Any]:
+            return raw
+
+    class Provider:
+        name = "fake"
+
+        def start(self) -> None:
+            pass
+
+        def send_audio(self, pcm16k: bytes) -> None:
+            pass
+
+        def drain_events(self) -> list[DiarizationEvent]:
+            return []
+
+        def active_events(self) -> list[DiarizationEvent]:
+            return []
+
+        def close(self) -> None:
+            pass
+
+    state = SessionState(  # type: ignore[no-untyped-call]
+        args=Args(),
+        started=datetime.datetime(2026, 1, 1),
+        out_path="/tmp/o.md",
+        html_path="/tmp/o.html",
+        diag_path="/tmp/o.diag",
+        turns_path="/tmp/o.turns",
+        wav_path="/tmp/o.wav",
+        serve=False,
+        diarization_provider=Provider(),
+    )
+    state.save = lambda *a, **k: None  # type: ignore[method-assign]
+    loop = RecvLoop(state, Args(), Backend())  # type: ignore[arg-type]
+    loop.cur_speaker = "1"  # type: ignore[assignment]
+    loop.cur_text = "これはテストです"
+    loop.cur_ms = 1000
+    loop.cur_end = 3000
+
+    loop.flush()  # type: ignore[no-untyped-call]
+
+    assert state.records == [{
+        "ms": 1000,
+        "end_ms": 3000,
+        "speaker": "@diar:1",
+        "text": "これはテストです",
+        "stt_raw_speaker": "#1",
+        "speaker_source": "stt_fallback",
+        "speaker_confidence": 0.0,
+        "speaker_reason": "diarization_no_confident_overlap_stt_fallback",
+    }]
+    assert state.disp_name(state.records[0]["speaker"]) == "話者1"

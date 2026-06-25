@@ -65,6 +65,12 @@ class PyannoteStreamingDiarizationProvider:
             except queue.Empty:
                 return events
 
+    def active_events(self) -> list[DiarizationEvent]:
+        return [
+            DiarizationEvent(start_ms, None, speaker, self.name)
+            for speaker, start_ms in self._active_starts.items()
+        ]
+
     def close(self) -> None:
         self._stop.set()
         if self._ws is not None:
