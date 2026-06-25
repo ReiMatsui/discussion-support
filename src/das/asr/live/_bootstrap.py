@@ -347,6 +347,7 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
                          tracker=tracker, serve=_serve,
                          diarization_provider=diarizer,
                          speaker_resolver=SpeakerResolver())
+    state.stt_backend = backend
 
     # --- AIエージェント ---
     _agent_oai_key = os.environ.get("OPENAI_API_KEY", "")
@@ -544,6 +545,10 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
                     if state.stt_ws is not None:
                         state.stt_ws.close()
                 state.reset_for_new_meeting()
+                if state.diarization_provider is not None:
+                    with _contextlib.suppress(Exception):
+                        state.diarization_provider.close()
+                    state.diarization_provider.start()
                 state.stt_ws = _connect_stt()
                 recv = RecvLoop(state, args, backend)
                 state.reset_requested.clear()

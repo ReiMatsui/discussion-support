@@ -89,6 +89,11 @@ INDEX_HTML = """<!doctype html>
   .enroll-status.rec { color: #b91c1c; font-weight: 600; }
   .roster-lock { display: flex; align-items: center; gap: .4rem; font-size: .8rem;
     margin-top: .6rem; cursor: pointer; }
+  .setting-row { display: flex; align-items: center; gap: .45rem; }
+  .setting-row label { flex: 1; font-size: .8rem; color: var(--muted); }
+  .setting-row select { border: 1px solid var(--line); border-radius: 6px;
+    padding: .3rem .45rem; background: var(--card); }
+  .setting-note { font-size: .72rem; color: var(--muted); margin-top: .35rem; }
   .u.bc { opacity: .5; font-size: .85em; }            /* 相槌は薄く小さく */
   .u.unsure { opacity: .75; }
   .u.unsure .who { font-style: italic; }              /* 未確定は話者名をイタリックに */
@@ -164,6 +169,14 @@ INDEX_HTML = """<!doctype html>
         <label class="roster-lock">
           <input type="checkbox" id="roster-lock"> 名簿を確定（登録済みの人だけで進める）
         </label>
+      </div>
+      <div class="panel" id="diar-panel">
+        <h2>話者分離</h2>
+        <div class="setting-row">
+          <label for="speaker-count">想定話者数</label>
+          <select id="speaker-count"></select>
+        </div>
+        <div class="setting-note">次の会議から反映</div>
       </div>
       <div class="panel" id="spk-panel" hidden>
         <h2>話者の名前を登録</h2><div id="speakers"></div>
@@ -340,6 +353,15 @@ function renderEnroll(vp) {
   if (document.activeElement !== lock) lock.checked = !!vp.locked;
 }
 
+function renderDiarization(config) {
+  const sel = $("speaker-count");
+  if (!sel.options.length) {
+    sel.innerHTML = '<option value="">未指定</option>'
+      + Array.from({ length: 10 }, (_, i) => `<option value="${i + 1}">${i + 1}人</option>`).join("");
+  }
+  if (document.activeElement !== sel) sel.value = config && config.max_speakers ? String(config.max_speakers) : "";
+}
+
 let enrolling = false;
 async function enrollPerson() {
   if (enrolling) return;
@@ -378,10 +400,21 @@ async function toggleRoster() {
   } catch (e) { /* SSEで状態が届く */ }
 }
 
+async function setSpeakerCount() {
+  const v = $("speaker-count").value;
+  try {
+    await fetch("/api/diarization", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ max_speakers: v ? Number(v) : null }),
+    });
+  } catch (e) { alert("話者数の設定に失敗しました"); }
+}
+
 function render(state) {
   renderModes(state.mode);
   renderVpBanner(state.vp);
   renderEnroll(state.vp);
+  renderDiarization(state.diarization);
   renderAgenda(state.agenda);
   renderTranscript(state.records || [], state.partial);
   renderSpeakers(state.speakers);
@@ -453,6 +486,7 @@ $("agenda-set").onclick = setAgenda;
 $("agenda").addEventListener("keydown", (e) => { if (e.key === "Enter") setAgenda(); });
 $("enroll-btn").onclick = enrollPerson;
 $("roster-lock").addEventListener("change", toggleRoster);
+$("speaker-count").addEventListener("change", setSpeakerCount);
 // 初期描画 + ライブ接続
 fetch("/api/state").then((r) => r.json()).then(render).catch(() => {});
 connect();

@@ -46,6 +46,8 @@ class AssemblyAIStreamingDiarizationProvider:
     def start(self) -> None:
         from websockets.sync.client import connect
 
+        self._stop.clear()
+        self._active_by_turn.clear()
         params: dict[str, str | int] = {
             "sample_rate": SR,
             "encoding": "pcm_s16le",
@@ -63,6 +65,9 @@ class AssemblyAIStreamingDiarizationProvider:
     def send_audio(self, pcm16k: bytes) -> None:
         if self._ws is not None and pcm16k:
             self._ws.send(pcm16k)
+
+    def set_max_speakers(self, max_speakers: int | None) -> None:
+        self.max_speakers = max_speakers
 
     def drain_events(self) -> list[DiarizationEvent]:
         events: list[DiarizationEvent] = []

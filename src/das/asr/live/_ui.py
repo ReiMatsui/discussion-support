@@ -120,6 +120,18 @@ class _UIHandler:
                     result = s.set_agenda(str(body.get("topic", "")))
                     _print_line(f"# 議題を設定（UIから）: {result['agenda']}")
                     self._json(200, result)
+                elif self.path == "/api/diarization":
+                    length = int(self.headers.get("Content-Length", 0))
+                    body = json.loads(self.rfile.read(length))
+                    raw = body.get("max_speakers")
+                    max_speakers = None if raw in (None, "", "auto") else int(raw)
+                    result = s.set_diarization_max_speakers(max_speakers)
+                    if result.get("ok"):
+                        label = max_speakers if max_speakers is not None else "未指定"
+                        s.add_sys(None, f"想定話者数を更新: {label}（次の会議から反映）")
+                        s.save()
+                        _print_line(f"# 想定話者数を更新（UIから）: {label}")
+                    self._json(200 if result.get("ok") else 400, result)
                 elif self.path == "/rename":
                     length = int(self.headers.get("Content-Length", 0))
                     body = json.loads(self.rfile.read(length))

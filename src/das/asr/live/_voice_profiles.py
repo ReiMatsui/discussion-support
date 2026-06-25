@@ -398,7 +398,13 @@ class VoiceProfiles:
                 # 登録時の遡及リネーム(#ラベル→人物N)で後からまとめて確定できる。
                 if prev is not None and not prev.startswith("#"):
                     pv = active.get(prev)
-                    if pv is None or float(np.dot(pv, emb)) < self._person_th(prev, th):
+                    prev_sim = float(np.dot(pv, emb)) if pv is not None else -1.0
+                    continuity_th = max(0.25, self._person_th(prev, th) - 0.12)
+                    if self.ANON.match(prev) and prev_sim >= continuity_th:
+                        self._note("低信頼追従", label=sp, sim=round(prev_sim, 3),
+                                   name=prev, prev=prev)
+                        return prev
+                    if pv is None or prev_sim < self._person_th(prev, th):
                         prev = None
                 # 登録: 発話数ではなく「声ごとのクリーンな発声の累積文字数」で確定する。
                 # 長い発話は窓分割して複数サンプル化（連続発話でも登録が進み、内部一貫性も確認）。

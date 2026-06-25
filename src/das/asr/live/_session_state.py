@@ -12,6 +12,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
+from types import SimpleNamespace
 
 from ._constants import (
     _PROACTIVITY_DEFAULT,
@@ -51,6 +52,7 @@ class SessionState:
                  diarization_provider: DiarizationProvider | None = None,
                  speaker_resolver: SpeakerResolver | None = None):
         self.args = args
+        self.stt_backend = None
         self.started = started
         self.out_path = out_path
         self.html_path = html_path
@@ -338,6 +340,10 @@ class SessionState:
                    "locked": self.tracker is not None and not self.tracker.auto,
                    "roster": (self.tracker.active_profile_names()
                               if self.tracker is not None else [])},
+            "diarization": {
+                "provider": getattr(self.diarization_provider, "name", None),
+                "max_speakers": getattr(self.args, "diarization_max_speakers", None),
+            },
             "agenda": self._current_agenda(),
             "started": self.started.strftime("%Y-%m-%d %H:%M"),
             "partial": {"speaker": self.partial_speaker, "text": self.partial_text},
@@ -424,6 +430,9 @@ class SessionState:
             self.agent_cursor = 0
             self.partial_text = ""
             self.partial_speaker = ""
+            self.diarization_speaker_keys = {}
+        with self.diarization_lock:
+            self.diarization_events = []
         if self.tracker is not None:
             self.tracker.reset_session()
         with self.topics_lock:
@@ -461,6 +470,27 @@ class SessionState:
         self.rev += 1
         self.save()
         return {"ok": True, "agenda": topic}
+
+    def set_diarization_max_speakers(self, value: int | None) -> dict:
+        """UIから想定話者数ヒントを更新する.
+
+        STT/外部diarizationの多くは接続開始時にしかmax_speakersを受け取れないため、
+        ここでは設定値を保存し、次の会議リセット時の再接続で反映する。
+        """
+        if value is not None and not 1 <= value <= 10:
+            return {"ok": False, "error": "話者数は1〜10で指定してください"}
+        try:
+            self.args.diarization_max_speakers = value
+        except AttributeError:
+            self.args = SimpleNamespace(diarization_max_speakers=value)
+        backend = getattr(self, "stt_backend", None)
+        if backend is not None and hasattr(backend, "set_max_speakers"):
+            backend.set_max_speakers(value)
+        provider = self.diarization_provider
+        if provider is not None and hasattr(provider, "set_max_speakers"):
+            provider.set_max_speakers(value)
+        self.rev += 1
+        return {"ok": True, "max_speakers": value}
 
     def _current_agenda(self) -> str:
         with self.topics_lock:

@@ -39,6 +39,8 @@ class PyannoteStreamingDiarizationProvider:
     def start(self) -> None:
         from websockets.sync.client import connect
 
+        self._stop.clear()
+        self._active_starts.clear()
         req = urllib.request.Request(self.create_url, data=b"{}", method="POST")
         req.add_header("Authorization", f"Bearer {self.api_key}")
         req.add_header("Content-Type", "application/json")

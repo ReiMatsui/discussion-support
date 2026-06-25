@@ -89,3 +89,27 @@ def test_parse_speaker_revision_returns_revised_events() -> None:
     assert events[0].speaker == "B"
     assert events[0].start_ms == 1000
     assert events[0].end_ms == 1500
+
+
+def test_start_after_close_clears_stop_and_active_turns(monkeypatch) -> None:
+    class WS:
+        def recv(self) -> str:
+            raise RuntimeError("stop")
+
+        def send(self, payload: str) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    provider = AssemblyAIStreamingDiarizationProvider("k")
+    provider._stop.set()
+    provider._active_by_turn[1] = provider._event_from_turn_label([
+        {"start": 1000, "end": 1500},
+    ], "A")[0]
+    monkeypatch.setattr("websockets.sync.client.connect", lambda *a, **k: WS())
+
+    provider.start()
+
+    assert not provider._stop.is_set()
+    assert provider._active_by_turn == {}

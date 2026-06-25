@@ -36,6 +36,9 @@ class SpeechmaticsBackend:
     def ws_headers(self) -> dict[str, str] | None:
         return {"Authorization": f"Bearer {self._api_key}"}
 
+    def set_max_speakers(self, max_speakers: int | None) -> None:
+        self._max_speakers = max_speakers
+
     def start_message(self, model: str, lang: str) -> dict:
         speaker_config: dict[str, object] = {
             "prefer_current_speaker": self._prefer_current_speaker,

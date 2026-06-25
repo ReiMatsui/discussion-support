@@ -307,6 +307,24 @@ def test_http_roster_lock_toggles_auto():
         httpd.shutdown()
 
 
+def test_http_diarization_updates_max_speakers_for_next_meeting():
+    """/api/diarization で想定話者数を更新できる."""
+    s = _make_state()
+    httpd, port = _serve(s)
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/diarization",
+            data=json.dumps({"max_speakers": 3}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req) as r:
+            out = json.loads(r.read())
+        assert out == {"ok": True, "max_speakers": 3}
+        assert s.args.diarization_max_speakers == 3
+        assert s.api_snapshot()["diarization"]["max_speakers"] == 3
+    finally:
+        httpd.shutdown()
+
+
 # --- 課題②: 安定した話者色 --------------------------------------------------
 
 def test_snapshot_speaker_colors_are_stable():

@@ -57,6 +57,39 @@ def test_active_events_exposes_open_speaker_turns() -> None:
     assert event.source == "pyannote"
 
 
+def test_start_after_close_clears_stop_and_active_speakers(monkeypatch) -> None:
+    class Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def read(self) -> bytes:
+            return b'{"url":"ws://example"}'
+
+    class WS:
+        def recv(self) -> str:
+            raise RuntimeError("stop")
+
+        def send(self, payload: str) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    provider = PyannoteStreamingDiarizationProvider("k")
+    provider._stop.set()
+    provider._active_starts["SPEAKER_00"] = 1
+    monkeypatch.setattr("urllib.request.urlopen", lambda *a, **k: Resp())
+    monkeypatch.setattr("websockets.sync.client.connect", lambda *a, **k: WS())
+
+    provider.start()
+
+    assert not provider._stop.is_set()
+    assert provider._active_starts == {}
+
+
 def test_send_audio_uses_pyannote_float_payload() -> None:
     class WS:
         def __init__(self) -> None:

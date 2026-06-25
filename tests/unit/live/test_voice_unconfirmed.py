@@ -75,3 +75,14 @@ def test_matching_voice_still_follows_registered_person():
     """声紋が松井に一致する発話は、従来どおり松井のまま（誤って未確定にしない）."""
     vp = _tracker(_unit(1, 0, 0))      # まさに松井の声
     assert vp.classify(_LONG, "2", count=True) == "松井"
+
+
+def test_anonymous_person_keeps_same_label_on_moderate_match():
+    """自動登録済み人物は、同じSTTラベルの低信頼発話を近ければ継続表示する."""
+    vp = _tracker(_unit(0.90, 0.43, 0))
+    vp.profiles = {"人物1": _unit(0, 1, 0)}
+    vp._active_keys = {"人物1"}
+    vp.sp_map = {"2": "人物1"}
+
+    assert vp.classify(_LONG, "2", count=True, chars=20) == "人物1"
+    assert vp.last["kind"] == "低信頼追従"
