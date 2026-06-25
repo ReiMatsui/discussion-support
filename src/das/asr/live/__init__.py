@@ -79,6 +79,9 @@ def post_system(text: str) -> None:
 @click.option("--stt", default="soniox",
               type=click.Choice(["soniox", "speechmatics"]),
               help="リアルタイムSTTの供給源")
+@click.option("--soniox-endpoint", is_flag=True,
+              help="Sonioxのエンドポイント検出を有効化（既定OFF。"
+                   "ON=早期確定で話者分離の精度が下がるとSoniox公式が明記。A/B比較用）")
 @click.option("--port", type=int, default=8231, help="UIサーバーのポート番号（0で無効）")
 @click.option("--agent", is_flag=True,
               help="AIファシリテーターを有効化（OPENAI_API_KEY必要）")

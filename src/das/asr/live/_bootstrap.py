@@ -68,6 +68,9 @@ class LiveArgs:
     vp_debug: bool = False
     polish: bool = False
     stt: str = "soniox"
+    # Sonioxのエンドポイント検出。公式は「話者分離の精度を下げる(早期確定で揺れる
+    # ラベルをロックする)」と明記しているため既定はOFF。A/B比較用に切替可能。
+    soniox_endpoint: bool = False
     port: int = 8231
     agent: bool = False
     agent_voice: str = "shimmer"
@@ -116,7 +119,9 @@ def build_backend(args: LiveArgs) -> STTBackend:
             raise SystemExit(
                 "環境変数 SONIOX_API_KEY を設定してください"
                 "（https://console.soniox.com）")
-        return SonioxBackend(api_key=api_key)
+        return SonioxBackend(
+            api_key=api_key,
+            enable_endpoint_detection=getattr(args, "soniox_endpoint", False))
 
 
 def _build_chat_params(model: str, prompt: str, *, max_out: int,
