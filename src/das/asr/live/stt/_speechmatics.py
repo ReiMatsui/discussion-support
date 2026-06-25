@@ -15,8 +15,16 @@ class SpeechmaticsBackend:
     話者ラベル: S1→"1"（表示は話者1）、不明UUはそのまま。
     """
 
-    def __init__(self, api_key: str):
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        max_speakers: int | None = None,
+        prefer_current_speaker: bool = True,
+    ):
         self._api_key = api_key
+        self._max_speakers = max_speakers
+        self._prefer_current_speaker = prefer_current_speaker
 
     @property
     def name(self) -> str:
@@ -29,6 +37,11 @@ class SpeechmaticsBackend:
         return {"Authorization": f"Bearer {self._api_key}"}
 
     def start_message(self, model: str, lang: str) -> dict:
+        speaker_config: dict[str, object] = {
+            "prefer_current_speaker": self._prefer_current_speaker,
+        }
+        if self._max_speakers is not None:
+            speaker_config["max_speakers"] = self._max_speakers
         return {
             "message": "StartRecognition",
             "audio_format": {
@@ -40,6 +53,7 @@ class SpeechmaticsBackend:
                 "language": lang,
                 "operating_point": "enhanced",
                 "diarization": "speaker",
+                "speaker_diarization_config": speaker_config,
                 "enable_partials": True,
                 "max_delay": 1.2,
                 "conversation_config": {"end_of_utterance_silence_trigger": 0.8},

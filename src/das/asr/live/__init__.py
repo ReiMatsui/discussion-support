@@ -80,8 +80,10 @@ def post_system(text: str) -> None:
               type=click.Choice(["soniox", "speechmatics"]),
               help="リアルタイムSTTの供給源")
 @click.option("--diarization", default="none",
-              type=click.Choice(["none", "pyannote"]),
-              help="外部話者分離の供給源（pyannoteはPYANNOTEAI_API_KEYが必要）")
+              type=click.Choice(["none", "pyannote", "assemblyai"]),
+              help="外部話者分離の供給源")
+@click.option("--diarization-max-speakers", type=int, default=None,
+              help="外部話者分離に渡す最大話者数ヒント（AssemblyAI等）")
 @click.option("--port", type=int, default=8231, help="UIサーバーのポート番号（0で無効）")
 @click.option("--agent", is_flag=True,
               help="AIファシリテーターを有効化（OPENAI_API_KEY必要）")

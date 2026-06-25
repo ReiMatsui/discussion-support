@@ -111,10 +111,14 @@ def test_liveargs_and_cli_have_diarization_option() -> None:
 
     assert LiveArgs().diarization == "none"
     assert LiveArgs(diarization="pyannote").diarization == "pyannote"
+    assert LiveArgs(
+        diarization="assemblyai",
+        diarization_max_speakers=3,
+    ).diarization_max_speakers == 3
     for param in main.params:
         if param.name == "diarization":
             choice_type = cast(click.Choice, param.type)
-            assert set(choice_type.choices) == {"none", "pyannote"}
+            assert set(choice_type.choices) == {"none", "pyannote", "assemblyai"}
             break
     else:
         raise AssertionError("diarization option not found")

@@ -13,6 +13,7 @@ import os
 import threading
 from dataclasses import dataclass
 
+from das.asr.live._assemblyai_diarization import AssemblyAIStreamingDiarizationProvider
 from das.asr.live._constants import (
     _AGENDA_PROMPT,
     _DRIFT_PROMPT,
@@ -72,7 +73,8 @@ class LiveArgs:
     stt: str = "soniox"
     # Sonioxのエンドポイント検出（文の切れ目で区切る＝議事録が読みやすい）。既定ON。
     soniox_endpoint: bool = True
-    diarization: str = "none"  # none / pyannote
+    diarization: str = "none"  # none / pyannote / assemblyai
+    diarization_max_speakers: int | None = None
     port: int = 8231
     agent: bool = False
     agent_voice: str = "shimmer"
@@ -114,7 +116,10 @@ def build_backend(args: LiveArgs) -> STTBackend:
             raise SystemExit(
                 "環境変数 SPEECHMATICS_API_KEY を設定してください"
                 "（https://portal.speechmatics.com/settings/api-keys）")
-        return SpeechmaticsBackend(api_key=sm_key)
+        return SpeechmaticsBackend(
+            api_key=sm_key,
+            max_speakers=args.diarization_max_speakers,
+        )
     else:
         api_key = os.environ.get("SONIOX_API_KEY")
         if not api_key:
@@ -322,6 +327,19 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
             raise SystemExit("環境変数 PYANNOTEAI_API_KEY を設定してください")
         diarizer = PyannoteStreamingDiarizationProvider(pyannote_key)
         print("# 話者分離: pyannoteAI streaming を使用", flush=True)
+    elif args.diarization == "assemblyai":
+        assemblyai_key = os.environ.get("ASSEMBLYAI_API_KEY")
+        if not assemblyai_key:
+            raise SystemExit("環境変数 ASSEMBLYAI_API_KEY を設定してください")
+        diarizer = AssemblyAIStreamingDiarizationProvider(
+            assemblyai_key,
+            max_speakers=args.diarization_max_speakers,
+        )
+        hint = (
+            f" max_speakers={args.diarization_max_speakers}"
+            if args.diarization_max_speakers else ""
+        )
+        print(f"# 話者分離: AssemblyAI streaming を使用{hint}", flush=True)
 
     state = SessionState(args=args, started=started, out_path=out_path,
                          html_path=html_path, diag_path=diag_path,
