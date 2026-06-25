@@ -700,9 +700,19 @@ def _run_sender(state: SessionState, backend: STTBackend):
             except OSError:
                 pass
         if ws is not None:
-            with contextlib.suppress(Exception):
+            try:
                 ws.send(pcm)
-        seq += 1
+            except Exception:
+                pass
+            else:
+                with state.buf_lock:
+                    state.asr_pcm_buf.extend(pcm)
+                    state.asr_pcm_total_bytes += len(pcm)
+                    if len(state.asr_pcm_buf) > state._PCM_KEEP_BYTES + SR * 2 * 10:
+                        trim = len(state.asr_pcm_buf) - state._PCM_KEEP_BYTES
+                        del state.asr_pcm_buf[:trim]
+                        state.asr_pcm_buf_offset += trim
+                seq += 1
 
 
 def _cleanup(state: SessionState, args, api_key: str,

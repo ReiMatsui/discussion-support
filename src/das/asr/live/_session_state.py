@@ -109,6 +109,12 @@ class SessionState:
         self.pcm_buf = bytearray()
         self.pcm_buf_offset = 0
         self.pcm_total_bytes = 0
+        # 声紋判定用: STT WebSocket に実際に送信できたPCMだけを保持する。
+        # 録音用バッファとは分けることで、接続リセット中に捨てた音声や送信失敗音声で
+        # STTタイムスタンプと声紋切り出し位置がずれるのを防ぐ。
+        self.asr_pcm_buf = bytearray()
+        self.asr_pcm_buf_offset = 0
+        self.asr_pcm_total_bytes = 0
         self._PCM_KEEP_BYTES = SR * 2 * 120
         self.buf_lock = threading.Lock()
         self.pcm_file = None  # IO[bytes] | None
@@ -288,6 +294,9 @@ class SessionState:
         self.pcm_buf = bytearray()
         self.pcm_buf_offset = 0
         self.pcm_total_bytes = 0
+        self.asr_pcm_buf = bytearray()
+        self.asr_pcm_buf_offset = 0
+        self.asr_pcm_total_bytes = 0
         try:
             self.pcm_file = open(self.wav_path, "wb")  # noqa: SIM115
             self.pcm_file.write(b"RIFF" + struct.pack("<I", 0) + b"WAVEfmt " +

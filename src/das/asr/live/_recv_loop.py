@@ -67,9 +67,9 @@ class RecvLoop:
                 with s.buf_lock:
                     abs_start = self.cur_ms * 32
                     abs_end = self.cur_end * 32
-                    rel_start = max(abs_start - s.pcm_buf_offset, 0)
-                    rel_end = max(abs_end - s.pcm_buf_offset, 0)
-                    seg = bytes(s.pcm_buf[rel_start: rel_end])
+                    rel_start = max(abs_start - s.asr_pcm_buf_offset, 0)
+                    rel_end = max(abs_end - s.asr_pcm_buf_offset, 0)
+                    seg = bytes(s.asr_pcm_buf[rel_start: rel_end])
                 wav = np.frombuffer(seg, dtype="<i2").astype(np.float32) / 32768.0
             else:
                 wav = np.zeros(0, dtype=np.float32)
