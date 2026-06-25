@@ -222,6 +222,20 @@ class VoiceProfiles:
         second = ranked[1][0] if len(ranked) > 1 else -1.0
         return cand, sim, second
 
+    def _ai_echo(self, emb: np.ndarray, active: dict):
+        """AI声紋(エコー)に一致すれば (キー, sim) を返す（無ければNone, 人間より高い閾値）."""
+        ai_profs = {k: self.profiles[k] for k in self._active_keys
+                    if k.startswith("__") and k.endswith("__") and k in self.profiles}
+        if not ai_profs:
+            return None
+        best_human = max((float(np.dot(p, emb)) for p in active.values()), default=-1.0)
+        for ai_key, ai_prof in ai_profs.items():
+            ai_th = self.AI_THRESH.get(self.model, self.thresh + 0.10)
+            ai_sim = float(np.dot(ai_prof, emb))
+            if ai_sim >= ai_th and ai_sim > best_human:
+                return ai_key, ai_sim
+        return None
+
     # ------------------------------------------------------------------
     # 自動登録（累積文字数ベース）
     # ------------------------------------------------------------------
@@ -357,23 +371,14 @@ class VoiceProfiles:
                 self.label_embs.setdefault(sp, []).append(emb)
                 del self.label_embs[sp][:-10]    # 手動登録用に直近10発話だけ保持
                 th, cs = self.thresh, self.consist
-                # AI声紋は通常の話者ランキングから分離（margin/dedupeへの干渉を防ぐ）
-                # __AI__ (ファシリテーター) と __PARTNER__ (会話相手) の両方を対象
-                _ai_keys = {k for k in self._active_keys if k.startswith("__") and k.endswith("__")}
                 active = self._active_human()
-                ai_profs = {k: self.profiles[k] for k in _ai_keys if k in self.profiles}
                 info = {"n_prof": len(active), "n_all": len(self.profiles)}   # 診断ログ用
                 # ① AI声紋の先行チェック（エコー除去用 — 人間より高い閾値）
-                if ai_profs:
-                    best_human = max((float(np.dot(p, emb))
-                                      for p in active.values()), default=-1.0)
-                    for ai_key, ai_prof in ai_profs.items():
-                        ai_th = self.AI_THRESH.get(self.model, th + 0.10)
-                        ai_sim = float(np.dot(ai_prof, emb))
-                        if ai_sim >= ai_th and ai_sim > best_human:
-                            self.sp_map[sp] = ai_key
-                            self._note("AI声紋一致", label=sp, sim=round(ai_sim, 3), key=ai_key)
-                            return ai_key
+                ai = self._ai_echo(emb, active)
+                if ai is not None:
+                    self.sp_map[sp] = ai[0]
+                    self._note("AI声紋一致", label=sp, sim=round(ai[1], 3), key=ai[0])
+                    return ai[0]
                 # ② 通常の話者照合（人間のプロファイルのみ）
                 ranked = self._rank_active(emb, active)
                 if ranked is not None:
@@ -405,27 +410,41 @@ class VoiceProfiles:
                     if target is not None:
                         return target
         elif count and wav.size >= SR * self.short_floor:
-            # 短い発話の取り違え安定化: 既知の2人以上を厳格に区別できるときだけ正す。
-            # 登録・蓄積はせず（声が短く不安定）、はっきり別人と分かる場合のみ割り当てを変える。
-            active = self._active_human()
-            if len(active) >= 2:
-                emb = self._embed(wav)
-                ranked = self._rank_active(emb, active) if emb is not None else None
-                if ranked is not None:
-                    cand, sim, second = ranked
-                    info = {"sim": round(sim, 3), "second": round(second, 3),
-                            "name": cand, "prev": prev, "short": True}
-                    strict_th = self._person_th(cand, self.thresh) + self.short_bonus
-                    if (sim >= strict_th
-                            and sim - second >= self.margin * self.short_margin_mult):
-                        self.sp_map[sp] = cand
-                        self._note("補正" if (prev is not None and not prev.startswith("#")
-                                              and prev != cand) else "声紋一致", label=sp, **info)
-                        return cand
-                # 厳格に決められない短い発話。確定済みの人へ追従すると誤割り当てに
-                # なる（2人ラリーは交互で直前と別人のことが多い）。名前を当てず未確定に。
+            # 短い発話: 取り違えの安定化に加え、登録の累積にも寄与させる
+            # （短い応酬ばかりでも登録が進むように）。
+            emb = self._embed(wav)
+            if emb is not None:
+                active = self._active_human()
+                # ① AI声紋エコーは先に弾く（登録を汚さないため、短い発話でも）
+                ai = self._ai_echo(emb, active)
+                if ai is not None:
+                    self.sp_map[sp] = ai[0]
+                    self._note("AI声紋一致", label=sp, sim=round(ai[1], 3), key=ai[0])
+                    return ai[0]
+                # ② 既知2人以上なら厳格照合で取り違えを正す
+                if len(active) >= 2:
+                    ranked = self._rank_active(emb, active)
+                    if ranked is not None:
+                        cand, sim, second = ranked
+                        strict_th = self._person_th(cand, self.thresh) + self.short_bonus
+                        if (sim >= strict_th
+                                and sim - second >= self.margin * self.short_margin_mult):
+                            self.sp_map[sp] = cand
+                            self._note("補正" if (prev is not None and not prev.startswith("#")
+                                                  and prev != cand) else "声紋一致",
+                                       label=sp, sim=round(sim, 3), second=round(second, 3),
+                                       name=cand, prev=prev, short=True)
+                            return cand
+                # ③ 登録の累積（短い発話も声の総量に寄与）。閾値に達したら確定。
+                if self.auto and chars > 0:
+                    ecs = self.consist + self.enroll_consist_bonus
+                    samples = self._segment_samples(wav, emb, chars)
+                    target = self._enroll_accumulate(samples, sp, prev, ecs)
+                    if target is not None:
+                        return target
+                # ④ 既知2人以上で決められない短い発話は、確定済みの人へ追従せず未確定に。
                 # sp_map は触らない（次の確信ある発話の連続性を保つため）。
-                if prev is not None and not prev.startswith("#"):
+                if len(active) >= 2 and prev is not None and not prev.startswith("#"):
                     self._note("未確定", label=sp, prev=prev, short=True)
                     return UNSURE_SPEAKER
         # 声紋で決められない（重なり/短い相槌/蓄積中）→ ラベルの直近判定に追従
