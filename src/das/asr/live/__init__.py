@@ -76,6 +76,8 @@ def post_system(text: str) -> None:
 @click.option("--vp-no-auto", is_flag=True, help="未知の声の自動登録を無効化")
 @click.option("--vp-debug", is_flag=True, help="声紋判定の内訳を表示")
 @click.option("--polish", is_flag=True, help="終了時に清書を行う（デフォルトオフ）")
+@click.option("--speaker-polish", is_flag=True,
+              help="終了後に録音全体から話者ラベルを再クラスタリングする")
 @click.option("--stt", default="soniox",
               type=click.Choice(["soniox", "speechmatics"]),
               help="リアルタイムSTTの供給源")

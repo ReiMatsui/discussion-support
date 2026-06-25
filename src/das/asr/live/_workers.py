@@ -739,6 +739,25 @@ def _cleanup(state: SessionState, args, api_key: str,
     saved_wav = state.finalize_wav()
     if saved_wav:
         _print_line(f"# 録音を保存しました: {saved_wav}")
+    if args.speaker_polish and saved_wav and tracker is not None:
+        try:
+            from ._speaker_polish import polish_speakers_from_wav
+            recs = polish_speakers_from_wav(
+                state.records,
+                saved_wav,
+                tracker,
+                max_speakers=getattr(args, "diarization_max_speakers", None),
+            )
+            base = os.path.splitext(state.out_path)[0]
+            fmd = base + ".speakers.md"
+            fht = base + ".speakers.html"
+            fturns = base + ".speakers.turns.jsonl"
+            state.write_md(recs, fmd)
+            state.write_html(live=False, recs=recs, path=fht, status="話者後処理済み")
+            state.write_turns(recs, fturns)
+            _print_line(f"# 話者後処理版を保存しました: {fmd} / {fht}")
+        except Exception as e:
+            _print_line(f"# 話者後処理に失敗しました: {type(e).__name__}: {e}")
     # 清書（直近の会議のwavを対象にする）
     if args.polish and not api_key and saved_wav:
         _print_line("# 清書はスキップ（SONIOX_API_KEY未設定。清書はSoniox非同期APIを使用）")
