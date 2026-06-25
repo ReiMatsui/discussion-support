@@ -180,6 +180,52 @@ def test_reset_resets_recording_and_snapshot_has_resetting():
     assert s.pcm_total_bytes == 0       # PCMバッファ（STTのmsと整合）リセット
 
 
+def test_set_agenda_replaces_baseline_keeps_points():
+    """議題を設定すると既存の議題は差し替え、抽出論点は残る."""
+    s = _make_state()
+    s.topics = [
+        {"topic": "古い議題", "speaker": "議題"},
+        {"topic": "コストの話", "speaker": "話者1"},
+    ]
+    r = s.set_agenda("新しい議題")
+    assert r == {"ok": True, "agenda": "新しい議題"}
+    assert s._current_agenda() == "新しい議題"
+    topics = [t["topic"] for t in s.topics]
+    assert topics[0] == "新しい議題"          # 議題は先頭
+    assert "コストの話" in topics            # 抽出論点は残る
+    assert "古い議題" not in topics          # 旧議題は差し替え
+
+
+def test_set_agenda_empty_clears():
+    s = _make_state()
+    s.topics = [{"topic": "議題X", "speaker": "議題"}]
+    s.set_agenda("")
+    assert s._current_agenda() == ""
+    assert s.topics == []
+
+
+def test_api_snapshot_has_agenda():
+    s = _make_state()
+    s.topics = [{"topic": "AI導入", "speaker": "議題(自動)"}]
+    assert s.api_snapshot()["agenda"] == "AI導入"
+
+
+def test_http_set_topic():
+    s = _make_state()
+    httpd, port = _serve(s)
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/topic",
+            data=json.dumps({"topic": "来期計画"}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req) as r:
+            out = json.loads(r.read())
+        assert out == {"ok": True, "agenda": "来期計画"}
+        assert s._current_agenda() == "来期計画"
+    finally:
+        httpd.shutdown()
+
+
 def test_http_get_root_serves_spa():
     """GET / が新SPA(HTML)を配信する."""
     state = _make_state()

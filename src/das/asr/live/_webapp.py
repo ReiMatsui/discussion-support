@@ -48,6 +48,13 @@ INDEX_HTML = """<!doctype html>
   .mode .desc { font-size: .76rem; color: var(--muted); margin-top: 2px; }
   .mode.busy { opacity: .6; }
 
+  .agenda-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 14px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    padding: 8px 12px; }
+  .agenda-label { font-size: .82rem; color: var(--muted); font-weight: 600;
+    flex-shrink: 0; }
+  .agenda-bar input { flex: 1; min-width: 0; border: 1px solid var(--line);
+    border-radius: 7px; padding: .4em .6em; font-size: .9rem; }
   .cols { display: flex; gap: 14px; align-items: flex-start; }
   .main { flex: 1; min-width: 0; }
   .side { width: 248px; flex-shrink: 0; }
@@ -110,6 +117,12 @@ INDEX_HTML = """<!doctype html>
   </header>
 
   <div class="modes" id="modes"></div>
+
+  <div class="agenda-bar">
+    <span class="agenda-label">議題</span>
+    <input id="agenda" placeholder="この会議のテーマ（脱線判定の基準。空欄なら自動推定）">
+    <button class="btn" id="agenda-set">設定</button>
+  </div>
 
   <div class="cols">
     <div class="main">
@@ -240,8 +253,25 @@ function renderTopics(list) {
   ).join("");
 }
 
+function renderAgenda(agenda) {
+  const inp = $("agenda");
+  if (document.activeElement !== inp) inp.value = agenda || "";  // 編集中は上書きしない
+}
+
+async function setAgenda() {
+  const topic = $("agenda").value.trim();
+  try {
+    await fetch("/api/topic", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic }),
+    });
+    $("agenda").blur();
+  } catch (e) { alert("議題の設定に失敗しました"); }
+}
+
 function render(state) {
   renderModes(state.mode);
+  renderAgenda(state.agenda);
   renderTranscript(state.records || []);
   renderSpeakers(state.speakers);
   renderParticipation(state.participation);
@@ -308,6 +338,8 @@ function connect() {
 
 $("end").onclick = stopSession;
 $("reset").onclick = resetMeeting;
+$("agenda-set").onclick = setAgenda;
+$("agenda").addEventListener("keydown", (e) => { if (e.key === "Enter") setAgenda(); });
 // 初期描画 + ライブ接続
 fetch("/api/state").then((r) => r.json()).then(render).catch(() => {});
 connect();

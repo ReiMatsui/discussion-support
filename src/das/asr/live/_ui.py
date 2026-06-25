@@ -111,6 +111,12 @@ class _UIHandler:
                     body = json.loads(self.rfile.read(length))
                     result = set_session_mode(s, str(body.get("mode", "")))
                     self._json(200 if result.get("ok") else 400, result)
+                elif self.path == "/api/topic":
+                    length = int(self.headers.get("Content-Length", 0))
+                    body = json.loads(self.rfile.read(length))
+                    result = s.set_agenda(str(body.get("topic", "")))
+                    _print_line(f"# 議題を設定（UIから）: {result['agenda']}")
+                    self._json(200, result)
                 elif self.path == "/rename":
                     length = int(self.headers.get("Content-Length", 0))
                     body = json.loads(self.rfile.read(length))

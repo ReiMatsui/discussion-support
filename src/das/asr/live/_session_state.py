@@ -228,6 +228,7 @@ class SessionState:
             "mode": self.session_mode(),
             "running": not self.stop.is_set(),
             "resetting": self.resetting,
+            "agenda": self._current_agenda(),
             "started": self.started.strftime("%Y-%m-%d %H:%M"),
             "speakers": speakers,
             "records": records,
@@ -322,6 +323,31 @@ class SessionState:
         self.rev += 1
         self.save()  # 空の新会議ファイルを作成
         return {"ok": True, "started": self.started.strftime("%Y-%m-%d %H:%M:%S")}
+
+    _AGENDA_SPEAKERS = ("議題", "議題(自動)")
+
+    def set_agenda(self, topic: str) -> dict:
+        """UIから議題（脱線判定の基準）を設定/変更する.
+
+        既存の議題エントリを差し替える（抽出済みの論点は残す）。
+        空文字なら議題を削除する。次回以降の脱線判定に即反映される。
+        """
+        topic = (topic or "").strip()
+        with self.topics_lock:
+            self.topics = [t for t in self.topics
+                           if t.get("speaker") not in self._AGENDA_SPEAKERS]
+            if topic:
+                self.topics.insert(0, {"topic": topic, "speaker": "議題"})
+        self.rev += 1
+        self.save()
+        return {"ok": True, "agenda": topic}
+
+    def _current_agenda(self) -> str:
+        with self.topics_lock:
+            for t in self.topics:
+                if t.get("speaker") in self._AGENDA_SPEAKERS:
+                    return t.get("topic", "")
+        return ""
 
     def seed_topic(self, topic: str | None, speaker: str = "議題"):
         """明示的な議題を脱線検出の基準論点としてシードする（Fix 8）.
