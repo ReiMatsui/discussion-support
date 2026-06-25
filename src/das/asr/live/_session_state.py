@@ -25,6 +25,7 @@ from ._constants import (
     PALETTE,
     RESET,
     SR,
+    UNSURE_SPEAKER,
     fmt_ts,
 )
 from ._participation import participation_stats
@@ -126,6 +127,8 @@ class SessionState:
     # ------------------------------------------------------------------
     def disp_name(self, key) -> str:
         key = str(key)
+        if key == UNSURE_SPEAKER:
+            return "未確定"
         if key in self.names:
             return self.names[key]
         return f"話者{key[1:]}" if key.startswith("#") else key
@@ -218,13 +221,15 @@ class SessionState:
                         "color": key_colors[str(r["speaker"])],
                         "text": r.get("text", ""),
                         "corrected": r.get("vp") == "補正",
+                        "bc": bool(r.get("bc")),
+                        "unsure": str(r["speaker"]) == UNSURE_SPEAKER,
                     })
             speakers = []
             _seen: set[str] = set()
             for r in raw:
                 key = str(r.get("speaker", "")) if "speaker" in r else ""
-                if not key or key in (AGENT_SPEAKER, "パートナー"):
-                    continue  # AI話者はリネーム対象外
+                if not key or key in (AGENT_SPEAKER, "パートナー", UNSURE_SPEAKER):
+                    continue  # AI話者・未確定はリネーム対象外
                 name = self.disp_name(key)
                 if name in _seen:
                     continue
@@ -236,7 +241,8 @@ class SessionState:
         with self.topics_lock:
             topics = [{"topic": t.get("topic", ""), "speaker": t.get("speaker", "")}
                       for t in self.topics]
-        stats = participation_stats(raw, exclude_speakers=(AGENT_SPEAKER, "パートナー"))
+        stats = participation_stats(
+            raw, exclude_speakers=(AGENT_SPEAKER, "パートナー", UNSURE_SPEAKER))
         participation = [
             {"speaker": self.disp_name(sp),
              "color": key_colors.get(str(sp), "#888"),

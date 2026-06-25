@@ -12,7 +12,7 @@ from typing import ClassVar
 
 import numpy as np
 
-from ._constants import SR
+from ._constants import SR, UNSURE_SPEAKER
 
 # ---------- リサンプル（AI声紋登録用） ----------
 
@@ -361,6 +361,12 @@ class VoiceProfiles:
                         self._note("補正" if (prev is not None and not prev.startswith("#")
                                               and prev != cand) else "声紋一致", label=sp, **info)
                         return cand
+                # 厳格に決められない短い発話。確定済みの人へ追従すると誤割り当てに
+                # なる（2人ラリーは交互で直前と別人のことが多い）。名前を当てず未確定に。
+                # sp_map は触らない（次の確信ある発話の連続性を保つため）。
+                if prev is not None and not prev.startswith("#"):
+                    self._note("未確定", label=sp, prev=prev, short=True)
+                    return UNSURE_SPEAKER
         # 声紋で決められない（重なり/短い相槌/蓄積中）→ ラベルの直近判定に追従
         key = prev if prev is not None else "#" + sp
         self.sp_map[sp] = key

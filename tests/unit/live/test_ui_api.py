@@ -171,6 +171,23 @@ def test_show_partial_updates_state_and_snapshot():
     assert s.api_snapshot()["partial"] == {"speaker": "", "text": ""}
 
 
+# --- 未確定話者・相槌のUI表示 ----------------------------------------------
+
+def test_snapshot_unsure_and_backchannel_flags():
+    s = _make_state()
+    s.records = [
+        {"speaker": "?", "text": "うーん", "ms": 0, "end_ms": 300},
+        {"speaker": "#1", "text": "はい", "ms": 300, "end_ms": 600, "bc": True},
+    ]
+    recs = s.api_snapshot()["records"]
+    assert recs[0]["speaker"] == "未確定" and recs[0]["unsure"] is True
+    assert recs[1]["bc"] is True
+    # 未確定は参加度・リネーム候補から除外
+    snap = s.api_snapshot()
+    assert all(p["speaker"] != "未確定" for p in snap["participation"])
+    assert all(sp["name"] != "未確定" for sp in snap["speakers"])
+
+
 # --- 声紋ステータスの可視化 -------------------------------------------------
 
 def test_snapshot_vp_disabled_when_no_tracker():
