@@ -53,11 +53,12 @@ def test_short_turn_corrects_to_clear_speaker():
     assert vp.pool == []                     # 蓄積もしない
 
 
-def test_short_turn_ambiguous_falls_back_to_prev():
-    """A/Bの中間で判別できない短い発話は、直前の割り当てに追従して暴れない."""
+def test_short_turn_ambiguous_marks_unsure():
+    """A/Bの中間で判別できない短い発話は、確定済みの人へ追従せず未確定にする."""
     vp = _tracker(_unit(1, 1, 0))            # AとBの中間（sim差が小さい）
-    vp.sp_map["1"] = "B"                     # 直前はB
-    assert vp.classify(_SHORT, "1", count=True) == "B"  # 勝手にAへ振らない
+    vp.sp_map["1"] = "B"                     # 直前はB（確定済み）
+    assert vp.classify(_SHORT, "1", count=True) == "?"   # Bと言い切らず未確定
+    assert vp.sp_map["1"] == "B"             # マッピングは保持（次の確信発話の連続性）
 
 
 def test_short_turn_skipped_for_backchannel():

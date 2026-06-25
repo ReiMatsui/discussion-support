@@ -60,6 +60,8 @@ class RecvLoop:
         tracker = s.tracker
         agent = s.agent
         partner = s.partner
+        # 相槌（「はい」等）は声紋の人物確定に使わず、UIでも薄く折りたためるよう印を付ける
+        _is_backchannel = bool(_BACKCHANNEL_RE.match(self.cur_text.strip()))
         if tracker is not None:
             if self.cur_ms is not None and self.cur_end is not None and self.cur_end > self.cur_ms:
                 with s.buf_lock:
@@ -71,8 +73,6 @@ class RecvLoop:
                 wav = np.frombuffer(seg, dtype="<i2").astype(np.float32) / 32768.0
             else:
                 wav = np.zeros(0, dtype=np.float32)
-            # 相槌（「はい」等）は声紋の人物確定に使わない（既存割り当てに追従, 課題④）
-            _is_backchannel = bool(_BACKCHANNEL_RE.match(self.cur_text.strip()))
             sp_id = tracker.classify(
                 wav, self.cur_speaker,
                 overlapped=self.overlaps_other(self.cur_ms, self.cur_end, label),
@@ -139,6 +139,8 @@ class RecvLoop:
                                        ensure_ascii=False, default=str) + "\n")
             except OSError:
                 pass
+        if _is_backchannel:
+            rec_extra["bc"] = True   # UIで薄く折りたためるように
         with s.state_lock:
             s.records.append({"ms": self.cur_ms, "end_ms": self.cur_end,
                               "speaker": sp_id, "text": self.cur_text.strip(),

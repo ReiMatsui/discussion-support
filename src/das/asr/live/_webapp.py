@@ -78,6 +78,9 @@ INDEX_HTML = """<!doctype html>
   .vp-banner { margin: 0 0 .6rem; padding: .5rem .75rem; border-radius: 6px;
     font-size: .85rem; background: #fdecea; color: #8a1c12; border: 1px solid #f3b4ab; }
   .vp-banner.ok { background: #eef7ee; color: #2c6e2c; border-color: #bfe0bf; }
+  .u.bc { opacity: .5; font-size: .85em; }            /* 相槌は薄く小さく */
+  .u.unsure { opacity: .75; }
+  .u.unsure .who { font-style: italic; }              /* 未確定は話者名をイタリックに */
   .u.partial { opacity: .55; font-style: italic; }
   .u.partial::after { content: "…"; }
   .sys { text-align: center; color: var(--muted); font-size: .78rem; margin: .4rem 0; }
@@ -191,9 +194,10 @@ function renderTranscript(records, partial) {
   for (const r of records) {
     if (r.type === "sys") { parts.push(`<div class="sys">⚙ ${esc(r.text)}</div>`); continue; }
     const facil = r.speaker === "ファシリテーター";
-    const color = facil ? "var(--facil)" : (r.color || "#444");
+    const color = facil ? "var(--facil)" : (r.unsure ? "var(--muted)" : (r.color || "#444"));
     const badge = r.corrected ? '<span class="badge">声紋補正</span>' : "";
-    parts.push(`<div class="u${facil ? " facil" : ""}">`
+    const cls = "u" + (facil ? " facil" : "") + (r.bc ? " bc" : "") + (r.unsure ? " unsure" : "");
+    parts.push(`<div class="${cls}">`
       + `<span class="ts">${fmtTs(r.ms)}</span>`
       + `<span class="who" style="color:${color}">${esc(r.speaker)}</span>`
       + `${esc(r.text)}${badge}</div>`);
