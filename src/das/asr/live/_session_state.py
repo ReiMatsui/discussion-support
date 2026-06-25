@@ -262,7 +262,10 @@ class SessionState:
             "running": not self.stop.is_set(),
             "resetting": self.resetting,
             "vp": {"enabled": self.tracker is not None,
-                   "model": getattr(self.tracker, "model", None)},
+                   "model": getattr(self.tracker, "model", None),
+                   "locked": self.tracker is not None and not self.tracker.auto,
+                   "roster": (self.tracker.active_profile_names()
+                              if self.tracker is not None else [])},
             "agenda": self._current_agenda(),
             "started": self.started.strftime("%Y-%m-%d %H:%M"),
             "partial": {"speaker": self.partial_speaker, "text": self.partial_text},
