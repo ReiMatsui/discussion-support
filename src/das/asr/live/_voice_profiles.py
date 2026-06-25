@@ -140,6 +140,11 @@ class VoiceProfiles:
         self.consist = consist if consist is not None else d_cs  # 3発話の全ペア類似の下限
         self.dedupe = dedupe if dedupe is not None else d_dd     # 既存人物への合流しきい値
         self.min_sec = min_sec
+        # 短い発話の取り違え安定化（2人会話の短いラリー対策）。min_sec 未満でも、
+        # 既知の2人以上を「厳格に」区別できるときだけ声紋で割り当てを正す。
+        self.short_floor = 0.45        # 厳格照合する下限秒数（これ未満は声が短すぎるので追従）
+        self.short_bonus = 0.05        # 採用閾値を本人閾値からどれだけ引き上げるか
+        self.short_margin_mult = 2.0   # 要求する2位とのmargin倍率
         self.profiles: dict[str, np.ndarray] = {}
         if os.path.exists(path):
             with open(path, encoding="utf-8") as f:
@@ -193,6 +198,22 @@ class VoiceProfiles:
             # 人間話者は照合対象から外す。AI声紋(__..__)だけ残す。
             self._active_keys = {k for k in self._active_keys
                                  if k.startswith("__") and k.endswith("__")}
+
+    def _active_human(self) -> dict:
+        """照合対象の人間プロファイル（AI声紋 __..__ は除く）."""
+        ai = {k for k in self._active_keys if k.startswith("__") and k.endswith("__")}
+        return {k: v for k, v in self.profiles.items()
+                if k in self._active_keys and k not in ai}
+
+    def _rank_active(self, emb: np.ndarray, active: dict):
+        """active内で最も似た人物の (cand, sim, second) を返す（空ならNone）."""
+        if not active:
+            return None
+        ranked = sorted(((float(np.dot(p, emb)), n) for n, p in active.items()),
+                        reverse=True)
+        sim, cand = ranked[0]
+        second = ranked[1][0] if len(ranked) > 1 else -1.0
+        return cand, sim, second
 
     def _note(self, kind: str, **info) -> None:
         self.counts[kind] = self.counts.get(kind, 0) + 1
@@ -255,8 +276,7 @@ class VoiceProfiles:
                 # AI声紋は通常の話者ランキングから分離（margin/dedupeへの干渉を防ぐ）
                 # __AI__ (ファシリテーター) と __PARTNER__ (会話相手) の両方を対象
                 _ai_keys = {k for k in self._active_keys if k.startswith("__") and k.endswith("__")}
-                active = {k: v for k, v in self.profiles.items()
-                          if k in self._active_keys and k not in _ai_keys}
+                active = self._active_human()
                 ai_profs = {k: self.profiles[k] for k in _ai_keys if k in self.profiles}
                 info = {"n_prof": len(active), "n_all": len(self.profiles)}   # 診断ログ用
                 # ① AI声紋の先行チェック（エコー除去用 — 人間より高い閾値）
@@ -271,11 +291,9 @@ class VoiceProfiles:
                             self._note("AI声紋一致", label=sp, sim=round(ai_sim, 3), key=ai_key)
                             return ai_key
                 # ② 通常の話者照合（人間のプロファイルのみ）
-                if active:
-                    ranked = sorted(((float(np.dot(p, emb)), n)
-                                     for n, p in active.items()), reverse=True)
-                    sim, cand = ranked[0]
-                    second = ranked[1][0] if len(ranked) > 1 else -1.0
+                ranked = self._rank_active(emb, active)
+                if ranked is not None:
+                    cand, sim, second = ranked
                     info.update(sim=round(sim, 3), second=round(second, 3), name=cand, prev=prev)
                     if sim >= self._person_th(cand, th) and sim - second >= self.margin:
                         self.sp_map[sp] = cand
@@ -317,6 +335,24 @@ class VoiceProfiles:
                         return target
                     self.pool.append(emb)
                     del self.pool[:-12]
+        elif count and wav.size >= SR * self.short_floor:
+            # 短い発話の取り違え安定化: 既知の2人以上を厳格に区別できるときだけ正す。
+            # 登録・蓄積はせず（声が短く不安定）、はっきり別人と分かる場合のみ割り当てを変える。
+            active = self._active_human()
+            if len(active) >= 2:
+                emb = self._embed(wav)
+                ranked = self._rank_active(emb, active) if emb is not None else None
+                if ranked is not None:
+                    cand, sim, second = ranked
+                    info = {"sim": round(sim, 3), "second": round(second, 3),
+                            "name": cand, "prev": prev, "short": True}
+                    strict_th = self._person_th(cand, self.thresh) + self.short_bonus
+                    if (sim >= strict_th
+                            and sim - second >= self.margin * self.short_margin_mult):
+                        self.sp_map[sp] = cand
+                        self._note("補正" if (prev is not None and not prev.startswith("#")
+                                              and prev != cand) else "声紋一致", label=sp, **info)
+                        return cand
         # 声紋で決められない（重なり/短い相槌/蓄積中）→ ラベルの直近判定に追従
         key = prev if prev is not None else "#" + sp
         self.sp_map[sp] = key
