@@ -41,6 +41,7 @@ def _tracker(emb: np.ndarray) -> VoiceProfiles:
     vp.enroll_win_sec = 1.5
     vp.enroll_consist_bonus = 0.08
     vp._POOL_CAP = 24
+    vp.max_human_speakers = None
     vp.margin = 0.05
     vp.thresh = 0.5
     vp.consist = 0.6

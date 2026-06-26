@@ -489,6 +489,8 @@ class SessionState:
         provider = self.diarization_provider
         if provider is not None and hasattr(provider, "set_max_speakers"):
             provider.set_max_speakers(value)
+        if self.tracker is not None and hasattr(self.tracker, "set_max_human_speakers"):
+            self.tracker.set_max_human_speakers(value)
         self.rev += 1
         return {"ok": True, "max_speakers": value}
 

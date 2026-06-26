@@ -46,6 +46,10 @@ from ._constants import (
 )
 from ._participation import participation_stats
 from ._polish import polish
+from ._speaker_policy import (
+    intervention_speaker_name,
+    reliable_human_records,
+)
 from ._ui import _print_line
 
 
@@ -76,7 +80,7 @@ def _run_agenda_detector(state: SessionState, oai_key: str, oai_model: str):
         if time.monotonic() - _last_attempt < _AGENDA_RETRY_SEC:
             continue
         _last_attempt = time.monotonic()
-        utts = [{"speaker": state.disp_name(r["speaker"]), "text": r["text"]}
+        utts = [{"speaker": intervention_speaker_name(state, r), "text": r["text"]}
                 for r in talk_rs[:_AGENDA_WINDOW]]
         agenda = _detect_agenda(utts, oai_key, oai_model)
         if agenda:
@@ -99,7 +103,8 @@ def _run_topic_worker(state: SessionState, oai_key: str, oai_model: str):
         if n - state.topic_cursor < state._TOPIC_TRIGGER:
             continue
         window = talk_rs[max(0, n - state._TOPIC_WINDOW):]
-        utts = [{"speaker": state.disp_name(r["speaker"]), "text": r["text"]} for r in window]
+        utts = [{"speaker": intervention_speaker_name(state, r), "text": r["text"]}
+                for r in window]
         with state.topics_lock:
             existing = [t["topic"] for t in state.topics]
         new_topics = _extract_topics(utts, existing, oai_key, oai_model)
@@ -166,7 +171,7 @@ def _run_drift_checker(state: SessionState, oai_key: str, oai_model: str):
             continue
         # 直近の発話を取得
         window = talk_rs[max(0, n - _DRIFT_CHECK_WINDOW):]
-        utts = [{"speaker": state.disp_name(r["speaker"]), "text": r["text"]}
+        utts = [{"speaker": intervention_speaker_name(state, r), "text": r["text"]}
                 for r in window]
         state.drift_cursor = n
         print(f"# [drift] チェック実行: {len(utts)}発話, "
@@ -208,9 +213,10 @@ def _run_participation_checker(state: SessionState, oai_key: str, oai_model: str
             continue
         if time.monotonic() - _last_check < _INVITE_CHECK_SEC:
             continue
-        stats = participation_stats(state.records, exclude_speakers=_skip)
+        reliable_rs = reliable_human_records(talk_rs)
+        stats = participation_stats(reliable_rs, exclude_speakers=_skip)
         if len(stats) < 2:
-            continue  # 参加者が2人未満なら声かけの意味がない
+            continue  # 信頼できる参加者が2人未満なら声かけの意味がない
         # 事前ゲート: 公平シェアの_INVITE_QUIET_RATIO未満の人がいる時だけLLMを呼ぶ
         equal = 1.0 / len(stats)
         if min(d["time_share"] for d in stats.values()) >= equal * _INVITE_QUIET_RATIO:
@@ -219,18 +225,25 @@ def _run_participation_checker(state: SessionState, oai_key: str, oai_model: str
         now_ms = max((d["last_end_ms"] for d in stats.values()
                       if d["last_end_ms"] is not None), default=None)
         participation = []
+        valid_invite_targets: set[str] = set()
         for sp, d in stats.items():
             silent = ((now_ms - d["last_end_ms"]) / 1000.0
                       if now_ms is not None and d["last_end_ms"] is not None else 0.0)
-            participation.append({"speaker": state.disp_name(sp),
+            speaker_name = state.disp_name(sp)
+            valid_invite_targets.add(speaker_name)
+            participation.append({"speaker": speaker_name,
                                   "time_share": d["time_share"],
                                   "turns": d["turns"], "silent_sec": silent})
         window = talk_rs[-_DRIFT_CHECK_WINDOW:]
-        utts = [{"speaker": state.disp_name(r["speaker"]), "text": r["text"]}
+        utts = [{"speaker": intervention_speaker_name(state, r), "text": r["text"]}
                 for r in window]
         result = _check(participation, utts, oai_key, oai_model)
         if result.get("invite") and result.get("speaker"):
             target = result["speaker"]
+            if target not in valid_invite_targets:
+                print(f"# [invite] skip: 信頼できる参加者名ではない target={target}",
+                      flush=True)
+                continue
             _print_line(f"# 🙋 声かけ候補: {target}（{result.get('reason', '')}）")
             state.invite_requests.put(target)
             print("# [invite] → 声かけ要求をキューに投入", flush=True)
@@ -416,7 +429,7 @@ def _run_agent_worker(state: SessionState):
             agent._last_noop_at = 0.0  # 新たな発話で会話が動いた → 沈黙ブレーカー解除
             new_texts = [r.get("text", "") for r in talk_rs[state.agent_cursor:]]
             for r in talk_rs[state.agent_cursor:]:
-                agent.feed(state.disp_name(r.get("speaker", "")), r.get("text", ""))
+                agent.feed(intervention_speaker_name(state, r), r.get("text", ""))
             state.agent_cursor = n
             # --- 自動割り込み ---
             _human_spoke = any(len(t.strip()) > _INTERRUPT_MIN_CHARS

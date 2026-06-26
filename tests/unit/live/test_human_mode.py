@@ -182,6 +182,33 @@ def test_participation_checker_enqueues_invite(monkeypatch):
     assert got == "話者2"
 
 
+def test_participation_checker_rejects_unreliable_invite_target(monkeypatch):
+    """LLMが参加度表にない低信頼名を返しても声かけ要求を積まない."""
+    import das.asr.live._bootstrap as bootstrap
+    from das.asr.live._workers import _run_participation_checker
+
+    monkeypatch.setattr(bootstrap, "check_participation",
+                        lambda *a, **k: {"invite": True, "speaker": "発話者",
+                                         "reason": "静か"})
+    state = _make_state(with_agent=True)
+    recs = []
+    t = 0
+    for i in range(8):
+        recs.append({"speaker": "人物1", "text": f"a{i}", "ms": t, "end_ms": t + 2000})
+        t += 2000
+    recs.append({"speaker": "人物2", "text": "はい", "ms": t, "end_ms": t + 200})
+    state.records = recs
+
+    th = threading.Thread(target=_run_participation_checker,
+                          args=(state, "key", "gpt-5-mini"), daemon=True)
+    th.start()
+    time.sleep(2.5)
+    state.stop.set()
+    th.join(timeout=2)
+
+    assert state.invite_requests.empty()
+
+
 def test_participation_checker_skips_when_balanced(monkeypatch):
     """発話量が均衡していれば（事前ゲート）LLMを呼ばず声かけしない（S4）."""
     import das.asr.live._bootstrap as bootstrap

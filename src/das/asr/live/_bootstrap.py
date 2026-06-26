@@ -317,6 +317,8 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
         else:
             print(f"# 声紋プロファイル: なし。未知の声は「人物N」として自動追跡、"
                   f"「1=松井」で実名化すると次回から自動表示（{args.voices}）", flush=True)
+        if tracker is not None:
+            tracker.set_max_human_speakers(args.diarization_max_speakers)
 
     # --- SessionState ---
     wav_path = os.path.splitext(out_path)[0] + ".wav"

@@ -152,6 +152,7 @@ class VoiceProfiles:
         self.enroll_win_sec = 1.5         # 長い発話を分割する窓の長さ（内部一貫性の確認用）
         self.enroll_consist_bonus = 0.08  # 一貫性しきい値(cs)への上乗せ（混入抑制）
         self._POOL_CAP = 24               # 保留サンプルの上限（古いものから捨てる）
+        self.max_human_speakers: int | None = None
         self.profiles: dict[str, np.ndarray] = {}
         if os.path.exists(path):
             with open(path, encoding="utf-8") as f:
@@ -299,6 +300,12 @@ class VoiceProfiles:
         if hit is not None and hit_sim >= self.dedupe:
             target, is_new = hit, False   # 既存人物の声だった → 合流（重複登録を防ぐ）
         else:
+            if self.max_human_speakers is not None and len(active) >= self.max_human_speakers:
+                key = "#" + sp
+                self.sp_map[sp] = key
+                self._note("話者数上限", label=sp, max_speakers=self.max_human_speakers,
+                           chars=round(total_chars))
+                return key
             self.n_anon += 1
             target = f"人物{self.n_anon}"
             self.profiles[target] = prof   # 新規人物（以後凍結）
@@ -310,6 +317,9 @@ class VoiceProfiles:
         self._note("自動登録" if is_new else "合流", label=sp, name=target,
                    rename=rename, chars=round(total_chars))
         return target
+
+    def set_max_human_speakers(self, value: int | None) -> None:
+        self.max_human_speakers = value
 
     def _note(self, kind: str, **info) -> None:
         self.counts[kind] = self.counts.get(kind, 0) + 1

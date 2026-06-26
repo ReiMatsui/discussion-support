@@ -40,6 +40,7 @@ def _tracker() -> VoiceProfiles:
     vp.enroll_win_sec = 1.5
     vp.enroll_consist_bonus = 0.08
     vp._POOL_CAP = 24
+    vp.max_human_speakers = None
     vp.margin = 0.05
     vp.thresh = 0.5
     vp.consist = 0.34
@@ -124,3 +125,15 @@ def test_commit_merges_into_existing_person():
     assert vp._commit_profile(_unit(1, 0, 0), "2", None, 50) == "山下くん"
     assert vp.last["kind"] == "合流"
     assert not any(k.startswith("人物") for k in vp.profiles)
+
+
+def test_expected_speaker_count_stops_new_anonymous_person():
+    """想定話者数に達したら、新しい人物Nを増やさず暫定ラベルに留める."""
+    vp = _tracker()
+    vp.profiles = {"人物1": _unit(1, 0, 0)}
+    vp._active_keys = {"人物1"}
+    vp.max_human_speakers = 1
+
+    assert vp._commit_profile(_unit(0, 1, 0), "2", None, 50) == "#2"
+    assert vp.last["kind"] == "話者数上限"
+    assert set(vp.profiles) == {"人物1"}
