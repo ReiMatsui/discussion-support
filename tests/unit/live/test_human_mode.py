@@ -163,7 +163,7 @@ def test_participation_checker_enqueues_invite(monkeypatch):
     for i in range(8):   # 話者1 はよく話す（warmup超え）
         recs.append({"speaker": "話者1", "text": f"a{i}", "ms": t, "end_ms": t + 2000})
         t += 2000
-    recs.append({"speaker": "話者2", "text": "はい", "ms": t, "end_ms": t + 200})
+    recs.append({"speaker": "話者2", "text": "少し補足があります", "ms": t, "end_ms": t + 200})
     state.records = recs
 
     th = threading.Thread(target=_run_participation_checker,

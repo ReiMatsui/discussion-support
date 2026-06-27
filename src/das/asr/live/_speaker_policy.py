@@ -3,9 +3,23 @@ from __future__ import annotations
 
 from typing import Any
 
-from ._constants import AGENT_SPEAKER, UNSURE_SPEAKER
+from ._constants import _BACKCHANNEL_RE, AGENT_SPEAKER, UNSURE_SPEAKER
 
 _GENERIC_SPEAKER = "発話者"
+
+
+def is_intervention_signal(record: dict[str, Any]) -> bool:
+    """AI介入の判断材料にしてよい発話かを返す.
+
+    話者が怪しくても、内容のある発話は「場の発言」として使う。相づちや未確定の
+    短発話は、議論の流れを動かす材料にしない。
+    """
+    text = str(record.get("text") or "").strip()
+    if not text:
+        return False
+    if record.get("bc") or record.get("speaker") == UNSURE_SPEAKER:
+        return False
+    return not _BACKCHANNEL_RE.match(text)
 
 
 def is_reliable_human_speaker(record: dict[str, Any]) -> bool:
@@ -30,4 +44,8 @@ def intervention_speaker_name(state, record: dict[str, Any]) -> str:
 
 
 def reliable_human_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [r for r in records if is_reliable_human_speaker(r)]
+    return [r for r in records if is_intervention_signal(r) and is_reliable_human_speaker(r)]
+
+
+def intervention_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [r for r in records if is_intervention_signal(r)]

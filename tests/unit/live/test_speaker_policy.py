@@ -4,7 +4,12 @@ from __future__ import annotations
 import datetime
 
 from das.asr.live._session_state import SessionState
-from das.asr.live._speaker_policy import intervention_speaker_name, is_reliable_human_speaker
+from das.asr.live._speaker_policy import (
+    intervention_records,
+    intervention_speaker_name,
+    is_intervention_signal,
+    is_reliable_human_speaker,
+)
 
 
 def _state() -> SessionState:
@@ -34,3 +39,24 @@ def test_named_or_auto_registered_person_is_reliable() -> None:
 
     assert is_reliable_human_speaker(rec) is True
     assert intervention_speaker_name(s, rec) == "人物1"
+
+
+def test_backchannel_is_not_intervention_signal() -> None:
+    rec = {"speaker": "?", "text": "はい", "bc": True}
+
+    assert is_intervention_signal(rec) is False
+    assert intervention_records([rec]) == []
+
+
+def test_uncertain_long_utterance_is_kept_as_room_context() -> None:
+    s = _state()
+    rec = {
+        "speaker": "@diar:1",
+        "speaker_source": "stt_fallback",
+        "text": "この論点はもう少し整理したほうが良いと思います",
+    }
+
+    assert is_intervention_signal(rec) is True
+    assert is_reliable_human_speaker(rec) is False
+    assert intervention_speaker_name(s, rec) == "発話者"
+    assert intervention_records([rec]) == [rec]

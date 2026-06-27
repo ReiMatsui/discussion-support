@@ -47,6 +47,7 @@ from ._constants import (
 from ._participation import participation_stats
 from ._polish import polish
 from ._speaker_policy import (
+    intervention_records,
     intervention_speaker_name,
     reliable_human_records,
 )
@@ -72,9 +73,11 @@ def _run_agenda_detector(state: SessionState, oai_key: str, oai_model: str):
             if state.topics:
                 return  # 既に議題/論点あり → 役目終了
         with state.state_lock:
-            talk_rs = [r for r in state.records
-                       if "speaker" in r and r.get("text")
-                       and r.get("speaker") != AGENT_SPEAKER]
+            talk_rs = intervention_records([
+                r for r in state.records
+                if "speaker" in r and r.get("text")
+                and r.get("speaker") != AGENT_SPEAKER
+            ])
         if len(talk_rs) < _AGENDA_MIN_UTTS:
             continue
         if time.monotonic() - _last_attempt < _AGENDA_RETRY_SEC:
@@ -98,7 +101,9 @@ def _run_topic_worker(state: SessionState, oai_key: str, oai_model: str):
         if not oai_key:
             continue
         with state.state_lock:
-            talk_rs = [r for r in state.records if "speaker" in r and r.get("text")]
+            talk_rs = intervention_records([
+                r for r in state.records if "speaker" in r and r.get("text")
+            ])
         n = len(talk_rs)
         if n - state.topic_cursor < state._TOPIC_TRIGGER:
             continue
@@ -158,9 +163,11 @@ def _run_drift_checker(state: SessionState, oai_key: str, oai_model: str):
             continue
         # ファシリテーター以外の全発話をカウント＆チェック対象にする
         with state.state_lock:
-            talk_rs = [r for r in state.records
-                       if "speaker" in r and r.get("text")
-                       and r.get("speaker") != AGENT_SPEAKER]
+            talk_rs = intervention_records([
+                r for r in state.records
+                if "speaker" in r and r.get("text")
+                and r.get("speaker") != AGENT_SPEAKER
+            ])
         n = len(talk_rs)
         # ウォームアップ: 会議開始直後の挨拶などで誤検出しないよう猶予を置く（Fix 11）
         if n < _DRIFT_WARMUP:
@@ -206,9 +213,11 @@ def _run_participation_checker(state: SessionState, oai_key: str, oai_model: str
         if agent.mode == "conversation":
             continue
         with state.state_lock:
-            talk_rs = [r for r in state.records
-                       if "speaker" in r and r.get("text")
-                       and r.get("speaker") not in _skip]
+            talk_rs = intervention_records([
+                r for r in state.records
+                if "speaker" in r and r.get("text")
+                and r.get("speaker") not in _skip
+            ])
         if len(talk_rs) < _INVITE_WARMUP:
             continue
         if time.monotonic() - _last_check < _INVITE_CHECK_SEC:
@@ -425,10 +434,12 @@ def _run_agent_worker(state: SessionState):
                        and r.get("speaker") not in _skip]
         n = len(talk_rs)
         if n > state.agent_cursor:
-            _last_utt_time[0] = time.monotonic()
-            agent._last_noop_at = 0.0  # 新たな発話で会話が動いた → 沈黙ブレーカー解除
-            new_texts = [r.get("text", "") for r in talk_rs[state.agent_cursor:]]
-            for r in talk_rs[state.agent_cursor:]:
+            new_records = intervention_records(talk_rs[state.agent_cursor:])
+            new_texts = [r.get("text", "") for r in new_records]
+            if new_records:
+                _last_utt_time[0] = time.monotonic()
+                agent._last_noop_at = 0.0  # 新たな発話で会話が動いた → 沈黙ブレーカー解除
+            for r in new_records:
                 agent.feed(intervention_speaker_name(state, r), r.get("text", ""))
             state.agent_cursor = n
             # --- 自動割り込み ---
