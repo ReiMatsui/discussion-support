@@ -51,6 +51,24 @@ if lsof -ti:${PORT} >/dev/null 2>&1; then
   sleep 1
 fi
 
+# ---- 3.5) 仮想環境(venv)の準備と依存インストール ----
+# システムのpythonに直接インストールすると環境によって import できない
+# 問題が起きるため、専用のvenvを作ってそこに aiohttp を入れる。
+VENV="${DIR}/.venv"
+PYBIN="${VENV}/bin/python"
+
+if [ ! -x "${PYBIN}" ]; then
+  echo "[setup] 仮想環境を作成します (${VENV})..."
+  python3 -m venv "${VENV}"
+fi
+
+# aiohttp が無ければインストール
+if ! "${PYBIN}" -c "import aiohttp" >/dev/null 2>&1; then
+  echo "[setup] aiohttp をインストールします..."
+  "${PYBIN}" -m pip install --quiet --upgrade pip
+  "${PYBIN}" -m pip install --quiet aiohttp
+fi
+
 # ---- 4) サーバー起動 ----
 echo ""
 echo "================================================="
@@ -60,7 +78,7 @@ echo "================================================="
 echo ""
 
 # サーバーを起動 (フォアグラウンドで実行してログを表示)
-python3 server.py &
+"${PYBIN}" server.py &
 SERVER_PID=$!
 
 # サーバーが起動するまで待機

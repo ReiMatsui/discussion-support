@@ -71,8 +71,10 @@ def load_api_key() -> str:
 
 API_KEY = load_api_key()
 
-# Available transcription models (cheapest -> most accurate):
-#   gpt-4o-mini-transcribe, gpt-4o-transcribe, whisper-1
+# Realtime transcription model. gpt-4o-transcribe supports server VAD
+# (auto turn detection), which this app relies on. gpt-realtime-whisper does
+# NOT support turn_detection, so don't use it unless committing manually.
+#   Faster/cheaper option: gpt-4o-mini-transcribe
 DEFAULT_MODEL = os.environ.get("TRANSCRIBE_MODEL", "gpt-4o-transcribe")
 
 OPENAI_REALTIME_URL = "wss://api.openai.com/v1/realtime?intent=transcription"
@@ -92,7 +94,6 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                 OPENAI_REALTIME_URL,
                 headers={
                     "Authorization": f"Bearer {API_KEY}",
-                    "OpenAI-Beta": "realtime=v1",
                 },
                 max_msg_size=16 * 1024 * 1024,
                 heartbeat=30,
@@ -113,20 +114,26 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
         # so the client doesn't need to know all the parameters.
         await ws_openai.send_json(
             {
-                "type": "transcription_session.update",
+                "type": "session.update",
                 "session": {
-                    "input_audio_format": "pcm16",
-                    "input_audio_transcription": {
-                        "model": DEFAULT_MODEL,
-                        # language omitted => auto detect (English + Japanese mix OK)
+                    "type": "transcription",
+                    "audio": {
+                        "input": {
+                            # Browser sends 24kHz mono PCM16 (see index.html worklet)
+                            "format": {"type": "audio/pcm", "rate": 24000},
+                            "transcription": {
+                                "model": DEFAULT_MODEL,
+                                "language": "en",  # English only => faster, more accurate
+                            },
+                            "turn_detection": {
+                                "type": "server_vad",
+                                "threshold": 0.5,
+                                "prefix_padding_ms": 300,
+                                "silence_duration_ms": 500,
+                            },
+                            "noise_reduction": {"type": "near_field"},
+                        }
                     },
-                    "turn_detection": {
-                        "type": "server_vad",
-                        "threshold": 0.5,
-                        "prefix_padding_ms": 300,
-                        "silence_duration_ms": 500,
-                    },
-                    "input_audio_noise_reduction": {"type": "near_field"},
                 },
             }
         )
