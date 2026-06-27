@@ -1,22 +1,18 @@
-"""Soniox バックエンドの開始メッセージ設定のテスト.
-
-公式ドキュメント: エンドポイント検出は話者分離の精度を下げる（早期確定で揺れる
-ラベルをロックする）。既定はOFF、A/B比較用に切替可能であることを保証する。
-"""
+"""Soniox バックエンドの開始メッセージ設定のテスト."""
 from __future__ import annotations
 
 from das.asr.live.stt._soniox import SonioxBackend
 
 
 def test_speaker_diarization_always_enabled():
-    m = SonioxBackend("k").start_message("stt-rt-v4", "ja")
+    m = SonioxBackend("k").start_message("stt-rt-v5", "ja")
     assert m["enable_speaker_diarization"] is True
     assert m["language_hints"] == ["ja"]
 
 
 def test_endpoint_detection_on_by_default():
     """既定でエンドポイント検出はON（文の切れ目で区切る＝議事録が読みやすい）."""
-    m = SonioxBackend("k").start_message("stt-rt-v4", "ja")
+    m = SonioxBackend("k").start_message("stt-rt-v5", "ja")
     assert m["enable_endpoint_detection"] is True
 
 

@@ -109,6 +109,8 @@ def test_liveargs_and_cli_have_diarization_option() -> None:
     from das.asr.live import main
     from das.asr.live._bootstrap import LiveArgs
 
+    assert LiveArgs().model == "stt-rt-v5"
+    assert LiveArgs().soniox_endpoint is True
     assert LiveArgs().diarization == "none"
     assert LiveArgs(diarization="pyannote").diarization == "pyannote"
     assert LiveArgs(
@@ -122,6 +124,7 @@ def test_liveargs_and_cli_have_diarization_option() -> None:
             break
     else:
         raise AssertionError("diarization option not found")
+    assert any(param.name == "soniox_endpoint" for param in main.params)
 
 
 def test_recv_loop_uses_diarization_when_voiceprint_is_unavailable() -> None:
@@ -168,6 +171,64 @@ def test_recv_loop_uses_diarization_when_voiceprint_is_unavailable() -> None:
         "speaker_reason": "diarization_overlap_1.00",
     }]
     assert state.disp_name(state.records[0]["speaker"]) == "話者1"
+
+
+def test_recv_loop_prefers_internal_voiceprint_over_external_diarization() -> None:
+    import datetime
+
+    class Args:
+        lang = "ja"
+        vp_debug = False
+
+    class Backend:
+        def parse_message(self, raw: dict[str, Any], lang: str) -> dict[str, Any]:
+            return raw
+
+    class Tracker:
+        def __init__(self) -> None:
+            self.last = {
+                "kind": "合流",
+                "label": "1",
+                "name": "人物1",
+                "rename": None,
+            }
+
+        def classify(self, *args: object, **kwargs: object) -> str:
+            return "人物1"
+
+    state = SessionState(  # type: ignore[no-untyped-call]
+        args=Args(),
+        started=datetime.datetime(2026, 1, 1),
+        out_path="/tmp/o.md",
+        html_path="/tmp/o.html",
+        diag_path="/tmp/o.diag",
+        turns_path="/tmp/o.turns",
+        wav_path="/tmp/o.wav",
+        tracker=Tracker(),  # type: ignore[arg-type]
+        serve=False,
+    )
+    state.save = lambda *a, **k: None  # type: ignore[method-assign]
+    state.asr_pcm_buf = bytearray(b"\0" * 16000 * 2 * 3)
+    state.diarization_events = [
+        DiarizationEvent(900, 3100, "SPEAKER_00", "pyannote"),
+    ]
+    loop = RecvLoop(state, Args(), Backend())  # type: ignore[arg-type]
+    loop.cur_speaker = "1"  # type: ignore[assignment]
+    loop.cur_text = "これはテストです"
+    loop.cur_ms = 1000
+    loop.cur_end = 3000
+
+    loop.flush()  # type: ignore[no-untyped-call]
+
+    assert state.records == [{
+        "ms": 1000,
+        "end_ms": 3000,
+        "speaker": "人物1",
+        "text": "これはテストです",
+        "speaker_source": "voiceprint",
+        "speaker_confidence": 1.0,
+        "speaker_reason": "voiceprint_high_confidence",
+    }]
 
 
 def test_recv_loop_normalizes_stt_label_when_diarization_is_enabled_but_unresolved() -> None:

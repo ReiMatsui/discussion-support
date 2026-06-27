@@ -17,6 +17,8 @@ from ._constants import _BACKCHANNEL_RE, RESET, UNSURE_SPEAKER, fmt_ts
 from ._diarization import TimeSegment
 from ._ui import _print_line
 
+_VOICEPRINT_RELIABLE_KINDS = {"声紋一致", "補正", "自動登録", "合流"}
+
 
 class RecvLoop:
     """STTからのトークンストリームを処理し、発話を確定(flush)してrecordsに追加する.
@@ -119,7 +121,7 @@ class RecvLoop:
                 and self.cur_end > self.cur_ms):
             voiceprint_speaker = None
             voiceprint_confidence = None
-            if (d and d.get("kind") in {"声紋一致", "補正"}
+            if (d and d.get("kind") in _VOICEPRINT_RELIABLE_KINDS
                     and sp_id is not None
                     and not str(sp_id).startswith("#")):
                 voiceprint_speaker = str(sp_id)
