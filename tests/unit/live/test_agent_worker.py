@@ -77,9 +77,13 @@ class FakeState:
         self.invite_requests: queue.Queue[str] = queue.Queue()
         self.fac_events: queue.Queue = queue.Queue()
         self.proactivity = {"silence_summarize": 18.0, "cooldown": 25.0}
+        self.intervention_events: list[dict] = []
 
     def disp_name(self, k):  # pragma: no cover
         return str(k)
+
+    def add_intervention_event(self, reason: str, detail: str = "") -> None:
+        self.intervention_events.append({"reason": reason, "detail": detail})
 
 
 def _run_worker_briefly(state, *, until, timeout=3.0) -> None:
@@ -183,6 +187,21 @@ def test_drift_request_triggers_with_reason():
 
     assert agent.trigger_calls, "脱線要求でトリガーされるべき"
     assert agent.trigger_calls[0]["drift_reason"] == "ラーメンの雑談"
+    assert state.intervention_events == [{"reason": "drift", "detail": "ラーメンの雑談"}]
+
+
+def test_count_trigger_records_intervention_reason():
+    """発話数トリガーの理由をUI用ログに残す."""
+    agent = FakeAgent()
+    agent._pending = [{"speaker": "人間", "text": str(i), "_count": True}
+                      for i in range(agent.trigger_n)]
+    state = FakeState(agent, None)
+
+    _run_worker_briefly(state, until=lambda: bool(agent.trigger_calls))
+
+    assert agent.trigger_calls
+    assert state.intervention_events
+    assert state.intervention_events[0]["reason"] == "count"
 
 
 def test_drift_request_held_until_agent_free():

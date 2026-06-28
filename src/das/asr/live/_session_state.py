@@ -107,6 +107,7 @@ class SessionState:
         # 積極性プロファイル（S5）。bootstrapで --proactivity から上書きされる。
         self.proactivity_name = _PROACTIVITY_DEFAULT
         self.proactivity: dict = dict(_PROACTIVITY_PROFILES[_PROACTIVITY_DEFAULT])
+        self.intervention_events: list[dict] = []
         # UIからの停止フック（F1）。run_sessionが「stopを立ててwsを閉じる」関数を設定する。
         self.request_stop: Callable[[], None] | None = None
         # 変更リビジョン（F2）。save()ごとに+1。SSEはこの変化を見て差分配信する。
@@ -349,6 +350,7 @@ class SessionState:
                 "proactivity": self.proactivity_name,
                 "trigger_n": getattr(self.agent, "trigger_n", None),
             },
+            "intervention_events": list(self.intervention_events[-20:]),
             "agenda": self._current_agenda(),
             "started": self.started.strftime("%Y-%m-%d %H:%M"),
             "partial": {"speaker": self.partial_speaker, "text": self.partial_text},
@@ -475,6 +477,16 @@ class SessionState:
         self.rev += 1
         self.save()
         return {"ok": True, "agenda": topic}
+
+    def add_intervention_event(self, reason: str, detail: str = "") -> None:
+        """UIで確認するための介入理由ログを追加する."""
+        self.intervention_events.append({
+            "time": datetime.datetime.now().strftime("%H:%M:%S"),
+            "reason": reason,
+            "detail": detail,
+        })
+        del self.intervention_events[:-20]
+        self.rev += 1
 
     def set_proactivity(self, name: str) -> dict:
         """UIから介入頻度プロファイルを更新する."""

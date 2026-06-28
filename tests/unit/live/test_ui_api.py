@@ -107,10 +107,16 @@ def test_api_snapshot_exposes_intervention_settings():
     s = _make_state()
     s.agent = _FakeAgent()
     s.set_proactivity("controlled")
+    s.add_intervention_event("count", "10>=10発話")
 
     snap = s.api_snapshot()
 
     assert snap["intervention"] == {"proactivity": "controlled", "trigger_n": 10}
+    assert snap["intervention_events"] == [{
+        "time": snap["intervention_events"][0]["time"],
+        "reason": "count",
+        "detail": "10>=10発話",
+    }]
 
 
 def test_http_rename_without_tracker():
@@ -486,6 +492,7 @@ def test_http_get_root_serves_spa():
         assert "/api/mode" in html     # モード切替
         assert "/api/intervention" in html
         assert 'id="proactivity"' in html
+        assert 'id="event-panel"' in html
     finally:
         httpd.shutdown()
 

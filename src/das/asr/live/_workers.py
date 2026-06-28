@@ -52,6 +52,12 @@ from ._speaker_policy import (
 from ._ui import _print_line
 
 
+def _log_intervention_event(state: SessionState, reason: str, detail: str = "") -> None:
+    add_event = getattr(state, "add_intervention_event", None)
+    if callable(add_event):
+        add_event(reason, detail)
+
+
 def _run_agenda_detector(state: SessionState, oai_key: str, oai_model: str):
     """会議冒頭の発話から議題を1回推定してシードする（S3, --topic未指定時）.
 
@@ -492,6 +498,7 @@ def _run_agent_worker(state: SessionState):
                 else:
                     print(f"# [trigger] drift: 脱線介入「{_pending_drift_reason}」",
                           flush=True)
+                    _log_intervention_event(state, "drift", _pending_drift_reason)
                     agent.trigger(topics=_bargein_topics,
                                   drift_reason=_pending_drift_reason)
                     _pending_drift_reason = None
@@ -500,6 +507,7 @@ def _run_agent_worker(state: SessionState):
             if agent._pending_intervention is not None:
                 print("# [trigger] retry: 中断された介入を再送（ガードバイパス）",
                       flush=True)
+                _log_intervention_event(state, "retry", "中断された介入を再送")
                 agent.trigger(topics=_bargein_topics)
                 _last_intervention_at = time.monotonic()
                 continue
@@ -533,6 +541,7 @@ def _run_agent_worker(state: SessionState):
         if agent.mode == "conversation":
             if (agent.pending_count > 0
                     and _silence_elapsed > _AGENT_CONV_SILENCE):
+                _log_intervention_event(state, "conversation", f"沈黙{_silence_elapsed:.1f}秒")
                 agent.trigger()
         else:
             # 沈黙要約の閾値: debateは従来通り、人間モードは積極性プロファイルに従う
@@ -541,12 +550,16 @@ def _run_agent_worker(state: SessionState):
                                else _silence_summarize)
             if agent.pending_count >= agent.trigger_n:
                 print(f"# [trigger] count: {agent.pending_count}>={agent.trigger_n}", flush=True)
+                _log_intervention_event(
+                    state, "count", f"{agent.pending_count}>={agent.trigger_n}発話")
                 agent.trigger(topics=_topics)
                 _last_intervention_at = time.monotonic()
             elif (_silence_thresh is not None
                   and agent.pending_count > 0
                   and _silence_elapsed > _silence_thresh):
                 print(f"# [trigger] silence: {_silence_elapsed:.1f}s > {_silence_thresh}s", flush=True)
+                _log_intervention_event(
+                    state, "silence", f"{_silence_elapsed:.1f}>{_silence_thresh:.1f}秒")
                 agent.trigger(topics=_topics)
                 _last_intervention_at = time.monotonic()
             # --- 沈黙ブレーカー: 介入不要後にデッドエアになった場合の一押し（Fix 10） ---
@@ -557,6 +570,7 @@ def _run_agent_worker(state: SessionState):
                   and time.monotonic() - _last_stall_at > _STALL_COOLDOWN):
                 print(f"# [trigger] stall: 介入不要後の沈黙{_silence_elapsed:.1f}s"
                       f"を解消", flush=True)
+                _log_intervention_event(state, "stall", f"介入不要後の沈黙{_silence_elapsed:.1f}秒")
                 agent.trigger(
                     topics=_topics,
                     drift_reason="会話が止まっています。本題に戻す一言を簡潔に述べてください。")
@@ -573,6 +587,7 @@ def _run_agent_worker(state: SessionState):
                     _pending_invite = None  # 同じ人を連続では誘わない
                 else:
                     print(f"# [trigger] invite: {_pending_invite}さんに声かけ", flush=True)
+                    _log_intervention_event(state, "invite", f"{_pending_invite}さんに声かけ")
                     agent.trigger(topics=_topics, invite_target=_pending_invite)
                     _last_intervention_at = time.monotonic()
                     _last_invited = _pending_invite

@@ -124,6 +124,12 @@ INDEX_HTML = """<!doctype html>
     background: #fff; border: 1px solid var(--line); border-left: 3px solid #8b5cf6;
     border-radius: 6px; }
   .topic .by { font-size: .68rem; color: #9ca3af; }
+  .event { font-size: .78rem; padding: .35em .5em; margin-bottom: .3em;
+    background: #fff; border: 1px solid var(--line); border-radius: 6px; }
+  .event .meta { display: flex; justify-content: space-between; gap: .4rem; color: #9ca3af;
+    font-size: .68rem; }
+  .event .reason { font-weight: 600; color: var(--ink); }
+  .event .detail { color: var(--muted); }
   .spk-row { display: flex; align-items: center; gap: 5px; margin-bottom: .4em; }
   .spk-name { width: 4em; flex-shrink: 0; font-weight: 600; font-size: .82rem;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -203,6 +209,9 @@ INDEX_HTML = """<!doctype html>
       </div>
       <div class="panel" id="topic-panel" hidden>
         <h2>論点</h2><div id="topics"></div>
+      </div>
+      <div class="panel" id="event-panel" hidden>
+        <h2>介入理由</h2><div id="events"></div>
       </div>
     </div>
   </div>
@@ -325,6 +334,26 @@ function renderTopics(list) {
   panel.hidden = false;
   $("topics").innerHTML = list.map((t) =>
     `<div class="topic">${esc(t.topic)}<div class="by">${esc(t.speaker || "")}</div></div>`
+  ).join("");
+}
+
+function renderInterventionEvents(list) {
+  const panel = $("event-panel");
+  if (!list || !list.length) { panel.hidden = true; return; }
+  panel.hidden = false;
+  const labels = {
+    count: "発話数",
+    silence: "沈黙",
+    drift: "脱線",
+    invite: "声かけ",
+    stall: "停滞",
+    retry: "再送",
+    conversation: "会話",
+  };
+  $("events").innerHTML = list.slice().reverse().map((e) =>
+    `<div class="event">`
+    + `<div class="meta"><span>${esc(e.time || "")}</span><span class="reason">${esc(labels[e.reason] || e.reason)}</span></div>`
+    + `<div class="detail">${esc(e.detail || "")}</div></div>`
   ).join("");
 }
 
@@ -457,6 +486,7 @@ function render(state) {
   renderSpeakers(state.speakers);
   renderParticipation(state.participation);
   renderTopics(state.topics);
+  renderInterventionEvents(state.intervention_events);
   setStatus(state.running, state.resetting);
 }
 
