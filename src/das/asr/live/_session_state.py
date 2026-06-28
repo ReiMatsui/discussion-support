@@ -107,6 +107,7 @@ class SessionState:
         # 積極性プロファイル（S5）。bootstrapで --proactivity から上書きされる。
         self.proactivity_name = _PROACTIVITY_DEFAULT
         self.proactivity: dict = dict(_PROACTIVITY_PROFILES[_PROACTIVITY_DEFAULT])
+        self.intervention_enabled = True
         self.intervention_events: list[dict] = []
         # UIからの停止フック（F1）。run_sessionが「stopを立ててwsを閉じる」関数を設定する。
         self.request_stop: Callable[[], None] | None = None
@@ -347,6 +348,7 @@ class SessionState:
                 "max_speakers": getattr(self.args, "diarization_max_speakers", None),
             },
             "intervention": {
+                "enabled": self.intervention_enabled,
                 "proactivity": self.proactivity_name,
                 "trigger_n": getattr(self.agent, "trigger_n", None),
             },
@@ -500,6 +502,17 @@ class SessionState:
             self.args = SimpleNamespace(proactivity=name)
         self.rev += 1
         return {"ok": True, "proactivity": name}
+
+    def set_intervention_enabled(self, enabled: bool) -> dict:
+        """UIからファシリテーター介入の有効/無効を切り替える."""
+        self.intervention_enabled = bool(enabled)
+        if not self.intervention_enabled and self.agent is not None:
+            with contextlib.suppress(Exception):
+                self.agent.interrupt()
+            with contextlib.suppress(Exception):
+                self.agent.reset_meeting()
+        self.rev += 1
+        return {"ok": True, "enabled": self.intervention_enabled}
 
     def set_diarization_max_speakers(self, value: int | None) -> dict:
         """UIから想定話者数ヒントを更新する.

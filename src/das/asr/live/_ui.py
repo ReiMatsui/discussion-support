@@ -124,6 +124,11 @@ class _UIHandler:
                     length = int(self.headers.get("Content-Length", 0))
                     body = json.loads(self.rfile.read(length))
                     result = {"ok": True}
+                    if "enabled" in body:
+                        result = s.set_intervention_enabled(bool(body.get("enabled")))
+                        if not result.get("ok"):
+                            self._json(400, result)
+                            return
                     proactivity = body.get("proactivity")
                     if proactivity is not None:
                         result = s.set_proactivity(str(proactivity))
@@ -141,11 +146,13 @@ class _UIHandler:
                     s.rev += 1
                     s.save()
                     _print_line(
-                        f"# 介入設定を更新（UIから）: proactivity={s.proactivity_name}"
+                        f"# 介入設定を更新（UIから）: enabled={s.intervention_enabled}"
+                        f" proactivity={s.proactivity_name}"
                         f" trigger={getattr(s.agent, 'trigger_n', None)}"
                     )
                     self._json(200, {
                         "ok": True,
+                        "enabled": s.intervention_enabled,
                         "proactivity": s.proactivity_name,
                         "trigger_n": getattr(s.agent, "trigger_n", None),
                     })

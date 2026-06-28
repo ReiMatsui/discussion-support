@@ -58,6 +58,55 @@ def _log_intervention_event(state: SessionState, reason: str, detail: str = "") 
         add_event(reason, detail)
 
 
+def _intervention_enabled(state: SessionState) -> bool:
+    return bool(getattr(state, "intervention_enabled", True))
+
+
+def _pcm_rms(pcm16: bytes) -> float:
+    """16bit PCMのRMS音量を0.0-1.0程度で返す。"""
+    if not pcm16:
+        return 0.0
+    samples = np.frombuffer(pcm16, dtype="<i2")
+    if samples.size == 0:
+        return 0.0
+    values = samples.astype(np.float32) / 32768.0
+    return float(np.sqrt(np.mean(values * values)))
+
+
+class _EarlyInterruptDetector:
+    """AI再生中のマイク音量立ち上がりで、ASR確定前に中断する小さな検出器."""
+
+    def __init__(self, *, min_ms: int = 280, cooldown_s: float = 0.8) -> None:
+        self.min_ms = min_ms
+        self.cooldown_s = cooldown_s
+        self._active_ms = 0.0
+        self._echo_floor: float | None = None
+        self._last_fire = -cooldown_s
+
+    def update(self, pcm16: bytes, *, ai_speaking: bool, now: float | None = None) -> bool:
+        now = time.monotonic() if now is None else now
+        if not ai_speaking:
+            self._active_ms = 0.0
+            self._echo_floor = None
+            return False
+        rms = _pcm_rms(pcm16)
+        duration_ms = len(pcm16) / 2 / SR * 1000.0
+        if self._echo_floor is None:
+            self._echo_floor = max(rms, 0.001)
+        elif rms < self._echo_floor * 1.15:
+            self._echo_floor = self._echo_floor * 0.9 + rms * 0.1
+        threshold = max(0.025, self._echo_floor * 1.65)
+        if rms >= threshold:
+            self._active_ms += duration_ms
+        else:
+            self._active_ms = max(0.0, self._active_ms - duration_ms * 1.5)
+        if self._active_ms >= self.min_ms and now - self._last_fire >= self.cooldown_s:
+            self._last_fire = now
+            self._active_ms = 0.0
+            return True
+        return False
+
+
 def _run_agenda_detector(state: SessionState, oai_key: str, oai_model: str):
     """会議冒頭の発話から議題を1回推定してシードする（S3, --topic未指定時）.
 
@@ -73,6 +122,8 @@ def _run_agenda_detector(state: SessionState, oai_key: str, oai_model: str):
         time.sleep(2)
         if not oai_key:
             return
+        if not _intervention_enabled(state):
+            continue
         with state.topics_lock:
             if state.topics:
                 return  # 既に議題/論点あり → 役目終了
@@ -103,6 +154,8 @@ def _run_topic_worker(state: SessionState, oai_key: str, oai_model: str):
     while not state.stop.is_set():
         time.sleep(3)
         if not oai_key:
+            continue
+        if not _intervention_enabled(state):
             continue
         with state.state_lock:
             talk_rs = intervention_records([
@@ -153,6 +206,8 @@ def _run_drift_checker(state: SessionState, oai_key: str, oai_model: str):
         _diag_tick += 1
         agent = state.agent
         if not oai_key or agent is None or not agent.enabled:
+            continue
+        if not _intervention_enabled(state):
             continue
         if agent.mode == "conversation":
             continue
@@ -213,6 +268,8 @@ def _run_participation_checker(state: SessionState, oai_key: str, oai_model: str
         time.sleep(1)
         agent = state.agent
         if not oai_key or agent is None or not agent.enabled:
+            continue
+        if not _intervention_enabled(state):
             continue
         if agent.mode == "conversation":
             continue
@@ -431,6 +488,7 @@ def _run_agent_worker(state: SessionState):
         # 積極性プロファイル（S5）: 介入クールダウンと沈黙要約の閾値
         _cooldown = state.proactivity.get("cooldown", _INTERVENTION_COOLDOWN)
         _silence_summarize = state.proactivity.get("silence_summarize")
+        _enabled = _intervention_enabled(state)
         with state.state_lock:
             _skip = {AGENT_SPEAKER, "パートナー"}
             talk_rs = [r for r in state.records
@@ -443,8 +501,9 @@ def _run_agent_worker(state: SessionState):
             if new_records:
                 _last_utt_time[0] = time.monotonic()
                 agent._last_noop_at = 0.0  # 新たな発話で会話が動いた → 沈黙ブレーカー解除
-            for r in new_records:
-                agent.feed(intervention_speaker_name(state, r), r.get("text", ""))
+            if _enabled:
+                for r in new_records:
+                    agent.feed(intervention_speaker_name(state, r), r.get("text", ""))
             state.agent_cursor = n
             # --- 自動割り込み ---
             _human_spoke = any(len(t.strip()) > _INTERRUPT_MIN_CHARS
@@ -462,6 +521,16 @@ def _run_agent_worker(state: SessionState):
                         partner.inject_context(
                             "人間", utt,
                             request_response=is_last)
+        if not _enabled:
+            for q in (state.drift_requests, state.invite_requests):
+                while True:
+                    try:
+                        q.get_nowait()
+                    except queue.Empty:
+                        break
+            if _diag_tick % 20 == 0:
+                print("# [diag] agent: intervention disabled", flush=True)
+            continue
         # --- ファシリテーター優先 ---
         if (partner is not None
                 and (partner.ai_speaking or partner._responding)
@@ -715,6 +784,7 @@ def _run_sender(state: SessionState, backend: STTBackend):
     作り直し中(古いwsが閉じている瞬間)の送信エラーは無視する（音声を捨てる）。
     """
     seq = 0
+    interrupt_detector = _EarlyInterruptDetector()
     while True:
         pcm = state.audio_q.get()
         ws = state.stt_ws
@@ -736,6 +806,22 @@ def _run_sender(state: SessionState, backend: STTBackend):
                 state.pcm_file.flush()
             except OSError:
                 pass
+        agent = state.agent
+        partner = state.partner
+        ai_speaking = bool(
+            (agent is not None and (agent.ai_speaking or agent._responding))
+            or (partner is not None and (partner.ai_speaking or partner._responding))
+        )
+        if interrupt_detector.update(pcm, ai_speaking=ai_speaking):
+            interrupted = False
+            if agent is not None and (agent.ai_speaking or agent._responding):
+                agent.interrupt()
+                interrupted = True
+            if partner is not None and (partner.ai_speaking or partner._responding):
+                partner.interrupt()
+                interrupted = True
+            if interrupted:
+                _log_intervention_event(state, "interrupt", "マイク入力で早期中断")
         if ws is not None:
             try:
                 ws.send(pcm)

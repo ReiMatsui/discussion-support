@@ -187,7 +187,11 @@ INDEX_HTML = """<!doctype html>
         <div class="setting-note">次の会議から反映</div>
       </div>
       <div class="panel" id="intervention-panel">
-        <h2>介入頻度</h2>
+        <h2>介入</h2>
+        <div class="setting-row">
+          <label for="intervention-enabled">オン</label>
+          <input id="intervention-enabled" type="checkbox">
+        </div>
         <div class="setting-row">
           <label for="proactivity">積極性</label>
           <select id="proactivity">
@@ -349,6 +353,7 @@ function renderInterventionEvents(list) {
     stall: "停滞",
     retry: "再送",
     conversation: "会話",
+    interrupt: "中断",
   };
   $("events").innerHTML = list.slice().reverse().map((e) =>
     `<div class="event">`
@@ -409,10 +414,15 @@ function renderDiarization(config) {
 }
 
 function renderIntervention(config) {
+  const enabled = $("intervention-enabled");
   const pro = $("proactivity");
   const trig = $("trigger-n");
+  if (document.activeElement !== enabled) enabled.checked = !config || config.enabled !== false;
   if (document.activeElement !== pro) pro.value = (config && config.proactivity) || "standard";
   if (document.activeElement !== trig) trig.value = config && config.trigger_n ? String(config.trigger_n) : "";
+  const disabled = config && config.enabled === false;
+  pro.disabled = disabled;
+  trig.disabled = disabled;
 }
 
 let enrolling = false;
@@ -464,7 +474,10 @@ async function setSpeakerCount() {
 }
 
 async function setIntervention() {
-  const body = { proactivity: $("proactivity").value };
+  const body = {
+    enabled: $("intervention-enabled").checked,
+    proactivity: $("proactivity").value,
+  };
   const n = Number($("trigger-n").value);
   if (n > 0) body.trigger_n = n;
   try {
@@ -554,6 +567,7 @@ $("agenda").addEventListener("keydown", (e) => { if (e.key === "Enter") setAgend
 $("enroll-btn").onclick = enrollPerson;
 $("roster-lock").addEventListener("change", toggleRoster);
 $("speaker-count").addEventListener("change", setSpeakerCount);
+$("intervention-enabled").addEventListener("change", setIntervention);
 $("proactivity").addEventListener("change", setIntervention);
 $("trigger-n").addEventListener("change", setIntervention);
 // 初期描画 + ライブ接続

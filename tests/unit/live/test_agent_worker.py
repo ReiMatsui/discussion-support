@@ -24,14 +24,15 @@ class FakeAgent:
         self.trigger_n = 10
         self.in_echo_window = False
         self._pending: list = []
+        self.feeds: list[tuple[str, str]] = []
         self.trigger_calls: list[dict] = []
 
     @property
     def pending_count(self) -> int:
         return len(self._pending)
 
-    def feed(self, speaker: str, text: str, **kw) -> None:  # pragma: no cover
-        pass
+    def feed(self, speaker: str, text: str, **kw) -> None:
+        self.feeds.append((speaker, text))
 
     def trigger(self, *, topics=None, drift_reason=None, invite_target=None) -> None:
         self.trigger_calls.append({"topics": topics, "drift_reason": drift_reason,
@@ -77,6 +78,7 @@ class FakeState:
         self.invite_requests: queue.Queue[str] = queue.Queue()
         self.fac_events: queue.Queue = queue.Queue()
         self.proactivity = {"silence_summarize": 18.0, "cooldown": 25.0}
+        self.intervention_enabled = True
         self.intervention_events: list[dict] = []
 
     def disp_name(self, k):  # pragma: no cover
@@ -175,6 +177,23 @@ def test_standard_proactivity_silence_summarize_fires():
 
     _run_worker_briefly(state, until=lambda: bool(agent.trigger_calls))
     assert agent.trigger_calls
+
+
+def test_intervention_disabled_skips_facilitator_but_keeps_partner_context():
+    """介入オフでもAIパートナーには人間発話を渡し、進行役トリガーだけ止める。"""
+    agent = FakeAgent()
+    partner = FakePartner()
+    partner.ai_speaking = True
+    state = FakeState(agent, partner)
+    state.intervention_enabled = False
+    state.records = [{"speaker": "#1", "text": "この点は違うと思います", "ms": 0}]
+
+    _run_worker_briefly(state, until=lambda: bool(partner.injected), timeout=1.5)
+
+    assert agent.feeds == []
+    assert agent.trigger_calls == []
+    assert partner.interrupts == 1
+    assert partner.injected == [("人間", "この点は違うと思います")]
 
 
 def test_drift_request_triggers_with_reason():

@@ -111,7 +111,11 @@ def test_api_snapshot_exposes_intervention_settings():
 
     snap = s.api_snapshot()
 
-    assert snap["intervention"] == {"proactivity": "controlled", "trigger_n": 10}
+    assert snap["intervention"] == {
+        "enabled": True,
+        "proactivity": "controlled",
+        "trigger_n": 10,
+    }
     assert snap["intervention_events"] == [{
         "time": snap["intervention_events"][0]["time"],
         "reason": "count",
@@ -467,11 +471,21 @@ def test_http_set_intervention_settings():
     try:
         req = urllib.request.Request(
             f"http://127.0.0.1:{port}/api/intervention",
-            data=json.dumps({"proactivity": "controlled", "trigger_n": 18}).encode(),
+            data=json.dumps({
+                "enabled": False,
+                "proactivity": "controlled",
+                "trigger_n": 18,
+            }).encode(),
             headers={"Content-Type": "application/json"}, method="POST")
         with urllib.request.urlopen(req) as r:
             out = json.loads(r.read())
-        assert out == {"ok": True, "proactivity": "controlled", "trigger_n": 18}
+        assert out == {
+            "ok": True,
+            "enabled": False,
+            "proactivity": "controlled",
+            "trigger_n": 18,
+        }
+        assert s.intervention_enabled is False
         assert s.proactivity_name == "controlled"
         assert s.agent.trigger_n == 18
     finally:
@@ -491,6 +505,7 @@ def test_http_get_root_serves_spa():
         assert "/api/stream" in html   # SSEを使うSPA
         assert "/api/mode" in html     # モード切替
         assert "/api/intervention" in html
+        assert 'id="intervention-enabled"' in html
         assert 'id="proactivity"' in html
         assert 'id="event-panel"' in html
     finally:

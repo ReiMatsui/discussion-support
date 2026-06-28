@@ -4,8 +4,10 @@ from __future__ import annotations
 import datetime
 from typing import Any
 
+import numpy as np
+
 from das.asr.live._session_state import SessionState
-from das.asr.live._workers import _run_sender
+from das.asr.live._workers import _EarlyInterruptDetector, _pcm_rms, _run_sender
 
 
 class _Backend:
@@ -93,3 +95,36 @@ def test_open_wav_resets_asr_buffer_offsets() -> None:
     assert state.asr_pcm_buf == bytearray()
     assert state.asr_pcm_buf_offset == 0
     assert state.asr_pcm_total_bytes == 0
+
+
+def _tone(level: float, samples: int = 1600) -> bytes:
+    return (np.ones(samples, dtype=np.float32) * level * 32767).astype("<i2").tobytes()
+
+
+def test_pcm_rms_reflects_signal_level() -> None:
+    assert _pcm_rms(_tone(0.05)) > _pcm_rms(_tone(0.01))
+
+
+def test_early_interrupt_ignores_stable_echo() -> None:
+    detector = _EarlyInterruptDetector(min_ms=250)
+    now = 0.0
+    fired = False
+    for _ in range(8):
+        now += 0.1
+        fired = detector.update(_tone(0.02), ai_speaking=True, now=now) or fired
+    assert fired is False
+
+
+def test_early_interrupt_fires_on_sustained_near_voice_rise() -> None:
+    detector = _EarlyInterruptDetector(min_ms=250)
+    now = 0.0
+    for _ in range(3):
+        now += 0.1
+        assert detector.update(_tone(0.02), ai_speaking=True, now=now) is False
+
+    fired = False
+    for _ in range(4):
+        now += 0.1
+        fired = detector.update(_tone(0.06), ai_speaking=True, now=now) or fired
+
+    assert fired is True
