@@ -24,10 +24,21 @@ class _FakeAgent:
     def __init__(self, mode="facilitator"):
         self.mode = mode
         self.voice = "shimmer"
+        self.trigger_n = 10
+        self._connected = False
+        self._conn_error = None
 
     @property
     def enabled(self):
         return self.mode != "off"
+
+    def apply_config(self, *, mode=None, voice=None, trigger_n=None):
+        if mode is not None:
+            self.mode = mode
+        if voice is not None:
+            self.voice = voice
+        if trigger_n is not None:
+            self.trigger_n = trigger_n
 
 
 class _FakeTracker:
@@ -90,6 +101,16 @@ def test_api_snapshot_speakers_have_rename_labels():
     assert by_name["人物1"]["renameable"] is True
     assert by_name["話者1"]["renameable"] is False  # 暫定#Nは登録対象外
     assert "ファシリテーター" not in by_name        # AI話者はリネーム対象外
+
+
+def test_api_snapshot_exposes_intervention_settings():
+    s = _make_state()
+    s.agent = _FakeAgent()
+    s.set_proactivity("controlled")
+
+    snap = s.api_snapshot()
+
+    assert snap["intervention"] == {"proactivity": "controlled", "trigger_n": 10}
 
 
 def test_http_rename_without_tracker():
@@ -433,6 +454,24 @@ def test_http_set_topic():
         httpd.shutdown()
 
 
+def test_http_set_intervention_settings():
+    s = _make_state()
+    s.agent = _FakeAgent()
+    httpd, port = _serve(s)
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/intervention",
+            data=json.dumps({"proactivity": "controlled", "trigger_n": 18}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req) as r:
+            out = json.loads(r.read())
+        assert out == {"ok": True, "proactivity": "controlled", "trigger_n": 18}
+        assert s.proactivity_name == "controlled"
+        assert s.agent.trigger_n == 18
+    finally:
+        httpd.shutdown()
+
+
 def test_http_get_root_serves_spa():
     """GET / が新SPA(HTML)を配信する."""
     state = _make_state()
@@ -445,6 +484,8 @@ def test_http_get_root_serves_spa():
         assert "<title>議論支援</title>" in html
         assert "/api/stream" in html   # SSEを使うSPA
         assert "/api/mode" in html     # モード切替
+        assert "/api/intervention" in html
+        assert 'id="proactivity"' in html
     finally:
         httpd.shutdown()
 

@@ -93,6 +93,8 @@ INDEX_HTML = """<!doctype html>
   .setting-row label { flex: 1; font-size: .8rem; color: var(--muted); }
   .setting-row select { border: 1px solid var(--line); border-radius: 6px;
     padding: .3rem .45rem; background: var(--card); }
+  .setting-row input { width: 4.2rem; border: 1px solid var(--line); border-radius: 6px;
+    padding: .3rem .45rem; background: var(--card); }
   .setting-note { font-size: .72rem; color: var(--muted); margin-top: .35rem; }
   .u.bc { opacity: .5; font-size: .85em; }            /* 相槌は薄く小さく */
   .u.unsure { opacity: .75; }
@@ -177,6 +179,21 @@ INDEX_HTML = """<!doctype html>
           <select id="speaker-count"></select>
         </div>
         <div class="setting-note">次の会議から反映</div>
+      </div>
+      <div class="panel" id="intervention-panel">
+        <h2>介入頻度</h2>
+        <div class="setting-row">
+          <label for="proactivity">積極性</label>
+          <select id="proactivity">
+            <option value="controlled">控えめ</option>
+            <option value="standard">標準</option>
+            <option value="active">積極</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <label for="trigger-n">発話数</label>
+          <input id="trigger-n" type="number" min="1" max="50">
+        </div>
       </div>
       <div class="panel" id="spk-panel" hidden>
         <h2>話者の名前を登録</h2><div id="speakers"></div>
@@ -362,6 +379,13 @@ function renderDiarization(config) {
   if (document.activeElement !== sel) sel.value = config && config.max_speakers ? String(config.max_speakers) : "";
 }
 
+function renderIntervention(config) {
+  const pro = $("proactivity");
+  const trig = $("trigger-n");
+  if (document.activeElement !== pro) pro.value = (config && config.proactivity) || "standard";
+  if (document.activeElement !== trig) trig.value = config && config.trigger_n ? String(config.trigger_n) : "";
+}
+
 let enrolling = false;
 async function enrollPerson() {
   if (enrolling) return;
@@ -410,11 +434,24 @@ async function setSpeakerCount() {
   } catch (e) { alert("話者数の設定に失敗しました"); }
 }
 
+async function setIntervention() {
+  const body = { proactivity: $("proactivity").value };
+  const n = Number($("trigger-n").value);
+  if (n > 0) body.trigger_n = n;
+  try {
+    await fetch("/api/intervention", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch (e) { alert("介入設定の変更に失敗しました"); }
+}
+
 function render(state) {
   renderModes(state.mode);
   renderVpBanner(state.vp);
   renderEnroll(state.vp);
   renderDiarization(state.diarization);
+  renderIntervention(state.intervention);
   renderAgenda(state.agenda);
   renderTranscript(state.records || [], state.partial);
   renderSpeakers(state.speakers);
@@ -487,6 +524,8 @@ $("agenda").addEventListener("keydown", (e) => { if (e.key === "Enter") setAgend
 $("enroll-btn").onclick = enrollPerson;
 $("roster-lock").addEventListener("change", toggleRoster);
 $("speaker-count").addEventListener("change", setSpeakerCount);
+$("proactivity").addEventListener("change", setIntervention);
+$("trigger-n").addEventListener("change", setIntervention);
 // 初期描画 + ライブ接続
 fetch("/api/state").then((r) => r.json()).then(render).catch(() => {});
 connect();

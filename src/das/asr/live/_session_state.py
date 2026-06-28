@@ -105,6 +105,7 @@ class SessionState:
         # 受信スレッドが partner の WebSocket 送信やファイルI/Oでブロックするのを防ぐ。
         self.fac_events: queue.Queue[tuple[str, str | None]] = queue.Queue()
         # 積極性プロファイル（S5）。bootstrapで --proactivity から上書きされる。
+        self.proactivity_name = _PROACTIVITY_DEFAULT
         self.proactivity: dict = dict(_PROACTIVITY_PROFILES[_PROACTIVITY_DEFAULT])
         # UIからの停止フック（F1）。run_sessionが「stopを立ててwsを閉じる」関数を設定する。
         self.request_stop: Callable[[], None] | None = None
@@ -344,6 +345,10 @@ class SessionState:
                 "provider": getattr(self.diarization_provider, "name", None),
                 "max_speakers": getattr(self.args, "diarization_max_speakers", None),
             },
+            "intervention": {
+                "proactivity": self.proactivity_name,
+                "trigger_n": getattr(self.agent, "trigger_n", None),
+            },
             "agenda": self._current_agenda(),
             "started": self.started.strftime("%Y-%m-%d %H:%M"),
             "partial": {"speaker": self.partial_speaker, "text": self.partial_text},
@@ -470,6 +475,19 @@ class SessionState:
         self.rev += 1
         self.save()
         return {"ok": True, "agenda": topic}
+
+    def set_proactivity(self, name: str) -> dict:
+        """UIから介入頻度プロファイルを更新する."""
+        if name not in _PROACTIVITY_PROFILES:
+            return {"ok": False, "error": "介入頻度は controlled / standard / active で指定してください"}
+        self.proactivity_name = name
+        self.proactivity = dict(_PROACTIVITY_PROFILES[name])
+        try:
+            self.args.proactivity = name
+        except AttributeError:
+            self.args = SimpleNamespace(proactivity=name)
+        self.rev += 1
+        return {"ok": True, "proactivity": name}
 
     def set_diarization_max_speakers(self, value: int | None) -> dict:
         """UIから想定話者数ヒントを更新する.

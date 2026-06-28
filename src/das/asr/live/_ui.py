@@ -120,6 +120,35 @@ class _UIHandler:
                     result = s.set_agenda(str(body.get("topic", "")))
                     _print_line(f"# 議題を設定（UIから）: {result['agenda']}")
                     self._json(200, result)
+                elif self.path == "/api/intervention":
+                    length = int(self.headers.get("Content-Length", 0))
+                    body = json.loads(self.rfile.read(length))
+                    result = {"ok": True}
+                    proactivity = body.get("proactivity")
+                    if proactivity is not None:
+                        result = s.set_proactivity(str(proactivity))
+                        if not result.get("ok"):
+                            self._json(400, result)
+                            return
+                    trigger_n = body.get("trigger_n")
+                    if trigger_n is not None:
+                        trigger_n = int(trigger_n)
+                        if trigger_n < 1 or trigger_n > 50:
+                            self._json(400, {"ok": False, "error": "発話数は1〜50で指定してください"})
+                            return
+                        if s.agent is not None:
+                            s.agent.apply_config(trigger_n=trigger_n)
+                    s.rev += 1
+                    s.save()
+                    _print_line(
+                        f"# 介入設定を更新（UIから）: proactivity={s.proactivity_name}"
+                        f" trigger={getattr(s.agent, 'trigger_n', None)}"
+                    )
+                    self._json(200, {
+                        "ok": True,
+                        "proactivity": s.proactivity_name,
+                        "trigger_n": getattr(s.agent, "trigger_n", None),
+                    })
                 elif self.path == "/api/diarization":
                     length = int(self.headers.get("Content-Length", 0))
                     body = json.loads(self.rfile.read(length))

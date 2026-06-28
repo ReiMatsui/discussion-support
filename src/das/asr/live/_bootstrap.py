@@ -425,9 +425,7 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
     # 明示的な議題があれば、論点抽出LLMの成否に依存せず最初から脱線検出を効かせる。
     # 人間同士モード(--topic)・debate・simulate のいずれの議題でもシードできる。
     # --- 積極性プロファイルを適用（S5） ---
-    from das.asr.live._constants import _PROACTIVITY_PROFILES
-    if args.proactivity in _PROACTIVITY_PROFILES:
-        state.proactivity = dict(_PROACTIVITY_PROFILES[args.proactivity])
+    if state.set_proactivity(args.proactivity).get("ok"):
         print(f"# 介入の積極性: {args.proactivity}", flush=True)
 
     # 会話モード(converse)で動的にパートナーを生成するための設定を保持（F3）
