@@ -62,51 +62,6 @@ def _intervention_enabled(state: SessionState) -> bool:
     return bool(getattr(state, "intervention_enabled", True))
 
 
-def _pcm_rms(pcm16: bytes) -> float:
-    """16bit PCMのRMS音量を0.0-1.0程度で返す。"""
-    if not pcm16:
-        return 0.0
-    samples = np.frombuffer(pcm16, dtype="<i2")
-    if samples.size == 0:
-        return 0.0
-    values = samples.astype(np.float32) / 32768.0
-    return float(np.sqrt(np.mean(values * values)))
-
-
-class _EarlyInterruptDetector:
-    """AI再生中のマイク音量立ち上がりで、ASR確定前に中断する小さな検出器."""
-
-    def __init__(self, *, min_ms: int = 280, cooldown_s: float = 0.8) -> None:
-        self.min_ms = min_ms
-        self.cooldown_s = cooldown_s
-        self._active_ms = 0.0
-        self._echo_floor: float | None = None
-        self._last_fire = -cooldown_s
-
-    def update(self, pcm16: bytes, *, ai_speaking: bool, now: float | None = None) -> bool:
-        now = time.monotonic() if now is None else now
-        if not ai_speaking:
-            self._active_ms = 0.0
-            self._echo_floor = None
-            return False
-        rms = _pcm_rms(pcm16)
-        duration_ms = len(pcm16) / 2 / SR * 1000.0
-        if self._echo_floor is None:
-            self._echo_floor = max(rms, 0.001)
-        elif rms < self._echo_floor * 1.15:
-            self._echo_floor = self._echo_floor * 0.9 + rms * 0.1
-        threshold = max(0.025, self._echo_floor * 1.65)
-        if rms >= threshold:
-            self._active_ms += duration_ms
-        else:
-            self._active_ms = max(0.0, self._active_ms - duration_ms * 1.5)
-        if self._active_ms >= self.min_ms and now - self._last_fire >= self.cooldown_s:
-            self._last_fire = now
-            self._active_ms = 0.0
-            return True
-        return False
-
-
 def _run_agenda_detector(state: SessionState, oai_key: str, oai_model: str):
     """会議冒頭の発話から議題を1回推定してシードする（S3, --topic未指定時）.
 
@@ -784,7 +739,6 @@ def _run_sender(state: SessionState, backend: STTBackend):
     作り直し中(古いwsが閉じている瞬間)の送信エラーは無視する（音声を捨てる）。
     """
     seq = 0
-    interrupt_detector = _EarlyInterruptDetector()
     while True:
         pcm = state.audio_q.get()
         ws = state.stt_ws
@@ -806,22 +760,6 @@ def _run_sender(state: SessionState, backend: STTBackend):
                 state.pcm_file.flush()
             except OSError:
                 pass
-        agent = state.agent
-        partner = state.partner
-        ai_speaking = bool(
-            (agent is not None and (agent.ai_speaking or agent._responding))
-            or (partner is not None and (partner.ai_speaking or partner._responding))
-        )
-        if interrupt_detector.update(pcm, ai_speaking=ai_speaking):
-            interrupted = False
-            if agent is not None and (agent.ai_speaking or agent._responding):
-                agent.interrupt()
-                interrupted = True
-            if partner is not None and (partner.ai_speaking or partner._responding):
-                partner.interrupt()
-                interrupted = True
-            if interrupted:
-                _log_intervention_event(state, "interrupt", "マイク入力で早期中断")
         if ws is not None:
             try:
                 ws.send(pcm)
