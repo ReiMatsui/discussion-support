@@ -8,7 +8,6 @@
 """
 from __future__ import annotations
 
-import os
 import queue
 import re
 import threading
@@ -45,7 +44,6 @@ from ._constants import (
     SR,
 )
 from ._participation import participation_stats
-from ._polish import polish
 from ._speaker_policy import (
     intervention_records,
     intervention_speaker_name,
@@ -743,8 +741,7 @@ def _run_sender(state: SessionState, backend: STTBackend):
                 seq += 1
 
 
-def _cleanup(state: SessionState, args, api_key: str,
-             tracker, wav_path: str, out_path: str, html_path: str):
+def _cleanup(state: SessionState, tracker, wav_path: str, out_path: str, html_path: str):
     """セッション終了時のリソース解放・ファイル保存."""
     from das.asr.live import _SYS_HOOK_REF
     _SYS_HOOK_REF[0] = None
@@ -763,24 +760,3 @@ def _cleanup(state: SessionState, args, api_key: str,
     saved_wav = state.finalize_wav()
     if saved_wav:
         _print_line(f"# 録音を保存しました: {saved_wav}")
-    # 清書（直近の会議のwavを対象にする）
-    if args.polish and not api_key and saved_wav:
-        _print_line("# 清書はスキップ（SONIOX_API_KEY未設定。清書はSoniox非同期APIを使用）")
-    if args.polish and api_key and saved_wav:
-        try:
-            with open(saved_wav, "rb") as f:
-                wav_data = f.read()
-            recs = polish(api_key, wav_data[44:], args.lang, tracker, log=_print_line)
-            fmd = os.path.splitext(state.out_path)[0] + ".final.md"
-            fht = os.path.splitext(state.out_path)[0] + ".final.html"
-            state.write_md(recs, fmd)
-            state.write_html(live=False, recs=recs, path=fht, status="清書（非同期再処理済み）")
-            state.write_turns(recs, os.path.splitext(state.out_path)[0] + ".final.turns.jsonl")
-            _print_line(f"# 清書版を保存しました: {fmd} / {fht}")
-            if not args.no_open:
-                import webbrowser
-                webbrowser.open("file://" + os.path.abspath(fht))
-        except KeyboardInterrupt:
-            _print_line("# 清書をスキップしました")
-        except Exception as e:
-            _print_line(f"# 清書に失敗しました: {type(e).__name__}: {e}")

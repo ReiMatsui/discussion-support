@@ -69,7 +69,6 @@ class LiveArgs:
     vp_match: float | None = None
     vp_no_auto: bool = False
     vp_debug: bool = False
-    polish: bool = False
     stt: str = "soniox"
     # Sonioxのエンドポイント検出（文の切れ目で区切る＝議事録が読みやすい）。既定ON。
     soniox_endpoint: bool = True
@@ -274,7 +273,6 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
                          "（テスト音声は scripts/make_overlap_testset.py 等で先に生成してください）")
 
     backend = build_backend(args)
-    api_key = os.environ.get("SONIOX_API_KEY")  # polish用（STTバックエンドとは独立）
     _serve = args.port > 0
 
     try:
@@ -561,4 +559,4 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
                 state.stt_ws.close()
         if state.diarization_provider is not None:
             state.diarization_provider.close()
-        _cleanup(state, args, api_key, tracker, wav_path, out_path, html_path)
+        _cleanup(state, tracker, wav_path, out_path, html_path)

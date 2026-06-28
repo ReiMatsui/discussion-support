@@ -90,7 +90,7 @@ def listen_soniox(
     soniox_args: str = typer.Option(
         "",
         "--soniox-args",
-        help="文字起こし側へ渡す追加引数 (空白区切り。例: '--stt speechmatics --no-polish')",
+        help="文字起こし側へ渡す追加引数 (空白区切り。例: '--stt speechmatics')",
     ),
     min_utt_chars: int = typer.Option(
         7,

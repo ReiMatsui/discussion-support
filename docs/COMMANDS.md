@@ -10,7 +10,7 @@ cd ~/discussion-support
 
 | 変数 | 用途 |
 |---|---|
-| `OPENAI_API_KEY` | TTS音声生成・清書 |
+| `OPENAI_API_KEY` | AIファシリテーター・TTS音声生成 |
 | `SONIOX_API_KEY` | Soniox リアルタイムSTT |
 | `SPEECHMATICS_API_KEY` | Speechmatics STT（オプション） |
 
@@ -43,9 +43,6 @@ uv run python -m das.asr.live
 ### 主要オプション
 
 ```bash
-# 清書なし（高速・API節約）
-uv run python -m das.asr.live --no-polish
-
 # Speechmaticsを使う
 uv run python -m das.asr.live --stt speechmatics
 
@@ -128,10 +125,10 @@ uv run das listen-soniox
 uv run das listen-soniox --skip-docs
 
 # 書き起こし側にオプションを渡す
-uv run das listen-soniox --skip-docs --soniox-args "--no-polish"
+uv run das listen-soniox --skip-docs --soniox-args "--stt soniox"
 
 # ファイル観戦 + ファシリテータ
-uv run das listen-soniox --skip-docs --soniox-args "--wav data/overlap_test/C_heavy.wav --play --no-polish"
+uv run das listen-soniox --skip-docs --soniox-args "--wav data/overlap_test/C_heavy.wav --play"
 ```
 
 ---
@@ -141,7 +138,7 @@ uv run das listen-soniox --skip-docs --soniox-args "--wav data/overlap_test/C_he
 ### 直接注入（観戦モード）— パイプラインの実力測定
 
 ```bash
-uv run python -m das.asr.live --wav data/overlap_test/C_heavy.wav --play --no-polish
+uv run python -m das.asr.live --wav data/overlap_test/C_heavy.wav --play
 ```
 
 wav内の音声を直接STTに送信。スピーカーからも再生されるので聞きながら確認できる。マイクは使わない。
@@ -150,7 +147,7 @@ wav内の音声を直接STTに送信。スピーカーからも再生される�
 
 ターミナル1:
 ```bash
-uv run python -m das.asr.live --no-polish
+uv run python -m das.asr.live
 ```
 
 ターミナル2:
@@ -163,7 +160,7 @@ afplay data/overlap_test/C_heavy.wav
 ### 参加モード（--join）— TTS討論に乱入
 
 ```bash
-uv run python -m das.asr.live --wav data/overlap_test/C_heavy.wav --join --no-polish
+uv run python -m das.asr.live --wav data/overlap_test/C_heavy.wav --join
 ```
 
 wavをスピーカー再生しつつ、自分のマイクも同時に拾う。**イヤホン推奨**（ハウリング防止）。
@@ -214,10 +211,9 @@ uv run das visualize            # 議論グラフ可視化
 | ファイル | 内容 |
 |---|---|
 | `<日時>.md` | Markdown議事録 |
-| `<日時>.html` | 静的議事録（`file://`表示・清書用。ライブUIはサーバーが配信） |
+| `<日時>.html` | 静的議事録（`file://`表示用。ライブUIはサーバーが配信） |
 | `<日時>.wav` | 録音（「新しい会議」で会議ごとに分割） |
 | `<日時>.turns.jsonl` | ターン単位データ（採点用） |
-| `<日時>.final.md` | 清書版（`--no-polish`未指定時） |
 
 ライブ表示はブラウザUI（`http://127.0.0.1:8231/`）が `/api/state`・SSEで配信する。
 「新しい会議」（リセット）すると、新しいタイムスタンプで別ファイルとして保存される。

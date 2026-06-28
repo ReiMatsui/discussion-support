@@ -18,7 +18,6 @@ das連携フック:
   _workers.py         音声入力・送信・トピック抽出・ターンテイキング
   _session_state.py   共有状態 + ファイル出力
   _voice_profiles.py  声紋プロファイル
-  _polish.py          非同期バッチ再処理（清書）
   _ui.py              HTTPサーバー + ターミナル出力
   _constants.py       定数・プロンプト・HTML テンプレート
   stt/                STTバックエンド
@@ -75,7 +74,6 @@ def post_system(text: str) -> None:
               help="即時判定のしきい値（省略時はモデル別の既定値）")
 @click.option("--vp-no-auto", is_flag=True, help="未知の声の自動登録を無効化")
 @click.option("--vp-debug", is_flag=True, help="声紋判定の内訳を表示")
-@click.option("--polish", is_flag=True, help="終了時に清書を行う（デフォルトオフ）")
 @click.option("--stt", default="soniox",
               type=click.Choice(["soniox", "speechmatics"]),
               help="リアルタイムSTTの供給源")
