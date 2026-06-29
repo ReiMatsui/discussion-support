@@ -510,6 +510,7 @@ def test_http_get_root_serves_spa():
         assert 'id="proactivity"' in html
         assert 'id="event-panel"' in html
         assert "list.length < 1" in html  # 発言量は1人でも表示する
+        assert ".bar-fill { display: block;" in html
     finally:
         httpd.shutdown()
 

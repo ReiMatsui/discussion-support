@@ -115,7 +115,8 @@ INDEX_HTML = """<!doctype html>
     text-overflow: ellipsis; white-space: nowrap; }
   .bar-bg { flex: 1; height: 9px; background: #eef0f2; border-radius: 5px;
     overflow: hidden; }
-  .bar-fill { height: 100%; border-radius: 5px; background: var(--accent); }
+  .bar-fill { display: block; height: 100%; min-width: 2px; border-radius: 5px;
+    background: var(--accent); }
   .bar-pct { width: 2.6em; text-align: right; color: var(--muted);
     font-size: .74rem; font-variant-numeric: tabular-nums; }
   .stat-group { margin-bottom: .7em; }
