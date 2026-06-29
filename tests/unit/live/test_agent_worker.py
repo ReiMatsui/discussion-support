@@ -9,7 +9,11 @@ import queue
 import threading
 import time
 
-from das.asr.live._workers import _run_agent_worker
+from das.asr.live._workers import (
+    _PendingInterventions,
+    _run_agent_worker,
+    _select_barge_in_decision,
+)
 
 
 class FakeAgent:
@@ -95,6 +99,52 @@ class FakeState:
 
     def add_intervention_event(self, reason: str, detail: str = "") -> None:
         self.intervention_events.append({"reason": reason, "detail": detail})
+
+
+def test_bargein_decision_prefers_fact_before_retry():
+    """事実補正は、中断介入の再送より先に差し込む."""
+    agent = FakeAgent()
+    agent._pending_intervention = {"delivered": "前の介入"}
+    state = FakeState(agent, None)
+    pending = _PendingInterventions()
+    pending.facts.append({"correction": "事実補正です。", "_queued_at": time.monotonic()})
+
+    decision = _select_barge_in_decision(
+        pending=pending,
+        agent=agent,
+        state=state,
+        now=time.monotonic(),
+        last_fact_at=0.0,
+        last_intervention_at=0.0,
+        cooldown=0.0,
+        diag_tick=1,
+    )
+
+    assert decision.reason == "fact"
+    assert decision.fact["correction"] == "事実補正です。"
+
+
+def test_bargein_decision_skips_cooldown_drift_then_retries():
+    """クールダウン中の脱線は捨て、保留介入の再送は同じ巡回で許可する."""
+    agent = FakeAgent()
+    agent._pending_intervention = {"delivered": "前の介入"}
+    state = FakeState(agent, None)
+    pending = _PendingInterventions(drift_reason="脱線", drift_count=1)
+    now = time.monotonic()
+
+    decision = _select_barge_in_decision(
+        pending=pending,
+        agent=agent,
+        state=state,
+        now=now,
+        last_fact_at=0.0,
+        last_intervention_at=now,
+        cooldown=100.0,
+        diag_tick=1,
+    )
+
+    assert decision.reason == "retry"
+    assert pending.drift_reason is None
 
 
 def _run_worker_briefly(state, *, until, timeout=3.0) -> None:

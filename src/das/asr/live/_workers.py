@@ -165,6 +165,59 @@ class _PendingInterventions:
         self.drift_count = 0
 
 
+@dataclass(frozen=True)
+class _BargeInDecision:
+    reason: str
+    fact: dict | None = None
+    drift_reason: str | None = None
+
+
+def _select_barge_in_decision(
+    *,
+    pending: _PendingInterventions,
+    agent,
+    state: SessionState,
+    now: float,
+    last_fact_at: float,
+    last_intervention_at: float,
+    cooldown: float,
+    diag_tick: int,
+) -> _BargeInDecision:
+    """ガードを越えて差し込む介入を、優先順位順に1つだけ選ぶ."""
+    pending.drop_stale_facts(now=now)
+    while pending.facts:
+        pending_fact = pending.facts[0]
+        correction = str(pending_fact.get("correction") or "").strip()
+        if not correction:
+            pending.facts.popleft()
+            continue
+        if now - last_fact_at < _FACTCHECK_COOLDOWN:
+            if diag_tick % 4 == 0:
+                print("# [trigger] hold: クールダウン中の事実補正", flush=True)
+            return _BargeInDecision("hold")
+        return _BargeInDecision("fact", fact=pending_fact)
+
+    if pending.drift_reason is not None:
+        required_drift_count = int(state.proactivity.get("drift_confirmations", 1))
+        if pending.drift_count < required_drift_count:
+            if diag_tick % 20 == 0:
+                print(
+                    "# [trigger] hold: 脱線判定の確認待ち "
+                    f"{pending.drift_count}/{required_drift_count}",
+                    flush=True,
+                )
+            return _BargeInDecision("hold")
+        if now - last_intervention_at < cooldown:
+            print("# [trigger] skip: クールダウン中の脱線介入", flush=True)
+            pending.clear_drift()
+        else:
+            return _BargeInDecision("drift", drift_reason=pending.drift_reason)
+
+    if agent._pending_intervention is not None:
+        return _BargeInDecision("retry")
+    return _BargeInDecision("none")
+
+
 def _run_agenda_detector(state: SessionState, oai_key: str, oai_model: str):
     """会議冒頭の発話から議題を1回推定してシードする（S3, --topic未指定時）.
 
@@ -695,53 +748,43 @@ def _run_agent_worker(state: SessionState):
         # パートナー発話・沈黙閾値を無視してトリガーする。会話が活発でも取りこぼさない。
         # trigger()の呼び出しはこの _run_agent_worker に一元化されている（R2）。
         if not agent._responding and not agent.ai_speaking:
+            _now = time.monotonic()
             _bargein_topics = None
             if agent.mode != "conversation":
                 with state.topics_lock:
                     _bargein_topics = list(state.topics) if state.topics else None
-            _pending.drop_stale_facts(now=time.monotonic())
-            if _pending.facts:
-                pending_fact = _pending.facts[0]
-                correction = str(pending_fact.get("correction") or "").strip()
-                if not correction:
-                    _pending.facts.popleft()
-                elif time.monotonic() - _last_fact_at < _FACTCHECK_COOLDOWN:
-                    if _diag_tick % 4 == 0:
-                        print("# [trigger] hold: クールダウン中の事実補正", flush=True)
-                    continue
-                else:
-                    print(f"# [trigger] fact: {correction}", flush=True)
-                    _log_intervention_event(state, "fact", correction)
-                    agent.trigger(topics=_bargein_topics,
-                                  fact_correction=pending_fact)
-                    _pending.facts.popleft()
-                    _last_fact_at = time.monotonic()
-                    _last_intervention_at = _last_fact_at
-                    continue
-            if _pending.drift_reason is not None:
-                _required_drift_count = int(state.proactivity.get("drift_confirmations", 1))
-                if _pending.drift_count < _required_drift_count:
-                    if _diag_tick % 20 == 0:
-                        print(
-                            "# [trigger] hold: 脱線判定の確認待ち "
-                            f"{_pending.drift_count}/{_required_drift_count}",
-                            flush=True,
-                        )
-                    continue
-                # クールダウン中は連発を避けるため要求を破棄（再脱線なら再検出される）
-                if time.monotonic() - _last_intervention_at < _cooldown:
-                    print("# [trigger] skip: クールダウン中の脱線介入", flush=True)
-                    _pending.clear_drift()
-                else:
-                    print(f"# [trigger] drift: 脱線介入「{_pending.drift_reason}」",
-                          flush=True)
-                    _log_intervention_event(state, "drift", _pending.drift_reason)
-                    agent.trigger(topics=_bargein_topics,
-                                  drift_reason=_pending.drift_reason)
-                    _pending.clear_drift()
-                    _last_intervention_at = time.monotonic()
-                    continue
-            if agent._pending_intervention is not None:
+            decision = _select_barge_in_decision(
+                pending=_pending,
+                agent=agent,
+                state=state,
+                now=_now,
+                last_fact_at=_last_fact_at,
+                last_intervention_at=_last_intervention_at,
+                cooldown=_cooldown,
+                diag_tick=_diag_tick,
+            )
+            if decision.reason == "hold":
+                continue
+            if decision.reason == "fact" and decision.fact is not None:
+                correction = str(decision.fact.get("correction") or "").strip()
+                print(f"# [trigger] fact: {correction}", flush=True)
+                _log_intervention_event(state, "fact", correction)
+                agent.trigger(topics=_bargein_topics,
+                              fact_correction=decision.fact)
+                _pending.facts.popleft()
+                _last_fact_at = time.monotonic()
+                _last_intervention_at = _last_fact_at
+                continue
+            if decision.reason == "drift" and decision.drift_reason is not None:
+                print(f"# [trigger] drift: 脱線介入「{decision.drift_reason}」",
+                      flush=True)
+                _log_intervention_event(state, "drift", decision.drift_reason)
+                agent.trigger(topics=_bargein_topics,
+                              drift_reason=decision.drift_reason)
+                _pending.clear_drift()
+                _last_intervention_at = time.monotonic()
+                continue
+            if decision.reason == "retry":
                 print("# [trigger] retry: 中断された介入を再送（ガードバイパス）",
                       flush=True)
                 _log_intervention_event(state, "retry", "中断された介入を再送")
