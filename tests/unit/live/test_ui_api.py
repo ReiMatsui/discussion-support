@@ -89,7 +89,7 @@ def test_session_mode_converse_with_partner():
 # --- api_snapshot -----------------------------------------------------------
 
 def test_api_snapshot_speakers_have_rename_labels():
-    """声紋確定の人物Nだけがリネーム可能、暫定#NとAIは対象外（F5）."""
+    """声紋確定の匿名参加者だけがリネーム可能、暫定ラベルとAIは対象外（F5）."""
     s = _make_state()
     s.records = [
         {"speaker": "人物1", "text": "a", "ms": 0, "end_ms": 500},
@@ -97,9 +97,9 @@ def test_api_snapshot_speakers_have_rename_labels():
         {"speaker": "ファシリテーター", "text": "x", "ms": None, "end_ms": None},
     ]
     by_name = {sp["name"]: sp for sp in s.api_snapshot()["speakers"]}
-    assert by_name["人物1"]["label"] == "人物1"
-    assert by_name["人物1"]["renameable"] is True
-    assert by_name["話者1"]["renameable"] is False  # 暫定#Nは登録対象外
+    assert by_name["参加者A"]["label"] == "人物1"
+    assert by_name["参加者A"]["renameable"] is True
+    assert by_name["参加者B"]["renameable"] is False  # 暫定#Nは登録対象外
     assert "ファシリテーター" not in by_name        # AI話者はリネーム対象外
 
 
@@ -152,9 +152,10 @@ def test_api_snapshot_structure():
     assert snap["mode"] == "transcribe"
     assert snap["running"] is True
     assert {r["type"] for r in snap["records"]} == {"utt", "sys"}
-    assert snap["records"][0]["speaker"] == "話者1"
+    assert snap["records"][0]["speaker"] == "参加者A"
     assert snap["topics"][0]["topic"] == "AI導入"
-    assert snap["participation"][0]["speaker"] == "話者1"
+    assert snap["topics"][0]["speaker"] == "参加者A"
+    assert snap["participation"][0]["speaker"] == "参加者A"
     # JSON化できること
     json.dumps(snap, ensure_ascii=False)
 
@@ -218,7 +219,7 @@ def test_show_partial_updates_state_and_snapshot():
     assert s.partial_text == "いまここを認識中"
     snap = s.api_snapshot()
     assert snap["partial"]["text"] == "いまここを認識中"
-    assert snap["partial"]["speaker"] == "話者1"
+    assert snap["partial"]["speaker"] == "参加者A"
     # 空文字でクリアされる
     s.show_partial("1", "")
     assert s.api_snapshot()["partial"] == {"speaker": "", "text": ""}
@@ -243,7 +244,7 @@ def test_snapshot_unsure_and_backchannel_flags():
 
 
 def test_speakers_registration_targets():
-    """登録対象は声紋確定の人物Nのみ。暫定#N/命名済み/未確定/AIは対象外."""
+    """登録対象は声紋確定の匿名参加者のみ。暫定/命名済み/未確定/AIは対象外."""
     s = _make_state()
     s.records = [
         {"speaker": "人物1", "text": "a", "ms": 0, "end_ms": 500},
@@ -253,11 +254,25 @@ def test_speakers_registration_targets():
         {"speaker": "ファシリテーター", "text": "x", "ms": None, "end_ms": None},
     ]
     by = {sp["name"]: sp for sp in s.api_snapshot()["speakers"]}
-    assert by["人物1"]["renameable"] is True and by["人物1"]["label"] == "人物1"
-    assert by["話者3"]["renameable"] is False    # 暫定#Nは登録対象外
+    assert by["参加者A"]["renameable"] is True and by["参加者A"]["label"] == "人物1"
+    assert by["参加者B"]["renameable"] is False    # 暫定#Nは登録対象外
     assert by["松井"]["renameable"] is False      # 命名済みは登録対象外
     assert "未確定" not in by                      # 未確定は出さない
     assert "ファシリテーター" not in by             # AIは出さない
+
+
+def test_anonymous_label_survives_voiceprint_rekey():
+    """暫定ラベルが声紋で確定しても、画面上の参加者名は変えない。"""
+    s = _make_state()
+    s.records = [{"speaker": "#2", "text": "a", "ms": 0, "end_ms": 500}]
+    assert s.api_snapshot()["records"][0]["speaker"] == "参加者A"
+
+    s.rekey("#2", "人物1")
+
+    snap = s.api_snapshot()
+    assert snap["records"][0]["speaker"] == "参加者A"
+    assert snap["speakers"][0]["name"] == "参加者A"
+    assert snap["speakers"][0]["label"] == "人物1"
 
 
 # --- 声紋ステータスの可視化 -------------------------------------------------
@@ -372,7 +387,7 @@ def test_snapshot_speaker_colors_are_stable():
     assert c1[0] == c1[2] and c1[0] != c1[1]      # 同一話者は同色・別話者は別色
     assert c1 == [r["color"] for r in snap2["records"]]  # 再取得でも不変
     part = {p["speaker"]: p["color"] for p in snap1["participation"]}
-    assert part["話者1"] == c1[0]                  # participationの色もrecordsと一致
+    assert part["参加者A"] == c1[0]                # participationの色もrecordsと一致
 
 
 def test_http_reset_clears_records():

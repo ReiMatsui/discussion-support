@@ -12,7 +12,7 @@ class SpeechmaticsBackend:
     """Speechmatics WebSocket STTプロバイダ.
 
     受信メッセージをSoniox互換の内部トークン形式に変換する。
-    話者ラベル: S1→"1"（表示は話者1）、不明UUはそのまま。
+    話者ラベル: S1→"1"（UI表示は参加者A/B）、不明UUはそのまま。
     """
 
     def __init__(

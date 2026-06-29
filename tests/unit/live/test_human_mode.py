@@ -155,7 +155,7 @@ def test_participation_checker_enqueues_invite(monkeypatch):
     from das.asr.live._workers import _run_participation_checker
 
     monkeypatch.setattr(bootstrap, "check_participation",
-                        lambda *a, **k: {"invite": True, "speaker": "話者2",
+                        lambda *a, **k: {"invite": True, "speaker": "参加者B",
                                          "reason": "静か"})
     state = _make_state(with_agent=True)
     recs = []
@@ -179,7 +179,7 @@ def test_participation_checker_enqueues_invite(monkeypatch):
     state.stop.set()
     th.join(timeout=2)
 
-    assert got == "話者2"
+    assert got == "参加者B"
 
 
 def test_participation_checker_rejects_unreliable_invite_target(monkeypatch):

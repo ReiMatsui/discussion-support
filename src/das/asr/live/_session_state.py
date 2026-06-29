@@ -75,6 +75,7 @@ class SessionState:
         self.diarization_events: list[DiarizationEvent] = []
         self.diarization_lock = threading.Lock()
         self.diarization_speaker_keys: dict[str, str] = {}
+        self.anonymous_labels: dict[str, str] = {}
         self._DIARIZATION_KEEP_MS = 10 * 60 * 1000
 
         # AI
@@ -150,15 +151,45 @@ class SessionState:
         key = str(key)
         if key == UNSURE_SPEAKER:
             return "未確定"
-        if key in self.names:
-            return self.names[key]
-        return f"話者{key[1:]}" if key.startswith("#") else key
+        name = self.names.get(key)
+        if name and not self._is_system_anonymous_name(name):
+            return name
+        if self._is_anonymous_speaker_key(key) or self._is_system_anonymous_name(key) or name:
+            return self._anonymous_label_for(key)
+        return key
+
+    @staticmethod
+    def _is_system_anonymous_name(name: str | None) -> bool:
+        if not name:
+            return False
+        return re.fullmatch(r"(話者|人物)\d+", str(name)) is not None
+
+    @staticmethod
+    def _anonymous_suffix(index: int) -> str:
+        letters = ""
+        n = index
+        while True:
+            n, rem = divmod(n, 26)
+            letters = chr(ord("A") + rem) + letters
+            if n == 0:
+                return letters
+            n -= 1
+
+    @staticmethod
+    def _is_anonymous_speaker_key(key: str) -> bool:
+        return key.startswith(("#", "@diar:"))
+
+    def _anonymous_label_for(self, key: str) -> str:
+        if key not in self.anonymous_labels:
+            suffix = self._anonymous_suffix(len(self.anonymous_labels))
+            self.anonymous_labels[key] = f"参加者{suffix}"
+        return self.anonymous_labels[key]
 
     def key_for_diarization_speaker(self, source: str, speaker: str) -> str:
         """外部diarizationの生ラベルを、表示用の安定した内部キーに変換する.
 
         pyannote の ``SPEAKER_00`` は実名でもUI向けラベルでもなく、provider内部の
-        匿名クラスタIDにすぎない。recordsには内部キーを入れ、表示は ``話者N`` に統一する。
+        匿名クラスタIDにすぎない。recordsには内部キーを入れ、表示は参加者A/Bに統一する。
         """
         raw = f"{source}:{speaker}"
         if raw not in self.diarization_speaker_keys:
@@ -241,6 +272,8 @@ class SessionState:
                     r["speaker"] = new
             if old in self.colors:
                 self.colors.setdefault(new, self.colors.pop(old))
+            if old in self.anonymous_labels:
+                self.anonymous_labels.setdefault(new, self.anonymous_labels.pop(old))
 
     def add_sys(self, ms, text: str):
         """システムイベントを議事録のタイムラインに残す."""
@@ -266,8 +299,8 @@ class SessionState:
     def _speaker_label(self, key: str) -> str | None:
         """話者リネーム(/rename)に渡すラベルを返す。リネーム不可なら None.
 
-        登録できるのは「声紋で確定したが名前の付いていない人物（人物N）」だけ。
-        - "人物N" → そのキー（profilesへ直接命名）
+        登録できるのは「声紋で確定したが名前の付いていない匿名参加者」だけ。
+        - 内部キー "人物N" → そのキー（profilesへ直接命名）
         暫定の "#N"（声紋未確定・Sonioxラベル依存で別人に振り替わりうる）、命名済みの
         実名、AI、未確定(?) は登録対象外（None）。確定した人だけに名前を付けることで、
         まだ揺れている話者に誤って名前を固定してしまうのを防ぐ。
@@ -315,8 +348,15 @@ class SessionState:
                                  "color": key_colors[key],
                                  "renameable": label is not None})
         with self.topics_lock:
-            topics = [{"topic": t.get("topic", ""), "speaker": t.get("speaker", "")}
-                      for t in self.topics]
+            topics = []
+            for t in self.topics:
+                speaker = t.get("speaker", "")
+                display_speaker = (
+                    speaker
+                    if speaker in self._AGENDA_SPEAKERS
+                    else self.disp_name(speaker)
+                )
+                topics.append({"topic": t.get("topic", ""), "speaker": display_speaker})
         stats = participation_stats(
             raw, exclude_speakers=(AGENT_SPEAKER, "パートナー", UNSURE_SPEAKER))
         participation = [
@@ -436,6 +476,7 @@ class SessionState:
             self.records = []
             self.names = {}
             self.colors = {}
+            self.anonymous_labels = {}
             self.agent_cursor = 0
             self.partial_text = ""
             self.partial_speaker = ""

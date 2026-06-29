@@ -208,7 +208,7 @@ INDEX_HTML = """<!doctype html>
         </div>
       </div>
       <div class="panel" id="spk-panel" hidden>
-        <h2>話者の名前を登録</h2><div id="speakers"></div>
+        <h2>参加者の名前を登録</h2><div id="speakers"></div>
       </div>
       <div class="panel" id="part-panel" hidden>
         <h2>発言量</h2><div id="participation"></div>

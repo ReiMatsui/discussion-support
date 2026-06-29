@@ -38,7 +38,7 @@ def test_named_or_auto_registered_person_is_reliable() -> None:
     rec = {"speaker": "人物1", "speaker_source": "voiceprint", "text": "発言"}
 
     assert is_reliable_human_speaker(rec) is True
-    assert intervention_speaker_name(s, rec) == "人物1"
+    assert intervention_speaker_name(s, rec) == "参加者A"
 
 
 def test_backchannel_is_not_intervention_signal() -> None:
