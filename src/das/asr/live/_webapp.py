@@ -103,6 +103,8 @@ INDEX_HTML = """<!doctype html>
   .setting-row input { width: 4.2rem; border: 1px solid var(--line); border-radius: 6px;
     padding: .3rem .45rem; background: var(--card); }
   .setting-note { font-size: .72rem; color: var(--muted); margin-top: .35rem; }
+  .intervention-summary { font-size: .76rem; color: var(--muted); margin-top: .45rem;
+    padding-top: .45rem; border-top: 1px solid var(--line); }
   .u.bc { opacity: .5; font-size: .85em; }            /* 相槌は薄く小さく */
   .u.unsure { opacity: .75; }
   .u.unsure .who { font-style: italic; }              /* 未確定は話者名をイタリックに */
@@ -222,6 +224,7 @@ INDEX_HTML = """<!doctype html>
           <label for="trigger-n">発話数</label>
           <input id="trigger-n" type="number" min="1" max="50">
         </div>
+        <div class="intervention-summary" id="intervention-summary">現在: 控えめ</div>
       </div>
       <div class="panel" id="spk-panel" hidden>
         <h2>参加者の名前を登録</h2><div id="speakers"></div>
@@ -440,12 +443,17 @@ function renderIntervention(config) {
   const enabled = $("intervention-enabled");
   const pro = $("proactivity");
   const trig = $("trigger-n");
+  const summary = $("intervention-summary");
   if (document.activeElement !== enabled) enabled.checked = !config || config.enabled !== false;
   if (document.activeElement !== pro) pro.value = (config && config.proactivity) || "controlled";
   if (document.activeElement !== trig) trig.value = config && config.trigger_n ? String(config.trigger_n) : "";
   const disabled = config && config.enabled === false;
   pro.disabled = disabled;
   trig.disabled = disabled;
+  const proLabels = { controlled: "控えめ", standard: "標準", active: "積極" };
+  const proText = proLabels[pro.value] || pro.value || "控えめ";
+  const triggerText = trig.value ? ` / ${trig.value}発話` : "";
+  summary.textContent = disabled ? "現在: オフ" : `現在: ${proText}${triggerText}`;
 }
 
 let enrolling = false;
