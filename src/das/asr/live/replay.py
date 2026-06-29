@@ -203,7 +203,7 @@ def _run_fact_check(
     if not _looks_like_fact_claim(turn["text"]):
         return None
     if opts.no_api:
-        return _event(turn, "fact_candidate", "式・数値・定義っぽい発話")
+        return _event(turn, "fact_candidate", "定義・値・データ・明示式の候補")
     result = check_fact(_utterance_window(records, _FACTCHECK_WINDOW), opts.api_key, opts.model)
     if result.get("should_correct"):
         correction = str(result.get("correction") or "").strip()

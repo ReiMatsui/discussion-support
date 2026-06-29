@@ -238,16 +238,16 @@ def test_fact_request_triggers_before_drift():
     state.factcheck_requests.put({
         "should_correct": True,
         "confidence": "high",
-        "claim": "平均は個数を合計で割る",
-        "correction": "平均は合計を個数で割ります。",
+        "claim": "指標Xの計算式は分母を分子で割る",
+        "correction": "指標Xは分子を分母で割ります。",
         "reason": "計算式が逆",
     })
-    state.drift_requests.put("計算方法の話題")
+    state.drift_requests.put("式の話題")
 
     _run_worker_briefly(state, until=lambda: bool(agent.trigger_calls))
 
     assert agent.trigger_calls
-    assert agent.trigger_calls[0]["fact_correction"]["correction"].startswith("平均は")
+    assert agent.trigger_calls[0]["fact_correction"]["correction"].startswith("指標Xは")
     assert agent.trigger_calls[0]["drift_reason"] is None
     assert state.intervention_events[0]["reason"] == "fact"
 

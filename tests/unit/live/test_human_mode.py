@@ -155,20 +155,43 @@ def test_check_participation_empty_is_no_invite():
 # 事実誤りの短い補正
 # ---------------------------------------------------------------------------
 
+def test_fact_candidate_gate_is_structural_not_keyword_based():
+    """例由来の単語ではなく、定義・値・データ・式の断定だけを候補にする."""
+    from das.asr.live._workers import _looks_like_fact_claim
+
+    positives = [
+        "指標Xの計算式は分母を分子で割る感じです",
+        "この用語の定義は、対象者が申請できる制度という意味です",
+        "制度Xの上限は70%です",
+        "x = y / z",
+        "単位はメートルです",
+    ]
+    negatives = [
+        "平均について話しましょう",
+        "2乗が出てきました",
+        "175cmだとどれくらいですか",
+        "計算方法の話です",
+        "米よりパンのほうが好きです",
+    ]
+
+    assert [_looks_like_fact_claim(t) for t in positives] == [True] * len(positives)
+    assert [_looks_like_fact_claim(t) for t in negatives] == [False] * len(negatives)
+
+
 def test_check_fact_correction_accepts_high_confidence(monkeypatch):
     import das.asr.live._bootstrap as bootstrap
     monkeypatch.setattr(bootstrap, "_post_chat_json",
                         lambda *a, **k: {"should_correct": True,
                                          "confidence": "high",
-                                         "claim": "平均は個数を合計で割る",
-                                         "correction": "平均は合計を個数で割ります。",
+                                         "claim": "指標Xの計算式は分母を分子で割る",
+                                         "correction": "指標Xは分子を分母で割ります。",
                                          "reason": "式が逆"})
 
     r = bootstrap.check_fact_correction(
-        [{"speaker": "A", "text": "平均は個数を合計で割る"}], "key", "m")
+        [{"speaker": "A", "text": "指標Xの計算式は分母を分子で割る"}], "key", "m")
 
     assert r["should_correct"] is True
-    assert r["correction"].startswith("平均は")
+    assert r["correction"].startswith("指標Xは")
 
 
 def test_check_fact_correction_suppresses_low_confidence(monkeypatch):
@@ -191,13 +214,13 @@ def test_fact_checker_enqueues_clear_formula_correction(monkeypatch):
     monkeypatch.setattr(bootstrap, "check_fact_correction",
                         lambda *a, **k: {"should_correct": True,
                                          "confidence": "high",
-                                         "claim": "平均は個数を合計で割る",
-                                         "correction": "平均は合計を個数で割ります。",
+                                         "claim": "指標Xの計算式は分母を分子で割る",
+                                         "correction": "指標Xは分子を分母で割ります。",
                                          "reason": "式が逆"})
     state = _make_state(with_agent=True)
     state.records = [
         {"speaker": "話者1", "text": "計算方法の話です", "ms": 0, "end_ms": 1000},
-        {"speaker": "話者2", "text": "平均は個数を合計で割る感じでしたっけ", "ms": 1000, "end_ms": 2000},
+        {"speaker": "話者2", "text": "指標Xの計算式は分母を分子で割る感じでしたっけ", "ms": 1000, "end_ms": 2000},
     ]
 
     th = threading.Thread(target=_run_fact_checker,
@@ -214,7 +237,7 @@ def test_fact_checker_enqueues_clear_formula_correction(monkeypatch):
     th.join(timeout=2)
 
     assert got is not None
-    assert got["correction"].startswith("平均は")
+    assert got["correction"].startswith("指標Xは")
 
 
 def test_fact_checker_ignores_plain_opinion(monkeypatch):

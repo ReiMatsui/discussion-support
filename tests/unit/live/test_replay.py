@@ -29,7 +29,7 @@ def test_load_turns_excludes_agent_by_default(tmp_path):
 
 def test_run_replay_fact_candidate_without_api():
     turns = [
-        {"turn_id": 1, "speaker": "A", "text": "平均は個数を合計で割る感じです", "ms": 0, "end_ms": 1000},
+        {"turn_id": 1, "speaker": "A", "text": "指標Xの計算式は分母を分子で割る感じです", "ms": 0, "end_ms": 1000},
     ]
 
     events = run_replay(turns, ReplayOptions(no_api=True, checks={"fact"}))
@@ -41,15 +41,15 @@ def test_run_replay_fact_candidate_without_api():
 def test_run_replay_fact_with_mock_checker():
     turns = [
         {"turn_id": 1, "speaker": "A", "text": "進め方の話です", "ms": 0, "end_ms": 1000},
-        {"turn_id": 2, "speaker": "B", "text": "平均は個数を合計で割る感じです", "ms": 1000, "end_ms": 2000},
+        {"turn_id": 2, "speaker": "B", "text": "指標Xの計算式は分母を分子で割る感じです", "ms": 1000, "end_ms": 2000},
     ]
 
     def fake_fact(utts, _key, _model):
         assert utts[-1]["speaker"] == "B"
         return {
             "should_correct": True,
-            "claim": "平均は個数を合計で割る",
-            "correction": "平均は合計を個数で割ります。",
+            "claim": "指標Xの計算式は分母を分子で割る",
+            "correction": "指標Xは分子を分母で割ります。",
             "reason": "式が逆",
         }
 
@@ -64,9 +64,9 @@ def test_run_replay_fact_with_mock_checker():
         "ms": 1000,
         "type": "fact",
         "speaker": "B",
-        "text": "平均は個数を合計で割る感じです",
-        "detail": "平均は合計を個数で割ります。",
-        "claim": "平均は個数を合計で割る",
+        "text": "指標Xの計算式は分母を分子で割る感じです",
+        "detail": "指標Xは分子を分母で割ります。",
+        "claim": "指標Xの計算式は分母を分子で割る",
         "reason": "式が逆",
     }]
 
@@ -94,7 +94,7 @@ def test_run_replay_drift_with_mock_checker():
 def test_cli_no_api_outputs_fact_candidate(tmp_path):
     p = tmp_path / "sample.turns.jsonl"
     _write_turns(p, [
-        {"turn_id": 1, "speaker": "A", "text": "平均は個数を合計で割る感じです", "ms": 0, "end_ms": 1000},
+        {"turn_id": 1, "speaker": "A", "text": "指標Xの計算式は分母を分子で割る感じです", "ms": 0, "end_ms": 1000},
     ])
 
     result = CliRunner().invoke(replay.main, [str(p), "--no-api", "--checks", "fact"])
@@ -104,7 +104,7 @@ def test_cli_no_api_outputs_fact_candidate(tmp_path):
 
 
 def test_replay_snapshot_for_ui():
-    turns = [{"turn_id": 1, "speaker": "A", "text": "平均は個数を合計で割る", "ms": 0}]
+    turns = [{"turn_id": 1, "speaker": "A", "text": "指標Xの計算式は分母を分子で割る", "ms": 0}]
     events = [{"turn_id": 1, "type": "fact_candidate", "detail": "候補"}]
 
     snap = replay_snapshot("x.turns.jsonl", turns, events,

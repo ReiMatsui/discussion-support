@@ -173,13 +173,13 @@ def test_trigger_with_invite_target(agent):
 def test_trigger_with_fact_correction(agent):
     """fact_correction指定時、_pendingが空でも短い補正コンテキスト付きで送信する."""
     agent.trigger(fact_correction={
-        "claim": "平均は個数を合計で割る",
-        "correction": "平均は合計を個数で割ります。",
+        "claim": "指標Xの計算式は分母を分子で割る",
+        "correction": "指標Xは分子を分母で割ります。",
         "reason": "式が逆",
     })
     text = agent.ws.last_create_text()
     assert "[事実補正]" in text
-    assert "平均は合計を個数で割ります。" in text
+    assert "指標Xは分子を分母で割ります。" in text
     assert "この補足だけ" in text
     assert agent._responding is True
 

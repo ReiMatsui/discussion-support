@@ -56,12 +56,29 @@ from ._speaker_policy import (
 from ._ui import _print_line
 
 
-_FACT_CANDIDATE_RE = re.compile(
-    r"("
-    r"\d+(?:\.\d+)?\s*(?:%|％|割|倍|cm|kg|m2|㎡)"
-    r"|式|計算|定義|単位|平均|中央値|割合|確率|速度|距離|面積|体積"
-    r"|とは|っていうのは|というのは|イコール|割る|掛ける|足す|引く|二乗|2乗"
-    r")"
+_FACT_DEFINITION_RE = re.compile(
+    r"(.{1,32}(とは|っていうのは|というのは)|"
+    r".{1,32}(定義|意味)\s*(は|が|を|って|とは|というのは)|"
+    r".{1,32}は.{1,32}のこと)"
+)
+_FACT_FORMULA_CUE_RE = re.compile(
+    r"((計算|算出)式|求め方|式\s*(は|が|を|って|とは|というのは))"
+)
+_FACT_UNIT_CUE_RE = re.compile(r"単位\s*(は|が|を|って|とは|というのは)")
+_FACT_NUMERIC_VALUE_RE = re.compile(
+    r"(は|が|=|＝|:|：).{0,40}"
+    r"\d+(?:\.\d+)?\s*"
+    r"(%|％|割|倍|円|人|件|個|回|年|月|日|時|分|秒|歳|度|点|位|"
+    r"kg|g|cm|mm|m|km|㎡|m2)"
+)
+_FACT_SYMBOL_FORMULA_RE = re.compile(
+    r"[A-Za-z0-9一-龥ぁ-んァ-ン]\s*"
+    r"(=|＝|≒|≈|>|<|≥|≤|\+|−|-|×|÷|/)"
+    r"\s*[A-Za-z0-9一-龥ぁ-んァ-ン]"
+)
+_FACT_OPERATION_RE = re.compile(
+    r"(は|とは|というのは|計算式|算出式|求め方).{0,48}"
+    r"(割る|掛ける|かける|足す|引く|二乗|2乗)"
 )
 
 
@@ -79,7 +96,14 @@ def _looks_like_fact_claim(text: str) -> bool:
     )
     if uncertain_only:
         return False
-    return bool(_FACT_CANDIDATE_RE.search(s))
+    return any((
+        _FACT_DEFINITION_RE.search(s),
+        _FACT_FORMULA_CUE_RE.search(s),
+        _FACT_UNIT_CUE_RE.search(s),
+        _FACT_NUMERIC_VALUE_RE.search(s),
+        _FACT_SYMBOL_FORMULA_RE.search(s),
+        _FACT_OPERATION_RE.search(s),
+    ))
 
 
 def _log_intervention_event(state: SessionState, reason: str, detail: str = "") -> None:
