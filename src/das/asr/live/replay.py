@@ -205,11 +205,12 @@ def _run_fact_check(
         return None
     if opts.no_api:
         return _event(turn, "fact_candidate", "LLM事実判定の対象")
-    result = check_fact(
-        [{"speaker": turn["speaker"], "text": turn["text"]}],
-        opts.api_key,
-        opts.model,
-    )
+    prior = [
+        r for r in records[:-1]
+        if is_intervention_signal(r)
+    ][-3:]
+    utts = _utterance_window(prior + [turn], 4)
+    result = check_fact(utts, opts.api_key, opts.model)
     if result.get("should_correct"):
         correction = str(result.get("correction") or "").strip()
         if correction:

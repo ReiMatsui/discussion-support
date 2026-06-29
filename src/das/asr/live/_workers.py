@@ -304,10 +304,15 @@ def _run_fact_checker(state: SessionState, oai_key: str, oai_model: str):
             continue
         _last_check = now
         state.fact_cursor = next_idx + 1
-        utts = [{
+        context = talk_rs[max(0, next_idx - 3):next_idx]
+        utts = [
+            {"speaker": intervention_speaker_name(state, r), "text": r["text"]}
+            for r in context
+        ]
+        utts.append({
             "speaker": intervention_speaker_name(state, candidate),
             "text": candidate["text"],
-        }]
+        })
         result = _check_fact(utts, oai_key, oai_model)
         if result.get("should_correct"):
             correction = str(result.get("correction") or "").strip()

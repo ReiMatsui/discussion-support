@@ -71,7 +71,7 @@ def test_run_replay_fact_with_mock_checker():
     }]
 
 
-def test_run_replay_fact_checks_only_current_candidate():
+def test_run_replay_fact_checks_target_with_recent_context():
     turns = [
         {"turn_id": 1, "speaker": "A", "text": "事物Aの高さは200メートルです", "ms": 0, "end_ms": 1000},
         {"turn_id": 2, "speaker": "B", "text": "国Bの首都は都市Aです", "ms": 1000, "end_ms": 2000},
@@ -90,7 +90,10 @@ def test_run_replay_fact_checks_only_current_candidate():
 
     assert calls == [
         [{"speaker": "A", "text": "事物Aの高さは200メートルです"}],
-        [{"speaker": "B", "text": "国Bの首都は都市Aです"}],
+        [
+            {"speaker": "A", "text": "事物Aの高さは200メートルです"},
+            {"speaker": "B", "text": "国Bの首都は都市Aです"},
+        ],
     ]
 
 

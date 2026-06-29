@@ -282,6 +282,26 @@ def test_check_fact_correction_suppresses_low_confidence(monkeypatch):
     ) == {"should_correct": False}
 
 
+def test_check_fact_correction_marks_only_last_utterance_as_target(monkeypatch):
+    import das.asr.live._bootstrap as bootstrap
+
+    prompts = []
+
+    def _fake_post(params, *_args, **_kwargs):
+        prompts.append(params["messages"][0]["content"])
+        return {"should_correct": False}
+
+    monkeypatch.setattr(bootstrap, "_post_chat_json", _fake_post)
+
+    bootstrap.check_fact_correction([
+        {"speaker": "A", "text": "対象Aについて話しています"},
+        {"speaker": "B", "text": "世界一高い山です"},
+    ], "key", "m")
+
+    assert "- [参照] A: 対象Aについて話しています" in prompts[0]
+    assert "- [判定対象] B: 世界一高い山です" in prompts[0]
+
+
 def test_fact_checker_enqueues_clear_formula_correction(monkeypatch):
     """式・定義っぽい発話だけを候補にし、高確信の補正をキューに積む."""
     import das.asr.live._bootstrap as bootstrap
@@ -319,7 +339,48 @@ def test_fact_checker_enqueues_clear_formula_correction(monkeypatch):
 
     assert got is not None
     assert got["correction"].startswith("指標Xは")
-    assert calls == [[{"speaker": "参加者A", "text": "指標Xの計算式は分母を分子で割る感じです"}]]
+    assert calls == [[
+        {"speaker": "参加者A", "text": "計算方法の話です"},
+        {"speaker": "参加者B", "text": "指標Xの計算式は分母を分子で割る感じです"},
+    ]]
+
+
+def test_fact_checker_passes_recent_context_before_target(monkeypatch):
+    """直前3発話は参照として渡し、判定対象は最後に置く."""
+    import das.asr.live._bootstrap as bootstrap
+    from das.asr.live._workers import _run_fact_checker
+
+    calls = []
+
+    def _fake_fact(utts, *_args):
+        calls.append(utts)
+        return {"should_correct": False}
+
+    monkeypatch.setattr(bootstrap, "check_fact_correction", _fake_fact)
+    state = _make_state(with_agent=True)
+    state.records = [
+        {"speaker": "話者1", "text": "平均について話しましょう", "ms": 0, "end_ms": 1000},
+        {"speaker": "話者1", "text": "計算方法の話です", "ms": 1000, "end_ms": 2000},
+        {"speaker": "話者1", "text": "優先順位を決めましょう", "ms": 2000, "end_ms": 3000},
+        {"speaker": "話者1", "text": "ランキングについて話しましょう", "ms": 3000, "end_ms": 4000},
+        {"speaker": "話者1", "text": "対象の値は100です", "ms": 4000, "end_ms": 5000},
+    ]
+
+    th = threading.Thread(target=_run_fact_checker,
+                          args=(state, "key", "gpt-5-mini"), daemon=True)
+    th.start()
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline and not calls:
+        time.sleep(0.05)
+    state.stop.set()
+    th.join(timeout=2)
+
+    assert calls == [[
+        {"speaker": "参加者A", "text": "計算方法の話です"},
+        {"speaker": "参加者A", "text": "優先順位を決めましょう"},
+        {"speaker": "参加者A", "text": "ランキングについて話しましょう"},
+        {"speaker": "参加者A", "text": "対象の値は100です"},
+    ]]
 
 
 def test_fact_checker_ignores_plain_opinion(monkeypatch):

@@ -285,7 +285,11 @@ def check_fact_correction(utterances: list[dict], api_key: str, model: str) -> d
     """
     if not utterances or not api_key:
         return {"should_correct": False}
-    utt_text = "\n".join(f"- {u['speaker']}: {u['text']}" for u in utterances)
+    lines = []
+    for i, u in enumerate(utterances):
+        label = "判定対象" if i == len(utterances) - 1 else "参照"
+        lines.append(f"- [{label}] {u['speaker']}: {u['text']}")
+    utt_text = "\n".join(lines)
     prompt = _FACTCHECK_PROMPT.format(utterances=utt_text)
     params = _build_chat_params(model, prompt, max_out=700, temperature=0.0)
     result = _post_chat_json(params, api_key, timeout=15, label="fact")
