@@ -171,6 +171,7 @@ def test_recv_loop_uses_diarization_when_voiceprint_is_unavailable() -> None:
         "speaker_reason": "diarization_overlap_1.00",
     }]
     assert state.disp_name(state.records[0]["speaker"]) == "参加者A"
+    assert state.names == {}
 
 
 def test_recv_loop_prefers_internal_voiceprint_over_external_diarization() -> None:

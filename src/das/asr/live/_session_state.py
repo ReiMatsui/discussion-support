@@ -196,7 +196,6 @@ class SessionState:
             idx = len(self.diarization_speaker_keys) + 1
             key = f"@diar:{idx}"
             self.diarization_speaker_keys[raw] = key
-            self.names[key] = f"話者{idx}"
         return self.diarization_speaker_keys[raw]
 
     def key_for_stt_fallback_speaker(self, speaker: str) -> str:
@@ -673,20 +672,14 @@ class SessionState:
                 dn = _html.escape(self.disp_name(s))
                 idx_s = list(self.colors).index(s) if s in self.colors else 0
                 c = HTML_PALETTE[idx_s % len(HTML_PALETTE)]
-                is_renameable = self._serve and self.tracker is not None and not s.startswith("#")
+                lbl = self._speaker_label(str(s))
+                is_renameable = self._serve and self.tracker is not None and lbl is not None
                 if is_renameable:
-                    lbl = s
-                    for _l, _k in self.tracker.sp_map.items():
-                        if _k == s:
-                            lbl = _l
-                            break
-                    is_anon = re.match(r"^人物\d+$", s)
-                    ph = "名前" if is_anon else "新しい名前"
                     sp_tags.append(
                         f'<div class="speaker-tag">'
                         f'<div class="speaker-name"><span class="dot" style="background:{c}"></span>{dn}</div>'
                         f'<div class="rename-row">'
-                        f'<input class="rename-input" placeholder="{ph}" data-label="{_html.escape(lbl)}">'
+                        f'<input class="rename-input" placeholder="名前" data-label="{_html.escape(lbl)}">'
                         f'<button class="rename-btn" onclick="rename(this)">登録</button>'
                         f'</div></div>')
                 else:

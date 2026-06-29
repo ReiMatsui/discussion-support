@@ -367,6 +367,7 @@ def test_http_diarization_updates_max_speakers_for_next_meeting():
         assert out == {"ok": True, "max_speakers": 3}
         assert s.args.diarization_max_speakers == 3
         assert s.api_snapshot()["diarization"]["max_speakers"] == 3
+        assert s.records[-1]["sys"] == "想定話者数を更新: 3（新しい会議/再接続で確実に反映）"
     finally:
         httpd.shutdown()
 
@@ -550,6 +551,25 @@ def test_http_get_state_and_post_stop():
         assert stop_calls == [True]  # request_stop が呼ばれた
     finally:
         httpd.shutdown()
+
+
+def test_legacy_html_rename_targets_only_confirmed_unregistered_participants():
+    s = _make_state()
+    s.tracker = _FakeTracker()
+    s.records = [
+        {"speaker": "人物1", "text": "a", "ms": 0, "end_ms": 500},
+        {"speaker": "#2", "text": "b", "ms": 500, "end_ms": 1000},
+        {"speaker": "松井", "text": "c", "ms": 1000, "end_ms": 1500},
+    ]
+
+    s.write_html()
+
+    with open(s.html_path, encoding="utf-8") as f:
+        html = f.read()
+    assert 'data-label="人物1"' in html
+    assert 'data-label="#2"' not in html
+    assert 'data-label="松井"' not in html
+    assert "参加者A" in html
 
 
 def test_http_stop_fallback_sets_event():
