@@ -231,6 +231,59 @@ def test_recv_loop_prefers_internal_voiceprint_over_external_diarization() -> No
     }]
 
 
+def test_recv_loop_auto_registration_message_uses_display_label() -> None:
+    import datetime
+
+    class Args:
+        lang = "ja"
+        vp_debug = False
+
+    class Backend:
+        def parse_message(self, raw: dict[str, Any], lang: str) -> dict[str, Any]:
+            return raw
+
+    class Tracker:
+        def __init__(self) -> None:
+            self.last = {
+                "kind": "自動登録",
+                "label": "1",
+                "name": "人物1",
+                "rename": ("#1", "人物1"),
+            }
+
+        def classify(self, *args: object, **kwargs: object) -> str:
+            return "人物1"
+
+    state = SessionState(  # type: ignore[no-untyped-call]
+        args=Args(),
+        started=datetime.datetime(2026, 1, 1),
+        out_path="/tmp/o.md",
+        html_path="/tmp/o.html",
+        diag_path="/tmp/o.diag",
+        turns_path="/tmp/o.turns",
+        wav_path="/tmp/o.wav",
+        tracker=Tracker(),  # type: ignore[arg-type]
+        serve=False,
+    )
+    state.save = lambda *a, **k: None  # type: ignore[method-assign]
+    state.asr_pcm_buf = bytearray(b"\0" * 16000 * 2 * 3)
+    loop = RecvLoop(state, Args(), Backend())  # type: ignore[arg-type]
+    loop.cur_speaker = "1"  # type: ignore[assignment]
+    loop.cur_text = "これはテストです"
+    loop.cur_ms = 1000
+    loop.cur_end = 3000
+
+    loop.flush()  # type: ignore[no-untyped-call]
+
+    assert state.records[0]["sys"] == (
+        "この声を「参加者A」として追跡開始"
+        "（名前は右側の登録欄から設定できます）"
+    )
+    assert "人物1" not in state.records[0]["sys"]
+    assert state.records[1]["speaker"] == "人物1"
+    assert state.disp_name(state.records[1]["speaker"]) == "参加者A"
+
+
 def test_recv_loop_normalizes_stt_label_when_diarization_is_enabled_but_unresolved() -> None:
     import datetime
 

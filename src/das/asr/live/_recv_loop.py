@@ -101,10 +101,11 @@ class RecvLoop:
             elif d and d["kind"] == "自動登録":
                 if d["rename"]:
                     s.rekey(*d["rename"])
-                s.add_sys(self.cur_ms, f"この声を「{d['name']}」として追跡開始"
-                                       f"（実名にするには {d['label']}=名前）")
-                _print_line(f"# この声を「{d['name']}」として追跡します"
-                            f"（実名にするには {d['label']}=名前 と入力）")
+                display_name = s.disp_name(d["name"])
+                s.add_sys(self.cur_ms, f"この声を「{display_name}」として追跡開始"
+                                       "（名前は右側の登録欄から設定できます）")
+                _print_line(f"# この声を「{display_name}」として追跡します"
+                            "（名前は右側の登録欄から設定できます）")
             elif d and d["kind"] == "合流":
                 if d["rename"]:
                     s.rekey(*d["rename"])
