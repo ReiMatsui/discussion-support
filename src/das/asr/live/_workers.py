@@ -71,6 +71,10 @@ _FACT_NUMERIC_VALUE_RE = re.compile(
     r"(%|％|割|倍|円|人|件|個|回|年|月|日|時|分|秒|歳|度|点|位|"
     r"kg|g|cm|mm|m|km|㎡|m2)"
 )
+_FACT_NUMERIC_UNCERTAIN_RE = re.compile(
+    r"(どれ|何|なん|いくつ|いくら|ぐらい|くらい|程度|"
+    r"だいたい|大体|かな|ですか|でしょうか|\?)"
+)
 _FACT_SYMBOL_FORMULA_RE = re.compile(
     r"[A-Za-z0-9一-龥ぁ-んァ-ン]\s*"
     r"(=|＝|≒|≈|>|<|≥|≤|\+|−|-|×|÷|/)"
@@ -79,6 +83,11 @@ _FACT_SYMBOL_FORMULA_RE = re.compile(
 _FACT_OPERATION_RE = re.compile(
     r"(は|とは|というのは|計算式|算出式|求め方).{0,48}"
     r"(割る|掛ける|かける|足す|引く|二乗|2乗)"
+)
+_FACT_OPERATION_RELATION_RE = re.compile(
+    r"[A-Za-z0-9一-龥ぁ-んァ-ン%％]+.{0,24}"
+    r"(を|に|から).{1,32}(で|に)?"
+    r"(割る|掛ける|かける|足す|引く)"
 )
 
 
@@ -96,13 +105,18 @@ def _looks_like_fact_claim(text: str) -> bool:
     )
     if uncertain_only:
         return False
+    numeric_value = (
+        _FACT_NUMERIC_VALUE_RE.search(s)
+        and not _FACT_NUMERIC_UNCERTAIN_RE.search(s)
+    )
     return any((
         _FACT_DEFINITION_RE.search(s),
         _FACT_FORMULA_CUE_RE.search(s),
         _FACT_UNIT_CUE_RE.search(s),
-        _FACT_NUMERIC_VALUE_RE.search(s),
+        numeric_value,
         _FACT_SYMBOL_FORMULA_RE.search(s),
         _FACT_OPERATION_RE.search(s),
+        _FACT_OPERATION_RELATION_RE.search(s),
     ))
 
 
