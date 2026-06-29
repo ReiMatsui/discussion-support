@@ -123,6 +123,13 @@ def test_api_snapshot_exposes_intervention_settings():
     }]
 
 
+def test_api_snapshot_exposes_startup_setup_state():
+    s = _make_state()
+    s.waiting_to_start = True
+
+    assert s.api_snapshot()["setup"] == {"waiting": True}
+
+
 def test_http_rename_without_tracker():
     """/rename（声紋なし）で表示名が更新される（SPAのリネームフロー）."""
     s = _make_state()
@@ -372,6 +379,21 @@ def test_http_diarization_updates_max_speakers_for_next_meeting():
         httpd.shutdown()
 
 
+def test_http_start_clears_startup_wait():
+    s = _make_state()
+    s.waiting_to_start = True
+    httpd, port = _serve(s)
+    try:
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/api/start", method="POST")
+        with urllib.request.urlopen(req) as r:
+            out = json.loads(r.read())
+        assert out == {"ok": True, "waiting": False}
+        assert s.waiting_to_start is False
+        assert s.start_requested.is_set()
+    finally:
+        httpd.shutdown()
+
+
 # --- 課題②: 安定した話者色 --------------------------------------------------
 
 def test_snapshot_speaker_colors_are_stable():
@@ -520,6 +542,9 @@ def test_http_get_root_serves_spa():
         assert "<title>議論支援</title>" in html
         assert "/api/stream" in html   # SSEを使うSPA
         assert "/api/mode" in html     # モード切替
+        assert "/api/start" in html
+        assert 'id="setup-panel"' in html
+        assert 'id="start-session"' in html
         assert "/api/intervention" in html
         assert 'id="speaker-count-status"' in html
         assert 'id="intervention-enabled"' in html

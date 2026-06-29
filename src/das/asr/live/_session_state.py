@@ -120,6 +120,8 @@ class SessionState:
         self.reset_requested = threading.Event()  # メインスレッドへの作り直し要求
         self.resetting = False                   # UI表示用（リセット処理中）
         self.request_reset: Callable[[], None] | None = None
+        self.waiting_to_start = False             # 開始前設定画面で待機中
+        self.start_requested = threading.Event()
 
         # PCMバッファ
         self.pcm_buf = bytearray()
@@ -377,6 +379,7 @@ class SessionState:
             "mode": self.session_mode(),
             "running": not self.stop.is_set(),
             "resetting": self.resetting,
+            "setup": {"waiting": self.waiting_to_start},
             "vp": {"enabled": self.tracker is not None,
                    "model": getattr(self.tracker, "model", None),
                    "locked": self.tracker is not None and not self.tracker.auto,

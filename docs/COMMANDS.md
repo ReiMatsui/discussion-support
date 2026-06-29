@@ -49,20 +49,23 @@ uv run python -m das.asr.live --stt speechmatics
 # ブラウザを開かない
 uv run python -m das.asr.live --no-open
 
+# 開始前設定をスキップしてすぐ開始
+uv run python -m das.asr.live --no-setup
+
 # 声紋照合を無効化
 uv run python -m das.asr.live --no-vp
 ```
 
 ### 声の登録
 
-起動中にターミナルで `1=松井` のように入力すると、「人物1」が「松井」に実名化される。次回以降は `voices.json` から自動認識。
+起動中にブラウザUIの「参加者の名前を登録」から名前を入れると、次回以降は `voices.json` から自動認識。
 
 ---
 
 ## 2. AIファシリテーター（Realtime API v2）
 
-AIファシリテーターを `--agent` で有効化する。脱線したら本題に戻し、発言の
-少ない人に声をかける。起動後はブラウザUIで3モードを切り替えられる。
+AIファシリテーターは既定で有効。脱線したら本題に戻し、発言の少ない人に
+声をかける。起動後はブラウザUIで3モードを切り替えられる。
 
 ### 3つのモード
 
@@ -73,20 +76,23 @@ AIファシリテーターを `--agent` で有効化する。脱線したら本�
 | 人間に介入 | 人同士の議論を進行役として支援（脱線戻し・声かけ） |
 
 ```bash
-# AIファシリテーターを有効化（議題は冒頭から自動推定）
-uv run python -m das.asr.live --agent
+# 推奨: 起動後、ブラウザで参加人数を確認してから開始
+uv run python -m das.asr.live
 
 # 議題を指定（脱線判定の基準。UIから後で変更も可）
-uv run python -m das.asr.live --agent --topic 'AIツール導入の是非'
+uv run python -m das.asr.live --topic 'AIツール導入の是非'
 
-# 介入の積極性（controlled=控えめ / standard=既定 / active=積極的）
-uv run python -m das.asr.live --agent --proactivity controlled
+# 介入の積極性（controlled=既定・控えめ / standard=標準 / active=積極的）
+uv run python -m das.asr.live --proactivity standard
 
 # AIと音声で議論する相手を付ける（AIと会話モードで起動）
-uv run python -m das.asr.live --agent --debate 'AIツール導入の是非'
+uv run python -m das.asr.live --debate 'AIツール導入の是非'
 
 # 声を変える（alloy/ash/ballad/coral/echo/sage/shimmer/verse/marin/cedar）
-uv run python -m das.asr.live --agent --agent-voice sage
+uv run python -m das.asr.live --agent-voice sage
+
+# AIファシリテーターを使わない
+uv run python -m das.asr.live --no-agent
 ```
 
 モードは**ブラウザUI上で実行中に切替**できる（AIパートナーの接続/切断も含む）。
@@ -102,10 +108,10 @@ uv run python -m das.asr.live --agent --agent-voice sage
 
 ```bash
 # 脱線→本題に戻す挙動の確認
-uv run python -m das.asr.live --simulate 'AIツール導入の是非' --sim-scenario derailed --agent
+uv run python -m das.asr.live --simulate 'AIツール導入の是非' --sim-scenario derailed
 
 # 発言量の偏り→声かけの確認
-uv run python -m das.asr.live --simulate 'AIツール導入の是非' --sim-scenario imbalanced --agent
+uv run python -m das.asr.live --simulate 'AIツール導入の是非' --sim-scenario imbalanced
 ```
 
 ---

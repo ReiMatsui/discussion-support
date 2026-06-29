@@ -45,20 +45,21 @@ speaker-attribution 由来の「誰が何を言ったか」文字起こしを統
 uv sync --extra soniox
 echo "SONIOX_API_KEY=..." >> .env
 uv run das listen-soniox            # 録音→話者特定→統合AF構築→ライブ介入
-# 実行中: 「1=松井」で話者の実名登録 / Ctrl-C で停止
+# 実行中: ブラウザUIで参加人数・名前登録・停止
 # 議事録(MD/HTML/turns.jsonl)は transcripts/ に自動保存
 # バッチでも可: uv run das run-session transcripts/<日時>.turns.jsonl
 ```
 
-### AIファシリテーター付きライブUI (`python -m das.asr.live --agent`)
+### AIファシリテーター付きライブUI (`python -m das.asr.live`)
 
-ブラウザUI（`http://127.0.0.1:8231/`）でライブ議事録・3モード切替（議事録のみ／
+ブラウザUI（`http://127.0.0.1:8231/`）で開始前の参加人数設定・ライブ議事録・3モード切替（議事録のみ／
 AIと会話／人間に介入）・議題編集・話者リネーム・発言量・「新しい会議」リセット・
 停止が行える。脱線を本題に戻し、発言の少ない人に声をかける。
 
 ```bash
-uv run python -m das.asr.live --agent --topic 'AIツール導入の是非'
-# 一人で動作確認: --simulate '議題' --sim-scenario derailed|imbalanced --agent
+uv run python -m das.asr.live
+# 議題を指定する場合: --topic 'AIツール導入の是非'
+# 一人で動作確認: --simulate '議題' --sim-scenario derailed|imbalanced
 ```
 
 詳しくは `docs/COMMANDS.md` を参照。

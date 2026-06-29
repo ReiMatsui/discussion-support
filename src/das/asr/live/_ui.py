@@ -108,6 +108,13 @@ class _UIHandler:
                     else:
                         # 接続なし（テスト等）は状態クリアのみ
                         self._json(200, s.reset_for_new_meeting())
+                elif self.path == "/api/start":
+                    s.waiting_to_start = False
+                    s.start_requested.set()
+                    s.rev += 1
+                    s.save()
+                    _print_line("# 会議を開始します（UIから）")
+                    self._json(200, {"ok": True, "waiting": False})
                 elif self.path == "/api/mode":
                     from das.asr.live._workers import set_session_mode
                     length = int(self.headers.get("Content-Length", 0))

@@ -652,7 +652,7 @@ def _run_stdin_commands(state: SessionState):
                 state.save()
                 _print_line(f"# 話者{label} → {name}（過去の発言も置換済み）")
         elif line.strip():
-            _print_line("# コマンド: 「1=松井」(声を登録) / 「fix 2=1」「fix 人物2=人物1」(統合) / Ctrl+Cで終了")
+            _print_line("# 名前登録はブラウザUIを推奨。ターミナル操作: 「1=松井」/「fix 2=1」/ Ctrl+Cで終了")
 
 
 def _run_from_mic(state: SessionState, device):

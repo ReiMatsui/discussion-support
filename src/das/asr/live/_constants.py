@@ -307,13 +307,13 @@ _ECHO_COOLDOWN = 2.0          # AI発話終了後のエコーウィンドウ秒�
 # --- 積極性プロファイル（人間ファシリテーションの介入頻度, S5） ---
 # silence_summarize: 沈黙がこの秒数続いたら要約/整理の介入を検討（None=しない）。
 # cooldown: 脱線介入・声かけの最小間隔（しつこさ防止）。
-# 既定は standard。控えめ寄りに調整（過剰介入のフィードバックを反映）。
+# 既定は controlled。まずは明確な問題時だけ介入する。
 _PROACTIVITY_PROFILES = {
     "controlled": {"silence_summarize": None, "cooldown": 40.0},  # 明確な問題時のみ
     "standard":   {"silence_summarize": 18.0, "cooldown": 25.0},
     "active":     {"silence_summarize": 8.0,  "cooldown": 15.0},
 }
-_PROACTIVITY_DEFAULT = "standard"
+_PROACTIVITY_DEFAULT = "controlled"
 # 相槌判定: 相槌パターンに一致する発話ではPartnerを止めない
 _BACKCHANNEL_RE = re.compile(
     r'^[\s、。,.!?！？]*'

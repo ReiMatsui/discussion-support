@@ -51,6 +51,13 @@ INDEX_HTML = """<!doctype html>
   .agenda-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 14px;
     background: var(--card); border: 1px solid var(--line); border-radius: 10px;
     padding: 8px 12px; }
+  .setup-panel { background: #fff7ed; border: 1px solid #fed7aa; border-radius: 10px;
+    padding: 10px 12px; margin-bottom: 14px; }
+  .setup-panel h2 { font-size: .9rem; margin: 0 0 .45rem; }
+  .setup-controls { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+  .setup-controls label { font-size: .82rem; color: var(--muted); }
+  .setup-controls select { border: 1px solid var(--line); border-radius: 6px;
+    padding: .35rem .5rem; background: var(--card); }
   .agenda-label { font-size: .82rem; color: var(--muted); font-weight: 600;
     flex-shrink: 0; }
   .agenda-bar input { flex: 1; min-width: 0; border: 1px solid var(--line);
@@ -154,6 +161,15 @@ INDEX_HTML = """<!doctype html>
   <div class="modes" id="modes"></div>
 
   <div class="vp-banner" id="vp-banner" hidden></div>
+
+  <div class="setup-panel" id="setup-panel" hidden>
+    <h2>開始前設定</h2>
+    <div class="setup-controls">
+      <label for="setup-speaker-count">参加人数</label>
+      <select id="setup-speaker-count"></select>
+      <button class="btn" id="start-session">会議を開始</button>
+    </div>
+  </div>
 
   <div class="agenda-bar">
     <span class="agenda-label">議題</span>
@@ -408,13 +424,15 @@ function renderEnroll(vp) {
 
 function renderDiarization(config) {
   const sel = $("speaker-count");
+  const setupSel = $("setup-speaker-count");
   const status = $("speaker-count-status");
-  if (!sel.options.length) {
-    sel.innerHTML = '<option value="">未指定</option>'
+  const options = '<option value="">未指定</option>'
       + Array.from({ length: 10 }, (_, i) => `<option value="${i + 1}">${i + 1}人</option>`).join("");
-  }
+  if (!sel.options.length) sel.innerHTML = options;
+  if (!setupSel.options.length) setupSel.innerHTML = options;
   const value = config && config.max_speakers ? String(config.max_speakers) : "";
   if (document.activeElement !== sel) sel.value = value;
+  if (document.activeElement !== setupSel) setupSel.value = value;
   status.textContent = value ? `設定: ${value}人` : "設定: 未指定";
 }
 
@@ -423,7 +441,7 @@ function renderIntervention(config) {
   const pro = $("proactivity");
   const trig = $("trigger-n");
   if (document.activeElement !== enabled) enabled.checked = !config || config.enabled !== false;
-  if (document.activeElement !== pro) pro.value = (config && config.proactivity) || "standard";
+  if (document.activeElement !== pro) pro.value = (config && config.proactivity) || "controlled";
   if (document.activeElement !== trig) trig.value = config && config.trigger_n ? String(config.trigger_n) : "";
   const disabled = config && config.enabled === false;
   pro.disabled = disabled;
@@ -469,7 +487,8 @@ async function toggleRoster() {
 }
 
 async function setSpeakerCount() {
-  const v = $("speaker-count").value;
+  const source = document.activeElement === $("setup-speaker-count") ? $("setup-speaker-count") : $("speaker-count");
+  const v = source.value;
   const status = $("speaker-count-status");
   status.textContent = "保存中...";
   try {
@@ -479,8 +498,18 @@ async function setSpeakerCount() {
     });
     if (!res.ok) throw new Error("bad status");
     const d = await res.json();
+    $("speaker-count").value = d.max_speakers ? String(d.max_speakers) : "";
+    $("setup-speaker-count").value = d.max_speakers ? String(d.max_speakers) : "";
     status.textContent = d.max_speakers ? `保存済み: ${d.max_speakers}人` : "保存済み: 未指定";
   } catch (e) { alert("話者数の設定に失敗しました"); }
+}
+
+async function startSession() {
+  try {
+    const res = await fetch("/api/start", { method: "POST" });
+    if (!res.ok) throw new Error("bad status");
+    $("setup-panel").hidden = true;
+  } catch (e) { alert("会議の開始に失敗しました"); }
 }
 
 async function setIntervention() {
@@ -500,6 +529,7 @@ async function setIntervention() {
 
 function render(state) {
   renderModes(state.mode);
+  $("setup-panel").hidden = !(state.setup && state.setup.waiting);
   renderVpBanner(state.vp);
   renderEnroll(state.vp);
   renderDiarization(state.diarization);
@@ -577,6 +607,8 @@ $("agenda").addEventListener("keydown", (e) => { if (e.key === "Enter") setAgend
 $("enroll-btn").onclick = enrollPerson;
 $("roster-lock").addEventListener("change", toggleRoster);
 $("speaker-count").addEventListener("change", setSpeakerCount);
+$("setup-speaker-count").addEventListener("change", setSpeakerCount);
+$("start-session").onclick = startSession;
 $("intervention-enabled").addEventListener("change", setIntervention);
 $("proactivity").addEventListener("change", setIntervention);
 $("trigger-n").addEventListener("change", setIntervention);

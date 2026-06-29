@@ -74,8 +74,9 @@ class LiveArgs:
     soniox_endpoint: bool = True
     diarization: str = "none"  # none / pyannote / assemblyai
     diarization_max_speakers: int | None = None
+    setup: bool = True
     port: int = 8231
-    agent: bool = False
+    agent: bool = True
     agent_voice: str = "shimmer"
     agent_trigger: int = 10
     simulate: str | None = None
@@ -83,7 +84,7 @@ class LiveArgs:
     debate: str | None = None
     debate_voice: str = "echo"
     topic: str | None = None   # 人間同士モードの議題（脱線判定の基準）
-    proactivity: str = "standard"  # 介入の積極性（controlled/standard/active）
+    proactivity: str = "controlled"  # 介入の積極性（controlled/standard/active）
 
 
 # ---------------------------------------------------------------------------
@@ -314,7 +315,7 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
             print(f"# 声紋プロファイル: {', '.join(tracker.profiles)}（{args.voices}）", flush=True)
         else:
             print("# 声紋プロファイル: なし。未知の声は名前未登録の参加者として自動追跡、"
-                  f"「1=松井」で実名化すると次回から自動表示（{args.voices}）", flush=True)
+                  f"ブラウザUIで名前を登録すると次回から自動表示（{args.voices}）", flush=True)
         if tracker is not None:
             tracker.set_max_human_speakers(args.diarization_max_speakers)
 
@@ -348,6 +349,7 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
                          diarization_provider=diarizer,
                          speaker_resolver=SpeakerResolver())
     state.stt_backend = backend
+    state.waiting_to_start = bool(args.setup and _serve and not args.wav and not args.simulate)
 
     # --- AIエージェント ---
     _agent_oai_key = os.environ.get("OPENAI_API_KEY", "")
@@ -388,6 +390,7 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
             print(f"# 警告: UIサーバーをポート{args.port}で起動できません ({e})", flush=True)
             _serve = False
             state._serve = False
+            state.waiting_to_start = False
 
     if args.simulate and args.debate:
         raise SystemExit("--simulate と --debate は同時に使えません")
@@ -397,7 +400,7 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
         if not _oai_key:
             raise SystemExit("--simulate には OPENAI_API_KEY が必要です")
         if not args.agent:
-            print("# ヒント: --agent を付けるとファシリテーターが介入します", flush=True)
+            print("# ヒント: --no-agent 指定中のためファシリテーターは介入しません", flush=True)
         if args.agent and args.agent_voice in DiscussionSimulator.SPEAKERS.values():
             print(f"# 警告: --agent-voice={args.agent_voice} はSimulator話者と重複しています。"
                   f"声紋分離に影響する可能性があります。alloy を推奨します。", flush=True)
@@ -410,7 +413,7 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
         if not _oai_key:
             raise SystemExit("--debate には OPENAI_API_KEY が必要です")
         if not args.agent:
-            print("# ヒント: --agent を付けるとファシリテーターが介入します", flush=True)
+            print("# ヒント: --no-agent 指定中のためファシリテーターは介入しません", flush=True)
         if args.agent and args.debate_voice == args.agent_voice:
             print(f"# 警告: --debate-voice と --agent-voice が同じ ({args.debate_voice})。"
                   f"声紋分離に影響します。", flush=True)
@@ -440,7 +443,6 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
             _explicit_agenda = True
             print(f"# 脱線検出: 議題を基準論点としてシード → {_agenda}", flush=True)
 
-    print(f"# {backend.name} に接続中…", flush=True)
     import contextlib as _contextlib
 
     def _connect_stt():
@@ -448,6 +450,27 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
         _ws.send(json.dumps(backend.start_message(args.model, args.lang)))
         return _ws
 
+    state.save()
+    if _serve:
+        print(f"# ブラウザUI: http://127.0.0.1:{args.port}/ "
+              f"（開始前設定・モード切替・ライブ更新・新しい会議・停止）", flush=True)
+    else:
+        print(f"# ブラウザ表示: open {html_path}", flush=True)
+    if not args.no_open:
+        import webbrowser
+        if _serve:
+            webbrowser.open(f"http://127.0.0.1:{args.port}/")
+        else:
+            webbrowser.open("file://" + os.path.abspath(html_path))
+    if state.waiting_to_start:
+        print("# 開始前設定: ブラウザで参加人数などを確認し、「会議を開始」を押してください", flush=True)
+        while not state.stop.is_set() and not state.start_requested.wait(timeout=0.2):
+            pass
+    if state.stop.is_set():
+        _cleanup(state, tracker, wav_path, out_path, html_path)
+        return
+
+    print(f"# {backend.name} に接続中…", flush=True)
     state.stt_ws = _connect_stt()
     if state.diarization_provider is not None:
         state.diarization_provider.start()
@@ -498,20 +521,9 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
                          daemon=True).start()
 
         state.save()
-        print("# 開始。話してください（「1=松井」で声を登録 / UIの停止ボタン or Ctrl+Cで終了）",
+        print("# 開始。話してください（名前登録はブラウザUIから / UIの停止ボタン or Ctrl+Cで終了）",
               flush=True)
         print(f"# 保存先: {out_path}", flush=True)
-        if _serve:
-            print(f"# ブラウザUI: http://127.0.0.1:{args.port}/ "
-                  f"（モード切替・ライブ更新・新しい会議・停止）\n", flush=True)
-        else:
-            print(f"# ブラウザ表示: open {html_path}\n", flush=True)
-        if not args.no_open:
-            import webbrowser
-            if _serve:
-                webbrowser.open(f"http://127.0.0.1:{args.port}/")
-            else:
-                webbrowser.open("file://" + os.path.abspath(html_path))
 
         # UIからの停止フック: stopを立て、STTのWebSocketを閉じて受信ループを抜ける（F1）
         def _request_stop():

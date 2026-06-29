@@ -65,6 +65,8 @@ def post_system(text: str) -> None:
 @click.option("--device", default=None, help="マイクデバイス名")
 @click.option("--out", default=None, help="保存先mdファイル（省略時 transcripts/日時.md）")
 @click.option("--no-open", is_flag=True, help="ブラウザを自動で開かない")
+@click.option("--setup/--no-setup", default=True,
+              help="起動時にブラウザで開始前設定を行う")
 @click.option("--no-vp", is_flag=True, help="声紋照合を無効化")
 @click.option("--voices", default="voices.json", help="声紋プロファイルの保存先")
 @click.option("--vp-model", default="redimnet",
@@ -85,7 +87,7 @@ def post_system(text: str) -> None:
 @click.option("--diarization-max-speakers", type=int, default=None,
               help="外部話者分離に渡す最大話者数ヒント（AssemblyAI等）")
 @click.option("--port", type=int, default=8231, help="UIサーバーのポート番号（0で無効）")
-@click.option("--agent", is_flag=True,
+@click.option("--agent/--no-agent", default=True,
               help="AIファシリテーターを有効化（OPENAI_API_KEY必要）")
 @click.option("--agent-voice", default="shimmer",
               help="AIファシリテーターの声")
@@ -101,11 +103,11 @@ def post_system(text: str) -> None:
               help="AI会話相手と議論（Realtime APIで音声対話）")
 @click.option("--debate-voice", default="echo", help="会話相手の声")
 @click.option("--topic", metavar="TOPIC", default=None,
-              help="人間同士の議論の議題（--agentと併用。脱線判定の基準。"
+              help="人間同士の議論の議題（AI有効時の脱線判定の基準。"
                    "未指定なら会議冒頭から自動推定）")
-@click.option("--proactivity", default="standard",
+@click.option("--proactivity", default="controlled",
               type=click.Choice(["controlled", "standard", "active"]),
-              help="ファシリテーターの介入の積極性（既定standard。"
+              help="ファシリテーターの介入の積極性（既定controlled。"
                    "controlled=明確な問題時のみ）")
 def main(**kwargs):
     """リアルタイム議事録 + AIファシリテーション."""
