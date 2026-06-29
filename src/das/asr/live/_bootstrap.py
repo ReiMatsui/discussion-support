@@ -18,6 +18,7 @@ from das.asr.live._assemblyai_diarization import AssemblyAIStreamingDiarizationP
 from das.asr.live._constants import (
     _AGENDA_PROMPT,
     _DRIFT_PROMPT,
+    _FACTCHECK_PROMPT,
     _PARTICIPATION_PROMPT,
     _TOPIC_PROMPT,
     OPENAI_API,
@@ -35,6 +36,7 @@ from das.asr.live._workers import (
     _on_partner_text_factory,
     _run_agenda_detector,
     _run_drift_checker,
+    _run_fact_checker,
     _run_from_mic,
     _run_from_wav,
     _run_participation_checker,
@@ -271,6 +273,32 @@ def check_participation(participation: list[dict], utterances: list[dict],
     result = _post_chat_json(params, api_key, timeout=15, label="invite")
     if not isinstance(result, dict):
         return {"invite": False}
+    return result
+
+
+def check_fact_correction(utterances: list[dict], api_key: str, model: str) -> dict:
+    """直近会話の明確な事実誤りを判定する.
+
+    Returns:
+        {"should_correct": bool, "confidence": str, "correction": str, ...}
+        or {"should_correct": False} on error/low confidence.
+    """
+    if not utterances or not api_key:
+        return {"should_correct": False}
+    utt_text = "\n".join(f"- {u['speaker']}: {u['text']}" for u in utterances)
+    prompt = _FACTCHECK_PROMPT.format(utterances=utt_text)
+    params = _build_chat_params(model, prompt, max_out=700, temperature=0.0)
+    result = _post_chat_json(params, api_key, timeout=15, label="fact")
+    if not isinstance(result, dict):
+        return {"should_correct": False}
+    if result.get("should_correct") is not True:
+        return {"should_correct": False}
+    if result.get("confidence") != "high":
+        return {"should_correct": False}
+    correction = str(result.get("correction") or "").strip()
+    if not correction:
+        return {"should_correct": False}
+    result["correction"] = correction
     return result
 
 
@@ -516,6 +544,9 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
                 threading.Thread(target=_run_drift_checker,
                                 args=(state, _oai_key, _oai_model), daemon=True).start()
                 print("# 脱線検出: 有効（3発話ごとに並列チェック）", flush=True)
+                threading.Thread(target=_run_fact_checker,
+                                args=(state, _oai_key, _oai_model), daemon=True).start()
+                print("# 事実誤り補正: 有効（高確信の定義・式だけ短く補足）", flush=True)
                 # --- 参加度の声かけ（発言の少ない人を誘う, S4） ---
                 threading.Thread(target=_run_participation_checker,
                                 args=(state, _oai_key, _oai_model), daemon=True).start()

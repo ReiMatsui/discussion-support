@@ -170,6 +170,20 @@ def test_trigger_with_invite_target(agent):
     assert agent._responding is True
 
 
+def test_trigger_with_fact_correction(agent):
+    """fact_correction指定時、_pendingが空でも短い補正コンテキスト付きで送信する."""
+    agent.trigger(fact_correction={
+        "claim": "BMIは体重の2乗を身長で割る",
+        "correction": "BMIは体重kgを身長mの2乗で割ります。",
+        "reason": "式が逆",
+    })
+    text = agent.ws.last_create_text()
+    assert "[事実補正]" in text
+    assert "BMIは体重kgを身長mの2乗で割ります。" in text
+    assert "この補足だけ" in text
+    assert agent._responding is True
+
+
 # ---------------------------------------------------------------------------
 # interrupt() と介入内容の保存
 # ---------------------------------------------------------------------------

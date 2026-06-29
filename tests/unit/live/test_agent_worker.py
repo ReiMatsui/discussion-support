@@ -35,9 +35,11 @@ class FakeAgent:
     def feed(self, speaker: str, text: str, **kw) -> None:
         self.feeds.append((speaker, text))
 
-    def trigger(self, *, topics=None, drift_reason=None, invite_target=None) -> None:
+    def trigger(self, *, topics=None, drift_reason=None, invite_target=None,
+                fact_correction=None) -> None:
         self.trigger_calls.append({"topics": topics, "drift_reason": drift_reason,
-                                   "invite_target": invite_target})
+                                   "invite_target": invite_target,
+                                   "fact_correction": fact_correction})
         # 実エージェントの挙動を模倣: トリガーで介入と保留発話を消費
         self._pending_intervention = None
         self._pending.clear()
@@ -79,8 +81,10 @@ class FakeState:
         self._was_in_echo = [False]
         self.agent_cursor = 0
         self.drift_cursor = 0
+        self.fact_cursor = 0
         self.drift_requests: queue.Queue[str] = queue.Queue()
         self.invite_requests: queue.Queue[str] = queue.Queue()
+        self.factcheck_requests: queue.Queue[dict] = queue.Queue()
         self.fac_events: queue.Queue = queue.Queue()
         self.proactivity = {"silence_summarize": 18.0, "cooldown": 25.0}
         self.intervention_enabled = True
@@ -225,6 +229,27 @@ def test_drift_request_triggers_with_reason():
     assert agent.trigger_calls, "脱線要求でトリガーされるべき"
     assert agent.trigger_calls[0]["drift_reason"] == "ラーメンの雑談"
     assert state.intervention_events == [{"reason": "drift", "detail": "ラーメンの雑談"}]
+
+
+def test_fact_request_triggers_before_drift():
+    """高確信の事実補正は、会話を壊さない短い補足として優先的に発火する."""
+    agent = FakeAgent()
+    state = FakeState(agent, None)
+    state.factcheck_requests.put({
+        "should_correct": True,
+        "confidence": "high",
+        "claim": "BMIは体重の2乗を身長で割る",
+        "correction": "BMIは体重kgを身長mの2乗で割ります。",
+        "reason": "計算式が逆",
+    })
+    state.drift_requests.put("体重の話題")
+
+    _run_worker_briefly(state, until=lambda: bool(agent.trigger_calls))
+
+    assert agent.trigger_calls
+    assert agent.trigger_calls[0]["fact_correction"]["correction"].startswith("BMIは")
+    assert agent.trigger_calls[0]["drift_reason"] is None
+    assert state.intervention_events[0]["reason"] == "fact"
 
 
 def test_single_drift_request_is_held_until_confirmed():

@@ -32,6 +32,10 @@ from ._constants import (
     _DRIFT_CHECK_INTERVAL,
     _DRIFT_CHECK_WINDOW,
     _DRIFT_WARMUP,
+    _FACTCHECK_CHECK_SEC,
+    _FACTCHECK_COOLDOWN,
+    _FACTCHECK_MIN_CHARS,
+    _FACTCHECK_WINDOW,
     _INTERRUPT_MIN_CHARS,
     _INTERVENTION_COOLDOWN,
     _INVITE_CHECK_SEC,
@@ -50,6 +54,32 @@ from ._speaker_policy import (
     reliable_human_records,
 )
 from ._ui import _print_line
+
+
+_FACT_CANDIDATE_RE = re.compile(
+    r"("
+    r"\d|%|％|割|倍|cm|kg|m2|㎡"
+    r"|BMI|bmi|式|計算|定義|単位|平均|中央値|割合|確率|速度|距離|面積|体積"
+    r"|とは|っていうのは|というのは|イコール|割る|掛ける|足す|引く|二乗|2乗"
+    r")"
+)
+
+
+def _looks_like_fact_claim(text: str) -> bool:
+    """LLMに渡す前の軽い候補絞り。意見・相槌・短文を極力落とす."""
+    s = (text or "").strip()
+    if len(s) < _FACTCHECK_MIN_CHARS:
+        return False
+    if _BACKCHANNEL_RE.match(s):
+        return False
+    uncertain_only = re.fullmatch(
+        r"[\s、。,.!?！？]*(たぶん|多分|なんでしたっけ|何でしたっけ|"
+        r"わからない|分からない|知らない|覚えてない|忘れた)[\s、。,.!?！？]*",
+        s,
+    )
+    if uncertain_only:
+        return False
+    return bool(_FACT_CANDIDATE_RE.search(s))
 
 
 def _log_intervention_event(state: SessionState, reason: str, detail: str = "") -> None:
@@ -205,6 +235,54 @@ def _run_drift_checker(state: SessionState, oai_key: str, oai_model: str):
             # R2: trigger()は呼ばず、要求をキューに積む。agent_workerが裁定する。
             state.drift_requests.put(reason)
             print("# [drift] → 介入要求をキューに投入", flush=True)
+
+
+def _run_fact_checker(state: SessionState, oai_key: str, oai_model: str):
+    """明確な事実誤りだけを短く補正する要求を積む.
+
+    脱線や発話量とは別ルートにする。ローカルの候補絞りで「式・数値・定義っぽい」
+    発話だけに限定し、LLM側でも high confidence の訂正だけを採用する。
+    """
+    from das.asr.live._bootstrap import check_fact_correction as _check_fact
+
+    _last_check = 0.0
+    while not state.stop.is_set():
+        time.sleep(0.5)
+        agent = state.agent
+        if not oai_key or agent is None or not agent.enabled:
+            continue
+        if not _intervention_enabled(state):
+            continue
+        if agent.mode == "conversation":
+            continue
+        with state.state_lock:
+            talk_rs = intervention_records([
+                r for r in state.records
+                if "speaker" in r and r.get("text")
+                and r.get("speaker") != AGENT_SPEAKER
+            ])
+        n = len(talk_rs)
+        if n <= state.fact_cursor:
+            continue
+        new_records = talk_rs[state.fact_cursor:n]
+        if not any(_looks_like_fact_claim(str(r.get("text") or "")) for r in new_records):
+            state.fact_cursor = n
+            continue
+        now = time.monotonic()
+        if now - _last_check < _FACTCHECK_CHECK_SEC:
+            continue
+        _last_check = now
+        state.fact_cursor = n
+        window = talk_rs[max(0, n - _FACTCHECK_WINDOW):]
+        utts = [{"speaker": intervention_speaker_name(state, r), "text": r["text"]}
+                for r in window]
+        result = _check_fact(utts, oai_key, oai_model)
+        if result.get("should_correct"):
+            correction = str(result.get("correction") or "").strip()
+            if correction:
+                _print_line(f"# ✅ 事実補正候補: {correction}")
+                state.factcheck_requests.put(result)
+                print("# [fact] → 補正要求をキューに投入", flush=True)
 
 
 def _run_participation_checker(state: SessionState, oai_key: str, oai_model: str):
@@ -430,6 +508,8 @@ def _run_agent_worker(state: SessionState):
     _pending_drift_reason: str | None = None  # drift_checkerからの未処理介入要求（R2）
     _pending_drift_count = 0
     _last_drift_request_at = 0.0
+    _pending_fact: dict | None = None
+    _last_fact_at = 0.0
     _pending_invite: str | None = None  # participation_checkerからの声かけ要求（S4）
     _last_invited: str | None = None    # 直近に声をかけた相手（連続回避）
     _last_agent_reconnect_at = 0.0
@@ -487,7 +567,7 @@ def _run_agent_worker(state: SessionState):
                             "人間", utt,
                             request_response=is_last)
         if not _enabled:
-            for q in (state.drift_requests, state.invite_requests):
+            for q in (state.drift_requests, state.invite_requests, state.factcheck_requests):
                 while True:
                     try:
                         q.get_nowait()
@@ -519,8 +599,14 @@ def _run_agent_worker(state: SessionState):
                 _pending_invite = state.invite_requests.get_nowait()
             except queue.Empty:
                 break
+        while True:
+            try:
+                _pending_fact = state.factcheck_requests.get_nowait()
+            except queue.Empty:
+                break
 
-        # --- 最優先のバージイン（ガードバイパス）: ①脱線介入 ②中断介入のリトライ ---
+        # --- 最優先のバージイン（ガードバイパス）:
+        # ①事実補正 ②脱線介入 ③中断介入のリトライ ---
         # agentがfree(応答中でなく発話中でもない)になった瞬間に、エコーウィンドウ・
         # パートナー発話・沈黙閾値を無視してトリガーする。会話が活発でも取りこぼさない。
         # trigger()の呼び出しはこの _run_agent_worker に一元化されている（R2）。
@@ -529,6 +615,22 @@ def _run_agent_worker(state: SessionState):
             if agent.mode != "conversation":
                 with state.topics_lock:
                     _bargein_topics = list(state.topics) if state.topics else None
+            if _pending_fact is not None:
+                correction = str(_pending_fact.get("correction") or "").strip()
+                if not correction:
+                    _pending_fact = None
+                elif time.monotonic() - _last_fact_at < _FACTCHECK_COOLDOWN:
+                    print("# [trigger] skip: クールダウン中の事実補正", flush=True)
+                    _pending_fact = None
+                else:
+                    print(f"# [trigger] fact: {correction}", flush=True)
+                    _log_intervention_event(state, "fact", correction)
+                    agent.trigger(topics=_bargein_topics,
+                                  fact_correction=_pending_fact)
+                    _pending_fact = None
+                    _last_fact_at = time.monotonic()
+                    _last_intervention_at = _last_fact_at
+                    continue
             if _pending_drift_reason is not None:
                 _required_drift_count = int(state.proactivity.get("drift_confirmations", 1))
                 if _pending_drift_count < _required_drift_count:

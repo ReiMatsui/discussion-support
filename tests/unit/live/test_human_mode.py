@@ -151,6 +151,96 @@ def test_check_participation_empty_is_no_invite():
     assert bootstrap.check_participation([], [], "key", "m") == {"invite": False}
 
 
+# ---------------------------------------------------------------------------
+# 事実誤りの短い補正
+# ---------------------------------------------------------------------------
+
+def test_check_fact_correction_accepts_high_confidence(monkeypatch):
+    import das.asr.live._bootstrap as bootstrap
+    monkeypatch.setattr(bootstrap, "_post_chat_json",
+                        lambda *a, **k: {"should_correct": True,
+                                         "confidence": "high",
+                                         "claim": "BMIは体重の2乗を身長で割る",
+                                         "correction": "BMIは体重kgを身長mの2乗で割ります。",
+                                         "reason": "式が逆"})
+
+    r = bootstrap.check_fact_correction(
+        [{"speaker": "A", "text": "BMIは体重の2乗を身長で割る"}], "key", "m")
+
+    assert r["should_correct"] is True
+    assert r["correction"].startswith("BMIは")
+
+
+def test_check_fact_correction_suppresses_low_confidence(monkeypatch):
+    import das.asr.live._bootstrap as bootstrap
+    monkeypatch.setattr(bootstrap, "_post_chat_json",
+                        lambda *a, **k: {"should_correct": True,
+                                         "confidence": "medium",
+                                         "correction": "補足"})
+
+    assert bootstrap.check_fact_correction(
+        [{"speaker": "A", "text": "たぶんそうだった気がします"}], "key", "m"
+    ) == {"should_correct": False}
+
+
+def test_fact_checker_enqueues_clear_formula_correction(monkeypatch):
+    """式・定義っぽい発話だけを候補にし、高確信の補正をキューに積む."""
+    import das.asr.live._bootstrap as bootstrap
+    from das.asr.live._workers import _run_fact_checker
+
+    monkeypatch.setattr(bootstrap, "check_fact_correction",
+                        lambda *a, **k: {"should_correct": True,
+                                         "confidence": "high",
+                                         "claim": "BMIは体重の2乗を身長で割る",
+                                         "correction": "BMIは体重kgを身長mの2乗で割ります。",
+                                         "reason": "式が逆"})
+    state = _make_state(with_agent=True)
+    state.records = [
+        {"speaker": "話者1", "text": "175cmの適正体重の話です", "ms": 0, "end_ms": 1000},
+        {"speaker": "話者2", "text": "BMIは体重の2乗を身長で割る感じでしたっけ", "ms": 1000, "end_ms": 2000},
+    ]
+
+    th = threading.Thread(target=_run_fact_checker,
+                          args=(state, "key", "gpt-5-mini"), daemon=True)
+    th.start()
+    got = None
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline and got is None:
+        try:
+            got = state.factcheck_requests.get_nowait()
+        except Exception:
+            time.sleep(0.05)
+    state.stop.set()
+    th.join(timeout=2)
+
+    assert got is not None
+    assert got["correction"].startswith("BMIは")
+
+
+def test_fact_checker_ignores_plain_opinion(monkeypatch):
+    """好みや単なる意見ではLLM判定すら呼ばない."""
+    import das.asr.live._bootstrap as bootstrap
+    from das.asr.live._workers import _run_fact_checker
+
+    calls = []
+    monkeypatch.setattr(bootstrap, "check_fact_correction",
+                        lambda *a, **k: calls.append(1) or {"should_correct": False})
+    state = _make_state(with_agent=True)
+    state.records = [
+        {"speaker": "話者1", "text": "米よりパンのほうが好きです", "ms": 0, "end_ms": 1000},
+    ]
+
+    th = threading.Thread(target=_run_fact_checker,
+                          args=(state, "key", "gpt-5-mini"), daemon=True)
+    th.start()
+    time.sleep(1.2)
+    state.stop.set()
+    th.join(timeout=2)
+
+    assert calls == []
+    assert state.factcheck_requests.empty()
+
+
 def test_participation_checker_enqueues_invite(monkeypatch):
     """発言の少ない人がいる時、LLM判定YESで声かけ要求をキューに積む（S4）."""
     import das.asr.live._bootstrap as bootstrap

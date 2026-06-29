@@ -324,7 +324,8 @@ class RealtimeAgent(_RealtimeBase):
 
     def trigger(self, *, topics: list[dict] | None = None,
                 drift_reason: str | None = None,
-                invite_target: str | None = None):
+                invite_target: str | None = None,
+                fact_correction: dict | None = None):
         """蓄積した発話をRealtimeAPIに送信し応答を要求.
 
         topics: 現在の論点一覧（_topic_workerが抽出したもの）。
@@ -334,6 +335,8 @@ class RealtimeAgent(_RealtimeBase):
                 ファシリテーターに介入を強く促す。
         invite_target: 発言の少ない参加者の名前（S4）。設定されていると、
                 _pendingが空でも送信し、その人に声をかける発話を促す。
+        fact_correction: 高確信の事実誤り補正。設定されていると、
+                _pendingが空でも送信し、短い補足だけを促す。
         保存された介入内容（割り込みで中断された発言）がある場合、
         コンテキストに追加して再試行の機会を与える。
         """
@@ -347,7 +350,7 @@ class RealtimeAgent(_RealtimeBase):
             if self._responding:
                 return  # 既に応答生成中、または別スレッドが確保済み
             if (not self._pending and self._pending_intervention is None
-                    and not drift_reason and not invite_target):
+                    and not drift_reason and not invite_target and not fact_correction):
                 return
             self._responding = True  # 確保（この時点でレースは閉じる）
             # スナップショットのみ取得。実際のクリアは送信成功後に行い、
@@ -376,6 +379,20 @@ class RealtimeAgent(_RealtimeBase):
                            f"{invite_target}さんに、今の論点について意見を尋ねる"
                            f"短い一言を自然に述べてください。")
             conv = f"{invite_note}\n\n{conv}" if conv else invite_note
+        # --- 事実誤り補正コンテキスト ---
+        if fact_correction:
+            correction = str(fact_correction.get("correction") or "").strip()
+            claim = str(fact_correction.get("claim") or "").strip()
+            reason = str(fact_correction.get("reason") or "").strip()
+            fact_note = (
+                "[事実補正]\n"
+                f"誤っている可能性が高い主張: {claim or '（不明）'}\n"
+                f"補足内容: {correction}\n"
+                f"理由: {reason or '高確信の事実誤り'}\n"
+                "この補足だけを、会話を止めない短い一言で自然に伝えてください。"
+                "説教・長い説明・追加論点の展開はしないでください。"
+            )
+            conv = f"{fact_note}\n\n{conv}" if conv else fact_note
         # --- 保存された介入内容をコンテキストに追加 ---
         # 注: 有効な介入は送信成功までクリアしない（Bug 2）。
         #     期限切れの介入のみ、送信成否に関わらずここで破棄する。

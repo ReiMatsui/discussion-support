@@ -226,7 +226,9 @@ def test_reset_for_new_meeting():
     s.partial_text = "認識中…"
     s.agent_cursor = 1
     s.drift_cursor = 1
+    s.fact_cursor = 1
     s.drift_requests.put("脱線")
+    s.factcheck_requests.put({"correction": "補正"})
     old_out, old_started = s.out_path, s.started
 
     result = s.reset_for_new_meeting()
@@ -234,8 +236,9 @@ def test_reset_for_new_meeting():
     assert result["ok"] is True
     assert s.records == []                 # 議事録クリア
     assert s.topics == []                  # 論点クリア
-    assert s.agent_cursor == 0 and s.drift_cursor == 0
+    assert s.agent_cursor == 0 and s.drift_cursor == 0 and s.fact_cursor == 0
     assert s.drift_requests.empty()        # キューもクリア
+    assert s.factcheck_requests.empty()
     assert s.names == {}                   # 話者名もリセット（課題③）
     assert s.colors == {}                  # 色割り当てもリセット
     assert s.partial_text == ""            # 認識途中もクリア

@@ -93,11 +93,14 @@ class SessionState:
         self._TOPIC_WINDOW = 10
         self._TOPIC_TRIGGER = 5
         self.drift_cursor = 0
+        self.fact_cursor = 0
         # 脱線検出→介入トリガーの受け渡しキュー（R2: トリガー経路の単一化）。
         # _run_drift_checker が積み、_run_agent_worker が裁定して trigger する。
         self.drift_requests: queue.Queue[str] = queue.Queue()
         # 参加度の声かけ要求キュー（S4）。対象話者の表示名を積む。
         self.invite_requests: queue.Queue[str] = queue.Queue()
+        # 事実誤りの短い補正要求キュー。{"correction": str, ...} を積む。
+        self.factcheck_requests: queue.Queue[dict] = queue.Queue()
         # 認識途中経過（partial）。UIに「認識中」を見せるため（課題①）。
         self.partial_text = ""
         self.partial_speaker = ""
@@ -554,9 +557,10 @@ class SessionState:
             self.topics = []
         self.topic_cursor = 0
         self.drift_cursor = 0
+        self.fact_cursor = 0
         self._last_utt_time[0] = time.monotonic()
         self._was_in_echo[0] = False
-        for q in (self.drift_requests, self.invite_requests):
+        for q in (self.drift_requests, self.invite_requests, self.factcheck_requests):
             while True:
                 try:
                     q.get_nowait()
