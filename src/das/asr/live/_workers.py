@@ -58,7 +58,7 @@ from ._ui import _print_line
 
 _FACT_CANDIDATE_RE = re.compile(
     r"("
-    r"\d|%|％|割|倍|cm|kg|m2|㎡"
+    r"\d+(?:\.\d+)?\s*(?:%|％|割|倍|cm|kg|m2|㎡)"
     r"|BMI|bmi|式|計算|定義|単位|平均|中央値|割合|確率|速度|距離|面積|体積"
     r"|とは|っていうのは|というのは|イコール|割る|掛ける|足す|引く|二乗|2乗"
     r")"
