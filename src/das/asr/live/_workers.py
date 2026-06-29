@@ -271,7 +271,7 @@ def _run_fact_checker(state: SessionState, oai_key: str, oai_model: str):
     _last_check = 0.0
     _recent_corrections: list[tuple[float, str]] = []
     while not state.stop.is_set():
-        time.sleep(0.5)
+        time.sleep(0.25)
         agent = state.agent
         if not oai_key or agent is None or not agent.enabled:
             continue
@@ -559,7 +559,7 @@ def _run_agent_worker(state: SessionState):
     _last_invited: str | None = None    # 直近に声をかけた相手（連続回避）
     _last_agent_reconnect_at = 0.0
     while not state.stop.is_set():
-        time.sleep(0.5)
+        time.sleep(0.25)
         _diag_tick += 1
         partner = state.partner  # 動的参照: 実行中のパートナー接続/切断に追従（F3）
         if agent is None or not agent._connected or not agent.enabled:

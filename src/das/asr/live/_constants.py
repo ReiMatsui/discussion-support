@@ -348,8 +348,8 @@ _INVITE_SILENCE = 2.0         # 声かけは沈黙(間)がこの秒数続いて�
 
 # --- 事実誤りの短い補正 ---
 _FACTCHECK_WINDOW = 3         # 判定に使う直近発話数
-_FACTCHECK_CHECK_SEC = 1.0    # LLM判定の最小間隔（事実誤りは早めに補足）
-_FACTCHECK_COOLDOWN = 4.0     # 訂正介入の最小間隔（短い補正なので通常介入より短く）
+_FACTCHECK_CHECK_SEC = 0.5    # LLM判定の最小間隔（事実誤りは早めに補足）
+_FACTCHECK_COOLDOWN = 2.0     # 訂正介入の最小間隔（短い補正なので通常介入より短く）
 _FACTCHECK_MIN_CHARS = 8      # 短すぎる発話は事前除外
 
 # --- デッドエア対策（介入不要後の沈黙ブレーカー） ---
