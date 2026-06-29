@@ -155,8 +155,8 @@ def test_check_participation_empty_is_no_invite():
 # 事実誤りの短い補正
 # ---------------------------------------------------------------------------
 
-def test_fact_candidate_gate_is_structural_not_keyword_based():
-    """例由来の単語ではなく、定義・値・データ・式の断定だけを候補にする."""
+def test_fact_candidate_gate_is_only_a_thin_exclusion_filter():
+    """明確な誤りかどうかはLLMに任せ、ローカルでは不要発話だけを落とす."""
     from das.asr.live._workers import _looks_like_fact_claim
 
     positives = [
@@ -179,114 +179,72 @@ def test_fact_candidate_gate_is_structural_not_keyword_based():
         "対象Aは世界で2番目に高い山です",
         "対象Aは世界で2番目に深い場所です",
         "対象Aは国内で3番目に大きい湖です",
+        "対象Aは世界で2番目に人口が多いです",
+        "人物Aはランキング1位です",
+        "人物AはリーグCでトップ10です",
         "対象Aは世界一大きい島です",
+        "対象Aを世界一高い山です",
         "対象Aは日本一長い川です",
         "対象Aは国内一広い湖です",
+        "時代Aの次は時代Bです",
+        "国Aは地域Bに属しています",
         "x = y / z",
         "単位はメートルです",
+        "2乗が出てきました",
+        "さっきは6回ほどかかりました",
+        "最初の10個の発話ぐらいから",
+        "式典は普通にやりました",
+        "まず対象Aを1個置きます",
     ]
     negatives = [
         "平均について話しましょう",
-        "2乗が出てきました",
         "123cmだとどれくらいですか",
         "対象Aは、123cmだとどれぐらいですか",
-        "さっきは6回ほどかかりました",
-        "対象Aは約120人です",
-        "最初の10個の発話ぐらいから",
         "計算方法の話です",
         "米よりパンのほうが好きです",
         "いいとは思いますけど",
-        "言うなとは言ったん",
-        "式典は普通にやった",
         "090-8165-1145 にかけてもいい？",
         "お酒はどこで飲むの、2回目のデート",
         "都市Aはきれいです",
         "人物Aはいい人です",
-        "まず対象Aを1個置きます",
         "1つ目の論点を確認しましょう",
         "優先順位を決めましょう",
         "ランキングについて話しましょう",
         "対象Aは上位かもしれません",
-        "人物Aは大会Bのランキング1位です",
-        "人物AはリーグCでトップ10です",
-        "人物Aはランキング1位です",
-        "組織Aは地域Bで最下位です",
-        "対象Aは全体で最多です",
-        "対象Aは最も速い乗り物です",
     ]
 
     assert [_looks_like_fact_claim(t) for t in positives] == [True] * len(positives)
     assert [_looks_like_fact_claim(t) for t in negatives] == [False] * len(negatives)
 
 
-def test_fact_candidate_gate_covers_clear_claim_types():
-    """明確な誤りになり得る主張の型を広めに候補化する."""
+def test_fact_candidate_gate_does_not_require_fact_pattern_keywords():
+    """助詞や既知カテゴリに依存せず、断定発話はLLMに渡す."""
     from das.asr.live._workers import _looks_like_fact_claim
 
-    cases = {
-        "numeric_units": [
-            "事物Aの高さは200メートルです",
-            "制度Aの上限は70%です",
-            "大会Aの参加者は120人です",
-            "事象Aは2020年に起こりました",
-        ],
-        "formula": [
-            "指標Aの計算式は分母を分子で割る形です",
-            "値Aを値Bで割ると指標Cです",
-            "x = y / z",
-        ],
-        "definition": [
-            "用語Aとは、条件Bを満たす対象のことです",
-            "用語Aの定義は対象Bという意味です",
-        ],
-        "role_relation": [
-            "都市Aは国Bの首都です",
-            "国Bの首都は都市Aです",
-            "人物Aは組織Bの代表です",
-            "作品Aの著者は人物Bです",
-        ],
-        "affiliation": [
-            "人物Aは国B人です",
-            "人物Aは国B出身です",
-            "人物Aの国籍は国Bです",
-        ],
-        "record_counts": [
-            "人物Aは大会Bを2勝しました",
-            "チームAは大会Bで3敗しました",
-        ],
-        "ranking": [
-            "対象Aは世界で2番目に高い山です",
-            "対象Aは世界で2番目に深い場所です",
-            "対象Aは国内で3番目に大きい湖です",
-            "対象Aは世界一大きい島です",
-            "対象Aは日本一長い川です",
-        ],
-    }
+    texts = [
+        "事物Aの高さは200メートルです",
+        "対象Aを世界一高い山です",
+        "時代Aの次は時代Bです",
+        "国Aは地域Bに属しています",
+        "対象Aは世界で2番目に人口が多いです",
+        "人物Aは大会Bのランキング1位です",
+        "これは未知カテゴリの断定文です",
+    ]
 
-    for category, texts in cases.items():
-        for text in texts:
-            assert _looks_like_fact_claim(text), f"{category}: {text}"
+    assert [_looks_like_fact_claim(t) for t in texts] == [True] * len(texts)
 
 
-def test_fact_candidate_gate_ignores_non_claim_neighbors():
-    """順位・数値・式の周辺語でも、事実断定でなければ候補にしない."""
+def test_fact_candidate_gate_ignores_low_value_utterances():
+    """相槌・質問・曖昧・好み・会話運営だけを事前除外する."""
     from das.asr.live._workers import _looks_like_fact_claim
 
     texts = [
         "ランキングについて話しましょう",
         "優先順位を決めましょう",
-        "まず対象Aを1個置きます",
         "1つ目の論点を確認しましょう",
         "トップになるにはどうすればいいですか",
         "対象Aは上位かもしれません",
         "順位は何位ですか",
-        "人物Aはランキング1位です",
-        "人物Aは大会Bのランキング1位です",
-        "人物AはリーグBでトップ10です",
-        "対象Aは地域Bで最下位です",
-        "対象Aは全体で最多です",
-        "対象Aは最も速い乗り物です",
-        "式典は普通にやりました",
         "計算方法の話です",
         "都市Aはきれいです",
         "人物Aはいい人です",
@@ -343,7 +301,7 @@ def test_fact_checker_enqueues_clear_formula_correction(monkeypatch):
     state = _make_state(with_agent=True)
     state.records = [
         {"speaker": "話者1", "text": "計算方法の話です", "ms": 0, "end_ms": 1000},
-        {"speaker": "話者2", "text": "指標Xの計算式は分母を分子で割る感じでしたっけ", "ms": 1000, "end_ms": 2000},
+        {"speaker": "話者2", "text": "指標Xの計算式は分母を分子で割る感じです", "ms": 1000, "end_ms": 2000},
     ]
 
     th = threading.Thread(target=_run_fact_checker,
@@ -361,7 +319,7 @@ def test_fact_checker_enqueues_clear_formula_correction(monkeypatch):
 
     assert got is not None
     assert got["correction"].startswith("指標Xは")
-    assert calls == [[{"speaker": "参加者A", "text": "指標Xの計算式は分母を分子で割る感じでしたっけ"}]]
+    assert calls == [[{"speaker": "参加者A", "text": "指標Xの計算式は分母を分子で割る感じです"}]]
 
 
 def test_fact_checker_ignores_plain_opinion(monkeypatch):

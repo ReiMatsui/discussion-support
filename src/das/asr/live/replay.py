@@ -26,7 +26,7 @@ from das.asr.live._constants import (
     AGENT_SPEAKER,
 )
 from das.asr.live._participation import participation_stats
-from das.asr.live._speaker_policy import reliable_human_records
+from das.asr.live._speaker_policy import is_intervention_signal, reliable_human_records
 from das.asr.live._workers import _looks_like_fact_claim
 
 CheckFact = Callable[[list[dict], str, str], dict]
@@ -199,10 +199,12 @@ def _run_fact_check(
 ) -> dict | None:
     if "fact" not in opts.checks:
         return None
+    if not is_intervention_signal(turn):
+        return None
     if not _looks_like_fact_claim(turn["text"]):
         return None
     if opts.no_api:
-        return _event(turn, "fact_candidate", "定義・値・データ・明示式の候補")
+        return _event(turn, "fact_candidate", "LLM事実判定の対象")
     result = check_fact(
         [{"speaker": turn["speaker"], "text": turn["text"]}],
         opts.api_key,

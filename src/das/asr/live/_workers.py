@@ -55,77 +55,31 @@ from ._speaker_policy import (
 from ._ui import _print_line
 
 
-_FACT_DEFINITION_RE = re.compile(
-    r"(.{1,32}(とは|っていうのは|というのは)[、,\s]*"
-    r".{1,48}(です|である|もの|こと|意味|指す|という|制度|対象)|"
-    r".{1,32}(定義|意味)\s*(は|が|を|って|とは|というのは)|"
-    r".{1,32}は.{1,32}のこと)"
-)
-_FACT_FORMULA_CUE_RE = re.compile(
-    r"((計算|算出)式|求め方|.{1,32}の式\s*(は|が|を|って|とは|というのは)|"
-    r"式\s*(とは|というのは))"
-)
-_FACT_UNIT_CUE_RE = re.compile(r"単位\s*(は|が|を|って|とは|というのは)")
-_FACT_NUMERIC_VALUE_RE = re.compile(
-    r"(は|が|=|＝|:|：).{0,40}"
-    r"\d+(?:\.\d+)?\s*"
-    r"(%|％|割|倍|円|人|件|個|回|勝|敗|年|月|日|時|分|秒|歳|度|点|"
-    r"kg|g|cm|mm|m|km|㎡|m2|"
-    r"メートル|センチ|センチメートル|ミリ|ミリメートル|キロ|キロメートル|"
-    r"グラム|キログラム)"
-)
-_FACT_NUMERIC_UNCERTAIN_RE = re.compile(
-    r"(どれ|どこ|何|なん|いくつ|いくら|ぐらい|くらい|程度|"
-    r"ほど|約|およそ|だいたい|大体|かな|ですか|でしょうか|\?)"
-)
 _FACT_PHONE_NUMBER_RE = re.compile(r"\b0\d{1,3}-\d{2,4}-\d{3,4}\b")
-_FACT_DEFINITION_FALSE_RE = re.compile(
-    r"とは\s*(思|違|言|いえ|いっ|さておき|ない|なく)"
+_FACT_QUESTION_RE = re.compile(
+    r"(ですか|でしょうか|ますか|かな|かね|なの|だっけ|でしたっけ|"
+    r"何|どれ|どこ|誰|いつ|いくつ|いくら|\?|？)"
 )
-_FACT_SYMBOL_FORMULA_RE = re.compile(
-    r"[A-Za-z0-9一-龥ぁ-んァ-ン]\s*"
-    r"(=|＝|≒|≈|>|<|≥|≤|\+|−|-|×|÷|/)"
-    r"\s*[A-Za-z0-9一-龥ぁ-んァ-ン]"
+_FACT_UNCERTAIN_RE = re.compile(
+    r"(たぶん|多分|おそらく|多分だけど|うろ覚え|曖昧|わからない|分からない|"
+    r"知らない|覚えてない|忘れた|気がする|かもしれない|かも|らしい)"
 )
-_FACT_OPERATION_RE = re.compile(
-    r"(は|とは|というのは|計算式|算出式|求め方).{0,48}"
-    r"(割る|掛ける|かける|足す|引く|二乗|2乗)"
+_FACT_PREFERENCE_RE = re.compile(
+    r"(好き|嫌い|好み|苦手|うれしい|嬉しい|楽しい|面白い|つまらない|"
+    r"良い|いい|悪い|きれい|綺麗|かわいい|かっこいい|おいしい|美味しい)"
 )
-_FACT_OPERATION_RELATION_RE = re.compile(
-    r"[A-Za-z0-9一-龥ぁ-んァ-ン%％]+.{0,24}"
-    r"(を|に).{0,32}(で|に)?"
-    r"(割る|掛ける|かける|足す|引く)"
-)
-_FACT_ROLE_TERMS = (
-    r"首都|県庁所在地|所在地|大統領|首相|代表|社長|CEO|"
-    r"創業者|設立者|発明者|作者|著者|監督|優勝者"
-)
-_FACT_ROLE_RELATION_RE = re.compile(
-    rf"(.{{1,40}}は.{{1,40}}の({_FACT_ROLE_TERMS})"
-    r"(です|でした|である|ではありません|ではない)|"
-    rf".{{1,40}}の({_FACT_ROLE_TERMS})は.{{1,40}}"
-    r"(です|でした|である|ではありません|ではない))"
-)
-_FACT_AFFILIATION_RE = re.compile(
-    r"(([A-Za-z一-龥ァ-ヶー]{2,40})は([A-Za-z一-龥ァ-ヶー]{2,24})(人|出身|国籍)"
-    r"(です|でした|である|ではありません|ではない)|"
-    r".{1,40}の(出身|国籍)は[A-Za-z一-龥ァ-ヶー]{2,40}"
-    r"(です|でした|である|ではありません|ではない))"
-)
-_FACT_RANKING_RE = re.compile(
-    r"(.{1,40}(は|が).{0,50}"
-    r"("
-    r"(世界|国内|日本).{0,16}((第?\d+|[一二三四五六七八九十]+)(番目)|一番)|"
-    r"(世界一|日本一|国内一)"
-    r")"
-    r".{0,24}"
-    r"(です|でした|である|ではありません|ではない|高い|低い|大きい|小さい|"
-    r"深い|浅い|長い|短い|広い|狭い))"
+_FACT_META_TALK_RE = re.compile(
+    r"(話しましょう|確認しましょう|決めましょう|考えましょう|進めましょう|"
+    r"について話|の話です|という話|話題|論点|議題|雑談)"
 )
 
 
 def _looks_like_fact_claim(text: str) -> bool:
-    """LLMに渡す前の軽い候補絞り。意見・相槌・短文を極力落とす."""
+    """LLMに渡す前の薄い除外フィルタ。
+
+    明確な誤りかどうかはLLMに任せる。ここでは相槌・質問・曖昧表現・
+    好みなど、訂正対象になりにくい発話だけを落とす。
+    """
     s = (text or "").strip()
     if len(s) < _FACTCHECK_MIN_CHARS:
         return False
@@ -140,26 +94,15 @@ def _looks_like_fact_claim(text: str) -> bool:
         return False
     if _FACT_PHONE_NUMBER_RE.search(s):
         return False
-    definition = (
-        _FACT_DEFINITION_RE.search(s)
-        and not _FACT_DEFINITION_FALSE_RE.search(s)
-    )
-    numeric_value = (
-        _FACT_NUMERIC_VALUE_RE.search(s)
-        and not _FACT_NUMERIC_UNCERTAIN_RE.search(s)
-    )
-    return any((
-        definition,
-        _FACT_FORMULA_CUE_RE.search(s),
-        _FACT_UNIT_CUE_RE.search(s),
-        numeric_value,
-        _FACT_SYMBOL_FORMULA_RE.search(s),
-        _FACT_OPERATION_RE.search(s),
-        _FACT_OPERATION_RELATION_RE.search(s),
-        _FACT_ROLE_RELATION_RE.search(s),
-        _FACT_AFFILIATION_RE.search(s),
-        _FACT_RANKING_RE.search(s),
-    ))
+    if _FACT_QUESTION_RE.search(s):
+        return False
+    if _FACT_UNCERTAIN_RE.search(s):
+        return False
+    if _FACT_PREFERENCE_RE.search(s):
+        return False
+    if _FACT_META_TALK_RE.search(s):
+        return False
+    return True
 
 
 def _log_intervention_event(state: SessionState, reason: str, detail: str = "") -> None:
@@ -320,8 +263,8 @@ def _run_drift_checker(state: SessionState, oai_key: str, oai_model: str):
 def _run_fact_checker(state: SessionState, oai_key: str, oai_model: str):
     """明確な事実誤りだけを短く補正する要求を積む.
 
-    脱線や発話量とは別ルートにする。ローカルの候補絞りで「式・数値・定義っぽい」
-    発話だけに限定し、LLM側でも high confidence の訂正だけを採用する。
+    脱線や発話量とは別ルートにする。ローカルでは明らかに不要な発話だけを落とし、
+    明確な誤りかどうかはLLMに任せる。採用するのは high confidence の訂正だけ。
     """
     from das.asr.live._bootstrap import check_fact_correction as _check_fact
 

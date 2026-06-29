@@ -48,6 +48,14 @@ def test_backchannel_is_not_intervention_signal() -> None:
     assert intervention_records([rec]) == []
 
 
+def test_displayed_unsure_speaker_is_not_intervention_signal() -> None:
+    rec = {"speaker": "未確定", "text": "外部音声らしい発話です"}
+
+    assert is_intervention_signal(rec) is False
+    assert is_reliable_human_speaker(rec) is False
+    assert intervention_records([rec]) == []
+
+
 def test_uncertain_long_utterance_is_kept_as_room_context() -> None:
     s = _state()
     rec = {

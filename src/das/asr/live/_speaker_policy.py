@@ -6,6 +6,7 @@ from typing import Any
 from ._constants import _BACKCHANNEL_RE, AGENT_SPEAKER, UNSURE_SPEAKER
 
 _GENERIC_SPEAKER = "発話者"
+_UNSURE_SPEAKER_LABELS = {UNSURE_SPEAKER, "未確定"}
 
 
 def is_intervention_signal(record: dict[str, Any]) -> bool:
@@ -17,7 +18,7 @@ def is_intervention_signal(record: dict[str, Any]) -> bool:
     text = str(record.get("text") or "").strip()
     if not text:
         return False
-    if record.get("bc") or record.get("speaker") == UNSURE_SPEAKER:
+    if record.get("bc") or record.get("speaker") in _UNSURE_SPEAKER_LABELS:
         return False
     return not _BACKCHANNEL_RE.match(text)
 
@@ -29,7 +30,7 @@ def is_reliable_human_speaker(record: dict[str, Any]) -> bool:
     発言量判定には使わない。誤った個人名でAIが介入するリスクを下げる。
     """
     speaker = record.get("speaker")
-    if speaker in {None, AGENT_SPEAKER, "パートナー", UNSURE_SPEAKER}:
+    if speaker in {None, AGENT_SPEAKER, "パートナー", *_UNSURE_SPEAKER_LABELS}:
         return False
     if record.get("speaker_source") == "stt_fallback":
         return False
