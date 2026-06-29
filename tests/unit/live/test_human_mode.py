@@ -169,8 +169,12 @@ def test_fact_candidate_gate_is_structural_not_keyword_based():
         "事物Aの高さは200メートルです",
         "指標Y、いや、事物Aの高さは200メートルです",
         "都市Aは国Bの首都です",
+        "都市Aは国Bの首都ではありません",
         "国Bの首都は都市Aです",
         "人物Aは組織BのCEOです",
+        "人物Aは国B人です",
+        "人物Aは国B出身です",
+        "人物Aは大会Bを2勝しました",
         "作品Aの作者は人物Bです",
         "x = y / z",
         "単位はメートルです",
@@ -189,6 +193,7 @@ def test_fact_candidate_gate_is_structural_not_keyword_based():
         "090-8165-1145 にかけてもいい？",
         "お酒はどこで飲むの、2回目のデート",
         "都市Aはきれいです",
+        "人物Aはいい人です",
     ]
 
     assert [_looks_like_fact_claim(t) for t in positives] == [True] * len(positives)
@@ -228,12 +233,17 @@ def test_fact_checker_enqueues_clear_formula_correction(monkeypatch):
     import das.asr.live._bootstrap as bootstrap
     from das.asr.live._workers import _run_fact_checker
 
-    monkeypatch.setattr(bootstrap, "check_fact_correction",
-                        lambda *a, **k: {"should_correct": True,
-                                         "confidence": "high",
-                                         "claim": "指標Xの計算式は分母を分子で割る",
-                                         "correction": "指標Xは分子を分母で割ります。",
-                                         "reason": "式が逆"})
+    calls = []
+
+    def _fake_fact(utts, *_args):
+        calls.append(utts)
+        return {"should_correct": True,
+                "confidence": "high",
+                "claim": "指標Xの計算式は分母を分子で割る",
+                "correction": "指標Xは分子を分母で割ります。",
+                "reason": "式が逆"}
+
+    monkeypatch.setattr(bootstrap, "check_fact_correction", _fake_fact)
     state = _make_state(with_agent=True)
     state.records = [
         {"speaker": "話者1", "text": "計算方法の話です", "ms": 0, "end_ms": 1000},
@@ -255,6 +265,7 @@ def test_fact_checker_enqueues_clear_formula_correction(monkeypatch):
 
     assert got is not None
     assert got["correction"].startswith("指標Xは")
+    assert calls == [[{"speaker": "参加者A", "text": "指標Xの計算式は分母を分子で割る感じでしたっけ"}]]
 
 
 def test_fact_checker_ignores_plain_opinion(monkeypatch):

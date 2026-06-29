@@ -71,6 +71,29 @@ def test_run_replay_fact_with_mock_checker():
     }]
 
 
+def test_run_replay_fact_checks_only_current_candidate():
+    turns = [
+        {"turn_id": 1, "speaker": "A", "text": "事物Aの高さは200メートルです", "ms": 0, "end_ms": 1000},
+        {"turn_id": 2, "speaker": "B", "text": "国Bの首都は都市Aです", "ms": 1000, "end_ms": 2000},
+    ]
+    calls = []
+
+    def fake_fact(utts, _key, _model):
+        calls.append(utts)
+        return {"should_correct": False}
+
+    run_replay(
+        turns,
+        ReplayOptions(api_key="key", checks={"fact"}),
+        check_fact=fake_fact,
+    )
+
+    assert calls == [
+        [{"speaker": "A", "text": "事物Aの高さは200メートルです"}],
+        [{"speaker": "B", "text": "国Bの首都は都市Aです"}],
+    ]
+
+
 def test_run_replay_drift_with_mock_checker():
     turns = [
         {"turn_id": i, "speaker": "A", "text": f"発話{i}", "ms": i * 1000, "end_ms": i * 1000 + 500}

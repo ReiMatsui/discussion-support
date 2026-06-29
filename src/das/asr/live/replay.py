@@ -21,7 +21,6 @@ from das.asr.live._constants import (
     _DRIFT_CHECK_INTERVAL,
     _DRIFT_CHECK_WINDOW,
     _DRIFT_WARMUP,
-    _FACTCHECK_WINDOW,
     _INVITE_QUIET_RATIO,
     _INVITE_WARMUP,
     AGENT_SPEAKER,
@@ -204,7 +203,11 @@ def _run_fact_check(
         return None
     if opts.no_api:
         return _event(turn, "fact_candidate", "定義・値・データ・明示式の候補")
-    result = check_fact(_utterance_window(records, _FACTCHECK_WINDOW), opts.api_key, opts.model)
+    result = check_fact(
+        [{"speaker": turn["speaker"], "text": turn["text"]}],
+        opts.api_key,
+        opts.model,
+    )
     if result.get("should_correct"):
         correction = str(result.get("correction") or "").strip()
         if correction:

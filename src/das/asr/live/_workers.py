@@ -35,7 +35,6 @@ from ._constants import (
     _FACTCHECK_CHECK_SEC,
     _FACTCHECK_COOLDOWN,
     _FACTCHECK_MIN_CHARS,
-    _FACTCHECK_WINDOW,
     _INTERRUPT_MIN_CHARS,
     _INTERVENTION_COOLDOWN,
     _INVITE_CHECK_SEC,
@@ -70,7 +69,7 @@ _FACT_UNIT_CUE_RE = re.compile(r"単位\s*(は|が|を|って|とは|という�
 _FACT_NUMERIC_VALUE_RE = re.compile(
     r"(は|が|=|＝|:|：).{0,40}"
     r"\d+(?:\.\d+)?\s*"
-    r"(%|％|割|倍|円|人|件|個|回|年|月|日|時|分|秒|歳|度|点|位|"
+    r"(%|％|割|倍|円|人|件|個|回|勝|敗|年|月|日|時|分|秒|歳|度|点|位|"
     r"kg|g|cm|mm|m|km|㎡|m2|"
     r"メートル|センチ|センチメートル|ミリ|ミリメートル|キロ|キロメートル|"
     r"グラム|キログラム)"
@@ -103,9 +102,15 @@ _FACT_ROLE_TERMS = (
 )
 _FACT_ROLE_RELATION_RE = re.compile(
     rf"(.{{1,40}}は.{{1,40}}の({_FACT_ROLE_TERMS})"
-    r"(です|でした|である)|"
+    r"(です|でした|である|ではありません|ではない)|"
     rf".{{1,40}}の({_FACT_ROLE_TERMS})は.{{1,40}}"
-    r"(です|でした|である))"
+    r"(です|でした|である|ではありません|ではない))"
+)
+_FACT_AFFILIATION_RE = re.compile(
+    r"(([A-Za-z一-龥ァ-ヶー]{2,40})は([A-Za-z一-龥ァ-ヶー]{2,24})(人|出身|国籍)"
+    r"(です|でした|である|ではありません|ではない)|"
+    r".{1,40}の(出身|国籍)は[A-Za-z一-龥ァ-ヶー]{2,40}"
+    r"(です|でした|である|ではありません|ではない))"
 )
 
 
@@ -142,6 +147,7 @@ def _looks_like_fact_claim(text: str) -> bool:
         _FACT_OPERATION_RE.search(s),
         _FACT_OPERATION_RELATION_RE.search(s),
         _FACT_ROLE_RELATION_RE.search(s),
+        _FACT_AFFILIATION_RE.search(s),
     ))
 
 
@@ -309,6 +315,7 @@ def _run_fact_checker(state: SessionState, oai_key: str, oai_model: str):
     from das.asr.live._bootstrap import check_fact_correction as _check_fact
 
     _last_check = 0.0
+    _recent_corrections: list[tuple[float, str]] = []
     while not state.stop.is_set():
         time.sleep(0.5)
         agent = state.agent
@@ -327,22 +334,38 @@ def _run_fact_checker(state: SessionState, oai_key: str, oai_model: str):
         n = len(talk_rs)
         if n <= state.fact_cursor:
             continue
-        new_records = talk_rs[state.fact_cursor:n]
-        if not any(_looks_like_fact_claim(str(r.get("text") or "")) for r in new_records):
+        next_idx = state.fact_cursor
+        candidate = None
+        while next_idx < n:
+            r = talk_rs[next_idx]
+            if _looks_like_fact_claim(str(r.get("text") or "")):
+                candidate = r
+                break
+            next_idx += 1
+        if candidate is None:
             state.fact_cursor = n
             continue
         now = time.monotonic()
         if now - _last_check < _FACTCHECK_CHECK_SEC:
             continue
         _last_check = now
-        state.fact_cursor = n
-        window = talk_rs[max(0, n - _FACTCHECK_WINDOW):]
-        utts = [{"speaker": intervention_speaker_name(state, r), "text": r["text"]}
-                for r in window]
+        state.fact_cursor = next_idx + 1
+        utts = [{
+            "speaker": intervention_speaker_name(state, candidate),
+            "text": candidate["text"],
+        }]
         result = _check_fact(utts, oai_key, oai_model)
         if result.get("should_correct"):
             correction = str(result.get("correction") or "").strip()
             if correction:
+                norm = re.sub(r"[\s、。,.，．!！?？]+", "", correction).lower()
+                _recent_corrections = [
+                    (t, c) for t, c in _recent_corrections if now - t < 90.0
+                ]
+                if any(c == norm for _, c in _recent_corrections):
+                    print("# [fact] skip: 重複する補正", flush=True)
+                    continue
+                _recent_corrections.append((now, norm))
                 _print_line(f"# ✅ 事実補正候補: {correction}")
                 state.factcheck_requests.put(result)
                 print("# [fact] → 補正要求をキューに投入", flush=True)
