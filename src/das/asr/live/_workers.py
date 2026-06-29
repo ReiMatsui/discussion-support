@@ -8,6 +8,8 @@
 """
 from __future__ import annotations
 
+import collections
+import contextlib
 import queue
 import re
 import threading
@@ -19,8 +21,6 @@ import numpy as np
 if TYPE_CHECKING:
     from ._session_state import SessionState
     from .stt import STTBackend
-
-import contextlib
 
 from ._constants import (
     _AGENDA_MIN_UTTS,
@@ -34,7 +34,9 @@ from ._constants import (
     _DRIFT_WARMUP,
     _FACTCHECK_CHECK_SEC,
     _FACTCHECK_COOLDOWN,
+    _FACTCHECK_MAX_RETRIES,
     _FACTCHECK_MIN_CHARS,
+    _FACTCHECK_PENDING_TTL,
     _INTERRUPT_MIN_CHARS,
     _INTERVENTION_COOLDOWN,
     _INVITE_CHECK_SEC,
@@ -53,7 +55,6 @@ from ._speaker_policy import (
     reliable_human_records,
 )
 from ._ui import _print_line
-
 
 _FACT_PHONE_NUMBER_RE = re.compile(r"\b0\d{1,3}-\d{2,4}-\d{3,4}\b")
 _FACT_QUESTION_RE = re.compile(
@@ -100,9 +101,7 @@ def _looks_like_fact_claim(text: str) -> bool:
         return False
     if _FACT_PREFERENCE_RE.search(s):
         return False
-    if _FACT_META_TALK_RE.search(s):
-        return False
-    return True
+    return not _FACT_META_TALK_RE.search(s)
 
 
 def _log_intervention_event(state: SessionState, reason: str, detail: str = "") -> None:
@@ -270,6 +269,7 @@ def _run_fact_checker(state: SessionState, oai_key: str, oai_model: str):
 
     _last_check = 0.0
     _recent_corrections: list[tuple[float, str]] = []
+    _retry_counts: dict[int, int] = {}
     while not state.stop.is_set():
         time.sleep(0.25)
         agent = state.agent
@@ -303,7 +303,6 @@ def _run_fact_checker(state: SessionState, oai_key: str, oai_model: str):
         if now - _last_check < _FACTCHECK_CHECK_SEC:
             continue
         _last_check = now
-        state.fact_cursor = next_idx + 1
         context = talk_rs[max(0, next_idx - 3):next_idx]
         utts = [
             {"speaker": intervention_speaker_name(state, r), "text": r["text"]}
@@ -314,6 +313,16 @@ def _run_fact_checker(state: SessionState, oai_key: str, oai_model: str):
             "text": candidate["text"],
         })
         result = _check_fact(utts, oai_key, oai_model)
+        if result.get("retryable_error"):
+            tries = _retry_counts.get(next_idx, 0) + 1
+            _retry_counts[next_idx] = tries
+            if tries <= _FACTCHECK_MAX_RETRIES:
+                print(f"# [fact] retry: LLM判定の一時失敗 {tries}/{_FACTCHECK_MAX_RETRIES}",
+                      flush=True)
+                continue
+            print("# [fact] skip: LLM判定の失敗が続いたため対象発話をスキップ", flush=True)
+        state.fact_cursor = next_idx + 1
+        _retry_counts.pop(next_idx, None)
         if result.get("should_correct"):
             correction = str(result.get("correction") or "").strip()
             if correction:
@@ -325,6 +334,7 @@ def _run_fact_checker(state: SessionState, oai_key: str, oai_model: str):
                     print("# [fact] skip: 重複する補正", flush=True)
                     continue
                 _recent_corrections.append((now, norm))
+                result["_queued_at"] = time.monotonic()
                 _print_line(f"# ✅ 事実補正候補: {correction}")
                 state.factcheck_requests.put(result)
                 print("# [fact] → 補正要求をキューに投入", flush=True)
@@ -553,7 +563,7 @@ def _run_agent_worker(state: SessionState):
     _pending_drift_reason: str | None = None  # drift_checkerからの未処理介入要求（R2）
     _pending_drift_count = 0
     _last_drift_request_at = 0.0
-    _pending_fact: dict | None = None
+    _pending_facts: collections.deque[dict] = collections.deque(maxlen=5)
     _last_fact_at = 0.0
     _pending_invite: str | None = None  # participation_checkerからの声かけ要求（S4）
     _last_invited: str | None = None    # 直近に声をかけた相手（連続回避）
@@ -646,7 +656,9 @@ def _run_agent_worker(state: SessionState):
                 break
         while True:
             try:
-                _pending_fact = state.factcheck_requests.get_nowait()
+                fact = state.factcheck_requests.get_nowait()
+                fact.setdefault("_queued_at", time.monotonic())
+                _pending_facts.append(fact)
             except queue.Empty:
                 break
 
@@ -660,10 +672,18 @@ def _run_agent_worker(state: SessionState):
             if agent.mode != "conversation":
                 with state.topics_lock:
                     _bargein_topics = list(state.topics) if state.topics else None
-            if _pending_fact is not None:
-                correction = str(_pending_fact.get("correction") or "").strip()
+            while _pending_facts:
+                age = time.monotonic() - float(_pending_facts[0].get("_queued_at", time.monotonic()))
+                if age <= _FACTCHECK_PENDING_TTL:
+                    break
+                stale = _pending_facts.popleft()
+                print(f"# [trigger] skip: 古い事実補正を破棄 {stale.get('correction', '')}",
+                      flush=True)
+            if _pending_facts:
+                pending_fact = _pending_facts[0]
+                correction = str(pending_fact.get("correction") or "").strip()
                 if not correction:
-                    _pending_fact = None
+                    _pending_facts.popleft()
                 elif time.monotonic() - _last_fact_at < _FACTCHECK_COOLDOWN:
                     if _diag_tick % 4 == 0:
                         print("# [trigger] hold: クールダウン中の事実補正", flush=True)
@@ -672,8 +692,8 @@ def _run_agent_worker(state: SessionState):
                     print(f"# [trigger] fact: {correction}", flush=True)
                     _log_intervention_event(state, "fact", correction)
                     agent.trigger(topics=_bargein_topics,
-                                  fact_correction=_pending_fact)
-                    _pending_fact = None
+                                  fact_correction=pending_fact)
+                    _pending_facts.popleft()
                     _last_fact_at = time.monotonic()
                     _last_intervention_at = _last_fact_at
                     continue

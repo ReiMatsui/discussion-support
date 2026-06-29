@@ -292,6 +292,33 @@ def test_fact_request_is_held_during_cooldown(monkeypatch):
     assert agent.trigger_calls[1]["fact_correction"]["correction"].startswith("国B")
 
 
+def test_fact_requests_are_drained_fifo_not_overwritten(monkeypatch):
+    """busy中に複数の事実補正が積まれても、最後の1件で上書きせず順番に処理する."""
+    import das.asr.live._workers as workers
+
+    monkeypatch.setattr(workers, "_FACTCHECK_COOLDOWN", 0.0)
+    agent = FakeAgent()
+    state = FakeState(agent, None)
+    state.factcheck_requests.put({
+        "should_correct": True,
+        "confidence": "high",
+        "correction": "1つ目の補正です。",
+    })
+    state.factcheck_requests.put({
+        "should_correct": True,
+        "confidence": "high",
+        "correction": "2つ目の補正です。",
+    })
+
+    _run_worker_briefly(state, until=lambda: len(agent.trigger_calls) >= 2)
+
+    corrections = [
+        call["fact_correction"]["correction"]
+        for call in agent.trigger_calls
+    ]
+    assert corrections == ["1つ目の補正です。", "2つ目の補正です。"]
+
+
 def test_single_drift_request_is_held_until_confirmed():
     """controlledでは単発の脱線判定だけでは即介入しない。"""
     agent = FakeAgent()

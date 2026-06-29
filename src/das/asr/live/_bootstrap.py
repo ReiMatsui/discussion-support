@@ -294,7 +294,7 @@ def check_fact_correction(utterances: list[dict], api_key: str, model: str) -> d
     params = _build_chat_params(model, prompt, max_out=700, temperature=0.0)
     result = _post_chat_json(params, api_key, timeout=15, label="fact")
     if not isinstance(result, dict):
-        return {"should_correct": False}
+        return {"should_correct": False, "retryable_error": True}
     if result.get("should_correct") is not True:
         return {"should_correct": False}
     if result.get("confidence") != "high":

@@ -282,6 +282,16 @@ def test_check_fact_correction_suppresses_low_confidence(monkeypatch):
     ) == {"should_correct": False}
 
 
+def test_check_fact_correction_marks_parse_failure_retryable(monkeypatch):
+    import das.asr.live._bootstrap as bootstrap
+
+    monkeypatch.setattr(bootstrap, "_post_chat_json", lambda *a, **k: None)
+
+    assert bootstrap.check_fact_correction(
+        [{"speaker": "A", "text": "対象の値は100です"}], "key", "m"
+    ) == {"should_correct": False, "retryable_error": True}
+
+
 def test_check_fact_correction_marks_only_last_utterance_as_target(monkeypatch):
     import das.asr.live._bootstrap as bootstrap
 
@@ -381,6 +391,51 @@ def test_fact_checker_passes_recent_context_before_target(monkeypatch):
         {"speaker": "参加者A", "text": "ランキングについて話しましょう"},
         {"speaker": "参加者A", "text": "対象の値は100です"},
     ]]
+
+
+def test_fact_checker_retries_retryable_failure_before_advancing(monkeypatch):
+    """LLM/API一時失敗では同じ発話を再試行し、成功したらキューに積む."""
+    import das.asr.live._bootstrap as bootstrap
+    import das.asr.live._workers as workers
+    from das.asr.live._workers import _run_fact_checker
+
+    monkeypatch.setattr(workers, "_FACTCHECK_CHECK_SEC", 0.1)
+    calls = []
+
+    def _fake_fact(utts, *_args):
+        calls.append(utts)
+        if len(calls) == 1:
+            return {"should_correct": False, "retryable_error": True}
+        return {"should_correct": True,
+                "confidence": "high",
+                "claim": "対象の値は100",
+                "correction": "対象の値は200です。",
+                "reason": "値が違う"}
+
+    monkeypatch.setattr(bootstrap, "check_fact_correction", _fake_fact)
+    state = _make_state(with_agent=True)
+    state.records = [
+        {"speaker": "話者1", "text": "対象の値は100です", "ms": 0, "end_ms": 1000},
+    ]
+
+    th = threading.Thread(target=_run_fact_checker,
+                          args=(state, "key", "gpt-5-mini"), daemon=True)
+    th.start()
+    got = None
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline and got is None:
+        try:
+            got = state.factcheck_requests.get_nowait()
+        except Exception:
+            time.sleep(0.05)
+    state.stop.set()
+    th.join(timeout=2)
+
+    assert got is not None
+    assert got["correction"] == "対象の値は200です。"
+    assert len(calls) >= 2
+    assert calls[0] == calls[1]
+    assert state.fact_cursor == 1
 
 
 def test_fact_checker_ignores_plain_opinion(monkeypatch):
