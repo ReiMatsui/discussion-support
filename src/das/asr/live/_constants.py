@@ -190,20 +190,27 @@ _TOPIC_PROMPT = """\
 形式: [{{"topic": "論点の短い要約", "speaker": "発話者名"}}]"""
 
 _DRIFT_PROMPT = """\
-会議の論点と直近の発話を比較し、脱線しているか判定してください。
+会議の基準議題・現在の論点・直近の発話を比較し、ファシリテーターが介入すべき
+明確な脱線かどうかを判定してください。
 
-## 論点
+## 基準議題
+{agenda}
+
+## 現在の論点
 {topics}
 
 ## 直近の発話
 {utterances}
 
 ## 判定基準
-- 議題と明らかに無関係な話題が続いている（雑談・私的な話題・別の話への脱線）→ drift=true
-- 議題に関連する議論なら、論点が多少移動しても・別の角度でも → drift=false
-- 一時的な余談、合意形成・要約・整理・進行の発言、関連する具体例 → drift=false
-- 会議開始時の挨拶・自己紹介・進行の発言 → drift=false
-迷ったら drift=false にしてください（過剰な介入を避けるため、明らかな脱線のみ true）。
+- 基準議題が明示されている場合だけ、それを「戻るべき軸」として強く扱う
+- 基準議題が未指定の場合、現在の論点は会話の流れを理解する参考であり、
+  最初の論点へ戻すための固定基準ではない
+- 会話が自然に新しい論点へ移っている、検証・メタ会話に移っている、
+  参加者がAIやファシリテーターに言及している → drift=false
+- 重要でない短い相槌・断片・一時的な余談 → drift=false
+- 明らかに無関係な話題が複数発話続き、会話の目的を損ねている → drift=true
+- 迷ったら drift=false（過剰な介入を避ける）
 
 JSON1つのみ出力。形式: {{"drift": true/false, "reason": "10字以内"}}"""
 
@@ -246,6 +253,10 @@ _PROMPT_FACILITATOR = """\
 不必要に発言しないでください。人間の議論を尊重し、
 本当に価値ある貢献ができる時だけ簡潔に発言してください。
 発言は日本語で、30秒以内に収まる長さにしてください。
+最初の論点に固着しないでください。会話の論点が自然に移った場合は、
+新しい流れを尊重し、元の話題へ戻す必要はありません。
+参加者がファシリテーターやAIに話しかけている場合は、脱線扱いで戻すのではなく、
+必要ならその問いに短く答えてください。
 
 介入する場合は、前置きや「（介入）」のような記号を付けず、
 本題の発言だけを話してください。
@@ -281,8 +292,8 @@ _AGENT_CONV_SILENCE = 1.5     # N秒沈黙で応答(conversation — 発話断�
 _INTERRUPT_MIN_CHARS = 8      # ファシリテーター割り込みの最小文字数
 
 # --- 並列ドリフト（脱線）検出 ---
-_DRIFT_CHECK_INTERVAL = 1     # ドリフトチェックの発話間隔（1=最後の1言でも即評価）
-_DRIFT_CHECK_WINDOW = 6       # チェック時に参照する最近の発話数
+_DRIFT_CHECK_INTERVAL = 3     # ドリフトチェックの発話間隔（短い発話に過敏にならない）
+_DRIFT_CHECK_WINDOW = 8       # チェック時に参照する最近の発話数
 _DRIFT_WARMUP = 3             # この発話数に達するまで脱線判定しない（開始時の挨拶の猶予）
 _INTERVENTION_COOLDOWN = 25.0 # 介入後この秒数は脱線介入を抑制（連発=しつこさの防止）
 
@@ -309,9 +320,12 @@ _ECHO_COOLDOWN = 2.0          # AI発話終了後のエコーウィンドウ秒�
 # cooldown: 脱線介入・声かけの最小間隔（しつこさ防止）。
 # 既定は controlled。まずは明確な問題時だけ介入する。
 _PROACTIVITY_PROFILES = {
-    "controlled": {"silence_summarize": None, "cooldown": 40.0},  # 明確な問題時のみ
-    "standard":   {"silence_summarize": 18.0, "cooldown": 25.0},
-    "active":     {"silence_summarize": 8.0,  "cooldown": 15.0},
+    "controlled": {"silence_summarize": None, "cooldown": 40.0,
+                   "drift_confirmations": 2},  # 明確な問題時のみ
+    "standard":   {"silence_summarize": 18.0, "cooldown": 25.0,
+                   "drift_confirmations": 2},
+    "active":     {"silence_summarize": 8.0,  "cooldown": 15.0,
+                   "drift_confirmations": 1},
 }
 _PROACTIVITY_DEFAULT = "controlled"
 # 相槌判定: 相槌パターンに一致する発話ではPartnerを止めない

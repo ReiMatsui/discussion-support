@@ -157,6 +157,8 @@ def test_trigger_with_topics_includes_topic_note(agent):
     text = agent.ws.last_create_text()
     assert "現在の論点" in text
     assert "AI導入の是非" in text
+    assert "自然に移った新しい論点は尊重" in text
+    assert "元のテーマに戻してください" not in text
 
 
 def test_trigger_with_invite_target(agent):

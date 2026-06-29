@@ -204,8 +204,25 @@ def check_drift(utterances: list[dict], topics: list[dict],
     if not utterances or not topics or not api_key:
         return {"drift": False}
     utt_text = "\n".join(f"- {u['speaker']}: {u['text']}" for u in utterances)
-    topic_text = "\n".join(f"- {t['topic']}" for t in topics)
-    prompt = _DRIFT_PROMPT.format(topics=topic_text, utterances=utt_text)
+    agenda_topics = [
+        t for t in topics
+        if t.get("speaker") in ("議題", "議題(自動)")
+    ]
+    explicit_agenda = [
+        t for t in agenda_topics
+        if t.get("speaker") == "議題"
+    ]
+    agenda_text = (
+        "\n".join(f"- {t['topic']}" for t in explicit_agenda)
+        if explicit_agenda else "（明示議題なし）"
+    )
+    flow_topics = [t for t in topics if t not in explicit_agenda]
+    topic_text = "\n".join(f"- {t['topic']}" for t in flow_topics) or "（まだなし）"
+    prompt = _DRIFT_PROMPT.format(
+        agenda=agenda_text,
+        topics=topic_text,
+        utterances=utt_text,
+    )
     params = _build_chat_params(model, prompt, max_out=800, temperature=0.0)
     result = _post_chat_json(params, api_key, timeout=15, label="drift")
     if not isinstance(result, dict):

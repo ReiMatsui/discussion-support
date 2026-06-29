@@ -214,7 +214,8 @@ class SessionState:
         """参加人数上限を超える新規匿名話者を「未確定」に落とす.
 
         参加人数は「表示できる人間スロット数」として扱う。既に出現済みの人間話者は
-        維持するが、上限到達後の新しい #/@diar:/人物N は増やさない。
+        維持するが、上限到達後の新しい #/@diar:/人物N は増やさない。設定前に
+        余剰ラベルが作られていた場合も、以後は上限外として未確定に寄せる。
         """
         key = str(key)
         if key in (AGENT_SPEAKER, "パートナー", UNSURE_SPEAKER):
@@ -222,8 +223,14 @@ class SessionState:
         if not (self._is_anonymous_speaker_key(key) or self._is_system_anonymous_name(key)):
             return key
         max_speakers = self._max_human_speakers()
-        if max_speakers is None or key in self.anonymous_labels:
+        if max_speakers is None:
             return key
+        if key in self.anonymous_labels:
+            label = self.anonymous_labels[key]
+            labels = sorted(set(self.anonymous_labels.values()))
+            if label in labels[:max_speakers]:
+                return key
+            return UNSURE_SPEAKER
         if self._known_human_slot_count() >= max_speakers:
             return UNSURE_SPEAKER
         return key

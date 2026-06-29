@@ -144,6 +144,22 @@ def test_participant_count_caps_new_anonymous_display_slots():
     assert s.constrain_human_speaker_key("人物3") == UNSURE_SPEAKER
 
 
+def test_participant_count_rejects_existing_extra_anonymous_labels():
+    s = _make_state()
+    s.set_diarization_max_speakers(2)
+    s.anonymous_labels = {
+        "#1": "参加者A",
+        "#2": "参加者B",
+        "#5": "参加者E",
+    }
+    s.records = [
+        {"speaker": "#1", "text": "a", "ms": 0, "end_ms": 500},
+        {"speaker": "#2", "text": "b", "ms": 500, "end_ms": 1000},
+    ]
+
+    assert s.constrain_human_speaker_key("#5") == UNSURE_SPEAKER
+
+
 def test_participant_count_includes_named_human_speakers():
     s = _make_state()
     s.set_diarization_max_speakers(2)

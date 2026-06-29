@@ -361,14 +361,14 @@ class RealtimeAgent(_RealtimeBase):
                 for i, t in enumerate(topics[-8:])  # 最新8件まで
             )
             topic_note = (f"[現在の論点]\n{topic_lines}\n\n"
-                          f"議論がこれらの論点からズレていたら、"
-                          f"簡潔に指摘して元のテーマに戻してください。")
+                          f"これは会話の流れを理解するための参考です。"
+                          f"最初の論点に固定せず、自然に移った新しい論点は尊重してください。")
             conv = f"{topic_note}\n\n{conv}" if conv else topic_note
         # --- 脱線検出コンテキスト ---
         if drift_reason:
             drift_note = (f"[脱線検出] {drift_reason}\n"
-                          f"議論が論点からズレています。"
-                          f"簡潔に指摘して元のテーマに戻してください。")
+                          f"必要な場合だけ、会話を前に進める短い一言を述べてください。"
+                          f"単に最初の話題へ戻すのではなく、今の流れを踏まえてください。")
             conv = f"{drift_note}\n\n{conv}" if conv else drift_note
         # --- 声かけ（参加度）コンテキスト（S4） ---
         if invite_target:

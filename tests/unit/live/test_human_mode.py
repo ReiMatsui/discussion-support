@@ -38,6 +38,7 @@ def test_proactivity_profiles():
     from das.asr.live._constants import _PROACTIVITY_DEFAULT, _PROACTIVITY_PROFILES
     assert _PROACTIVITY_DEFAULT == "controlled"
     assert _PROACTIVITY_PROFILES["controlled"]["silence_summarize"] is None
+    assert _PROACTIVITY_PROFILES["controlled"]["drift_confirmations"] >= 2
     assert _PROACTIVITY_PROFILES["standard"]["silence_summarize"] == 18.0
     # 控えめ寄り: 標準でも以前の5秒よりかなり長い
     assert _PROACTIVITY_PROFILES["standard"]["silence_summarize"] > 10

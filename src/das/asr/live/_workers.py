@@ -428,6 +428,8 @@ def _run_agent_worker(state: SessionState):
     _last_stall_at = 0.0  # 沈黙ブレーカーの最終発火時刻（ループ防止、Fix 10）
     _last_intervention_at = 0.0  # 直近の介入時刻（脱線介入のクールダウン用）
     _pending_drift_reason: str | None = None  # drift_checkerからの未処理介入要求（R2）
+    _pending_drift_count = 0
+    _last_drift_request_at = 0.0
     _pending_invite: str | None = None  # participation_checkerからの声かけ要求（S4）
     _last_invited: str | None = None    # 直近に声をかけた相手（連続回避）
     _last_agent_reconnect_at = 0.0
@@ -505,6 +507,11 @@ def _run_agent_worker(state: SessionState):
         while True:
             try:
                 _pending_drift_reason = state.drift_requests.get_nowait()
+                now = time.monotonic()
+                if now - _last_drift_request_at > 20.0:
+                    _pending_drift_count = 0
+                _last_drift_request_at = now
+                _pending_drift_count += 1
             except queue.Empty:
                 break
         while True:
@@ -523,10 +530,20 @@ def _run_agent_worker(state: SessionState):
                 with state.topics_lock:
                     _bargein_topics = list(state.topics) if state.topics else None
             if _pending_drift_reason is not None:
+                _required_drift_count = int(state.proactivity.get("drift_confirmations", 1))
+                if _pending_drift_count < _required_drift_count:
+                    if _diag_tick % 20 == 0:
+                        print(
+                            "# [trigger] hold: 脱線判定の確認待ち "
+                            f"{_pending_drift_count}/{_required_drift_count}",
+                            flush=True,
+                        )
+                    continue
                 # クールダウン中は連発を避けるため要求を破棄（再脱線なら再検出される）
                 if time.monotonic() - _last_intervention_at < _cooldown:
                     print("# [trigger] skip: クールダウン中の脱線介入", flush=True)
                     _pending_drift_reason = None
+                    _pending_drift_count = 0
                 else:
                     print(f"# [trigger] drift: 脱線介入「{_pending_drift_reason}」",
                           flush=True)
@@ -534,6 +551,7 @@ def _run_agent_worker(state: SessionState):
                     agent.trigger(topics=_bargein_topics,
                                   drift_reason=_pending_drift_reason)
                     _pending_drift_reason = None
+                    _pending_drift_count = 0
                     _last_intervention_at = time.monotonic()
                     continue
             if agent._pending_intervention is not None:

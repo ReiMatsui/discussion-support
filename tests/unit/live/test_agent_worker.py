@@ -214,9 +214,10 @@ def test_intervention_disabled_skips_facilitator_but_keeps_partner_context():
 
 
 def test_drift_request_triggers_with_reason():
-    """drift_requestsに積まれた脱線要求を、agent_workerがdrift_reason付きでトリガーする（R2）."""
+    """連続した脱線要求で、agent_workerがdrift_reason付きでトリガーする（R2）."""
     agent = FakeAgent()
     state = FakeState(agent, None)
+    state.drift_requests.put("ラーメンの雑談")
     state.drift_requests.put("ラーメンの雑談")
 
     _run_worker_briefly(state, until=lambda: bool(agent.trigger_calls))
@@ -224,6 +225,20 @@ def test_drift_request_triggers_with_reason():
     assert agent.trigger_calls, "脱線要求でトリガーされるべき"
     assert agent.trigger_calls[0]["drift_reason"] == "ラーメンの雑談"
     assert state.intervention_events == [{"reason": "drift", "detail": "ラーメンの雑談"}]
+
+
+def test_single_drift_request_is_held_until_confirmed():
+    """controlledでは単発の脱線判定だけでは即介入しない。"""
+    agent = FakeAgent()
+    state = FakeState(agent, None)
+    state.proactivity = {"silence_summarize": None, "cooldown": 40.0,
+                         "drift_confirmations": 2}
+    state.drift_requests.put("地元の雑談")
+
+    _run_worker_briefly(state, until=lambda: False, timeout=1.0)
+
+    assert agent.trigger_calls == []
+    assert state.intervention_events == []
 
 
 def test_count_trigger_records_intervention_reason():
