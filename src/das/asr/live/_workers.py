@@ -14,6 +14,7 @@ import queue
 import re
 import threading
 import time
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -112,6 +113,56 @@ def _log_intervention_event(state: SessionState, reason: str, detail: str = "") 
 
 def _intervention_enabled(state: SessionState) -> bool:
     return bool(getattr(state, "intervention_enabled", True))
+
+
+@dataclass
+class _PendingInterventions:
+    """agent_worker が一元調停する未処理介入要求."""
+
+    drift_reason: str | None = None
+    drift_count: int = 0
+    last_drift_request_at: float = 0.0
+    facts: collections.deque[dict] = field(
+        default_factory=lambda: collections.deque(maxlen=5))
+    invite: str | None = None
+
+    def drain(self, state: SessionState, *, now: float) -> None:
+        """各監視ワーカーのキューを回収し、保留状態に反映する."""
+        while True:
+            try:
+                self.drift_reason = state.drift_requests.get_nowait()
+                if now - self.last_drift_request_at > 20.0:
+                    self.drift_count = 0
+                self.last_drift_request_at = now
+                self.drift_count += 1
+            except queue.Empty:
+                break
+        while True:
+            try:
+                self.invite = state.invite_requests.get_nowait()
+            except queue.Empty:
+                break
+        while True:
+            try:
+                fact = state.factcheck_requests.get_nowait()
+                fact.setdefault("_queued_at", now)
+                self.facts.append(fact)
+            except queue.Empty:
+                break
+
+    def drop_stale_facts(self, *, now: float) -> None:
+        """会話タイミングを外した古い事実補正を破棄する."""
+        while self.facts:
+            age = now - float(self.facts[0].get("_queued_at", now))
+            if age <= _FACTCHECK_PENDING_TTL:
+                return
+            stale = self.facts.popleft()
+            print(f"# [trigger] skip: 古い事実補正を破棄 {stale.get('correction', '')}",
+                  flush=True)
+
+    def clear_drift(self) -> None:
+        self.drift_reason = None
+        self.drift_count = 0
 
 
 def _run_agenda_detector(state: SessionState, oai_key: str, oai_model: str):
@@ -560,12 +611,8 @@ def _run_agent_worker(state: SessionState):
     _diag_tick = 0
     _last_stall_at = 0.0  # 沈黙ブレーカーの最終発火時刻（ループ防止、Fix 10）
     _last_intervention_at = 0.0  # 直近の介入時刻（脱線介入のクールダウン用）
-    _pending_drift_reason: str | None = None  # drift_checkerからの未処理介入要求（R2）
-    _pending_drift_count = 0
-    _last_drift_request_at = 0.0
-    _pending_facts: collections.deque[dict] = collections.deque(maxlen=5)
+    _pending = _PendingInterventions()
     _last_fact_at = 0.0
-    _pending_invite: str | None = None  # participation_checkerからの声かけ要求（S4）
     _last_invited: str | None = None    # 直近に声をかけた相手（連続回避）
     _last_agent_reconnect_at = 0.0
     while not state.stop.is_set():
@@ -640,28 +687,7 @@ def _run_agent_worker(state: SessionState):
             partner.interrupt()
         # --- drift_checker/participation_checkerからの要求を回収（R2/S4） ---
         # busyでも取りこぼさないよう、キューは毎ループ必ずdrainして最新を保持する。
-        while True:
-            try:
-                _pending_drift_reason = state.drift_requests.get_nowait()
-                now = time.monotonic()
-                if now - _last_drift_request_at > 20.0:
-                    _pending_drift_count = 0
-                _last_drift_request_at = now
-                _pending_drift_count += 1
-            except queue.Empty:
-                break
-        while True:
-            try:
-                _pending_invite = state.invite_requests.get_nowait()
-            except queue.Empty:
-                break
-        while True:
-            try:
-                fact = state.factcheck_requests.get_nowait()
-                fact.setdefault("_queued_at", time.monotonic())
-                _pending_facts.append(fact)
-            except queue.Empty:
-                break
+        _pending.drain(state, now=time.monotonic())
 
         # --- 最優先のバージイン（ガードバイパス）:
         # ①事実補正 ②脱線介入 ③中断介入のリトライ ---
@@ -673,18 +699,12 @@ def _run_agent_worker(state: SessionState):
             if agent.mode != "conversation":
                 with state.topics_lock:
                     _bargein_topics = list(state.topics) if state.topics else None
-            while _pending_facts:
-                age = time.monotonic() - float(_pending_facts[0].get("_queued_at", time.monotonic()))
-                if age <= _FACTCHECK_PENDING_TTL:
-                    break
-                stale = _pending_facts.popleft()
-                print(f"# [trigger] skip: 古い事実補正を破棄 {stale.get('correction', '')}",
-                      flush=True)
-            if _pending_facts:
-                pending_fact = _pending_facts[0]
+            _pending.drop_stale_facts(now=time.monotonic())
+            if _pending.facts:
+                pending_fact = _pending.facts[0]
                 correction = str(pending_fact.get("correction") or "").strip()
                 if not correction:
-                    _pending_facts.popleft()
+                    _pending.facts.popleft()
                 elif time.monotonic() - _last_fact_at < _FACTCHECK_COOLDOWN:
                     if _diag_tick % 4 == 0:
                         print("# [trigger] hold: クールダウン中の事実補正", flush=True)
@@ -694,33 +714,31 @@ def _run_agent_worker(state: SessionState):
                     _log_intervention_event(state, "fact", correction)
                     agent.trigger(topics=_bargein_topics,
                                   fact_correction=pending_fact)
-                    _pending_facts.popleft()
+                    _pending.facts.popleft()
                     _last_fact_at = time.monotonic()
                     _last_intervention_at = _last_fact_at
                     continue
-            if _pending_drift_reason is not None:
+            if _pending.drift_reason is not None:
                 _required_drift_count = int(state.proactivity.get("drift_confirmations", 1))
-                if _pending_drift_count < _required_drift_count:
+                if _pending.drift_count < _required_drift_count:
                     if _diag_tick % 20 == 0:
                         print(
                             "# [trigger] hold: 脱線判定の確認待ち "
-                            f"{_pending_drift_count}/{_required_drift_count}",
+                            f"{_pending.drift_count}/{_required_drift_count}",
                             flush=True,
                         )
                     continue
                 # クールダウン中は連発を避けるため要求を破棄（再脱線なら再検出される）
                 if time.monotonic() - _last_intervention_at < _cooldown:
                     print("# [trigger] skip: クールダウン中の脱線介入", flush=True)
-                    _pending_drift_reason = None
-                    _pending_drift_count = 0
+                    _pending.clear_drift()
                 else:
-                    print(f"# [trigger] drift: 脱線介入「{_pending_drift_reason}」",
+                    print(f"# [trigger] drift: 脱線介入「{_pending.drift_reason}」",
                           flush=True)
-                    _log_intervention_event(state, "drift", _pending_drift_reason)
+                    _log_intervention_event(state, "drift", _pending.drift_reason)
                     agent.trigger(topics=_bargein_topics,
-                                  drift_reason=_pending_drift_reason)
-                    _pending_drift_reason = None
-                    _pending_drift_count = 0
+                                  drift_reason=_pending.drift_reason)
+                    _pending.clear_drift()
                     _last_intervention_at = time.monotonic()
                     continue
             if agent._pending_intervention is not None:
@@ -800,18 +818,18 @@ def _run_agent_worker(state: SessionState):
             # --- 声かけ（参加度）: 沈黙の“間”で、発言の少ない人を誘う（S4） ---
             # 脱線(バージイン)と違い、声かけは人間を割り込まないよう間を待つ。
             # クールダウン共有＋同じ人を連続では誘わない。
-            elif (_pending_invite is not None
+            elif (_pending.invite is not None
                   and _silence_elapsed > _INVITE_SILENCE
                   and time.monotonic() - _last_intervention_at > _cooldown):
-                if _pending_invite == _last_invited:
-                    _pending_invite = None  # 同じ人を連続では誘わない
+                if _pending.invite == _last_invited:
+                    _pending.invite = None  # 同じ人を連続では誘わない
                 else:
-                    print(f"# [trigger] invite: {_pending_invite}さんに声かけ", flush=True)
-                    _log_intervention_event(state, "invite", f"{_pending_invite}さんに声かけ")
-                    agent.trigger(topics=_topics, invite_target=_pending_invite)
+                    print(f"# [trigger] invite: {_pending.invite}さんに声かけ", flush=True)
+                    _log_intervention_event(state, "invite", f"{_pending.invite}さんに声かけ")
+                    agent.trigger(topics=_topics, invite_target=_pending.invite)
                     _last_intervention_at = time.monotonic()
-                    _last_invited = _pending_invite
-                    _pending_invite = None
+                    _last_invited = _pending.invite
+                    _pending.invite = None
 
 
 def _run_stdin_commands(state: SessionState):
