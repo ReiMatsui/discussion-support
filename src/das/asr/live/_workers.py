@@ -63,7 +63,8 @@ _FACT_DEFINITION_RE = re.compile(
     r".{1,32}は.{1,32}のこと)"
 )
 _FACT_FORMULA_CUE_RE = re.compile(
-    r"((計算|算出)式|求め方|(?<!成人)式\s*(は|が|を|って|とは|というのは))"
+    r"((計算|算出)式|求め方|.{1,32}の式\s*(は|が|を|って|とは|というのは)|"
+    r"式\s*(とは|というのは))"
 )
 _FACT_UNIT_CUE_RE = re.compile(r"単位\s*(は|が|を|って|とは|というのは)")
 _FACT_NUMERIC_VALUE_RE = re.compile(
@@ -96,10 +97,14 @@ _FACT_OPERATION_RELATION_RE = re.compile(
     r"(を|に).{0,32}(で|に)?"
     r"(割る|掛ける|かける|足す|引く)"
 )
+_FACT_ROLE_TERMS = (
+    r"首都|県庁所在地|所在地|大統領|首相|代表|社長|CEO|"
+    r"創業者|設立者|発明者|作者|著者|監督|優勝者"
+)
 _FACT_ROLE_RELATION_RE = re.compile(
-    r"(.{1,40}は.{1,40}の(首都|県庁所在地|大統領|首相|社長|CEO|創業者)"
+    rf"(.{{1,40}}は.{{1,40}}の({_FACT_ROLE_TERMS})"
     r"(です|でした|である)|"
-    r".{1,40}の(首都|県庁所在地|大統領|首相|社長|CEO|創業者)は.{1,40}"
+    rf".{{1,40}}の({_FACT_ROLE_TERMS})は.{{1,40}}"
     r"(です|でした|である))"
 )
 

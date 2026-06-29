@@ -266,7 +266,7 @@ def test_fact_request_is_held_during_cooldown(monkeypatch):
         state.factcheck_requests.put({
             "should_correct": True,
             "confidence": "high",
-            "correction": "富士山は約3,776メートルです。",
+            "correction": "事物Aの高さは約3,000メートルです。",
         })
         deadline = time.monotonic() + 2.0
         while time.monotonic() < deadline and len(agent.trigger_calls) < 1:
@@ -276,7 +276,7 @@ def test_fact_request_is_held_during_cooldown(monkeypatch):
         state.factcheck_requests.put({
             "should_correct": True,
             "confidence": "high",
-            "correction": "アメリカの首都はワシントンD.C.です。",
+            "correction": "国Bの首都は都市Aです。",
         })
         time.sleep(0.3)
         assert len(agent.trigger_calls) == 1, "クールダウン中はまだ発火しない"
@@ -289,7 +289,7 @@ def test_fact_request_is_held_during_cooldown(monkeypatch):
         t.join(timeout=2.0)
 
     assert len(agent.trigger_calls) == 2
-    assert agent.trigger_calls[1]["fact_correction"]["correction"].startswith("アメリカ")
+    assert agent.trigger_calls[1]["fact_correction"]["correction"].startswith("国B")
 
 
 def test_single_drift_request_is_held_until_confirmed():
