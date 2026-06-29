@@ -89,7 +89,7 @@ def test_session_mode_converse_with_partner():
 # --- api_snapshot -----------------------------------------------------------
 
 def test_api_snapshot_speakers_have_rename_labels():
-    """声紋確定の匿名参加者だけがリネーム可能、暫定ラベルとAIは対象外（F5）."""
+    """声紋確定済みで名前未登録の参加者だけがリネーム可能、暫定ラベルとAIは対象外（F5）."""
     s = _make_state()
     s.records = [
         {"speaker": "人物1", "text": "a", "ms": 0, "end_ms": 500},
@@ -244,7 +244,7 @@ def test_snapshot_unsure_and_backchannel_flags():
 
 
 def test_speakers_registration_targets():
-    """登録対象は声紋確定の匿名参加者のみ。暫定/命名済み/未確定/AIは対象外."""
+    """登録対象は声紋確定済みで名前未登録の参加者のみ。暫定/命名済み/未確定/AIは対象外."""
     s = _make_state()
     s.records = [
         {"speaker": "人物1", "text": "a", "ms": 0, "end_ms": 500},

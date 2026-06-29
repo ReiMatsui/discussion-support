@@ -189,7 +189,7 @@ class SessionState:
         """外部diarizationの生ラベルを、表示用の安定した内部キーに変換する.
 
         pyannote の ``SPEAKER_00`` は実名でもUI向けラベルでもなく、provider内部の
-        匿名クラスタIDにすぎない。recordsには内部キーを入れ、表示は参加者A/Bに統一する。
+        未登録クラスタIDにすぎない。recordsには内部キーを入れ、表示は参加者A/Bに統一する。
         """
         raw = f"{source}:{speaker}"
         if raw not in self.diarization_speaker_keys:
@@ -299,7 +299,7 @@ class SessionState:
     def _speaker_label(self, key: str) -> str | None:
         """話者リネーム(/rename)に渡すラベルを返す。リネーム不可なら None.
 
-        登録できるのは「声紋で確定したが名前の付いていない匿名参加者」だけ。
+        登録できるのは「声紋で確定したが名前の付いていない参加者」だけ。
         - 内部キー "人物N" → そのキー（profilesへ直接命名）
         暫定の "#N"（声紋未確定・Sonioxラベル依存で別人に振り替わりうる）、命名済みの
         実名、AI、未確定(?) は登録対象外（None）。確定した人だけに名前を付けることで、
