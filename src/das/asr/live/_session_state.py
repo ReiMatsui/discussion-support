@@ -133,6 +133,8 @@ class SessionState:
         self.asr_pcm_buf = bytearray()
         self.asr_pcm_buf_offset = 0
         self.asr_pcm_total_bytes = 0
+        self.stt_time_offset_ms = 0
+        self._stt_connection_audio_base_bytes = 0
         self._PCM_KEEP_BYTES = SR * 2 * 120
         self.buf_lock = threading.Lock()
         self.pcm_file = None  # IO[bytes] | None
@@ -459,6 +461,8 @@ class SessionState:
         self.asr_pcm_buf = bytearray()
         self.asr_pcm_buf_offset = 0
         self.asr_pcm_total_bytes = 0
+        self.stt_time_offset_ms = 0
+        self._stt_connection_audio_base_bytes = 0
         try:
             self.pcm_file = open(self.wav_path, "wb")  # noqa: SIM115
             self.pcm_file.write(b"RIFF" + struct.pack("<I", 0) + b"WAVEfmt " +
@@ -490,6 +494,19 @@ class SessionState:
         with contextlib.suppress(OSError):
             os.remove(self.wav_path)
         return None
+
+    def mark_stt_connection_started(self) -> None:
+        """新しいSTT接続の時刻0と、送信済み音声の絶対位置を対応させる."""
+        with self.buf_lock:
+            base = self.asr_pcm_total_bytes
+            self._stt_connection_audio_base_bytes = base
+            self.stt_time_offset_ms = int(base / (SR * 2) * 1000)
+
+    def stt_abs_ms(self, ms: int | None) -> int | None:
+        """現在のSTT接続内タイムスタンプを、会議全体の時刻に変換する."""
+        if ms is None:
+            return None
+        return int(ms) + self.stt_time_offset_ms
 
     def reset_for_new_meeting(self) -> dict:
         """現在の会議を確定保存し、同一プロセスのまま次の会議に切り替える（F6）.

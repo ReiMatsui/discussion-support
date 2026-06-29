@@ -87,9 +87,24 @@ def test_open_wav_resets_asr_buffer_offsets() -> None:
     state.asr_pcm_buf.extend(b"abc")
     state.asr_pcm_buf_offset = 10
     state.asr_pcm_total_bytes = 3
+    state.stt_time_offset_ms = 999
+    state._stt_connection_audio_base_bytes = 123
 
     state.open_wav()  # type: ignore[no-untyped-call]
 
     assert state.asr_pcm_buf == bytearray()
     assert state.asr_pcm_buf_offset == 0
     assert state.asr_pcm_total_bytes == 0
+    assert state.stt_time_offset_ms == 0
+    assert state._stt_connection_audio_base_bytes == 0
+
+
+def test_stt_connection_start_sets_timestamp_offset() -> None:
+    state = _make_state()
+    state.asr_pcm_total_bytes = 16000 * 2 * 12
+
+    state.mark_stt_connection_started()
+
+    assert state.stt_time_offset_ms == 12000
+    assert state.stt_abs_ms(345) == 12345
+    assert state.stt_abs_ms(None) is None

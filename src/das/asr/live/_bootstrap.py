@@ -11,6 +11,7 @@ import datetime
 import json
 import os
 import threading
+import time
 from dataclasses import dataclass
 
 from das.asr.live._assemblyai_diarization import AssemblyAIStreamingDiarizationProvider
@@ -448,6 +449,7 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
     def _connect_stt():
         _ws = connect(backend.ws_url(), additional_headers=backend.ws_headers())
         _ws.send(json.dumps(backend.start_message(args.model, args.lang)))
+        state.mark_stt_connection_started()
         return _ws
 
     state.save()
@@ -545,11 +547,13 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
 
         # 受信ループ。reset要求が来たらSTTを張り直して次の会議へ。
         recv = RecvLoop(state, args, backend)
+        reconnect_attempts = 0
         while not state.stop.is_set():
-            recv.run(state.stt_ws)
+            status = recv.run(state.stt_ws)
             if state.stop.is_set():
                 break
             if state.reset_requested.is_set():
+                reconnect_attempts = 0
                 print("# STTセッションを作り直しています…", flush=True)
                 with _contextlib.suppress(Exception):
                     if state.stt_ws is not None:
@@ -565,6 +569,29 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
                 state.resetting = False
                 state.rev += 1
                 print("# 新しい会議を開始しました", flush=True)
+            elif status == "disconnected":
+                reconnect_attempts += 1
+                delay = min(5.0, 0.5 * reconnect_attempts)
+                print(f"# STTに再接続中… ({reconnect_attempts}回目)", flush=True)
+                with _contextlib.suppress(Exception):
+                    if state.stt_ws is not None:
+                        state.stt_ws.close()
+                if state.diarization_provider is not None:
+                    with _contextlib.suppress(Exception):
+                        state.diarization_provider.close()
+                    state.diarization_provider.start()
+                time.sleep(delay)
+                try:
+                    state.stt_ws = _connect_stt()
+                except Exception as e:
+                    print(f"# STT再接続に失敗: {e}", flush=True)
+                    continue
+                recv = RecvLoop(state, args, backend)
+                print("# STTに再接続しました", flush=True)
+            else:
+                reconnect_attempts = 0
+                if status == "finished":
+                    break
     finally:
         with _contextlib.suppress(Exception):
             if state.stt_ws is not None:

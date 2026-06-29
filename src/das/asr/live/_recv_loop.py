@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 
@@ -18,6 +18,7 @@ from ._diarization import TimeSegment
 from ._ui import _print_line
 
 _VOICEPRINT_RELIABLE_KINDS = {"声紋一致", "補正", "自動登録", "合流"}
+RecvStatus = Literal["ok", "finished", "disconnected"]
 
 
 class RecvLoop:
@@ -204,7 +205,7 @@ class RecvLoop:
         self.cur_end = None
         self.cur_last_token_time = time.monotonic()
 
-    def run(self, ws):
+    def run(self, ws) -> RecvStatus:
         """WebSocket受信ループのメイン.
 
         stop（終了）または reset_requested（STT作り直し）で正常に抜ける。
@@ -215,11 +216,12 @@ class RecvLoop:
             while not self.state.stop.is_set() and not self.state.reset_requested.is_set():
                 try:
                     raw = ws.recv()
-                except Exception:
+                except Exception as e:
                     # 停止/作り直しで ws が閉じられた場合は正常終了扱い
                     if self.state.stop.is_set() or self.state.reset_requested.is_set():
                         break
-                    raise
+                    _print_line(f"# STT WebSocket切断: {e}。再接続します")
+                    return "disconnected"
                 res = self.backend.parse_message(json.loads(raw), args.lang)
                 if res.get("error_code") is not None:
                     _print_line(f"# エラー: {res['error_code']} - {res.get('error_message')}")
@@ -239,9 +241,9 @@ class RecvLoop:
                             self.flush()
                             self.cur_speaker = sp
                         if self.cur_ms is None:
-                            self.cur_ms = token.get("start_ms")
+                            self.cur_ms = self.state.stt_abs_ms(token.get("start_ms"))
                         if token.get("end_ms") is not None:
-                            self.cur_end = token["end_ms"]
+                            self.cur_end = self.state.stt_abs_ms(token["end_ms"])
                         self.cur_text += text
                         self.cur_last_token_time = time.monotonic()
                     else:
@@ -260,8 +262,9 @@ class RecvLoop:
                 if res.get("finished"):
                     self.flush()
                     _print_line("# 終了")
-                    break
+                    return "finished"
         except KeyboardInterrupt:
             pass
         finally:
             self.flush()
+        return "ok"

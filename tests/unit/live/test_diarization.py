@@ -1,6 +1,7 @@
 """話者分離の統合・評価ロジックのテスト."""
 from __future__ import annotations
 
+import json
 from typing import Any, cast
 
 import click
@@ -345,3 +346,79 @@ def test_recv_loop_normalizes_stt_label_when_diarization_is_enabled_but_unresolv
         "speaker_reason": "diarization_no_confident_overlap_stt_fallback",
     }]
     assert state.disp_name(state.records[0]["speaker"]) == "参加者A"
+
+
+def test_recv_loop_returns_disconnected_on_unexpected_ws_close() -> None:
+    import datetime
+
+    class Args:
+        lang = "ja"
+        vp_debug = False
+
+    class Backend:
+        def parse_message(self, raw: dict[str, Any], lang: str) -> dict[str, Any]:
+            return raw
+
+    class WS:
+        def recv(self) -> str:
+            raise RuntimeError("closed")
+
+    state = SessionState(  # type: ignore[no-untyped-call]
+        args=Args(),
+        started=datetime.datetime(2026, 1, 1),
+        out_path="/tmp/o.md",
+        html_path="/tmp/o.html",
+        diag_path="/tmp/o.diag",
+        turns_path="/tmp/o.turns",
+        wav_path="/tmp/o.wav",
+        serve=False,
+    )
+    loop = RecvLoop(state, Args(), Backend())  # type: ignore[arg-type]
+
+    assert loop.run(WS()) == "disconnected"  # type: ignore[arg-type]
+
+
+def test_recv_loop_offsets_stt_timestamps_after_reconnect() -> None:
+    import datetime
+
+    class Args:
+        lang = "ja"
+        vp_debug = False
+
+    class Backend:
+        def parse_message(self, raw: dict[str, Any], lang: str) -> dict[str, Any]:
+            return raw
+
+    class WS:
+        def __init__(self) -> None:
+            self.messages = iter([
+                json.dumps({
+                    "tokens": [
+                        {"text": "再接続後です", "is_final": True,
+                         "speaker": "1", "start_ms": 100, "end_ms": 800},
+                        {"text": "<end>"},
+                    ],
+                    "finished": True,
+                }),
+            ])
+
+        def recv(self) -> str:
+            return next(self.messages)
+
+    state = SessionState(  # type: ignore[no-untyped-call]
+        args=Args(),
+        started=datetime.datetime(2026, 1, 1),
+        out_path="/tmp/o.md",
+        html_path="/tmp/o.html",
+        diag_path="/tmp/o.diag",
+        turns_path="/tmp/o.turns",
+        wav_path="/tmp/o.wav",
+        serve=False,
+    )
+    state.save = lambda *a, **k: None  # type: ignore[method-assign]
+    state.stt_time_offset_ms = 12000
+    loop = RecvLoop(state, Args(), Backend())  # type: ignore[arg-type]
+
+    assert loop.run(WS()) == "finished"  # type: ignore[arg-type]
+    assert state.records[0]["ms"] == 12100
+    assert state.records[0]["end_ms"] == 12800
