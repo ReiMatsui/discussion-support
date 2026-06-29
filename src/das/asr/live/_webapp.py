@@ -179,12 +179,13 @@ INDEX_HTML = """<!doctype html>
         </label>
       </div>
       <div class="panel" id="diar-panel">
-        <h2>話者分離</h2>
+        <h2>参加人数</h2>
         <div class="setting-row">
           <label for="speaker-count">想定話者数</label>
           <select id="speaker-count"></select>
         </div>
-        <div class="setting-note">次の会議から反映</div>
+        <div class="setting-note" id="speaker-count-status">未指定</div>
+        <div class="setting-note">変更後は新しい会議/再接続で確実に反映</div>
       </div>
       <div class="panel" id="intervention-panel">
         <h2>介入</h2>
@@ -291,7 +292,7 @@ function bars(list, key) {
 
 function renderParticipation(list) {
   const panel = $("part-panel");
-  if (!list || list.length < 2) { panel.hidden = true; return; }
+  if (!list || list.length < 1) { panel.hidden = true; return; }
   panel.hidden = false;
   let html = "";
   if (list.some((p) => p.has_time)) {
@@ -406,11 +407,14 @@ function renderEnroll(vp) {
 
 function renderDiarization(config) {
   const sel = $("speaker-count");
+  const status = $("speaker-count-status");
   if (!sel.options.length) {
     sel.innerHTML = '<option value="">未指定</option>'
       + Array.from({ length: 10 }, (_, i) => `<option value="${i + 1}">${i + 1}人</option>`).join("");
   }
-  if (document.activeElement !== sel) sel.value = config && config.max_speakers ? String(config.max_speakers) : "";
+  const value = config && config.max_speakers ? String(config.max_speakers) : "";
+  if (document.activeElement !== sel) sel.value = value;
+  status.textContent = value ? `設定: ${value}人` : "設定: 未指定";
 }
 
 function renderIntervention(config) {
@@ -465,11 +469,16 @@ async function toggleRoster() {
 
 async function setSpeakerCount() {
   const v = $("speaker-count").value;
+  const status = $("speaker-count-status");
+  status.textContent = "保存中...";
   try {
-    await fetch("/api/diarization", {
+    const res = await fetch("/api/diarization", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ max_speakers: v ? Number(v) : null }),
     });
+    if (!res.ok) throw new Error("bad status");
+    const d = await res.json();
+    status.textContent = d.max_speakers ? `保存済み: ${d.max_speakers}人` : "保存済み: 未指定";
   } catch (e) { alert("話者数の設定に失敗しました"); }
 }
 

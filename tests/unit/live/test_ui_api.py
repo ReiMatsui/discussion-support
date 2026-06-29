@@ -505,9 +505,11 @@ def test_http_get_root_serves_spa():
         assert "/api/stream" in html   # SSEを使うSPA
         assert "/api/mode" in html     # モード切替
         assert "/api/intervention" in html
+        assert 'id="speaker-count-status"' in html
         assert 'id="intervention-enabled"' in html
         assert 'id="proactivity"' in html
         assert 'id="event-panel"' in html
+        assert "list.length < 1" in html  # 発言量は1人でも表示する
     finally:
         httpd.shutdown()
 
