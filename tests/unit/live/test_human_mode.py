@@ -163,6 +163,7 @@ def test_fact_candidate_gate_is_structural_not_keyword_based():
         "指標Xの計算式は分母を分子で割る感じです",
         "なんか、体重の2乗を身長で割ると、どうのこうのみたいな",
         "身長を体重の2乗で割るんですよね",
+        "BMIの式は身長を体重で割るんですよね",
         "この用語の定義は、対象者が申請できる制度という意味です",
         "制度Xの上限は70%です",
         "x = y / z",
@@ -176,6 +177,11 @@ def test_fact_candidate_gate_is_structural_not_keyword_based():
         "最初の10個の発話ぐらいから",
         "計算方法の話です",
         "米よりパンのほうが好きです",
+        "いいとは思いますけど",
+        "言うなとは言ったん",
+        "成人式は普通にやった",
+        "090-8165-1145 にかけてもいい？",
+        "お酒はどこで飲むの、2回目のデート",
     ]
 
     assert [_looks_like_fact_claim(t) for t in positives] == [True] * len(positives)

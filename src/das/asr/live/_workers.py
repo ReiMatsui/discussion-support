@@ -57,12 +57,13 @@ from ._ui import _print_line
 
 
 _FACT_DEFINITION_RE = re.compile(
-    r"(.{1,32}(とは|っていうのは|というのは)|"
+    r"(.{1,32}(とは|っていうのは|というのは)[、,\s]*"
+    r".{1,48}(です|である|もの|こと|意味|指す|という|制度|対象)|"
     r".{1,32}(定義|意味)\s*(は|が|を|って|とは|というのは)|"
     r".{1,32}は.{1,32}のこと)"
 )
 _FACT_FORMULA_CUE_RE = re.compile(
-    r"((計算|算出)式|求め方|式\s*(は|が|を|って|とは|というのは))"
+    r"((計算|算出)式|求め方|(?<!成人)式\s*(は|が|を|って|とは|というのは))"
 )
 _FACT_UNIT_CUE_RE = re.compile(r"単位\s*(は|が|を|って|とは|というのは)")
 _FACT_NUMERIC_VALUE_RE = re.compile(
@@ -72,8 +73,12 @@ _FACT_NUMERIC_VALUE_RE = re.compile(
     r"kg|g|cm|mm|m|km|㎡|m2)"
 )
 _FACT_NUMERIC_UNCERTAIN_RE = re.compile(
-    r"(どれ|何|なん|いくつ|いくら|ぐらい|くらい|程度|"
+    r"(どれ|どこ|何|なん|いくつ|いくら|ぐらい|くらい|程度|"
     r"だいたい|大体|かな|ですか|でしょうか|\?)"
+)
+_FACT_PHONE_NUMBER_RE = re.compile(r"\b0\d{1,3}-\d{2,4}-\d{3,4}\b")
+_FACT_DEFINITION_FALSE_RE = re.compile(
+    r"とは\s*(思|違|言|いえ|いっ|さておき|ない|なく)"
 )
 _FACT_SYMBOL_FORMULA_RE = re.compile(
     r"[A-Za-z0-9一-龥ぁ-んァ-ン]\s*"
@@ -86,7 +91,7 @@ _FACT_OPERATION_RE = re.compile(
 )
 _FACT_OPERATION_RELATION_RE = re.compile(
     r"[A-Za-z0-9一-龥ぁ-んァ-ン%％]+.{0,24}"
-    r"(を|に|から).{1,32}(で|に)?"
+    r"(を|に).{0,32}(で|に)?"
     r"(割る|掛ける|かける|足す|引く)"
 )
 
@@ -105,12 +110,18 @@ def _looks_like_fact_claim(text: str) -> bool:
     )
     if uncertain_only:
         return False
+    if _FACT_PHONE_NUMBER_RE.search(s):
+        return False
+    definition = (
+        _FACT_DEFINITION_RE.search(s)
+        and not _FACT_DEFINITION_FALSE_RE.search(s)
+    )
     numeric_value = (
         _FACT_NUMERIC_VALUE_RE.search(s)
         and not _FACT_NUMERIC_UNCERTAIN_RE.search(s)
     )
     return any((
-        _FACT_DEFINITION_RE.search(s),
+        definition,
         _FACT_FORMULA_CUE_RE.search(s),
         _FACT_UNIT_CUE_RE.search(s),
         numeric_value,
