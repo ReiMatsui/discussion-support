@@ -430,11 +430,19 @@ def _run_agent_worker(state: SessionState):
     _pending_drift_reason: str | None = None  # drift_checkerからの未処理介入要求（R2）
     _pending_invite: str | None = None  # participation_checkerからの声かけ要求（S4）
     _last_invited: str | None = None    # 直近に声をかけた相手（連続回避）
+    _last_agent_reconnect_at = 0.0
     while not state.stop.is_set():
         time.sleep(0.5)
         _diag_tick += 1
         partner = state.partner  # 動的参照: 実行中のパートナー接続/切断に追従（F3）
         if agent is None or not agent._connected or not agent.enabled:
+            if agent is not None and agent.enabled and not agent._connected:
+                now = time.monotonic()
+                if now - _last_agent_reconnect_at >= 5.0:
+                    _last_agent_reconnect_at = now
+                    print("# AI Agent: 再接続を試みます", flush=True)
+                    with contextlib.suppress(Exception):
+                        agent.connect()
             if _diag_tick % 20 == 0:
                 print(f"# [diag] _agent_worker skip: agent={agent is not None}"
                       f" conn={agent._connected if agent else '?'}"

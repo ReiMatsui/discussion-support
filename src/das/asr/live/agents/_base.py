@@ -135,6 +135,8 @@ class _RealtimeBase:
             except Exception as e:
                 print(f"# {self._LABEL} 音声再生異常: {e}", flush=True)
 
+        if self._playback_thread is not None and self._playback_thread.is_alive():
+            return
         self._playback_thread = threading.Thread(target=_player, daemon=True)
         self._playback_thread.start()
 

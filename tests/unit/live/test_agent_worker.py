@@ -26,6 +26,7 @@ class FakeAgent:
         self._pending: list = []
         self.feeds: list[tuple[str, str]] = []
         self.trigger_calls: list[dict] = []
+        self.connect_calls = 0
 
     @property
     def pending_count(self) -> int:
@@ -43,6 +44,10 @@ class FakeAgent:
 
     def interrupt(self) -> None:  # pragma: no cover
         pass
+
+    def connect(self) -> None:
+        self.connect_calls += 1
+        self._connected = True
 
 
 class FakePartner:
@@ -140,6 +145,18 @@ def test_no_retry_when_no_pending_intervention():
     _run_worker_briefly(state, until=lambda: False, timeout=1.0)
 
     assert agent.trigger_calls == []
+
+
+def test_agent_worker_reconnects_disconnected_enabled_agent():
+    """AI AgentのWebSocketが落ちたら、ワーカーが再接続を試みる."""
+    agent = FakeAgent()
+    agent._connected = False
+    state = FakeState(agent, None)
+
+    _run_worker_briefly(state, until=lambda: agent.connect_calls > 0, timeout=1.5)
+
+    assert agent.connect_calls == 1
+    assert agent._connected is True
 
 
 def test_stall_breaker_fires_after_noop_silence():
