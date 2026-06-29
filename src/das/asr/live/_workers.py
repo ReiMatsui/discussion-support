@@ -112,6 +112,21 @@ _FACT_AFFILIATION_RE = re.compile(
     r".{1,40}の(出身|国籍)は[A-Za-z一-龥ァ-ヶー]{2,40}"
     r"(です|でした|である|ではありません|ではない))"
 )
+_FACT_RANKING_RE = re.compile(
+    r"(.{1,40}(は|が).{0,50}"
+    r"("
+    r"(世界|国内|全体|地域|大会|リーグ|ランキング|順位).{0,16}"
+    r"((第?\d+|[一二三四五六七八九十]+)(位|番目)|トップ\d+|ワースト\d+|"
+    r"最下位|最上位|一番|世界一|日本一|国内一|ナンバーワン|最多|最少|最大|最小|最高|最低|"
+    r"最も.{1,12})"
+    r"|((第?\d+|[一二三四五六七八九十]+)(位|番目)|トップ\d+|ワースト\d+|"
+    r"最下位|最上位|一番|世界一|日本一|国内一|ナンバーワン|最多|最少|最大|最小|最高|最低|"
+    r"最も.{1,12})"
+    r")"
+    r".{0,24}"
+    r"(です|でした|である|ではありません|ではない|高い|低い|大きい|小さい|"
+    r"深い|浅い|多い|少ない|速い|遅い|強い|弱い))"
+)
 
 
 def _looks_like_fact_claim(text: str) -> bool:
@@ -148,6 +163,7 @@ def _looks_like_fact_claim(text: str) -> bool:
         _FACT_OPERATION_RELATION_RE.search(s),
         _FACT_ROLE_RELATION_RE.search(s),
         _FACT_AFFILIATION_RE.search(s),
+        _FACT_RANKING_RE.search(s),
     ))
 
 

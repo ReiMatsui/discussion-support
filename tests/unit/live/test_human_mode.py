@@ -176,6 +176,15 @@ def test_fact_candidate_gate_is_structural_not_keyword_based():
         "人物Aは国B出身です",
         "人物Aは大会Bを2勝しました",
         "作品Aの作者は人物Bです",
+        "対象Aは世界で2番目に高い山です",
+        "対象Aは世界で2番目に深い場所です",
+        "対象Aは国内で3番目に大きい湖です",
+        "人物Aは大会Bのランキング1位です",
+        "人物AはリーグCでトップ10です",
+        "組織Aは地域Bで最下位です",
+        "対象Aは全体で最多です",
+        "対象Aは世界一大きい建物です",
+        "対象Aは最も速い乗り物です",
         "x = y / z",
         "単位はメートルです",
     ]
@@ -194,10 +203,88 @@ def test_fact_candidate_gate_is_structural_not_keyword_based():
         "お酒はどこで飲むの、2回目のデート",
         "都市Aはきれいです",
         "人物Aはいい人です",
+        "まず対象Aを1個置きます",
+        "1つ目の論点を確認しましょう",
+        "優先順位を決めましょう",
+        "ランキングについて話しましょう",
+        "対象Aは上位かもしれません",
     ]
 
     assert [_looks_like_fact_claim(t) for t in positives] == [True] * len(positives)
     assert [_looks_like_fact_claim(t) for t in negatives] == [False] * len(negatives)
+
+
+def test_fact_candidate_gate_covers_clear_claim_types():
+    """明確な誤りになり得る主張の型を広めに候補化する."""
+    from das.asr.live._workers import _looks_like_fact_claim
+
+    cases = {
+        "numeric_units": [
+            "事物Aの高さは200メートルです",
+            "制度Aの上限は70%です",
+            "大会Aの参加者は120人です",
+            "事象Aは2020年に起こりました",
+        ],
+        "formula": [
+            "指標Aの計算式は分母を分子で割る形です",
+            "値Aを値Bで割ると指標Cです",
+            "x = y / z",
+        ],
+        "definition": [
+            "用語Aとは、条件Bを満たす対象のことです",
+            "用語Aの定義は対象Bという意味です",
+        ],
+        "role_relation": [
+            "都市Aは国Bの首都です",
+            "国Bの首都は都市Aです",
+            "人物Aは組織Bの代表です",
+            "作品Aの著者は人物Bです",
+        ],
+        "affiliation": [
+            "人物Aは国B人です",
+            "人物Aは国B出身です",
+            "人物Aの国籍は国Bです",
+        ],
+        "record_counts": [
+            "人物Aは大会Bを2勝しました",
+            "チームAは大会Bで3敗しました",
+        ],
+        "ranking": [
+            "対象Aは世界で2番目に高い山です",
+            "対象Aは国内で3番目に大きい湖です",
+            "人物Aはランキング1位です",
+            "組織AはリーグBでトップ10です",
+            "対象Aは地域Bで最下位です",
+            "対象Aは世界一大きい建物です",
+            "対象Aは最も深い場所です",
+        ],
+    }
+
+    for category, texts in cases.items():
+        for text in texts:
+            assert _looks_like_fact_claim(text), f"{category}: {text}"
+
+
+def test_fact_candidate_gate_ignores_non_claim_neighbors():
+    """順位・数値・式の周辺語でも、事実断定でなければ候補にしない."""
+    from das.asr.live._workers import _looks_like_fact_claim
+
+    texts = [
+        "ランキングについて話しましょう",
+        "優先順位を決めましょう",
+        "まず対象Aを1個置きます",
+        "1つ目の論点を確認しましょう",
+        "トップになるにはどうすればいいですか",
+        "対象Aは上位かもしれません",
+        "順位は何位ですか",
+        "式典は普通にやりました",
+        "計算方法の話です",
+        "都市Aはきれいです",
+        "人物Aはいい人です",
+    ]
+
+    for text in texts:
+        assert not _looks_like_fact_claim(text), text
 
 
 def test_check_fact_correction_accepts_high_confidence(monkeypatch):
