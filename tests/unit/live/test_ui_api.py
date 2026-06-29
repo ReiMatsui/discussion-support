@@ -8,6 +8,7 @@ import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
 
+from das.asr.live._constants import UNSURE_SPEAKER
 from das.asr.live._session_state import SessionState
 from das.asr.live._ui import _UIHandler
 
@@ -128,6 +129,30 @@ def test_api_snapshot_exposes_startup_setup_state():
     s.waiting_to_start = True
 
     assert s.api_snapshot()["setup"] == {"waiting": True}
+
+
+def test_participant_count_caps_new_anonymous_display_slots():
+    s = _make_state()
+    s.set_diarization_max_speakers(2)
+
+    assert s.constrain_human_speaker_key("#1") == "#1"
+    assert s.disp_name("#1") == "参加者A"
+    assert s.constrain_human_speaker_key("@diar:1") == "@diar:1"
+    assert s.disp_name("@diar:1") == "参加者B"
+
+    assert s.constrain_human_speaker_key("#3") == UNSURE_SPEAKER
+    assert s.constrain_human_speaker_key("人物3") == UNSURE_SPEAKER
+
+
+def test_participant_count_includes_named_human_speakers():
+    s = _make_state()
+    s.set_diarization_max_speakers(2)
+    s.records = [
+        {"speaker": "松井", "text": "a", "ms": 0, "end_ms": 500},
+        {"speaker": "田中", "text": "b", "ms": 500, "end_ms": 1000},
+    ]
+
+    assert s.constrain_human_speaker_key("#3") == UNSURE_SPEAKER
 
 
 def test_http_rename_without_tracker():

@@ -10,6 +10,7 @@ import threading
 
 import numpy as np
 
+from das.asr.live._constants import UNSURE_SPEAKER
 from das.asr.live._voice_profiles import SR, VoiceProfiles
 
 
@@ -87,3 +88,17 @@ def test_anonymous_person_keeps_same_label_on_moderate_match():
 
     assert vp.classify(_LONG, "2", count=True, chars=20) == "人物1"
     assert vp.last["kind"] == "低信頼追従"
+
+
+def test_max_speakers_turns_extra_new_voice_unsure():
+    """参加人数上限に達した後の新しい声は、新参加者ではなく未確定にする."""
+    vp = _tracker(_unit(0, 1, 0))
+    vp.profiles = {"人物1": _unit(1, 0, 0)}
+    vp._active_keys = {"人物1"}
+    vp.sp_map = {}
+    vp.max_human_speakers = 1
+
+    assert vp.classify(_LONG, "3", count=True, chars=60) == UNSURE_SPEAKER
+    assert vp.sp_map["3"] == UNSURE_SPEAKER
+    assert "人物2" not in vp.profiles
+    assert vp.last["kind"] == "話者数上限"

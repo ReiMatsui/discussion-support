@@ -188,6 +188,7 @@ class RecvLoop:
             # 直前の人に追従させず未確定にする。bcフラグでUIでは薄く折りたたむ。
             sp_id = UNSURE_SPEAKER
             rec_extra["bc"] = True
+        sp_id = s.constrain_human_speaker_key(sp_id)
         with s.state_lock:
             s.records.append({"ms": self.cur_ms, "end_ms": self.cur_end,
                               "speaker": sp_id, "text": self.cur_text.strip(),

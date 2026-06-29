@@ -10,6 +10,7 @@ import threading
 
 import numpy as np
 
+from das.asr.live._constants import UNSURE_SPEAKER
 from das.asr.live._voice_profiles import SR, VoiceProfiles
 
 
@@ -128,12 +129,12 @@ def test_commit_merges_into_existing_person():
 
 
 def test_expected_speaker_count_stops_new_anonymous_person():
-    """想定話者数に達したら、新しい人物Nを増やさず暫定ラベルに留める."""
+    """想定話者数に達したら、新しい人物Nも暫定参加者も増やさない."""
     vp = _tracker()
     vp.profiles = {"人物1": _unit(1, 0, 0)}
     vp._active_keys = {"人物1"}
     vp.max_human_speakers = 1
 
-    assert vp._commit_profile(_unit(0, 1, 0), "2", None, 50) == "#2"
+    assert vp._commit_profile(_unit(0, 1, 0), "2", None, 50) == UNSURE_SPEAKER
     assert vp.last["kind"] == "話者数上限"
     assert set(vp.profiles) == {"人物1"}

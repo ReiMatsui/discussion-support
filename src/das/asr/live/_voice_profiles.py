@@ -301,11 +301,10 @@ class VoiceProfiles:
             target, is_new = hit, False   # 既存人物の声だった → 合流（重複登録を防ぐ）
         else:
             if self.max_human_speakers is not None and len(active) >= self.max_human_speakers:
-                key = "#" + sp
-                self.sp_map[sp] = key
+                self.sp_map[sp] = UNSURE_SPEAKER
                 self._note("話者数上限", label=sp, max_speakers=self.max_human_speakers,
                            chars=round(total_chars))
-                return key
+                return UNSURE_SPEAKER
             self.n_anon += 1
             target = f"人物{self.n_anon}"
             self.profiles[target] = prof   # 新規人物（以後凍結）

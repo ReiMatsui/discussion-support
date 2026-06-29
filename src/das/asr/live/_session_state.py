@@ -187,6 +187,45 @@ class SessionState:
             self.anonymous_labels[key] = f"参加者{suffix}"
         return self.anonymous_labels[key]
 
+    def _max_human_speakers(self) -> int | None:
+        value = getattr(self.args, "diarization_max_speakers", None)
+        return value if isinstance(value, int) and value > 0 else None
+
+    def _human_slot_key(self, key: str) -> str | None:
+        if key in (AGENT_SPEAKER, "パートナー", UNSURE_SPEAKER):
+            return None
+        if self._is_anonymous_speaker_key(key) or self._is_system_anonymous_name(key):
+            return self.anonymous_labels.get(key, key)
+        return key
+
+    def _known_human_slot_count(self) -> int:
+        slots = set(self.anonymous_labels.values())
+        with self.state_lock:
+            for r in self.records:
+                key = str(r.get("speaker", "")) if "speaker" in r else ""
+                slot = self._human_slot_key(key)
+                if slot is not None:
+                    slots.add(slot)
+        return len(slots)
+
+    def constrain_human_speaker_key(self, key) -> str:
+        """参加人数上限を超える新規匿名話者を「未確定」に落とす.
+
+        参加人数は「表示できる人間スロット数」として扱う。既に出現済みの人間話者は
+        維持するが、上限到達後の新しい #/@diar:/人物N は増やさない。
+        """
+        key = str(key)
+        if key in (AGENT_SPEAKER, "パートナー", UNSURE_SPEAKER):
+            return key
+        if not (self._is_anonymous_speaker_key(key) or self._is_system_anonymous_name(key)):
+            return key
+        max_speakers = self._max_human_speakers()
+        if max_speakers is None or key in self.anonymous_labels:
+            return key
+        if self._known_human_slot_count() >= max_speakers:
+            return UNSURE_SPEAKER
+        return key
+
     def key_for_diarization_speaker(self, source: str, speaker: str) -> str:
         """外部diarizationの生ラベルを、表示用の安定した内部キーに変換する.
 
