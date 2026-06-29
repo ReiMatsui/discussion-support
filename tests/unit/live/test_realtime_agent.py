@@ -153,7 +153,7 @@ def test_trigger_releases_responding_when_nothing_to_send(agent):
 
 def test_trigger_with_topics_includes_topic_note(agent):
     agent.feed("人間", "本題の発言")
-    agent.trigger(topics=[{"topic": "AI導入の是非", "speaker": "松井"}])
+    agent.trigger(topics=[{"topic": "AI導入の是非", "speaker": "参加者A"}])
     text = agent.ws.last_create_text()
     assert "現在の論点" in text
     assert "AI導入の是非" in text
@@ -163,23 +163,23 @@ def test_trigger_with_topics_includes_topic_note(agent):
 
 def test_trigger_with_invite_target(agent):
     """invite_target指定時、_pendingが空でも声かけコンテキスト付きで送信する（S4）."""
-    agent.trigger(invite_target="田中")
+    agent.trigger(invite_target="参加者B")
     text = agent.ws.last_create_text()
     assert "[声かけ]" in text
-    assert "田中" in text
+    assert "参加者B" in text
     assert agent._responding is True
 
 
 def test_trigger_with_fact_correction(agent):
     """fact_correction指定時、_pendingが空でも短い補正コンテキスト付きで送信する."""
     agent.trigger(fact_correction={
-        "claim": "BMIは体重の2乗を身長で割る",
-        "correction": "BMIは体重kgを身長mの2乗で割ります。",
+        "claim": "平均は個数を合計で割る",
+        "correction": "平均は合計を個数で割ります。",
         "reason": "式が逆",
     })
     text = agent.ws.last_create_text()
     assert "[事実補正]" in text
-    assert "BMIは体重kgを身長mの2乗で割ります。" in text
+    assert "平均は合計を個数で割ります。" in text
     assert "この補足だけ" in text
     assert agent._responding is True
 

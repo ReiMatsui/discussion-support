@@ -110,7 +110,7 @@ def listen_soniox(
     FacilitationAgent が周期的に介入を判定し、ターミナルとライブ議事録 HTML
     (💡システム行) に提示する。
     要: SONIOX_API_KEY (.env) / `uv sync --extra soniox`。
-    話者の実名登録は文字起こし側の標準入力で「1=松井」。
+    話者の実名登録は文字起こし側の標準入力で「1=名前」。
     """
     asyncio.run(
         _run_listen_soniox_async(
@@ -265,7 +265,7 @@ async def _run_listen_soniox_async(
         asyncio.create_task(_facilitate_loop()) if facilitate_interval > 0 else None
     )
 
-    typer.echo("[listen-soniox] 録音開始。実名登録は「1=松井」と入力。Ctrl-C で停止。")
+    typer.echo("[listen-soniox] 録音開始。実名登録は「1=名前」と入力。Ctrl-C で停止。")
     try:
         await orch.run_live(_utt_stream())
     except KeyboardInterrupt:

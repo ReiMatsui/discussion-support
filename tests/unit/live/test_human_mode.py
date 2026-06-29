@@ -137,13 +137,13 @@ def test_agenda_detector_seeds_when_detected(monkeypatch):
 def test_check_participation_parses(monkeypatch):
     import das.asr.live._bootstrap as bootstrap
     monkeypatch.setattr(bootstrap, "_post_chat_json",
-                        lambda *a, **k: {"invite": True, "speaker": "田中",
+                        lambda *a, **k: {"invite": True, "speaker": "参加者B",
                                          "reason": "発言が少ない"})
     r = bootstrap.check_participation(
-        [{"speaker": "田中", "time_share": 0.1, "turns": 1, "silent_sec": 60}],
+        [{"speaker": "参加者B", "time_share": 0.1, "turns": 1, "silent_sec": 60}],
         [], "key", "m")
     assert r["invite"] is True
-    assert r["speaker"] == "田中"
+    assert r["speaker"] == "参加者B"
 
 
 def test_check_participation_empty_is_no_invite():
@@ -160,15 +160,15 @@ def test_check_fact_correction_accepts_high_confidence(monkeypatch):
     monkeypatch.setattr(bootstrap, "_post_chat_json",
                         lambda *a, **k: {"should_correct": True,
                                          "confidence": "high",
-                                         "claim": "BMIは体重の2乗を身長で割る",
-                                         "correction": "BMIは体重kgを身長mの2乗で割ります。",
+                                         "claim": "平均は個数を合計で割る",
+                                         "correction": "平均は合計を個数で割ります。",
                                          "reason": "式が逆"})
 
     r = bootstrap.check_fact_correction(
-        [{"speaker": "A", "text": "BMIは体重の2乗を身長で割る"}], "key", "m")
+        [{"speaker": "A", "text": "平均は個数を合計で割る"}], "key", "m")
 
     assert r["should_correct"] is True
-    assert r["correction"].startswith("BMIは")
+    assert r["correction"].startswith("平均は")
 
 
 def test_check_fact_correction_suppresses_low_confidence(monkeypatch):
@@ -191,13 +191,13 @@ def test_fact_checker_enqueues_clear_formula_correction(monkeypatch):
     monkeypatch.setattr(bootstrap, "check_fact_correction",
                         lambda *a, **k: {"should_correct": True,
                                          "confidence": "high",
-                                         "claim": "BMIは体重の2乗を身長で割る",
-                                         "correction": "BMIは体重kgを身長mの2乗で割ります。",
+                                         "claim": "平均は個数を合計で割る",
+                                         "correction": "平均は合計を個数で割ります。",
                                          "reason": "式が逆"})
     state = _make_state(with_agent=True)
     state.records = [
-        {"speaker": "話者1", "text": "175cmの適正体重の話です", "ms": 0, "end_ms": 1000},
-        {"speaker": "話者2", "text": "BMIは体重の2乗を身長で割る感じでしたっけ", "ms": 1000, "end_ms": 2000},
+        {"speaker": "話者1", "text": "計算方法の話です", "ms": 0, "end_ms": 1000},
+        {"speaker": "話者2", "text": "平均は個数を合計で割る感じでしたっけ", "ms": 1000, "end_ms": 2000},
     ]
 
     th = threading.Thread(target=_run_fact_checker,
@@ -214,7 +214,7 @@ def test_fact_checker_enqueues_clear_formula_correction(monkeypatch):
     th.join(timeout=2)
 
     assert got is not None
-    assert got["correction"].startswith("BMIは")
+    assert got["correction"].startswith("平均は")
 
 
 def test_fact_checker_ignores_plain_opinion(monkeypatch):

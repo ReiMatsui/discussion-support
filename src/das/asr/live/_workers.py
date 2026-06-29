@@ -59,7 +59,7 @@ from ._ui import _print_line
 _FACT_CANDIDATE_RE = re.compile(
     r"("
     r"\d+(?:\.\d+)?\s*(?:%|％|割|倍|cm|kg|m2|㎡)"
-    r"|BMI|bmi|式|計算|定義|単位|平均|中央値|割合|確率|速度|距離|面積|体積"
+    r"|式|計算|定義|単位|平均|中央値|割合|確率|速度|距離|面積|体積"
     r"|とは|っていうのは|というのは|イコール|割る|掛ける|足す|引く|二乗|2乗"
     r")"
 )
@@ -780,7 +780,7 @@ def _run_stdin_commands(state: SessionState):
                 state.save()
                 _print_line(f"# 話者{label} → {name}（過去の発言も置換済み）")
         elif line.strip():
-            _print_line("# 名前登録はブラウザUIを推奨。ターミナル操作: 「1=松井」/「fix 2=1」/ Ctrl+Cで終了")
+            _print_line("# 名前登録はブラウザUIを推奨。ターミナル操作: 「1=名前」/「fix 2=1」/ Ctrl+Cで終了")
 
 
 def _run_from_mic(state: SessionState, device):
@@ -922,7 +922,8 @@ def _cleanup(state: SessionState, tracker, wav_path: str, out_path: str, html_pa
     state.save(live=False)
     if tracker is not None:
         _print_line(f"# レイテンシ統計: {tracker.stats()}")
-    _print_line(f"# 議事録を保存しました: {state.out_path} / {state.html_path}")
+    saved = state.out_path if state._serve else f"{state.out_path} / {state.html_path}"
+    _print_line(f"# 議事録を保存しました: {saved}")
     # WAVファイルのヘッダを確定して正規のWAVにする（state.wav_pathを使用）
     saved_wav = state.finalize_wav()
     if saved_wav:

@@ -260,6 +260,38 @@ def test_reset_calls_tracker_reset_session():
     assert calls == [True]
 
 
+def test_save_skips_legacy_html_when_served(tmp_path):
+    """通常のサーバーUI利用時は古い議事録HTMLを毎回生成しない."""
+    s = SessionState(
+        args=object(), started=datetime.datetime(2026, 1, 1),
+        out_path=str(tmp_path / "o.md"), html_path=str(tmp_path / "o.html"),
+        diag_path=str(tmp_path / "o.diag"), turns_path=str(tmp_path / "o.turns"),
+        wav_path=str(tmp_path / "o.wav"), serve=True,
+    )
+    s.records = [{"speaker": "話者1", "text": "やあ", "ms": 0, "end_ms": 500}]
+
+    s.save()
+
+    assert (tmp_path / "o.md").exists()
+    assert (tmp_path / "o.turns").exists()
+    assert not (tmp_path / "o.html").exists()
+
+
+def test_save_writes_legacy_html_without_server(tmp_path):
+    """UIサーバーを使わない時だけ静的HTMLを残す."""
+    s = SessionState(
+        args=object(), started=datetime.datetime(2026, 1, 1),
+        out_path=str(tmp_path / "o.md"), html_path=str(tmp_path / "o.html"),
+        diag_path=str(tmp_path / "o.diag"), turns_path=str(tmp_path / "o.turns"),
+        wav_path=str(tmp_path / "o.wav"), serve=False,
+    )
+    s.records = [{"speaker": "話者1", "text": "やあ", "ms": 0, "end_ms": 500}]
+
+    s.save()
+
+    assert (tmp_path / "o.html").exists()
+
+
 # --- 課題①: 認識途中(partial)の配信 -----------------------------------------
 
 def test_show_partial_updates_state_and_snapshot():

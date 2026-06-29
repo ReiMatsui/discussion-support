@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import json
 import os
+import webbrowser
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +35,103 @@ CheckDrift = Callable[[list[dict], list[dict], str, str], dict]
 CheckParticipation = Callable[[list[dict], list[dict], str, str], dict]
 
 AGENT_SPEAKERS = {AGENT_SPEAKER, "AI", "パートナー"}
+
+REPLAY_INDEX_HTML = """<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>リプレイ検証</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ink:#1f2937;
+    --muted:#6b7280; --fact:#0e7490; --drift:#b45309; --invite:#6d28d9; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, "Hiragino Sans", "Segoe UI", sans-serif; line-height: 1.55; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 16px; }
+  header { display:flex; align-items:baseline; gap:12px; margin-bottom:14px; }
+  h1 { font-size: 1.08rem; margin:0; }
+  .meta { color: var(--muted); font-size:.82rem; }
+  .cols { display:grid; grid-template-columns: minmax(0,1fr) 340px; gap:14px; align-items:start; }
+  @media (max-width: 860px) { .cols { grid-template-columns: 1fr; } }
+  .panel { background: var(--card); border:1px solid var(--line); border-radius:10px; padding:12px; }
+  .panel h2 { margin:0 0 .6rem; font-size:.86rem; color:#9ca3af; font-weight:600; }
+  .turn { padding:.45rem .55rem; border-bottom:1px solid #f0f1f3; }
+  .turn:last-child { border-bottom:0; }
+  .turn.hit { background:#f8fafc; border-left:3px solid #94a3b8; }
+  .ts { color:#9ca3af; font-size:.74rem; margin-right:.45rem; font-variant-numeric:tabular-nums; }
+  .speaker { font-weight:700; margin-right:.45rem; }
+  .event { border:1px solid var(--line); border-radius:8px; padding:.55rem .65rem; margin-bottom:.5rem; background:#fff; }
+  .event .kind { font-weight:700; font-size:.78rem; }
+  .event.fact .kind, .event.fact_candidate .kind { color:var(--fact); }
+  .event.drift .kind { color:var(--drift); }
+  .event.invite .kind { color:var(--invite); }
+  .event .detail { margin-top:.25rem; }
+  .event .quote { color:var(--muted); font-size:.78rem; margin-top:.3rem; }
+  .chips { display:flex; flex-wrap:wrap; gap:.35rem; margin-bottom:.7rem; }
+  .chip { border:1px solid var(--line); border-radius:999px; padding:.18rem .55rem; font-size:.78rem; background:#fff; }
+  .empty { color:var(--muted); text-align:center; padding:1rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>リプレイ検証</h1>
+    <span class="meta" id="summary">読み込み中...</span>
+  </header>
+  <div class="cols">
+    <section class="panel">
+      <h2>発話ログ</h2>
+      <div id="turns"></div>
+    </section>
+    <aside class="panel">
+      <h2>介入候補</h2>
+      <div class="chips" id="chips"></div>
+      <div id="events"></div>
+    </aside>
+  </div>
+</div>
+<script>
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const ts = (ms) => {
+  if (ms == null) return "--:--";
+  const sec = Math.floor(ms / 1000);
+  return `${String(Math.floor(sec / 60)).padStart(2, "0")}:${String(sec % 60).padStart(2, "0")}`;
+};
+const label = (t) => ({
+  fact: "事実補正",
+  fact_candidate: "事実候補",
+  drift: "脱線",
+  invite: "声かけ",
+}[t] || t);
+fetch("/api/replay").then((r) => r.json()).then((data) => {
+  const events = data.events || [];
+  const hitTurns = new Set(events.map((e) => e.turn_id));
+  document.getElementById("summary").textContent =
+    `${data.source} / ${data.turns.length}発話 / ${events.length}件`;
+  const counts = events.reduce((acc, e) => (acc[e.type] = (acc[e.type] || 0) + 1, acc), {});
+  document.getElementById("chips").innerHTML = Object.keys(counts).length
+    ? Object.entries(counts).map(([k,v]) => `<span class="chip">${esc(label(k))}: ${v}</span>`).join("")
+    : `<span class="chip">候補なし</span>`;
+  document.getElementById("events").innerHTML = events.length
+    ? events.map((e) => `<div class="event ${esc(e.type)}">
+        <div><span class="kind">${esc(label(e.type))}</span>
+          <span class="meta">#${esc(e.turn_id)} ${esc(ts(e.ms))}</span></div>
+        <div class="detail">${esc(e.detail)}</div>
+        ${e.reason ? `<div class="meta">${esc(e.reason)}</div>` : ""}
+        <div class="quote">${esc(e.speaker)}: ${esc(e.text)}</div>
+      </div>`).join("")
+    : `<div class="empty">介入候補はありません</div>`;
+  document.getElementById("turns").innerHTML = data.turns.length
+    ? data.turns.map((t) => `<div class="turn ${hitTurns.has(t.turn_id) ? "hit" : ""}">
+        <span class="ts">${esc(ts(t.ms))}</span><span class="speaker">${esc(t.speaker)}</span>${esc(t.text)}
+      </div>`).join("")
+    : `<div class="empty">発話がありません</div>`;
+});
+</script>
+</body>
+</html>"""
 
 
 @dataclass
@@ -215,6 +314,54 @@ def run_replay(
     return events
 
 
+def replay_snapshot(source: str | Path, turns: list[dict], events: list[dict],
+                    opts: ReplayOptions) -> dict:
+    """Build the JSON object served by the replay UI."""
+    return {
+        "source": str(source),
+        "topic": opts.topic,
+        "checks": sorted(opts.checks),
+        "no_api": opts.no_api,
+        "turns": turns,
+        "events": events,
+    }
+
+
+def serve_replay(snapshot: dict, *, port: int, open_browser: bool) -> None:
+    """Serve replay results as an in-memory local UI."""
+    payload = json.dumps(snapshot, ensure_ascii=False).encode()
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path == "/api/replay":
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(payload)
+            elif self.path == "/" or self.path.startswith("/?"):
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(REPLAY_INDEX_HTML.encode("utf-8"))
+            else:
+                self.send_error(404)
+
+        def log_message(self, format, *args):
+            pass
+
+    httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    url = f"http://127.0.0.1:{httpd.server_address[1]}/"
+    click.echo(f"# replay UI: {url}")
+    if open_browser:
+        webbrowser.open(url)
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        httpd.server_close()
+
+
 def _parse_checks(value: str) -> set[str]:
     checks = {v.strip() for v in value.split(",") if v.strip()}
     unknown = checks - {"fact", "drift", "invite"}
@@ -231,13 +378,18 @@ def _parse_checks(value: str) -> set[str]:
 @click.option("--model", default=None, help="OPENAI_MODEL_FASTの代わりに使うモデル")
 @click.option("--out", default=None, type=click.Path(dir_okay=False),
               help="イベントJSONLの保存先。未指定なら標準出力")
+@click.option("--serve", is_flag=True, help="結果をローカルUIで表示する")
+@click.option("--port", type=int, default=8232, help="--serve のポート番号。0で自動割当")
+@click.option("--open/--no-open", "open_browser", default=True,
+              help="--serve 時にブラウザを開く")
 @click.option("--limit", type=int, default=None, help="先頭N発話だけリプレイ")
 @click.option("--include-agent", is_flag=True,
               help="保存済みのAI/ファシリテーター発話も入力に含める")
 @click.option("--no-api", is_flag=True,
               help="APIを呼ばず、ローカル候補抽出だけ行う")
 def main(turns_path: str, topic: str | None, checks: str, model: str | None,
-         out: str | None, limit: int | None, include_agent: bool, no_api: bool) -> None:
+         out: str | None, serve: bool, port: int, open_browser: bool,
+         limit: int | None, include_agent: bool, no_api: bool) -> None:
     """Replay a saved turns.jsonl file and print intervention candidates."""
     api_key = os.environ.get("OPENAI_API_KEY", "")
     opts = ReplayOptions(
@@ -253,6 +405,10 @@ def main(turns_path: str, topic: str | None, checks: str, model: str | None,
         raise click.ClickException("OPENAI_API_KEY is required unless --no-api is set")
     turns = load_turns(turns_path, include_agent=include_agent, limit=limit)
     events = run_replay(turns, opts)
+    snapshot = replay_snapshot(turns_path, turns, events, opts)
+    if serve:
+        serve_replay(snapshot, port=port, open_browser=open_browser)
+        return
     lines = [json.dumps(e, ensure_ascii=False) for e in events]
     text = "\n".join(lines) + ("\n" if lines else "")
     if out:

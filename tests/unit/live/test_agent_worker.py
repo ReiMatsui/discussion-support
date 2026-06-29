@@ -238,16 +238,16 @@ def test_fact_request_triggers_before_drift():
     state.factcheck_requests.put({
         "should_correct": True,
         "confidence": "high",
-        "claim": "BMIは体重の2乗を身長で割る",
-        "correction": "BMIは体重kgを身長mの2乗で割ります。",
+        "claim": "平均は個数を合計で割る",
+        "correction": "平均は合計を個数で割ります。",
         "reason": "計算式が逆",
     })
-    state.drift_requests.put("体重の話題")
+    state.drift_requests.put("計算方法の話題")
 
     _run_worker_briefly(state, until=lambda: bool(agent.trigger_calls))
 
     assert agent.trigger_calls
-    assert agent.trigger_calls[0]["fact_correction"]["correction"].startswith("BMIは")
+    assert agent.trigger_calls[0]["fact_correction"]["correction"].startswith("平均は")
     assert agent.trigger_calls[0]["drift_reason"] is None
     assert state.intervention_events[0]["reason"] == "fact"
 
@@ -342,20 +342,20 @@ def test_invite_fires_at_pause_with_target():
     """声かけ要求は、沈黙の間が空いてから対象話者付きでトリガーされる（S4）."""
     agent = FakeAgent()
     state = FakeState(agent, None)
-    state.invite_requests.put("田中")
+    state.invite_requests.put("参加者B")
     state._last_utt_time[0] = time.monotonic() - 100  # 十分な沈黙(間)
 
     _run_worker_briefly(state, until=lambda: bool(agent.trigger_calls))
 
     assert agent.trigger_calls, "沈黙の間で声かけがトリガーされるべき"
-    assert agent.trigger_calls[0]["invite_target"] == "田中"
+    assert agent.trigger_calls[0]["invite_target"] == "参加者B"
 
 
 def test_invite_waits_for_pause():
     """沈黙の間が無い（直前に発話があった）うちは声かけしない（割り込まない）（S4）."""
     agent = FakeAgent()
     state = FakeState(agent, None)
-    state.invite_requests.put("田中")
+    state.invite_requests.put("参加者B")
     state._last_utt_time[0] = time.monotonic()  # たった今発話があった → 間が無い
 
     _run_worker_briefly(state, until=lambda: False, timeout=1.0)

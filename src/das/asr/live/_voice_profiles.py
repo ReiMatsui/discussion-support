@@ -455,7 +455,7 @@ class VoiceProfiles:
         return key
 
     def enroll(self, label: str, name: str) -> str | None:
-        """「1=松井」「人物2=田中」: 話者に名前を付ける（声の登録 or 既存人物のリネーム）.
+        """「1=名前」「人物2=名前」: 話者に名前を付ける（声の登録 or 既存人物のリネーム）.
 
         実名を付けたプロファイルのみ voices.json に永続化される（匿名「人物N」は
         そのセッション限り）。戻り値: 旧表示キー（過去のrecords付け替え用）。
@@ -466,7 +466,7 @@ class VoiceProfiles:
 
     def _enroll(self, label: str, name: str) -> str | None:
         if label in self.profiles:
-            # 「人物1=松井」: 既存プロファイルのリネーム
+            # 「人物1=名前」: 既存プロファイルのリネーム
             self.profiles[name] = self.profiles.pop(label)
             old = label
         else:

@@ -9,24 +9,24 @@ def _sim():
 
 
 def test_single_speaker_line():
-    sp, utt = _sim()._parse_turn("松井: コストを議論しましょう。")
-    assert sp == "松井"
+    sp, utt = _sim()._parse_turn("参加者A: コストを議論しましょう。")
+    assert sp == "参加者A"
     assert utt == "コストを議論しましょう。"
 
 
 def test_fullwidth_colon():
-    sp, utt = _sim()._parse_turn("田中：賛成です。")
-    assert sp == "田中"
+    sp, utt = _sim()._parse_turn("参加者B：賛成です。")
+    assert sp == "参加者B"
     assert utt == "賛成です。"
 
 
 def test_multi_speaker_takes_first_only():
     """複数話者が混ざった応答でも、最初の1人だけを採用する（声の分離維持）."""
-    text = "松井: メリットは効率化です。\n田中: でもコストが心配です。\n佐藤: 確かに。"
+    text = "参加者A: メリットは効率化です。\n参加者B: でもコストが心配です。\n参加者C: 確かに。"
     sp, utt = _sim()._parse_turn(text)
-    assert sp == "松井"
+    assert sp == "参加者A"
     assert utt == "メリットは効率化です。"
-    assert "田中" not in utt  # 2人目以降は取り込まない
+    assert "参加者B" not in utt  # 2人目以降は取り込まない
 
 
 def test_unknown_speaker_is_rejected():
@@ -38,6 +38,6 @@ def test_non_speaker_format_rejected():
 
 
 def test_leading_blank_lines_skipped():
-    sp, utt = _sim()._parse_turn("\n\n佐藤: そうですね。")
-    assert sp == "佐藤"
+    sp, utt = _sim()._parse_turn("\n\n参加者C: そうですね。")
+    assert sp == "参加者C"
     assert utt == "そうですね。"

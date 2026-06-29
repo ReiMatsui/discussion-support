@@ -919,5 +919,6 @@ class SessionState:
     def save(self, live: bool = True):
         self.rev += 1  # 変更を通知（SSEの差分配信用, F2）
         self.write_md()
-        self.write_html(live)
+        if not self._serve:
+            self.write_html(live)
         self.write_turns()
