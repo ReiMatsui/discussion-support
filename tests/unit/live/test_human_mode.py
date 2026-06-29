@@ -168,6 +168,9 @@ def test_fact_candidate_gate_is_structural_not_keyword_based():
         "制度Xの上限は70%です",
         "富士山の高さは200メートルです",
         "BMI、いや、富士山の高さは200メートルです",
+        "京都は日本の首都です",
+        "ニューヨークはアメリカの首都です",
+        "日本の首都は京都です",
         "x = y / z",
         "単位はメートルです",
     ]
@@ -184,6 +187,7 @@ def test_fact_candidate_gate_is_structural_not_keyword_based():
         "成人式は普通にやった",
         "090-8165-1145 にかけてもいい？",
         "お酒はどこで飲むの、2回目のデート",
+        "京都はきれいです",
     ]
 
     assert [_looks_like_fact_claim(t) for t in positives] == [True] * len(positives)

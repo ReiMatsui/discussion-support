@@ -252,6 +252,46 @@ def test_fact_request_triggers_before_drift():
     assert state.intervention_events[0]["reason"] == "fact"
 
 
+def test_fact_request_is_held_during_cooldown(monkeypatch):
+    """事実補正はクールダウン中でも破棄せず、明けたら発火する."""
+    import das.asr.live._workers as workers
+
+    monkeypatch.setattr(workers, "_FACTCHECK_COOLDOWN", 1.0)
+    agent = FakeAgent()
+    state = FakeState(agent, None)
+
+    t = threading.Thread(target=_run_agent_worker, args=(state,), daemon=True)
+    t.start()
+    try:
+        state.factcheck_requests.put({
+            "should_correct": True,
+            "confidence": "high",
+            "correction": "富士山は約3,776メートルです。",
+        })
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and len(agent.trigger_calls) < 1:
+            time.sleep(0.05)
+        assert len(agent.trigger_calls) == 1
+
+        state.factcheck_requests.put({
+            "should_correct": True,
+            "confidence": "high",
+            "correction": "アメリカの首都はワシントンD.C.です。",
+        })
+        time.sleep(0.3)
+        assert len(agent.trigger_calls) == 1, "クールダウン中はまだ発火しない"
+
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and len(agent.trigger_calls) < 2:
+            time.sleep(0.05)
+    finally:
+        state.stop.set()
+        t.join(timeout=2.0)
+
+    assert len(agent.trigger_calls) == 2
+    assert agent.trigger_calls[1]["fact_correction"]["correction"].startswith("アメリカ")
+
+
 def test_single_drift_request_is_held_until_confirmed():
     """controlledでは単発の脱線判定だけでは即介入しない。"""
     agent = FakeAgent()

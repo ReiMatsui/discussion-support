@@ -96,6 +96,12 @@ _FACT_OPERATION_RELATION_RE = re.compile(
     r"(を|に).{0,32}(で|に)?"
     r"(割る|掛ける|かける|足す|引く)"
 )
+_FACT_ROLE_RELATION_RE = re.compile(
+    r"(.{1,40}は.{1,40}の(首都|県庁所在地|大統領|首相|社長|CEO|創業者)"
+    r"(です|でした|である)|"
+    r".{1,40}の(首都|県庁所在地|大統領|首相|社長|CEO|創業者)は.{1,40}"
+    r"(です|でした|である))"
+)
 
 
 def _looks_like_fact_claim(text: str) -> bool:
@@ -130,6 +136,7 @@ def _looks_like_fact_claim(text: str) -> bool:
         _FACT_SYMBOL_FORMULA_RE.search(s),
         _FACT_OPERATION_RE.search(s),
         _FACT_OPERATION_RELATION_RE.search(s),
+        _FACT_ROLE_RELATION_RE.search(s),
     ))
 
 
@@ -671,8 +678,9 @@ def _run_agent_worker(state: SessionState):
                 if not correction:
                     _pending_fact = None
                 elif time.monotonic() - _last_fact_at < _FACTCHECK_COOLDOWN:
-                    print("# [trigger] skip: クールダウン中の事実補正", flush=True)
-                    _pending_fact = None
+                    if _diag_tick % 4 == 0:
+                        print("# [trigger] hold: クールダウン中の事実補正", flush=True)
+                    continue
                 else:
                     print(f"# [trigger] fact: {correction}", flush=True)
                     _log_intervention_event(state, "fact", correction)
