@@ -39,11 +39,14 @@ def test_proactivity_profiles():
     assert _PROACTIVITY_DEFAULT == "controlled"
     assert _PROACTIVITY_PROFILES["controlled"]["silence_summarize"] is None
     assert _PROACTIVITY_PROFILES["controlled"]["drift_confirmations"] >= 2
+    assert _PROACTIVITY_PROFILES["controlled"]["stall_breaker"] is False
     assert _PROACTIVITY_PROFILES["standard"]["silence_summarize"] == 18.0
+    assert _PROACTIVITY_PROFILES["standard"]["stall_breaker"] is False
     # 控えめ寄り: 標準でも以前の5秒よりかなり長い
     assert _PROACTIVITY_PROFILES["standard"]["silence_summarize"] > 10
     assert _PROACTIVITY_PROFILES["active"]["cooldown"] < \
         _PROACTIVITY_PROFILES["standard"]["cooldown"]
+    assert _PROACTIVITY_PROFILES["active"]["stall_breaker"] is True
 
 
 def test_cli_has_imbalanced_scenario():

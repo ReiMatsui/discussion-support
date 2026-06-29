@@ -588,6 +588,7 @@ def _run_agent_worker(state: SessionState):
         # 積極性プロファイル（S5）: 介入クールダウンと沈黙要約の閾値
         _cooldown = state.proactivity.get("cooldown", _INTERVENTION_COOLDOWN)
         _silence_summarize = state.proactivity.get("silence_summarize")
+        _stall_breaker = bool(state.proactivity.get("stall_breaker", False))
         _enabled = _intervention_enabled(state)
         with state.state_lock:
             _skip = {AGENT_SPEAKER, "パートナー"}
@@ -783,7 +784,8 @@ def _run_agent_worker(state: SessionState):
             # --- 沈黙ブレーカー: 介入不要後にデッドエアになった場合の一押し（Fix 10） ---
             # 「介入不要」の判断自体は尊重する（一度黙る）が、その後に会話が止まって
             # しまったら、本題へ戻す一言を促す。クールダウンで繰り返しを防ぐ。
-            elif (agent._last_noop_at > 0
+            elif (_stall_breaker
+                  and agent._last_noop_at > 0
                   and _silence_elapsed > _STALL_SILENCE
                   and time.monotonic() - _last_stall_at > _STALL_COOLDOWN):
                 print(f"# [trigger] stall: 介入不要後の沈黙{_silence_elapsed:.1f}s"

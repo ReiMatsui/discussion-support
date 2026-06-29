@@ -164,10 +164,12 @@ def test_agent_worker_reconnects_disconnected_enabled_agent():
 
 
 def test_stall_breaker_fires_after_noop_silence():
-    """介入不要後に沈黙が続いたら、本題に戻す一押しをトリガーする（Fix 10）."""
+    """activeでは介入不要後に沈黙が続いたら、一押しをトリガーする."""
     agent = FakeAgent()
     agent._last_noop_at = time.monotonic()      # 直前に「介入不要」と判断
     state = FakeState(agent, None)
+    state.proactivity = {"silence_summarize": 8.0, "cooldown": 15.0,
+                         "stall_breaker": True}
     state._last_utt_time[0] = time.monotonic() - 100  # 十分な沈黙を模擬
 
     _run_worker_briefly(state, until=lambda: bool(agent.trigger_calls))
@@ -175,6 +177,20 @@ def test_stall_breaker_fires_after_noop_silence():
     assert agent.trigger_calls, "介入不要後の沈黙で一押しが入るべき"
     assert "止まって" in (agent.trigger_calls[0]["drift_reason"] or "")
     assert agent._last_noop_at == 0.0  # 発火後はマーカーを解除
+
+
+def test_controlled_proactivity_no_stall_breaker_after_noop():
+    """controlledでは介入不要後の沈黙でも、黙る判断を尊重する."""
+    agent = FakeAgent()
+    agent._last_noop_at = time.monotonic()
+    state = FakeState(agent, None)
+    state.proactivity = {"silence_summarize": None, "cooldown": 40.0,
+                         "stall_breaker": False}
+    state._last_utt_time[0] = time.monotonic() - 100
+
+    _run_worker_briefly(state, until=lambda: False, timeout=1.0)
+
+    assert agent.trigger_calls == []
 
 
 def test_controlled_proactivity_no_silence_summarize():
