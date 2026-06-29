@@ -134,8 +134,73 @@ def build_backend(args: LiveArgs) -> STTBackend:
             enable_endpoint_detection=getattr(args, "soniox_endpoint", False))
 
 
+_TOPICS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "topics": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "topic": {"type": "string"},
+                    "speaker": {"type": "string"},
+                },
+                "required": ["topic", "speaker"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["topics"],
+    "additionalProperties": False,
+}
+
+_DRIFT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "drift": {"type": "boolean"},
+        "reason": {"type": "string"},
+    },
+    "required": ["drift", "reason"],
+    "additionalProperties": False,
+}
+
+_AGENDA_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "agenda": {"type": "string"},
+    },
+    "required": ["agenda"],
+    "additionalProperties": False,
+}
+
+_PARTICIPATION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "invite": {"type": "boolean"},
+        "speaker": {"type": "string"},
+        "reason": {"type": "string"},
+    },
+    "required": ["invite", "speaker", "reason"],
+    "additionalProperties": False,
+}
+
+_FACT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "should_correct": {"type": "boolean"},
+        "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+        "claim": {"type": "string"},
+        "correction": {"type": "string"},
+        "reason": {"type": "string"},
+    },
+    "required": ["should_correct", "confidence", "claim", "correction", "reason"],
+    "additionalProperties": False,
+}
+
+
 def _build_chat_params(model: str, prompt: str, *, max_out: int,
-                       temperature: float) -> dict:
+                       temperature: float, schema_name: str | None = None,
+                       schema: dict | None = None) -> dict:
     """Chat Completions のリクエストパラメータを構築する（モデル系統別）.
 
     gpt-5系/o系は推論モデルで、temperature指定不可・max_tokensは
@@ -146,6 +211,15 @@ def _build_chat_params(model: str, prompt: str, *, max_out: int,
     name = model.lower()
     params: dict = {"model": model,
                     "messages": [{"role": "user", "content": prompt}]}
+    if schema_name and schema:
+        params["response_format"] = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": schema_name,
+                "strict": True,
+                "schema": schema,
+            },
+        }
     if name.startswith("gpt-5"):
         params["reasoning_effort"] = "minimal"  # 短いJSON抽出に推論は不要
         params["max_completion_tokens"] = max_out
@@ -191,9 +265,14 @@ def extract_topics(utterances: list[dict], existing: list[str],
     utt_text = "\n".join(f"- {u['speaker']}: {u['text']}" for u in utterances)
     ex_text = "\n".join(f"- {t}" for t in existing) if existing else "（まだなし）"
     prompt = _TOPIC_PROMPT.format(existing=ex_text, utterances=utt_text)
-    params = _build_chat_params(model, prompt, max_out=2000, temperature=0.3)
+    params = _build_chat_params(
+        model, prompt, max_out=2000, temperature=0.3,
+        schema_name="topics_result", schema=_TOPICS_SCHEMA)
     result = _post_chat_json(params, api_key, timeout=30, label="topic")
-    return result if isinstance(result, list) else []
+    if not isinstance(result, dict):
+        return []
+    topics = result.get("topics")
+    return topics if isinstance(topics, list) else []
 
 
 def check_drift(utterances: list[dict], topics: list[dict],
@@ -225,7 +304,9 @@ def check_drift(utterances: list[dict], topics: list[dict],
         topics=topic_text,
         utterances=utt_text,
     )
-    params = _build_chat_params(model, prompt, max_out=800, temperature=0.0)
+    params = _build_chat_params(
+        model, prompt, max_out=800, temperature=0.0,
+        schema_name="drift_result", schema=_DRIFT_SCHEMA)
     result = _post_chat_json(params, api_key, timeout=15, label="drift")
     if not isinstance(result, dict):
         return {"drift": False}
@@ -242,7 +323,9 @@ def detect_agenda(utterances: list[dict], api_key: str, model: str) -> str | Non
         return None
     utt_text = "\n".join(f"- {u['speaker']}: {u['text']}" for u in utterances)
     prompt = _AGENDA_PROMPT.format(utterances=utt_text)
-    params = _build_chat_params(model, prompt, max_out=400, temperature=0.0)
+    params = _build_chat_params(
+        model, prompt, max_out=400, temperature=0.0,
+        schema_name="agenda_result", schema=_AGENDA_SCHEMA)
     result = _post_chat_json(params, api_key, timeout=20, label="agenda")
     if not isinstance(result, dict):
         return None
@@ -269,7 +352,9 @@ def check_participation(participation: list[dict], utterances: list[dict],
     utt_text = "\n".join(f"- {u['speaker']}: {u['text']}" for u in utterances)
     prompt = _PARTICIPATION_PROMPT.format(participation=part_text,
                                           utterances=utt_text)
-    params = _build_chat_params(model, prompt, max_out=400, temperature=0.0)
+    params = _build_chat_params(
+        model, prompt, max_out=400, temperature=0.0,
+        schema_name="participation_result", schema=_PARTICIPATION_SCHEMA)
     result = _post_chat_json(params, api_key, timeout=15, label="invite")
     if not isinstance(result, dict):
         return {"invite": False}
@@ -291,7 +376,9 @@ def check_fact_correction(utterances: list[dict], api_key: str, model: str) -> d
         lines.append(f"- [{label}] {u['speaker']}: {u['text']}")
     utt_text = "\n".join(lines)
     prompt = _FACTCHECK_PROMPT.format(utterances=utt_text)
-    params = _build_chat_params(model, prompt, max_out=700, temperature=0.0)
+    params = _build_chat_params(
+        model, prompt, max_out=700, temperature=0.0,
+        schema_name="fact_correction_result", schema=_FACT_SCHEMA)
     result = _post_chat_json(params, api_key, timeout=15, label="fact")
     if not isinstance(result, dict):
         return {"should_correct": False, "retryable_error": True}
