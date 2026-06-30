@@ -46,8 +46,9 @@ uv sync --extra soniox
 echo "SONIOX_API_KEY=..." >> .env
 uv run das listen-soniox            # 録音→話者特定→統合AF構築→ライブ介入
 # 実行中: ブラウザUIで参加人数・名前登録・停止
-# 議事録(MD/HTML/turns.jsonl)は transcripts/ に自動保存
+# 議事録(MD/HTML/turns.jsonl/interventions.jsonl)は transcripts/ に自動保存
 # バッチでも可: uv run das run-session transcripts/<日時>.turns.jsonl
+# 介入レビュー: uv run python -m das.asr.live.replay transcripts/<日時>.turns.jsonl --no-api --serve
 ```
 
 ### AIファシリテーター付きライブUI (`python -m das.asr.live`)

@@ -114,6 +114,30 @@ uv run python -m das.asr.live --simulate 'AIツール導入の是非' --sim-scen
 uv run python -m das.asr.live --simulate 'AIツール導入の是非' --sim-scenario imbalanced
 ```
 
+### 録音後の介入レビュー
+
+ライブ実行後、`transcripts/` には議事録だけでなく、ターン単位ログと介入ログも残る。
+`replay` UIを開くと、保存済み介入の「発火理由」「直近文脈」「実際に届いた発話」を並べて確認できる。
+
+```bash
+# APIを使わず、保存済み介入ログだけを見返す
+uv run python -m das.asr.live.replay transcripts/<日時>.turns.jsonl --no-api --serve
+
+# 保存済みログに加えて、同じturnsから介入候補を再判定する
+uv run python -m das.asr.live.replay transcripts/<日時>.turns.jsonl \
+  --topic 'AIツール導入の是非' --serve
+```
+
+`<日時>.interventions.jsonl` が同じ場所にあれば自動で読み込まれる。別ファイルを使う場合:
+
+```bash
+uv run python -m das.asr.live.replay transcripts/<日時>.turns.jsonl \
+  --interventions transcripts/<別名>.interventions.jsonl --no-api --serve
+```
+
+レビューUIでは、delivery欠落・発火理由なし発話・文脈欠落・長すぎる介入などを
+軽い品質フラグとして表示する。
+
 ---
 
 ## 3. AIファシリテータ付きモード（dasオーケストレータ）
