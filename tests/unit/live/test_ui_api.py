@@ -61,7 +61,7 @@ class _FakeTracker:
         return list(self.profiles)
 
     def active_profile_names(self):
-        return list(self.profiles)
+        return [name for name in self.profiles if not str(name).startswith("人物")]
 
 
 class _FakeBackend:
@@ -455,6 +455,14 @@ def test_snapshot_vp_enabled_reports_model_and_roster():
     assert vp["enabled"] is True and vp["model"] == "redimnet"
     assert vp["locked"] is True                  # auto=False → 名簿確定
     assert set(vp["roster"]) == {"黒田", "としや"}
+
+
+def test_snapshot_roster_hides_anonymous_voiceprint_profiles():
+    s = _make_state()
+    s.tracker = _FakeTracker(auto=False)
+    s.tracker.profiles = {"黒田": 1, "人物1": 1}
+
+    assert s.api_snapshot()["vp"]["roster"] == ["黒田"]
 
 
 # --- 事前登録・名簿（UI登録フロー） ----------------------------------------
