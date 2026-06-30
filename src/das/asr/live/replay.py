@@ -555,6 +555,8 @@ def _parse_checks(value: str) -> set[str]:
 @click.option("--model", default=None, help="OPENAI_MODEL_FASTの代わりに使うモデル")
 @click.option("--out", default=None, type=click.Path(dir_okay=False),
               help="イベントJSONLの保存先。未指定なら標準出力")
+@click.option("--review-out", default=None, type=click.Path(dir_okay=False),
+              help="保存済み介入レビューJSONLの保存先")
 @click.option("--serve", is_flag=True, help="結果をローカルUIで表示する")
 @click.option("--port", type=int, default=8232, help="--serve のポート番号。0で自動割当")
 @click.option("--open/--no-open", "open_browser", default=True,
@@ -568,9 +570,9 @@ def _parse_checks(value: str) -> set[str]:
 @click.option("--no-api", is_flag=True,
               help="APIを呼ばず、ローカル候補抽出だけ行う")
 def main(turns_path: str, topic: str | None, checks: str, model: str | None,
-         out: str | None, serve: bool, port: int, open_browser: bool,
-         limit: int | None, include_agent: bool, interventions_path: str | None,
-         no_api: bool) -> None:
+         out: str | None, review_out: str | None, serve: bool, port: int,
+         open_browser: bool, limit: int | None, include_agent: bool,
+         interventions_path: str | None, no_api: bool) -> None:
     """Replay a saved turns.jsonl file and print intervention candidates."""
     api_key = os.environ.get("OPENAI_API_KEY", "")
     opts = ReplayOptions(
@@ -589,6 +591,16 @@ def main(turns_path: str, topic: str | None, checks: str, model: str | None,
     default_path = default_interventions_path(turns_path)
     interventions = load_interventions(interventions_path or default_path)
     snapshot = replay_snapshot(turns_path, turns, events, opts, interventions)
+    if review_out:
+        review_lines = [
+            json.dumps(item, ensure_ascii=False)
+            for item in snapshot["intervention_review"]
+        ]
+        Path(review_out).write_text(
+            "\n".join(review_lines) + ("\n" if review_lines else ""),
+            encoding="utf-8",
+        )
+        click.echo(f"# intervention review: {len(review_lines)} -> {review_out}")
     if serve:
         serve_replay(snapshot, port=port, open_browser=open_browser)
         return

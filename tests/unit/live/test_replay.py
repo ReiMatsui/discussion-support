@@ -356,6 +356,25 @@ def test_cli_serve_auto_loads_sibling_interventions(tmp_path, monkeypatch):
     assert seen["snapshot"]["intervention_review"][0]["event_id"] == "int-0001"
 
 
+def test_cli_writes_intervention_review_jsonl(tmp_path):
+    p = tmp_path / "sample.turns.jsonl"
+    review_out = tmp_path / "review.jsonl"
+    _write_turns(p, [{"turn_id": 1, "speaker": "A", "text": "進め方の話です"}])
+    _write_jsonl(tmp_path / "sample.interventions.jsonl", [
+        {"event_id": "int-0001", "type": "trigger", "reason": "count"},
+    ])
+
+    result = CliRunner().invoke(
+        replay.main,
+        [str(p), "--no-api", "--review-out", str(review_out)],
+    )
+
+    assert result.exit_code == 0
+    rows = [json.loads(line) for line in review_out.read_text(encoding="utf-8").splitlines()]
+    assert rows[0]["event_id"] == "int-0001"
+    assert rows[0]["quality_flags"] == ["missing_delivery", "no_recent_context"]
+
+
 def test_replay_snapshot_for_ui():
     turns = [{"turn_id": 1, "speaker": "A", "text": "指標Xの計算式は分母を分子で割る", "ms": 0}]
     events = [{"turn_id": 1, "type": "fact_candidate", "detail": "候補"}]
@@ -379,3 +398,4 @@ def test_cli_help_has_serve_option():
     assert "--serve" in result.output
     assert "--port" in result.output
     assert "--interventions" in result.output
+    assert "--review-out" in result.output
