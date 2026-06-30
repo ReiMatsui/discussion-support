@@ -68,10 +68,12 @@ def test_intervention_review_items_pair_trigger_and_delivery(tmp_path):
                 "topics": [{"topic": "AI導入", "speaker": "議題"}],
                 "recent_utterances": [{"speaker": "A", "text": "話"}],
             },
+            "created_at": "2026-01-01T09:00:00",
         },
         {
             "type": "delivery",
             "trigger_event_id": "int-0001",
+            "created_at": "2026-01-01T09:00:03",
             "text": "本題に戻しましょう",
         },
     ])
@@ -83,10 +85,12 @@ def test_intervention_review_items_pair_trigger_and_delivery(tmp_path):
         "status": "delivered",
         "reason": "drift",
         "detail": "雑談",
-        "created_at": None,
+        "created_at": "2026-01-01T09:00:00",
         "turn_count": 3,
         "recent_utterances": [{"speaker": "A", "text": "話"}],
         "topics": [{"topic": "AI導入", "speaker": "議題"}],
+        "timing": {},
+        "trigger_to_delivery_sec": 3.0,
         "delivery_text": "本題に戻しましょう",
         "quality_flags": [],
         "trigger": load_interventions(path)[0],
@@ -118,6 +122,8 @@ def test_intervention_review_items_marks_orphan_delivery():
     assert items[0]["status"] == "orphan_delivery"
     assert items[0]["delivery_text"] == "本題に戻しましょう"
     assert items[0]["quality_flags"] == ["orphan_delivery", "no_recent_context"]
+    assert items[0]["timing"] == {}
+    assert items[0]["trigger_to_delivery_sec"] is None
 
 
 def test_intervention_review_items_flags_long_delivery_and_drift_without_topic():
@@ -141,13 +147,25 @@ def test_intervention_review_items_flags_long_delivery_and_drift_without_topic()
 
 def test_intervention_review_summary_counts_status_reasons_and_flags():
     items = [
-        {"status": "delivered", "reason": "drift", "quality_flags": ["long_delivery"]},
+        {
+            "status": "delivered",
+            "reason": "drift",
+            "quality_flags": ["long_delivery"],
+            "timing": {"candidate_wait_sec": 1.0},
+            "trigger_to_delivery_sec": 2.0,
+        },
         {
             "status": "missing_delivery",
             "reason": "invite",
             "quality_flags": ["missing_delivery", "no_recent_context"],
+            "timing": {"candidate_wait_sec": 3.0},
         },
-        {"status": "delivered", "reason": "drift", "quality_flags": []},
+        {
+            "status": "delivered",
+            "reason": "drift",
+            "quality_flags": [],
+            "trigger_to_delivery_sec": 4.0,
+        },
     ]
 
     assert intervention_review_summary(items) == {
@@ -160,6 +178,10 @@ def test_intervention_review_summary_counts_status_reasons_and_flags():
             "missing_delivery": 1,
             "no_recent_context": 1,
         },
+        "avg_candidate_wait_sec": 2.0,
+        "max_candidate_wait_sec": 3.0,
+        "avg_trigger_to_delivery_sec": 3.0,
+        "max_trigger_to_delivery_sec": 4.0,
     }
 
 

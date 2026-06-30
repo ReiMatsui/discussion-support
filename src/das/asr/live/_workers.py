@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import collections
 import contextlib
+import datetime
 import queue
 import re
 import threading
@@ -130,7 +131,12 @@ def _looks_like_fact_claim(text: str) -> bool:
     return bool(_FACT_STRONG_ANCHOR_RE.search(s))
 
 
-def _intervention_event_metadata(state: SessionState, *, recent_limit: int = 5) -> dict:
+def _intervention_event_metadata(
+    state: SessionState,
+    *,
+    recent_limit: int = 5,
+    timing: dict | None = None,
+) -> dict:
     """介入の事後レビューに必要な最小コンテキストを作る."""
     with state.state_lock:
         utterances = [
@@ -149,19 +155,28 @@ def _intervention_event_metadata(state: SessionState, *, recent_limit: int = 5) 
             for t in state.topics[:5]
         ]
     agent = getattr(state, "agent", None)
-    return {
+    metadata = {
         "mode": getattr(agent, "mode", None),
         "proactivity": getattr(state, "proactivity_name", None),
         "turn_count": len(utterances),
         "recent_utterances": utterances[-recent_limit:],
         "topics": topics,
     }
+    if timing:
+        metadata["timing"] = timing
+    return metadata
 
 
-def _log_intervention_event(state: SessionState, reason: str, detail: str = "") -> None:
+def _log_intervention_event(
+    state: SessionState,
+    reason: str,
+    detail: str = "",
+    *,
+    timing: dict | None = None,
+) -> None:
     add_event = getattr(state, "add_intervention_event", None)
     if callable(add_event):
-        add_event(reason, detail, metadata=_intervention_event_metadata(state))
+        add_event(reason, detail, metadata=_intervention_event_metadata(state, timing=timing))
 
 
 def _intervention_enabled(state: SessionState) -> bool:
@@ -175,6 +190,7 @@ class _PendingInterventions:
     drift_reason: str | None = None
     drift_count: int = 0
     last_drift_request_at: float = 0.0
+    last_drift_request_wall_at: str | None = None
     facts: collections.deque[dict] = field(
         default_factory=lambda: collections.deque(maxlen=5))
     invite: str | None = None
@@ -187,6 +203,8 @@ class _PendingInterventions:
                 if now - self.last_drift_request_at > 20.0:
                     self.drift_count = 0
                 self.last_drift_request_at = now
+                self.last_drift_request_wall_at = datetime.datetime.now().isoformat(
+                    timespec="seconds")
                 self.drift_count += 1
             except queue.Empty:
                 break
@@ -199,6 +217,8 @@ class _PendingInterventions:
             try:
                 fact = state.factcheck_requests.get_nowait()
                 fact.setdefault("_queued_at", now)
+                fact.setdefault("_queued_wall_at", datetime.datetime.now().isoformat(
+                    timespec="seconds"))
                 self.facts.append(fact)
             except queue.Empty:
                 break
@@ -246,6 +266,30 @@ def _floor_available_for_intervention(
         and not partner_busy
         and not in_echo_window
     )
+
+
+def _intervention_timing_metadata(
+    *,
+    kind: str,
+    now: float,
+    silence_elapsed: float,
+    pause_required: float,
+    queued_at: float | None = None,
+    queued_wall_at: str | None = None,
+    policy: str = "floor_pause",
+) -> dict:
+    """介入の自然さ/遅延レビュー用タイミング情報を作る."""
+    timing = {
+        "kind": kind,
+        "policy": policy,
+        "pause_required_sec": round(pause_required, 3),
+        "pause_actual_sec": round(silence_elapsed, 3),
+    }
+    if queued_at is not None:
+        timing["candidate_wait_sec"] = round(max(0.0, now - queued_at), 3)
+    if queued_wall_at:
+        timing["candidate_created_at"] = queued_wall_at
+    return timing
 
 
 def _select_barge_in_decision(
@@ -917,6 +961,7 @@ def _run_agent_worker(state: SessionState):
         # trigger()の呼び出しはこの _run_agent_worker に一元化されている（R2）。
         if not agent._responding and not agent.ai_speaking:
             _now = time.monotonic()
+            _silence_elapsed = _now - _last_utt_time[0]
             _partner_busy = bool(partner is not None
                                  and (partner.ai_speaking or partner._responding))
             _bargein_topics = None
@@ -930,7 +975,7 @@ def _run_agent_worker(state: SessionState):
                 now=_now,
                 last_fact_at=_last_fact_at,
                 last_intervention_at=_last_intervention_at,
-                silence_elapsed=_now - _last_utt_time[0],
+                silence_elapsed=_silence_elapsed,
                 partner_busy=_partner_busy,
                 in_echo_window=bool(agent.in_echo_window),
                 cooldown=_cooldown,
@@ -940,8 +985,17 @@ def _run_agent_worker(state: SessionState):
                 continue
             if decision.reason == "fact" and decision.fact is not None:
                 correction = str(decision.fact.get("correction") or "").strip()
+                timing = _intervention_timing_metadata(
+                    kind="fact",
+                    now=_now,
+                    silence_elapsed=_silence_elapsed,
+                    pause_required=_INTERVENTION_PAUSE_FACT,
+                    queued_at=float(decision.fact.get("_queued_at", _now)),
+                    queued_wall_at=str(decision.fact.get("_queued_wall_at") or ""),
+                    policy="fact_freshness_pause",
+                )
                 print(f"# [trigger] fact: {correction}", flush=True)
-                _log_intervention_event(state, "fact", correction)
+                _log_intervention_event(state, "fact", correction, timing=timing)
                 agent.trigger(topics=_bargein_topics,
                               fact_correction=decision.fact,
                               retry_intervention=False)
@@ -950,18 +1004,38 @@ def _run_agent_worker(state: SessionState):
                 _last_intervention_at = _last_fact_at
                 continue
             if decision.reason == "drift" and decision.drift_reason is not None:
+                timing = _intervention_timing_metadata(
+                    kind="drift",
+                    now=_now,
+                    silence_elapsed=_silence_elapsed,
+                    pause_required=_INTERVENTION_PAUSE_DRIFT,
+                    queued_at=_pending.last_drift_request_at or None,
+                    queued_wall_at=_pending.last_drift_request_wall_at,
+                    policy="drift_confirmation_pause",
+                )
                 print(f"# [trigger] drift: 脱線介入「{decision.drift_reason}」",
                       flush=True)
-                _log_intervention_event(state, "drift", decision.drift_reason)
+                _log_intervention_event(
+                    state, "drift", decision.drift_reason, timing=timing)
                 agent.trigger(topics=_bargein_topics,
                               drift_reason=decision.drift_reason)
                 _pending.clear_drift()
                 _last_intervention_at = time.monotonic()
                 continue
             if decision.reason == "retry":
+                pending_intervention = agent._pending_intervention or {}
+                timing = _intervention_timing_metadata(
+                    kind="retry",
+                    now=_now,
+                    silence_elapsed=_silence_elapsed,
+                    pause_required=_INTERVENTION_PAUSE_RETRY,
+                    queued_at=float(pending_intervention.get("created_at", _now)),
+                    policy="retry_extra_pause",
+                )
                 print("# [trigger] retry: 中断された介入を再送（ガードバイパス）",
                       flush=True)
-                _log_intervention_event(state, "retry", "中断された介入を再送")
+                _log_intervention_event(
+                    state, "retry", "中断された介入を再送", timing=timing)
                 agent.trigger(topics=_bargein_topics)
                 _last_intervention_at = time.monotonic()
                 continue
@@ -1009,26 +1083,56 @@ def _run_agent_worker(state: SessionState):
             _log_intervention_event(state, "conversation", normal_decision.detail)
             agent.trigger()
         elif normal_decision.reason == "count":
+            timing = _intervention_timing_metadata(
+                kind="count",
+                now=time.monotonic(),
+                silence_elapsed=_silence_elapsed,
+                pause_required=_INTERVENTION_PAUSE_COUNT,
+                policy="turn_count_pause",
+            )
             print(f"# [trigger] count: {normal_decision.detail}", flush=True)
-            _log_intervention_event(state, "count", normal_decision.detail)
+            _log_intervention_event(state, "count", normal_decision.detail, timing=timing)
             agent.trigger(topics=_topics)
             _last_intervention_at = time.monotonic()
         elif normal_decision.reason == "silence":
+            timing = _intervention_timing_metadata(
+                kind="silence",
+                now=time.monotonic(),
+                silence_elapsed=_silence_elapsed,
+                pause_required=float(_silence_summarize or 0.0),
+                policy="silence_summary",
+            )
             print(f"# [trigger] silence: {normal_decision.detail}", flush=True)
-            _log_intervention_event(state, "silence", normal_decision.detail)
+            _log_intervention_event(
+                state, "silence", normal_decision.detail, timing=timing)
             agent.trigger(topics=_topics)
             _last_intervention_at = time.monotonic()
         elif normal_decision.reason == "stall":
+            timing = _intervention_timing_metadata(
+                kind="stall",
+                now=time.monotonic(),
+                silence_elapsed=_silence_elapsed,
+                pause_required=_STALL_SILENCE,
+                policy="noop_stall_pause",
+            )
             print(f"# [trigger] stall: {normal_decision.detail}", flush=True)
-            _log_intervention_event(state, "stall", normal_decision.detail)
+            _log_intervention_event(state, "stall", normal_decision.detail, timing=timing)
             agent.trigger(topics=_topics,
                           drift_reason=normal_decision.drift_reason)
             _last_stall_at = time.monotonic()
             _last_intervention_at = time.monotonic()
             agent._last_noop_at = 0.0
         elif normal_decision.reason == "invite":
+            timing = _intervention_timing_metadata(
+                kind="invite",
+                now=time.monotonic(),
+                silence_elapsed=_silence_elapsed,
+                pause_required=_INVITE_SILENCE,
+                policy="participation_pause",
+            )
             print(f"# [trigger] invite: {normal_decision.detail}", flush=True)
-            _log_intervention_event(state, "invite", normal_decision.detail)
+            _log_intervention_event(
+                state, "invite", normal_decision.detail, timing=timing)
             agent.trigger(topics=_topics,
                           invite_target=normal_decision.invite_target)
             _last_intervention_at = time.monotonic()

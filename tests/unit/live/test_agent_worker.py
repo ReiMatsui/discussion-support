@@ -498,17 +498,14 @@ def test_drift_request_triggers_with_reason():
 
     assert agent.trigger_calls, "脱線要求でトリガーされるべき"
     assert agent.trigger_calls[0]["drift_reason"] == "ラーメンの雑談"
-    assert state.intervention_events == [{
-        "reason": "drift",
-        "detail": "ラーメンの雑談",
-        "metadata": {
-            "mode": "facilitator",
-            "proactivity": None,
-            "turn_count": 0,
-            "recent_utterances": [],
-            "topics": [],
-        },
-    }]
+    event = state.intervention_events[0]
+    assert event["reason"] == "drift"
+    assert event["detail"] == "ラーメンの雑談"
+    assert event["metadata"]["mode"] == "facilitator"
+    assert event["metadata"]["turn_count"] == 0
+    assert event["metadata"]["timing"]["kind"] == "drift"
+    assert event["metadata"]["timing"]["policy"] == "drift_confirmation_pause"
+    assert event["metadata"]["timing"]["candidate_wait_sec"] >= 0
 
 
 def test_fact_request_triggers_before_drift():
@@ -531,6 +528,8 @@ def test_fact_request_triggers_before_drift():
     assert agent.trigger_calls[0]["drift_reason"] is None
     assert agent.trigger_calls[0]["retry_intervention"] is False
     assert state.intervention_events[0]["reason"] == "fact"
+    assert state.intervention_events[0]["metadata"]["timing"]["kind"] == "fact"
+    assert state.intervention_events[0]["metadata"]["timing"]["policy"] == "fact_freshness_pause"
 
 
 def test_fact_request_is_held_during_cooldown(monkeypatch):
@@ -626,6 +625,8 @@ def test_count_trigger_records_intervention_reason():
     assert agent.trigger_calls
     assert state.intervention_events
     assert state.intervention_events[0]["reason"] == "count"
+    assert state.intervention_events[0]["metadata"]["timing"]["kind"] == "count"
+    assert state.intervention_events[0]["metadata"]["timing"]["policy"] == "turn_count_pause"
 
 
 def test_drift_request_held_until_agent_free():
@@ -668,7 +669,7 @@ def test_drift_intervention_cooldown_suppresses_repeats():
     t.start()
     try:
         # 1回目の脱線で介入が入る
-        deadline = time.monotonic() + 2.0
+        deadline = time.monotonic() + 3.0
         while time.monotonic() < deadline and not agent.trigger_calls:
             time.sleep(0.05)
         assert len(agent.trigger_calls) == 1

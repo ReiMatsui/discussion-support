@@ -6,6 +6,7 @@ repeatable before adding heavier audio/TTS replay.
 """
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import webbrowser
@@ -274,6 +275,17 @@ def _intervention_quality_flags(
     return flags
 
 
+def _event_time_delta_sec(start: str | None, end: str | None) -> float | None:
+    if not start or not end:
+        return None
+    try:
+        start_dt = datetime.datetime.fromisoformat(start)
+        end_dt = datetime.datetime.fromisoformat(end)
+    except ValueError:
+        return None
+    return round(max(0.0, (end_dt - start_dt).total_seconds()), 3)
+
+
 def intervention_review_items(interventions: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Pair trigger and delivery records for human review."""
     triggers = {
@@ -296,9 +308,14 @@ def intervention_review_items(interventions: list[dict[str, Any]]) -> list[dict[
     for event_id, trigger in triggers.items():
         delivery = deliveries_by_trigger.get(event_id, [None])[0]
         metadata = trigger.get("metadata") if isinstance(trigger.get("metadata"), dict) else {}
+        timing = metadata.get("timing") if isinstance(metadata.get("timing"), dict) else {}
         reason = str(trigger.get("reason") or "")
         delivery_text = str(delivery.get("text", "") if delivery else "")
         status = "delivered" if delivery else "missing_delivery"
+        trigger_to_delivery_sec = _event_time_delta_sec(
+            trigger.get("created_at"),
+            delivery.get("created_at") if delivery else None,
+        )
         items.append({
             "event_id": event_id,
             "status": status,
@@ -308,6 +325,8 @@ def intervention_review_items(interventions: list[dict[str, Any]]) -> list[dict[
             "turn_count": metadata.get("turn_count"),
             "recent_utterances": metadata.get("recent_utterances", []),
             "topics": metadata.get("topics", []),
+            "timing": timing,
+            "trigger_to_delivery_sec": trigger_to_delivery_sec,
             "delivery_text": delivery_text,
             "quality_flags": _intervention_quality_flags(
                 status=status,
@@ -329,6 +348,8 @@ def intervention_review_items(interventions: list[dict[str, Any]]) -> list[dict[
             "turn_count": None,
             "recent_utterances": [],
             "topics": [],
+            "timing": {},
+            "trigger_to_delivery_sec": None,
             "delivery_text": delivery_text,
             "quality_flags": _intervention_quality_flags(
                 status="orphan_delivery",
@@ -347,12 +368,21 @@ def intervention_review_summary(items: list[dict[str, Any]]) -> dict[str, Any]:
     status_counts: dict[str, int] = {}
     reason_counts: dict[str, int] = {}
     flag_counts: dict[str, int] = {}
+    candidate_waits: list[float] = []
+    trigger_to_delivery: list[float] = []
     flagged_count = 0
     for item in items:
         status = str(item.get("status") or "unknown")
         reason = str(item.get("reason") or "delivery")
         status_counts[status] = status_counts.get(status, 0) + 1
         reason_counts[reason] = reason_counts.get(reason, 0) + 1
+        timing = item.get("timing") if isinstance(item.get("timing"), dict) else {}
+        wait = timing.get("candidate_wait_sec")
+        if isinstance(wait, int | float):
+            candidate_waits.append(float(wait))
+        delivery_wait = item.get("trigger_to_delivery_sec")
+        if isinstance(delivery_wait, int | float):
+            trigger_to_delivery.append(float(delivery_wait))
         flags = item.get("quality_flags") or []
         if flags:
             flagged_count += 1
@@ -365,6 +395,18 @@ def intervention_review_summary(items: list[dict[str, Any]]) -> dict[str, Any]:
         "status_counts": status_counts,
         "reason_counts": reason_counts,
         "flag_counts": flag_counts,
+        "avg_candidate_wait_sec": (
+            round(sum(candidate_waits) / len(candidate_waits), 3)
+            if candidate_waits else None
+        ),
+        "max_candidate_wait_sec": round(max(candidate_waits), 3) if candidate_waits else None,
+        "avg_trigger_to_delivery_sec": (
+            round(sum(trigger_to_delivery) / len(trigger_to_delivery), 3)
+            if trigger_to_delivery else None
+        ),
+        "max_trigger_to_delivery_sec": (
+            round(max(trigger_to_delivery), 3) if trigger_to_delivery else None
+        ),
     }
 
 
