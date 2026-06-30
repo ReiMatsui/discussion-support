@@ -62,7 +62,7 @@ REPLAY_INDEX_HTML = """<!doctype html>
   .speaker { font-weight:700; margin-right:.45rem; }
   .event { border:1px solid var(--line); border-radius:8px; padding:.55rem .65rem; margin-bottom:.5rem; background:#fff; }
   .event .kind { font-weight:700; font-size:.78rem; }
-  .event.fact .kind, .event.fact_candidate .kind { color:var(--fact); }
+  .event.fact .kind, .event.fact_candidate .kind, .event.fact_retryable_error .kind { color:var(--fact); }
   .event.drift .kind { color:var(--drift); }
   .event.invite .kind { color:var(--invite); }
   .event .detail { margin-top:.25rem; }
@@ -101,6 +101,7 @@ const ts = (ms) => {
 const label = (t) => ({
   fact: "事実補正",
   fact_candidate: "事実候補",
+  fact_retryable_error: "事実判定失敗",
   drift: "脱線",
   invite: "声かけ",
 }[t] || t);
@@ -209,8 +210,10 @@ def _run_fact_check(
         r for r in records[:-1]
         if is_intervention_signal(r)
     ][-3:]
-    utts = _utterance_window(prior + [turn], 4)
+    utts = _utterance_window([*prior, turn], 4)
     result = check_fact(utts, opts.api_key, opts.model)
+    if result.get("retryable_error"):
+        return _event(turn, "fact_retryable_error", "LLM事実判定の一時失敗")
     if result.get("should_correct"):
         correction = str(result.get("correction") or "").strip()
         if correction:
@@ -289,15 +292,11 @@ def run_replay(
     check_participation: CheckParticipation | None = None,
 ) -> list[dict]:
     """Replay turns and return intervention candidate events."""
-    from das.asr.live._bootstrap import (
-        check_drift as default_check_drift,
-        check_fact_correction as default_check_fact,
-        check_participation as default_check_participation,
-    )
+    from das.asr.live import _bootstrap
 
-    check_fact = check_fact or default_check_fact
-    check_drift = check_drift or default_check_drift
-    check_participation = check_participation or default_check_participation
+    check_fact = check_fact or _bootstrap.check_fact_correction
+    check_drift = check_drift or _bootstrap.check_drift
+    check_participation = check_participation or _bootstrap.check_participation
 
     records: list[dict] = []
     events: list[dict] = []

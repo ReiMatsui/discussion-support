@@ -97,6 +97,30 @@ def test_run_replay_fact_checks_target_with_recent_context():
     ]
 
 
+def test_run_replay_fact_retryable_error_is_visible():
+    turns = [
+        {"turn_id": 1, "speaker": "A", "text": "国Bの首都は都市Aです", "ms": 0, "end_ms": 1000},
+    ]
+
+    def fake_fact(_utts, _key, _model):
+        return {"should_correct": False, "retryable_error": True}
+
+    events = run_replay(
+        turns,
+        ReplayOptions(api_key="key", checks={"fact"}),
+        check_fact=fake_fact,
+    )
+
+    assert events == [{
+        "turn_id": 1,
+        "ms": 0,
+        "type": "fact_retryable_error",
+        "speaker": "A",
+        "text": "国Bの首都は都市Aです",
+        "detail": "LLM事実判定の一時失敗",
+    }]
+
+
 def test_run_replay_drift_with_mock_checker():
     turns = [
         {"turn_id": i, "speaker": "A", "text": f"発話{i}", "ms": i * 1000, "end_ms": i * 1000 + 500}
