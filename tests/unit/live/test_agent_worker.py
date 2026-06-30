@@ -160,6 +160,30 @@ def test_bargein_decision_holds_fact_until_short_silence():
     assert pending.facts
 
 
+def test_fact_can_fire_before_slower_interventions():
+    """事実補正は鮮度を優先し、他の介入より短い間で発火できる."""
+    agent = FakeAgent()
+    state = FakeState(agent, None)
+    pending = _PendingInterventions()
+    pending.facts.append({"correction": "事実補正です。", "_queued_at": time.monotonic()})
+
+    decision = _select_barge_in_decision(
+        pending=pending,
+        agent=agent,
+        state=state,
+        now=time.monotonic(),
+        last_fact_at=0.0,
+        last_intervention_at=0.0,
+        silence_elapsed=1.0,
+        partner_busy=False,
+        in_echo_window=False,
+        cooldown=0.0,
+        diag_tick=1,
+    )
+
+    assert decision.reason == "fact"
+
+
 def test_log_intervention_event_includes_review_context():
     agent = FakeAgent()
     state = FakeState(agent, None)
@@ -207,6 +231,29 @@ def test_bargein_decision_skips_cooldown_drift_then_retries():
 
     assert decision.reason == "retry"
     assert pending.drift_reason is None
+
+
+def test_drift_waits_longer_than_fact_pause():
+    """脱線介入は、短い相槌程度の間では入らず少し長めに待つ."""
+    agent = FakeAgent()
+    state = FakeState(agent, None)
+    pending = _PendingInterventions(drift_reason="脱線", drift_count=1)
+
+    decision = _select_barge_in_decision(
+        pending=pending,
+        agent=agent,
+        state=state,
+        now=time.monotonic(),
+        last_fact_at=0.0,
+        last_intervention_at=0.0,
+        silence_elapsed=1.0,
+        partner_busy=False,
+        in_echo_window=False,
+        cooldown=0.0,
+        diag_tick=1,
+    )
+
+    assert decision.reason == "hold"
 
 
 def test_normal_trigger_decision_prefers_count_before_invite():
@@ -318,6 +365,20 @@ def test_retry_fires_after_pause():
     _run_worker_briefly(state, until=lambda: bool(agent.trigger_calls))
 
     assert agent.trigger_calls
+
+
+def test_retry_waits_for_longer_pause_than_fact():
+    """再送はしつこく見えやすいので、短い間では待つ."""
+    agent = FakeAgent()
+    agent._pending_intervention = {
+        "delivered": "中断された指摘", "created_at": time.monotonic(), "attempts": 1,
+    }
+    state = FakeState(agent, None)
+    state._last_utt_time[0] = time.monotonic() - 1.0
+
+    _run_worker_briefly(state, until=lambda: False, timeout=1.0)
+
+    assert agent.trigger_calls == []
 
 
 def test_retry_waits_while_agent_busy():
@@ -488,7 +549,7 @@ def test_fact_request_is_held_during_cooldown(monkeypatch):
             "confidence": "high",
             "correction": "事物Aの高さは約3,000メートルです。",
         })
-        deadline = time.monotonic() + 2.0
+        deadline = time.monotonic() + 3.0
         while time.monotonic() < deadline and len(agent.trigger_calls) < 1:
             time.sleep(0.05)
         assert len(agent.trigger_calls) == 1

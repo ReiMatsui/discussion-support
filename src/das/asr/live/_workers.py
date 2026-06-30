@@ -37,11 +37,13 @@ from ._constants import (
     _FACTCHECK_COOLDOWN,
     _FACTCHECK_MAX_RETRIES,
     _FACTCHECK_MIN_CHARS,
-    _FACTCHECK_MIN_SILENCE,
     _FACTCHECK_PENDING_TTL,
     _INTERRUPT_MIN_CHARS,
     _INTERVENTION_COOLDOWN,
-    _INTERVENTION_MIN_PAUSE,
+    _INTERVENTION_PAUSE_COUNT,
+    _INTERVENTION_PAUSE_DRIFT,
+    _INTERVENTION_PAUSE_FACT,
+    _INTERVENTION_PAUSE_RETRY,
     _INVITE_CHECK_SEC,
     _INVITE_QUIET_RATIO,
     _INVITE_SILENCE,
@@ -236,10 +238,11 @@ def _floor_available_for_intervention(
     silence_elapsed: float,
     partner_busy: bool,
     in_echo_window: bool,
+    pause_required: float,
 ) -> bool:
     """参加者の会話を遮らず、介入が自然に入れる短い間があるか."""
     return (
-        silence_elapsed >= _INTERVENTION_MIN_PAUSE
+        silence_elapsed >= pause_required
         and not partner_busy
         and not in_echo_window
     )
@@ -260,11 +263,6 @@ def _select_barge_in_decision(
     diag_tick: int,
 ) -> _BargeInDecision:
     """ガードを越えて差し込む介入を、優先順位順に1つだけ選ぶ."""
-    floor_available = _floor_available_for_intervention(
-        silence_elapsed=silence_elapsed,
-        partner_busy=partner_busy,
-        in_echo_window=in_echo_window,
-    )
     pending.drop_stale_facts(now=now)
     while pending.facts:
         pending_fact = pending.facts[0]
@@ -272,7 +270,13 @@ def _select_barge_in_decision(
         if not correction:
             pending.facts.popleft()
             continue
-        if silence_elapsed < _FACTCHECK_MIN_SILENCE or not floor_available:
+        fact_floor_available = _floor_available_for_intervention(
+            silence_elapsed=silence_elapsed,
+            partner_busy=partner_busy,
+            in_echo_window=in_echo_window,
+            pause_required=_INTERVENTION_PAUSE_FACT,
+        )
+        if not fact_floor_available:
             if diag_tick % 4 == 0:
                 print("# [trigger] hold: 発話の切れ目待ちの事実補正", flush=True)
             return _BargeInDecision("hold")
@@ -292,7 +296,13 @@ def _select_barge_in_decision(
                     flush=True,
                 )
             return _BargeInDecision("hold")
-        if not floor_available:
+        drift_floor_available = _floor_available_for_intervention(
+            silence_elapsed=silence_elapsed,
+            partner_busy=partner_busy,
+            in_echo_window=in_echo_window,
+            pause_required=_INTERVENTION_PAUSE_DRIFT,
+        )
+        if not drift_floor_available:
             if diag_tick % 4 == 0:
                 print("# [trigger] hold: 発話の切れ目待ちの脱線介入", flush=True)
             return _BargeInDecision("hold")
@@ -303,7 +313,13 @@ def _select_barge_in_decision(
             return _BargeInDecision("drift", drift_reason=pending.drift_reason)
 
     if agent._pending_intervention is not None:
-        if not floor_available:
+        retry_floor_available = _floor_available_for_intervention(
+            silence_elapsed=silence_elapsed,
+            partner_busy=partner_busy,
+            in_echo_window=in_echo_window,
+            pause_required=_INTERVENTION_PAUSE_RETRY,
+        )
+        if not retry_floor_available:
             if diag_tick % 4 == 0:
                 print("# [trigger] hold: 発話の切れ目待ちの再送", flush=True)
             return _BargeInDecision("hold")
@@ -335,7 +351,7 @@ def _select_normal_trigger_decision(
     silence_thresh = (_AGENT_DEBATE_SILENCE if partner_present
                       else silence_summarize)
     if agent.pending_count >= agent.trigger_n:
-        if silence_elapsed < _INTERVENTION_MIN_PAUSE:
+        if silence_elapsed < _INTERVENTION_PAUSE_COUNT:
             return _NormalTriggerDecision("none")
         return _NormalTriggerDecision(
             "count", f"{agent.pending_count}>={agent.trigger_n}発話")

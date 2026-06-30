@@ -362,13 +362,15 @@ _INVITE_SILENCE = 2.0         # 声かけは沈黙(間)がこの秒数続いて�
 _FACTCHECK_WINDOW = 3         # 判定に使う直近発話数
 _FACTCHECK_CHECK_SEC = 0.5    # LLM判定の最小間隔（事実誤りは早めに補足）
 _FACTCHECK_COOLDOWN = 2.0     # 訂正介入の最小間隔（短い補正なので通常介入より短く）
-_FACTCHECK_MIN_SILENCE = 1.2  # 訂正介入でも、参加者の発話が切れる短い間を待つ
 _FACTCHECK_MIN_CHARS = 8      # 短すぎる発話は事前除外
 _FACTCHECK_MAX_RETRIES = 2    # API/JSON一時失敗時の再試行上限（永久詰まり防止）
 _FACTCHECK_PENDING_TTL = 30.0 # キュー内の補正が古くなったら会話の自然さを優先して破棄
 
 # --- 介入タイミング ---
-_INTERVENTION_MIN_PAUSE = 1.2 # 自動介入は、参加者の発話が切れる短い間を待つ
+_INTERVENTION_PAUSE_FACT = 0.9   # 事実補正: 鮮度優先。ただし発話には被せない
+_INTERVENTION_PAUSE_DRIFT = 1.8  # 脱線: 会話の自律的な復帰を少し待つ
+_INTERVENTION_PAUSE_RETRY = 2.4  # 再送: しつこさを避け、十分な間がある時だけ
+_INTERVENTION_PAUSE_COUNT = 1.5  # 発話数整理: 参加者の連続発話を遮らない
 
 # --- デッドエア対策（介入不要後の沈黙ブレーカー） ---
 _STALL_SILENCE = 7.0          # 介入不要後この秒数沈黙したら一押し
