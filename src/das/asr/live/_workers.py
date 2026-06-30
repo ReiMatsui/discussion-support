@@ -172,6 +172,14 @@ class _BargeInDecision:
     drift_reason: str | None = None
 
 
+@dataclass(frozen=True)
+class _NormalTriggerDecision:
+    reason: str
+    detail: str = ""
+    invite_target: str | None = None
+    drift_reason: str | None = None
+
+
 def _select_barge_in_decision(
     *,
     pending: _PendingInterventions,
@@ -216,6 +224,56 @@ def _select_barge_in_decision(
     if agent._pending_intervention is not None:
         return _BargeInDecision("retry")
     return _BargeInDecision("none")
+
+
+def _select_normal_trigger_decision(
+    *,
+    pending: _PendingInterventions,
+    agent,
+    silence_elapsed: float,
+    silence_summarize: float | None,
+    partner_present: bool,
+    stall_breaker: bool,
+    now: float,
+    last_stall_at: float,
+    last_intervention_at: float,
+    cooldown: float,
+    last_invited: str | None,
+) -> _NormalTriggerDecision:
+    """通常の間で発火する介入を、優先順位順に1つだけ選ぶ."""
+    if agent.mode == "conversation":
+        if agent.pending_count > 0 and silence_elapsed > _AGENT_CONV_SILENCE:
+            return _NormalTriggerDecision(
+                "conversation", f"沈黙{silence_elapsed:.1f}秒")
+        return _NormalTriggerDecision("none")
+
+    silence_thresh = (_AGENT_DEBATE_SILENCE if partner_present
+                      else silence_summarize)
+    if agent.pending_count >= agent.trigger_n:
+        return _NormalTriggerDecision(
+            "count", f"{agent.pending_count}>={agent.trigger_n}発話")
+    if (silence_thresh is not None
+            and agent.pending_count > 0
+            and silence_elapsed > silence_thresh):
+        return _NormalTriggerDecision(
+            "silence", f"{silence_elapsed:.1f}>{silence_thresh:.1f}秒")
+    if (stall_breaker
+            and agent._last_noop_at > 0
+            and silence_elapsed > _STALL_SILENCE
+            and now - last_stall_at > _STALL_COOLDOWN):
+        return _NormalTriggerDecision(
+            "stall",
+            f"介入不要後の沈黙{silence_elapsed:.1f}秒",
+            drift_reason="会話が止まっています。本題に戻す一言を簡潔に述べてください。",
+        )
+    if (pending.invite is not None
+            and silence_elapsed > _INVITE_SILENCE
+            and now - last_intervention_at > cooldown):
+        if pending.invite == last_invited:
+            return _NormalTriggerDecision("skip_invite", invite_target=pending.invite)
+        return _NormalTriggerDecision(
+            "invite", f"{pending.invite}さんに声かけ", invite_target=pending.invite)
+    return _NormalTriggerDecision("none")
 
 
 def _run_agenda_detector(state: SessionState, oai_key: str, oai_model: str):
@@ -818,61 +876,50 @@ def _run_agent_worker(state: SessionState):
         # --- モード別トリガー判定 ---
         # （中断された介入のリトライは上のガードバイパス節に集約済み）
         _silence_elapsed = time.monotonic() - _last_utt_time[0]
-        if agent.mode == "conversation":
-            if (agent.pending_count > 0
-                    and _silence_elapsed > _AGENT_CONV_SILENCE):
-                _log_intervention_event(state, "conversation", f"沈黙{_silence_elapsed:.1f}秒")
-                agent.trigger()
-        else:
-            # 沈黙要約の閾値: debateは従来通り、人間モードは積極性プロファイルに従う
-            # （None なら沈黙だけでは要約介入しない＝過剰介入の抑制, S5）
-            _silence_thresh = (_AGENT_DEBATE_SILENCE if partner is not None
-                               else _silence_summarize)
-            if agent.pending_count >= agent.trigger_n:
-                print(f"# [trigger] count: {agent.pending_count}>={agent.trigger_n}", flush=True)
-                _log_intervention_event(
-                    state, "count", f"{agent.pending_count}>={agent.trigger_n}発話")
-                agent.trigger(topics=_topics)
-                _last_intervention_at = time.monotonic()
-            elif (_silence_thresh is not None
-                  and agent.pending_count > 0
-                  and _silence_elapsed > _silence_thresh):
-                print(f"# [trigger] silence: {_silence_elapsed:.1f}s > {_silence_thresh}s", flush=True)
-                _log_intervention_event(
-                    state, "silence", f"{_silence_elapsed:.1f}>{_silence_thresh:.1f}秒")
-                agent.trigger(topics=_topics)
-                _last_intervention_at = time.monotonic()
-            # --- 沈黙ブレーカー: 介入不要後にデッドエアになった場合の一押し（Fix 10） ---
-            # 「介入不要」の判断自体は尊重する（一度黙る）が、その後に会話が止まって
-            # しまったら、本題へ戻す一言を促す。クールダウンで繰り返しを防ぐ。
-            elif (_stall_breaker
-                  and agent._last_noop_at > 0
-                  and _silence_elapsed > _STALL_SILENCE
-                  and time.monotonic() - _last_stall_at > _STALL_COOLDOWN):
-                print(f"# [trigger] stall: 介入不要後の沈黙{_silence_elapsed:.1f}s"
-                      f"を解消", flush=True)
-                _log_intervention_event(state, "stall", f"介入不要後の沈黙{_silence_elapsed:.1f}秒")
-                agent.trigger(
-                    topics=_topics,
-                    drift_reason="会話が止まっています。本題に戻す一言を簡潔に述べてください。")
-                _last_stall_at = time.monotonic()
-                _last_intervention_at = time.monotonic()
-                agent._last_noop_at = 0.0
-            # --- 声かけ（参加度）: 沈黙の“間”で、発言の少ない人を誘う（S4） ---
-            # 脱線(バージイン)と違い、声かけは人間を割り込まないよう間を待つ。
-            # クールダウン共有＋同じ人を連続では誘わない。
-            elif (_pending.invite is not None
-                  and _silence_elapsed > _INVITE_SILENCE
-                  and time.monotonic() - _last_intervention_at > _cooldown):
-                if _pending.invite == _last_invited:
-                    _pending.invite = None  # 同じ人を連続では誘わない
-                else:
-                    print(f"# [trigger] invite: {_pending.invite}さんに声かけ", flush=True)
-                    _log_intervention_event(state, "invite", f"{_pending.invite}さんに声かけ")
-                    agent.trigger(topics=_topics, invite_target=_pending.invite)
-                    _last_intervention_at = time.monotonic()
-                    _last_invited = _pending.invite
-                    _pending.invite = None
+        normal_decision = _select_normal_trigger_decision(
+            pending=_pending,
+            agent=agent,
+            silence_elapsed=_silence_elapsed,
+            silence_summarize=_silence_summarize,
+            partner_present=partner is not None,
+            stall_breaker=_stall_breaker,
+            now=time.monotonic(),
+            last_stall_at=_last_stall_at,
+            last_intervention_at=_last_intervention_at,
+            cooldown=_cooldown,
+            last_invited=_last_invited,
+        )
+        if normal_decision.reason == "conversation":
+            _log_intervention_event(state, "conversation", normal_decision.detail)
+            agent.trigger()
+        elif normal_decision.reason == "count":
+            print(f"# [trigger] count: {normal_decision.detail}", flush=True)
+            _log_intervention_event(state, "count", normal_decision.detail)
+            agent.trigger(topics=_topics)
+            _last_intervention_at = time.monotonic()
+        elif normal_decision.reason == "silence":
+            print(f"# [trigger] silence: {normal_decision.detail}", flush=True)
+            _log_intervention_event(state, "silence", normal_decision.detail)
+            agent.trigger(topics=_topics)
+            _last_intervention_at = time.monotonic()
+        elif normal_decision.reason == "stall":
+            print(f"# [trigger] stall: {normal_decision.detail}", flush=True)
+            _log_intervention_event(state, "stall", normal_decision.detail)
+            agent.trigger(topics=_topics,
+                          drift_reason=normal_decision.drift_reason)
+            _last_stall_at = time.monotonic()
+            _last_intervention_at = time.monotonic()
+            agent._last_noop_at = 0.0
+        elif normal_decision.reason == "invite":
+            print(f"# [trigger] invite: {normal_decision.detail}", flush=True)
+            _log_intervention_event(state, "invite", normal_decision.detail)
+            agent.trigger(topics=_topics,
+                          invite_target=normal_decision.invite_target)
+            _last_intervention_at = time.monotonic()
+            _last_invited = normal_decision.invite_target
+            _pending.invite = None
+        elif normal_decision.reason == "skip_invite":
+            _pending.invite = None  # 同じ人を連続では誘わない
 
 
 def _run_stdin_commands(state: SessionState):

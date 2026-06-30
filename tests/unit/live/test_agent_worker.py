@@ -13,6 +13,7 @@ from das.asr.live._workers import (
     _PendingInterventions,
     _run_agent_worker,
     _select_barge_in_decision,
+    _select_normal_trigger_decision,
 )
 
 
@@ -145,6 +146,53 @@ def test_bargein_decision_skips_cooldown_drift_then_retries():
 
     assert decision.reason == "retry"
     assert pending.drift_reason is None
+
+
+def test_normal_trigger_decision_prefers_count_before_invite():
+    """通常介入では、十分な発話があれば声かけより整理介入を優先する."""
+    agent = FakeAgent()
+    agent._pending = [{"speaker": "人間", "text": str(i), "_count": True}
+                      for i in range(agent.trigger_n)]
+    pending = _PendingInterventions(invite="参加者B")
+
+    decision = _select_normal_trigger_decision(
+        pending=pending,
+        agent=agent,
+        silence_elapsed=100.0,
+        silence_summarize=18.0,
+        partner_present=False,
+        stall_breaker=False,
+        now=time.monotonic(),
+        last_stall_at=0.0,
+        last_intervention_at=0.0,
+        cooldown=0.0,
+        last_invited=None,
+    )
+
+    assert decision.reason == "count"
+
+
+def test_normal_trigger_decision_respects_controlled_silence():
+    """controlledでは、沈黙だけで通常の要約介入を選ばない."""
+    agent = FakeAgent()
+    agent._pending = [{"speaker": "人間", "text": "x", "_count": True}]
+    pending = _PendingInterventions()
+
+    decision = _select_normal_trigger_decision(
+        pending=pending,
+        agent=agent,
+        silence_elapsed=100.0,
+        silence_summarize=None,
+        partner_present=False,
+        stall_breaker=False,
+        now=time.monotonic(),
+        last_stall_at=0.0,
+        last_intervention_at=0.0,
+        cooldown=0.0,
+        last_invited=None,
+    )
+
+    assert decision.reason == "none"
 
 
 def _run_worker_briefly(state, *, until, timeout=3.0) -> None:
