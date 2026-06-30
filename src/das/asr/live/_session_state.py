@@ -114,6 +114,8 @@ class SessionState:
         self.proactivity: dict = dict(_PROACTIVITY_PROFILES[_PROACTIVITY_DEFAULT])
         self.intervention_enabled = True
         self.intervention_events: list[dict] = []
+        self._intervention_event_seq = 0
+        self._last_intervention_event_id: str | None = None
         # UIからの停止フック（F1）。run_sessionが「stopを立ててwsを閉じる」関数を設定する。
         self.request_stop: Callable[[], None] | None = None
         # 変更リビジョン（F2）。save()ごとに+1。SSEはこの変化を見て差分配信する。
@@ -581,6 +583,8 @@ class SessionState:
         self.drift_cursor = 0
         self.fact_cursor = 0
         self.intervention_events = []
+        self._intervention_event_seq = 0
+        self._last_intervention_event_id = None
         self._last_utt_time[0] = time.monotonic()
         self._was_in_echo[0] = False
         for q in (self.drift_requests, self.invite_requests, self.factcheck_requests):
@@ -617,6 +621,9 @@ class SessionState:
                                metadata: dict | None = None) -> None:
         """UIで確認するための介入理由ログを追加する."""
         now = datetime.datetime.now()
+        self._intervention_event_seq += 1
+        event_id = f"int-{self._intervention_event_seq:04d}"
+        self._last_intervention_event_id = event_id
         event = {
             "time": now.strftime("%H:%M:%S"),
             "reason": reason,
@@ -625,6 +632,8 @@ class SessionState:
         self.intervention_events.append(event)
         del self.intervention_events[:-20]
         self.write_intervention_event({
+            "event_id": event_id,
+            "type": "trigger",
             **event,
             "created_at": now.isoformat(timespec="seconds"),
             "meeting_started": self.started.isoformat(timespec="seconds"),
@@ -962,6 +971,7 @@ class SessionState:
         now = datetime.datetime.now()
         self.write_intervention_event({
             "type": "delivery",
+            "trigger_event_id": self._last_intervention_event_id,
             "time": now.strftime("%H:%M:%S"),
             "created_at": now.isoformat(timespec="seconds"),
             "meeting_started": self.started.isoformat(timespec="seconds"),
