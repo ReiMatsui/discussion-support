@@ -10,6 +10,7 @@ from das.asr.live.replay import (
     ReplayOptions,
     default_interventions_path,
     intervention_review_items,
+    intervention_review_summary,
     load_interventions,
     load_turns,
     replay_snapshot,
@@ -135,6 +136,30 @@ def test_intervention_review_items_flags_long_delivery_and_drift_without_topic()
     ])
 
     assert items[0]["quality_flags"] == ["drift_without_topic", "long_delivery"]
+
+
+def test_intervention_review_summary_counts_status_reasons_and_flags():
+    items = [
+        {"status": "delivered", "reason": "drift", "quality_flags": ["long_delivery"]},
+        {
+            "status": "missing_delivery",
+            "reason": "invite",
+            "quality_flags": ["missing_delivery", "no_recent_context"],
+        },
+        {"status": "delivered", "reason": "drift", "quality_flags": []},
+    ]
+
+    assert intervention_review_summary(items) == {
+        "total": 3,
+        "flagged_count": 2,
+        "status_counts": {"delivered": 2, "missing_delivery": 1},
+        "reason_counts": {"drift": 2, "invite": 1},
+        "flag_counts": {
+            "long_delivery": 1,
+            "missing_delivery": 1,
+            "no_recent_context": 1,
+        },
+    }
 
 
 def test_run_replay_fact_candidate_without_api():
@@ -375,6 +400,25 @@ def test_cli_writes_intervention_review_jsonl(tmp_path):
     assert rows[0]["quality_flags"] == ["missing_delivery", "no_recent_context"]
 
 
+def test_cli_writes_intervention_review_summary_json(tmp_path):
+    p = tmp_path / "sample.turns.jsonl"
+    summary_out = tmp_path / "summary.json"
+    _write_turns(p, [{"turn_id": 1, "speaker": "A", "text": "進め方の話です"}])
+    _write_jsonl(tmp_path / "sample.interventions.jsonl", [
+        {"event_id": "int-0001", "type": "trigger", "reason": "count"},
+    ])
+
+    result = CliRunner().invoke(
+        replay.main,
+        [str(p), "--no-api", "--review-summary-out", str(summary_out)],
+    )
+
+    assert result.exit_code == 0
+    data = json.loads(summary_out.read_text(encoding="utf-8"))
+    assert data["total"] == 1
+    assert data["flag_counts"] == {"missing_delivery": 1, "no_recent_context": 1}
+
+
 def test_replay_snapshot_for_ui():
     turns = [{"turn_id": 1, "speaker": "A", "text": "指標Xの計算式は分母を分子で割る", "ms": 0}]
     events = [{"turn_id": 1, "type": "fact_candidate", "detail": "候補"}]
@@ -389,6 +433,7 @@ def test_replay_snapshot_for_ui():
     assert snap["checks"] == ["fact"]
     assert snap["interventions"] == interventions
     assert snap["intervention_review"][0]["event_id"] == "int-0001"
+    assert snap["intervention_review_summary"]["total"] == 1
 
 
 def test_cli_help_has_serve_option():
@@ -399,3 +444,4 @@ def test_cli_help_has_serve_option():
     assert "--port" in result.output
     assert "--interventions" in result.output
     assert "--review-out" in result.output
+    assert "--review-summary-out" in result.output

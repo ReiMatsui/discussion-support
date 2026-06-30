@@ -135,6 +135,7 @@ const flagLabel = (s) => ({
 fetch("/api/replay").then((r) => r.json()).then((data) => {
   const events = data.events || [];
   const review = data.intervention_review || [];
+  const reviewSummary = data.intervention_review_summary || {};
   const hitTurns = new Set(events.map((e) => e.turn_id));
   document.getElementById("summary").textContent =
     `${data.source} / ${data.turns.length}発話 / 候補${events.length}件 / 保存済み${review.length}件`;
@@ -152,7 +153,11 @@ fetch("/api/replay").then((r) => r.json()).then((data) => {
       </div>`).join("")
     : `<div class="empty">介入候補はありません</div>`;
   document.getElementById("review").innerHTML = review.length
-    ? review.map((r) => `<div class="review-item">
+    ? `<div class="chips">
+        <span class="chip">合計: ${esc(reviewSummary.total ?? review.length)}</span>
+        <span class="chip">発話済み: ${esc(reviewSummary.status_counts?.delivered ?? 0)}</span>
+        <span class="chip">要確認: ${esc(reviewSummary.flagged_count ?? 0)}</span>
+      </div>` + review.map((r) => `<div class="review-item">
         <div><span class="kind">${esc(r.reason || "delivery")}</span>
           <span class="status">${esc(statusLabel(r.status))}</span></div>
         ${r.detail ? `<div class="detail">${esc(r.detail)}</div>` : ""}
@@ -336,6 +341,32 @@ def intervention_review_items(interventions: list[dict[str, Any]]) -> list[dict[
     return items
 
 
+def intervention_review_summary(items: list[dict[str, Any]]) -> dict[str, Any]:
+    """Summarize saved intervention review items for run-level comparison."""
+    status_counts: dict[str, int] = {}
+    reason_counts: dict[str, int] = {}
+    flag_counts: dict[str, int] = {}
+    flagged_count = 0
+    for item in items:
+        status = str(item.get("status") or "unknown")
+        reason = str(item.get("reason") or "delivery")
+        status_counts[status] = status_counts.get(status, 0) + 1
+        reason_counts[reason] = reason_counts.get(reason, 0) + 1
+        flags = item.get("quality_flags") or []
+        if flags:
+            flagged_count += 1
+        for flag in flags:
+            flag = str(flag)
+            flag_counts[flag] = flag_counts.get(flag, 0) + 1
+    return {
+        "total": len(items),
+        "flagged_count": flagged_count,
+        "status_counts": status_counts,
+        "reason_counts": reason_counts,
+        "flag_counts": flag_counts,
+    }
+
+
 def _event(turn: dict, kind: str, detail: str, **extra) -> dict:
     return {
         "turn_id": turn.get("turn_id"),
@@ -492,6 +523,7 @@ def replay_snapshot(source: str | Path, turns: list[dict], events: list[dict],
                     opts: ReplayOptions, interventions: list[dict] | None = None) -> dict:
     """Build the JSON object served by the replay UI."""
     interventions = interventions or []
+    review_items = intervention_review_items(interventions)
     return {
         "source": str(source),
         "topic": opts.topic,
@@ -500,7 +532,8 @@ def replay_snapshot(source: str | Path, turns: list[dict], events: list[dict],
         "turns": turns,
         "events": events,
         "interventions": interventions,
-        "intervention_review": intervention_review_items(interventions),
+        "intervention_review": review_items,
+        "intervention_review_summary": intervention_review_summary(review_items),
     }
 
 
@@ -557,6 +590,8 @@ def _parse_checks(value: str) -> set[str]:
               help="イベントJSONLの保存先。未指定なら標準出力")
 @click.option("--review-out", default=None, type=click.Path(dir_okay=False),
               help="保存済み介入レビューJSONLの保存先")
+@click.option("--review-summary-out", default=None, type=click.Path(dir_okay=False),
+              help="保存済み介入レビュー集計JSONの保存先")
 @click.option("--serve", is_flag=True, help="結果をローカルUIで表示する")
 @click.option("--port", type=int, default=8232, help="--serve のポート番号。0で自動割当")
 @click.option("--open/--no-open", "open_browser", default=True,
@@ -570,9 +605,9 @@ def _parse_checks(value: str) -> set[str]:
 @click.option("--no-api", is_flag=True,
               help="APIを呼ばず、ローカル候補抽出だけ行う")
 def main(turns_path: str, topic: str | None, checks: str, model: str | None,
-         out: str | None, review_out: str | None, serve: bool, port: int,
-         open_browser: bool, limit: int | None, include_agent: bool,
-         interventions_path: str | None, no_api: bool) -> None:
+         out: str | None, review_out: str | None, review_summary_out: str | None,
+         serve: bool, port: int, open_browser: bool, limit: int | None,
+         include_agent: bool, interventions_path: str | None, no_api: bool) -> None:
     """Replay a saved turns.jsonl file and print intervention candidates."""
     api_key = os.environ.get("OPENAI_API_KEY", "")
     opts = ReplayOptions(
@@ -601,6 +636,13 @@ def main(turns_path: str, topic: str | None, checks: str, model: str | None,
             encoding="utf-8",
         )
         click.echo(f"# intervention review: {len(review_lines)} -> {review_out}")
+    if review_summary_out:
+        Path(review_summary_out).write_text(
+            json.dumps(snapshot["intervention_review_summary"], ensure_ascii=False, indent=2)
+            + "\n",
+            encoding="utf-8",
+        )
+        click.echo(f"# intervention review summary -> {review_summary_out}")
     if serve:
         serve_replay(snapshot, port=port, open_browser=open_browser)
         return
