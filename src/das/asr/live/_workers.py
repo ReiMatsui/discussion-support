@@ -37,6 +37,7 @@ from ._constants import (
     _FACTCHECK_COOLDOWN,
     _FACTCHECK_MAX_RETRIES,
     _FACTCHECK_MIN_CHARS,
+    _FACTCHECK_MIN_SILENCE,
     _FACTCHECK_PENDING_TTL,
     _INTERRUPT_MIN_CHARS,
     _INTERVENTION_COOLDOWN,
@@ -237,6 +238,7 @@ def _select_barge_in_decision(
     now: float,
     last_fact_at: float,
     last_intervention_at: float,
+    silence_elapsed: float,
     cooldown: float,
     diag_tick: int,
 ) -> _BargeInDecision:
@@ -248,6 +250,10 @@ def _select_barge_in_decision(
         if not correction:
             pending.facts.popleft()
             continue
+        if silence_elapsed < _FACTCHECK_MIN_SILENCE:
+            if diag_tick % 4 == 0:
+                print("# [trigger] hold: 発話の切れ目待ちの事実補正", flush=True)
+            return _BargeInDecision("hold")
         if now - last_fact_at < _FACTCHECK_COOLDOWN:
             if diag_tick % 4 == 0:
                 print("# [trigger] hold: クールダウン中の事実補正", flush=True)
@@ -874,6 +880,7 @@ def _run_agent_worker(state: SessionState):
                 now=_now,
                 last_fact_at=_last_fact_at,
                 last_intervention_at=_last_intervention_at,
+                silence_elapsed=_now - _last_utt_time[0],
                 cooldown=_cooldown,
                 diag_tick=_diag_tick,
             )

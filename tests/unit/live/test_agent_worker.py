@@ -124,12 +124,36 @@ def test_bargein_decision_prefers_fact_before_retry():
         now=time.monotonic(),
         last_fact_at=0.0,
         last_intervention_at=0.0,
+        silence_elapsed=10.0,
         cooldown=0.0,
         diag_tick=1,
     )
 
     assert decision.reason == "fact"
     assert decision.fact["correction"] == "事実補正です。"
+
+
+def test_bargein_decision_holds_fact_until_short_silence():
+    """事実補正でも、参加者の発話が切れる短い間を待つ."""
+    agent = FakeAgent()
+    state = FakeState(agent, None)
+    pending = _PendingInterventions()
+    pending.facts.append({"correction": "事実補正です。", "_queued_at": time.monotonic()})
+
+    decision = _select_barge_in_decision(
+        pending=pending,
+        agent=agent,
+        state=state,
+        now=time.monotonic(),
+        last_fact_at=0.0,
+        last_intervention_at=0.0,
+        silence_elapsed=0.1,
+        cooldown=0.0,
+        diag_tick=1,
+    )
+
+    assert decision.reason == "hold"
+    assert pending.facts
 
 
 def test_log_intervention_event_includes_review_context():
@@ -170,6 +194,7 @@ def test_bargein_decision_skips_cooldown_drift_then_retries():
         now=now,
         last_fact_at=0.0,
         last_intervention_at=now,
+        silence_elapsed=10.0,
         cooldown=100.0,
         diag_tick=1,
     )
