@@ -72,6 +72,11 @@ REPLAY_INDEX_HTML = """<!doctype html>
   .event.invite .kind, .event.invite_rejected .kind { color:var(--invite); }
   .event .detail { margin-top:.25rem; }
   .event .quote { color:var(--muted); font-size:.78rem; margin-top:.3rem; }
+  .review { border-top:1px solid var(--line); margin-top:.8rem; padding-top:.8rem; }
+  .review-item { border:1px solid var(--line); border-radius:8px; padding:.55rem .65rem; margin-bottom:.5rem; background:#fff; }
+  .review-item .status { color:var(--muted); font-size:.76rem; }
+  .review-item .delivery { margin-top:.25rem; font-weight:600; }
+  .review-item .context { color:var(--muted); font-size:.76rem; margin-top:.35rem; }
   .chips { display:flex; flex-wrap:wrap; gap:.35rem; margin-bottom:.7rem; }
   .chip { border:1px solid var(--line); border-radius:999px; padding:.18rem .55rem; font-size:.78rem; background:#fff; }
   .empty { color:var(--muted); text-align:center; padding:1rem; }
@@ -92,6 +97,10 @@ REPLAY_INDEX_HTML = """<!doctype html>
       <h2>介入候補</h2>
       <div class="chips" id="chips"></div>
       <div id="events"></div>
+      <div class="review">
+        <h2>保存済み介入</h2>
+        <div id="review"></div>
+      </div>
     </aside>
   </div>
 </div>
@@ -111,11 +120,17 @@ const label = (t) => ({
   invite: "声かけ",
   invite_rejected: "声かけ除外",
 }[t] || t);
+const statusLabel = (s) => ({
+  delivered: "発話済み",
+  missing_delivery: "発話未確認",
+  orphan_delivery: "発火理由なし",
+}[s] || s);
 fetch("/api/replay").then((r) => r.json()).then((data) => {
   const events = data.events || [];
+  const review = data.intervention_review || [];
   const hitTurns = new Set(events.map((e) => e.turn_id));
   document.getElementById("summary").textContent =
-    `${data.source} / ${data.turns.length}発話 / ${events.length}件`;
+    `${data.source} / ${data.turns.length}発話 / 候補${events.length}件 / 保存済み${review.length}件`;
   const counts = events.reduce((acc, e) => (acc[e.type] = (acc[e.type] || 0) + 1, acc), {});
   document.getElementById("chips").innerHTML = Object.keys(counts).length
     ? Object.entries(counts).map(([k,v]) => `<span class="chip">${esc(label(k))}: ${v}</span>`).join("")
@@ -129,6 +144,19 @@ fetch("/api/replay").then((r) => r.json()).then((data) => {
         <div class="quote">${esc(e.speaker)}: ${esc(e.text)}</div>
       </div>`).join("")
     : `<div class="empty">介入候補はありません</div>`;
+  document.getElementById("review").innerHTML = review.length
+    ? review.map((r) => `<div class="review-item">
+        <div><span class="kind">${esc(r.reason || "delivery")}</span>
+          <span class="status">${esc(statusLabel(r.status))}</span></div>
+        ${r.detail ? `<div class="detail">${esc(r.detail)}</div>` : ""}
+        ${r.delivery_text ? `<div class="delivery">${esc(r.delivery_text)}</div>` : ""}
+        <div class="context">turns: ${esc(r.turn_count ?? "-")}
+          ${r.topics?.length ? ` / 論点: ${esc(r.topics.map((t) => t.topic).join(", "))}` : ""}</div>
+        ${r.recent_utterances?.length ? `<div class="quote">${
+          r.recent_utterances.map((u) => `${esc(u.speaker)}: ${esc(u.text)}`).join("<br>")
+        }</div>` : ""}
+      </div>`).join("")
+    : `<div class="empty">保存済み介入ログはありません</div>`;
   document.getElementById("turns").innerHTML = data.turns.length
     ? data.turns.map((t) => `<div class="turn ${hitTurns.has(t.turn_id) ? "hit" : ""}">
         <span class="ts">${esc(ts(t.ms))}</span><span class="speaker">${esc(t.speaker)}</span>${esc(t.text)}
@@ -180,6 +208,85 @@ def load_turns(path: str | Path, *, include_agent: bool = False,
             if limit is not None and len(turns) >= limit:
                 break
     return turns
+
+
+def default_interventions_path(turns_path: str | Path) -> Path:
+    """Return the sibling interventions.jsonl path for a turns file."""
+    path = Path(turns_path)
+    name = path.name
+    if name.endswith(".turns.jsonl"):
+        return path.with_name(name[:-len(".turns.jsonl")] + ".interventions.jsonl")
+    if name.endswith(".jsonl"):
+        return path.with_name(name[:-len(".jsonl")] + ".interventions.jsonl")
+    return path.with_name(name + ".interventions.jsonl")
+
+
+def load_interventions(path: str | Path | None) -> list[dict[str, Any]]:
+    """Load saved intervention trigger/delivery events from JSONL."""
+    if path is None:
+        return []
+    p = Path(path)
+    if not p.exists():
+        return []
+    events: list[dict[str, Any]] = []
+    with open(p, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                events.append(json.loads(line))
+    return events
+
+
+def intervention_review_items(interventions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Pair trigger and delivery records for human review."""
+    triggers = {
+        str(e.get("event_id")): e
+        for e in interventions
+        if e.get("type") == "trigger" and e.get("event_id")
+    }
+    deliveries_by_trigger: dict[str, list[dict[str, Any]]] = {}
+    orphans: list[dict[str, Any]] = []
+    for event in interventions:
+        if event.get("type") != "delivery":
+            continue
+        trigger_id = event.get("trigger_event_id")
+        if trigger_id and str(trigger_id) in triggers:
+            deliveries_by_trigger.setdefault(str(trigger_id), []).append(event)
+        else:
+            orphans.append(event)
+
+    items: list[dict[str, Any]] = []
+    for event_id, trigger in triggers.items():
+        delivery = deliveries_by_trigger.get(event_id, [None])[0]
+        metadata = trigger.get("metadata") if isinstance(trigger.get("metadata"), dict) else {}
+        items.append({
+            "event_id": event_id,
+            "status": "delivered" if delivery else "missing_delivery",
+            "reason": trigger.get("reason", ""),
+            "detail": trigger.get("detail", ""),
+            "created_at": trigger.get("created_at"),
+            "turn_count": metadata.get("turn_count"),
+            "recent_utterances": metadata.get("recent_utterances", []),
+            "topics": metadata.get("topics", []),
+            "delivery_text": delivery.get("text", "") if delivery else "",
+            "trigger": trigger,
+            "delivery": delivery,
+        })
+    for delivery in orphans:
+        items.append({
+            "event_id": None,
+            "status": "orphan_delivery",
+            "reason": "",
+            "detail": "",
+            "created_at": delivery.get("created_at"),
+            "turn_count": None,
+            "recent_utterances": [],
+            "topics": [],
+            "delivery_text": delivery.get("text", ""),
+            "trigger": None,
+            "delivery": delivery,
+        })
+    return items
 
 
 def _event(turn: dict, kind: str, detail: str, **extra) -> dict:
@@ -335,8 +442,9 @@ def run_replay(
 
 
 def replay_snapshot(source: str | Path, turns: list[dict], events: list[dict],
-                    opts: ReplayOptions) -> dict:
+                    opts: ReplayOptions, interventions: list[dict] | None = None) -> dict:
     """Build the JSON object served by the replay UI."""
+    interventions = interventions or []
     return {
         "source": str(source),
         "topic": opts.topic,
@@ -344,6 +452,8 @@ def replay_snapshot(source: str | Path, turns: list[dict], events: list[dict],
         "no_api": opts.no_api,
         "turns": turns,
         "events": events,
+        "interventions": interventions,
+        "intervention_review": intervention_review_items(interventions),
     }
 
 
@@ -405,11 +515,15 @@ def _parse_checks(value: str) -> set[str]:
 @click.option("--limit", type=int, default=None, help="先頭N発話だけリプレイ")
 @click.option("--include-agent", is_flag=True,
               help="保存済みのAI/ファシリテーター発話も入力に含める")
+@click.option("--interventions", "interventions_path", default=None,
+              type=click.Path(exists=True, dir_okay=False),
+              help="保存済み介入ログJSONL。未指定ならturns隣の*.interventions.jsonlを読む")
 @click.option("--no-api", is_flag=True,
               help="APIを呼ばず、ローカル候補抽出だけ行う")
 def main(turns_path: str, topic: str | None, checks: str, model: str | None,
          out: str | None, serve: bool, port: int, open_browser: bool,
-         limit: int | None, include_agent: bool, no_api: bool) -> None:
+         limit: int | None, include_agent: bool, interventions_path: str | None,
+         no_api: bool) -> None:
     """Replay a saved turns.jsonl file and print intervention candidates."""
     api_key = os.environ.get("OPENAI_API_KEY", "")
     opts = ReplayOptions(
@@ -425,7 +539,9 @@ def main(turns_path: str, topic: str | None, checks: str, model: str | None,
         raise click.ClickException("OPENAI_API_KEY is required unless --no-api is set")
     turns = load_turns(turns_path, include_agent=include_agent, limit=limit)
     events = run_replay(turns, opts)
-    snapshot = replay_snapshot(turns_path, turns, events, opts)
+    default_path = default_interventions_path(turns_path)
+    interventions = load_interventions(interventions_path or default_path)
+    snapshot = replay_snapshot(turns_path, turns, events, opts, interventions)
     if serve:
         serve_replay(snapshot, port=port, open_browser=open_browser)
         return

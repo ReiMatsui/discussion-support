@@ -6,10 +6,25 @@ from click.testing import CliRunner
 
 from das.asr.live import replay
 from das.asr.live._constants import _INVITE_WARMUP
-from das.asr.live.replay import ReplayOptions, load_turns, replay_snapshot, run_replay
+from das.asr.live.replay import (
+    ReplayOptions,
+    default_interventions_path,
+    intervention_review_items,
+    load_interventions,
+    load_turns,
+    replay_snapshot,
+    run_replay,
+)
 
 
 def _write_turns(path, rows):
+    path.write_text(
+        "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _write_jsonl(path, rows):
     path.write_text(
         "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n",
         encoding="utf-8",
@@ -26,6 +41,78 @@ def test_load_turns_excludes_agent_by_default(tmp_path):
     turns = load_turns(p)
 
     assert [t["speaker"] for t in turns] == ["参加者A"]
+
+
+def test_default_interventions_path_for_turns_file():
+    assert str(default_interventions_path("sample.turns.jsonl")).endswith(
+        "sample.interventions.jsonl"
+    )
+
+
+def test_load_interventions_returns_empty_for_missing_file(tmp_path):
+    assert load_interventions(tmp_path / "missing.interventions.jsonl") == []
+
+
+def test_intervention_review_items_pair_trigger_and_delivery(tmp_path):
+    path = tmp_path / "sample.interventions.jsonl"
+    _write_jsonl(path, [
+        {
+            "event_id": "int-0001",
+            "type": "trigger",
+            "reason": "drift",
+            "detail": "雑談",
+            "metadata": {
+                "turn_count": 3,
+                "topics": [{"topic": "AI導入", "speaker": "議題"}],
+                "recent_utterances": [{"speaker": "A", "text": "話"}],
+            },
+        },
+        {
+            "type": "delivery",
+            "trigger_event_id": "int-0001",
+            "text": "本題に戻しましょう",
+        },
+    ])
+
+    items = intervention_review_items(load_interventions(path))
+
+    assert items == [{
+        "event_id": "int-0001",
+        "status": "delivered",
+        "reason": "drift",
+        "detail": "雑談",
+        "created_at": None,
+        "turn_count": 3,
+        "recent_utterances": [{"speaker": "A", "text": "話"}],
+        "topics": [{"topic": "AI導入", "speaker": "議題"}],
+        "delivery_text": "本題に戻しましょう",
+        "trigger": load_interventions(path)[0],
+        "delivery": load_interventions(path)[1],
+    }]
+
+
+def test_intervention_review_items_marks_missing_delivery():
+    items = intervention_review_items([{
+        "event_id": "int-0001",
+        "type": "trigger",
+        "reason": "invite",
+        "detail": "参加者Bさんに声かけ",
+        "metadata": {},
+    }])
+
+    assert items[0]["status"] == "missing_delivery"
+    assert items[0]["delivery_text"] == ""
+
+
+def test_intervention_review_items_marks_orphan_delivery():
+    items = intervention_review_items([{
+        "type": "delivery",
+        "trigger_event_id": None,
+        "text": "本題に戻しましょう",
+    }])
+
+    assert items[0]["status"] == "orphan_delivery"
+    assert items[0]["delivery_text"] == "本題に戻しましょう"
 
 
 def test_run_replay_fact_candidate_without_api():
@@ -228,17 +315,39 @@ def test_cli_no_api_outputs_fact_candidate(tmp_path):
     assert '"type": "fact_candidate"' in result.output
 
 
+def test_cli_serve_auto_loads_sibling_interventions(tmp_path, monkeypatch):
+    p = tmp_path / "sample.turns.jsonl"
+    _write_turns(p, [{"turn_id": 1, "speaker": "A", "text": "進め方の話です"}])
+    _write_jsonl(tmp_path / "sample.interventions.jsonl", [
+        {"event_id": "int-0001", "type": "trigger", "reason": "count"},
+    ])
+    seen = {}
+
+    def fake_serve(snapshot, *, port, open_browser):
+        seen["snapshot"] = snapshot
+
+    monkeypatch.setattr(replay, "serve_replay", fake_serve)
+
+    result = CliRunner().invoke(replay.main, [str(p), "--no-api", "--serve"])
+
+    assert result.exit_code == 0
+    assert seen["snapshot"]["intervention_review"][0]["event_id"] == "int-0001"
+
+
 def test_replay_snapshot_for_ui():
     turns = [{"turn_id": 1, "speaker": "A", "text": "指標Xの計算式は分母を分子で割る", "ms": 0}]
     events = [{"turn_id": 1, "type": "fact_candidate", "detail": "候補"}]
+    interventions = [{"event_id": "int-0001", "type": "trigger", "reason": "fact"}]
 
     snap = replay_snapshot("x.turns.jsonl", turns, events,
-                           ReplayOptions(no_api=True, checks={"fact"}))
+                           ReplayOptions(no_api=True, checks={"fact"}), interventions)
 
     assert snap["source"] == "x.turns.jsonl"
     assert snap["turns"] == turns
     assert snap["events"] == events
     assert snap["checks"] == ["fact"]
+    assert snap["interventions"] == interventions
+    assert snap["intervention_review"][0]["event_id"] == "int-0001"
 
 
 def test_cli_help_has_serve_option():
@@ -247,3 +356,4 @@ def test_cli_help_has_serve_option():
     assert result.exit_code == 0
     assert "--serve" in result.output
     assert "--port" in result.output
+    assert "--interventions" in result.output
