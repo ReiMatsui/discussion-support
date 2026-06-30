@@ -5,6 +5,7 @@ import json
 from click.testing import CliRunner
 
 from das.asr.live import replay
+from das.asr.live._constants import _INVITE_WARMUP
 from das.asr.live.replay import ReplayOptions, load_turns, replay_snapshot, run_replay
 
 
@@ -139,6 +140,31 @@ def test_run_replay_drift_with_mock_checker():
 
     assert events[0]["type"] == "drift"
     assert events[0]["detail"] == "雑談"
+
+
+def test_run_replay_invite_rejects_unknown_target():
+    turns = []
+    for i in range(_INVITE_WARMUP):
+        speaker = "A" if i < _INVITE_WARMUP - 1 else "B"
+        turns.append({
+            "turn_id": i + 1,
+            "speaker": speaker,
+            "text": f"発話{i}",
+            "ms": i * 1000,
+            "end_ms": i * 1000 + 500,
+        })
+
+    def fake_invite(_participation, _utts, _key, _model):
+        return {"invite": True, "speaker": "C", "reason": "静か"}
+
+    events = run_replay(
+        turns,
+        ReplayOptions(api_key="key", checks={"invite"}),
+        check_participation=fake_invite,
+    )
+
+    assert events[-1]["type"] == "invite_rejected"
+    assert events[-1]["detail"] == "C"
 
 
 def test_cli_no_api_outputs_fact_candidate(tmp_path):

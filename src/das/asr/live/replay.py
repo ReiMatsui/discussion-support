@@ -64,7 +64,7 @@ REPLAY_INDEX_HTML = """<!doctype html>
   .event .kind { font-weight:700; font-size:.78rem; }
   .event.fact .kind, .event.fact_candidate .kind, .event.fact_retryable_error .kind { color:var(--fact); }
   .event.drift .kind { color:var(--drift); }
-  .event.invite .kind { color:var(--invite); }
+  .event.invite .kind, .event.invite_rejected .kind { color:var(--invite); }
   .event .detail { margin-top:.25rem; }
   .event .quote { color:var(--muted); font-size:.78rem; margin-top:.3rem; }
   .chips { display:flex; flex-wrap:wrap; gap:.35rem; margin-bottom:.7rem; }
@@ -104,6 +104,7 @@ const label = (t) => ({
   fact_retryable_error: "事実判定失敗",
   drift: "脱線",
   invite: "声かけ",
+  invite_rejected: "声かけ除外",
 }[t] || t);
 fetch("/api/replay").then((r) => r.json()).then((data) => {
   const events = data.events || [];
@@ -266,9 +267,11 @@ def _run_invite_check(
     now_ms = max((d["last_end_ms"] for d in stats.values()
                   if d["last_end_ms"] is not None), default=None)
     participation = []
+    valid_invite_targets: set[str] = set()
     for speaker, data in stats.items():
         silent = ((now_ms - data["last_end_ms"]) / 1000.0
                   if now_ms is not None and data["last_end_ms"] is not None else 0.0)
+        valid_invite_targets.add(str(speaker))
         participation.append({
             "speaker": speaker,
             "time_share": data["time_share"],
@@ -278,8 +281,11 @@ def _run_invite_check(
     result = check_participation(participation, _utterance_window(records, _DRIFT_CHECK_WINDOW),
                                  opts.api_key, opts.model)
     if result.get("invite") and result.get("speaker"):
-        return _event(turn, "invite", str(result.get("speaker")),
-                      reason=result.get("reason", ""))
+        target = str(result.get("speaker"))
+        if target not in valid_invite_targets:
+            return _event(turn, "invite_rejected", target,
+                          reason="信頼できる参加者名ではない")
+        return _event(turn, "invite", target, reason=result.get("reason", ""))
     return None
 
 
