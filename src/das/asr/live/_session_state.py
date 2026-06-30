@@ -256,6 +256,8 @@ class SessionState:
         return self.key_for_diarization_speaker("stt", speaker)
 
     def key_for_label(self, sp) -> str:
+        if str(sp).strip().lower() in {"", "none", "null", "unknown", "uu", UNSURE_SPEAKER}:
+            return UNSURE_SPEAKER
         sp = str(sp)
         if self.tracker is not None and sp in self.tracker.sp_map:
             return self.tracker.sp_map[sp]

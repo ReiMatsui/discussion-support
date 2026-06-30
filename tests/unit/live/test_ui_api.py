@@ -327,6 +327,17 @@ def test_show_partial_updates_state_and_snapshot():
     assert s.api_snapshot()["partial"] == {"speaker": "", "text": ""}
 
 
+def test_show_partial_missing_speaker_is_unsure():
+    s = _make_state()
+
+    s.show_partial(None, "認識中です")
+
+    assert s.api_snapshot()["partial"] == {
+        "speaker": "未確定",
+        "text": "認識中です",
+    }
+
+
 # --- 未確定話者・相槌のUI表示 ----------------------------------------------
 
 def test_snapshot_unsure_and_backchannel_flags():
