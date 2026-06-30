@@ -25,6 +25,7 @@ class _FakeAgent:
     def __init__(self, mode="facilitator"):
         self.mode = mode
         self.voice = "shimmer"
+        self.model = "gpt-realtime-2"
         self.trigger_n = 10
         self._connected = False
         self._conn_error = None
@@ -116,6 +117,7 @@ def test_api_snapshot_exposes_intervention_settings():
         "enabled": True,
         "proactivity": "controlled",
         "trigger_n": 10,
+        "model": "gpt-realtime-2",
     }
     assert snap["intervention_events"] == [{
         "time": snap["intervention_events"][0]["time"],

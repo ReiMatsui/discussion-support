@@ -424,7 +424,8 @@ class SessionState:
         agent = None
         if self.agent is not None:
             agent = {"enabled": self.agent.enabled, "mode": self.agent.mode,
-                     "voice": self.agent.voice}
+                     "voice": self.agent.voice,
+                     "model": getattr(self.agent, "model", None)}
         return {
             "rev": self.rev,
             "mode": self.session_mode(),
@@ -444,6 +445,7 @@ class SessionState:
                 "enabled": self.intervention_enabled,
                 "proactivity": self.proactivity_name,
                 "trigger_n": getattr(self.agent, "trigger_n", None),
+                "model": getattr(self.agent, "model", None),
             },
             "intervention_events": list(self.intervention_events[-20:]),
             "agenda": self._current_agenda(),

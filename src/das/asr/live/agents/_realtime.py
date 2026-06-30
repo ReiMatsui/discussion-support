@@ -17,7 +17,8 @@ from .._constants import (
     _PROMPT_CONVERSATION,
     _PROMPT_FACILITATOR,
     AGENT_VOICES,
-    REALTIME_URL,
+    REALTIME_MODEL,
+    realtime_url,
 )
 from .._voice_profiles import VoiceProfiles
 from ._base import _RealtimeBase
@@ -47,8 +48,10 @@ class RealtimeAgent(_RealtimeBase):
     MODES = ("off", "facilitator", "conversation")
 
     def __init__(self, api_key: str, voice: str = "shimmer",
-                 mode: str = "facilitator", trigger_n: int = _AGENT_TRIGGER):
+                 mode: str = "facilitator", trigger_n: int = _AGENT_TRIGGER,
+                 model: str = REALTIME_MODEL):
         self.api_key = api_key
+        self.model = model
         self.voice = voice
         self.mode = mode                   # off / facilitator / conversation
         self.trigger_n = trigger_n
@@ -145,7 +148,7 @@ class RealtimeAgent(_RealtimeBase):
             return
         try:
             self.ws = connect(
-                REALTIME_URL,
+                realtime_url(self.model),
                 additional_headers={
                     "Authorization": f"Bearer {self.api_key}",
                 },
@@ -159,7 +162,8 @@ class RealtimeAgent(_RealtimeBase):
         self._send_session_update()
         threading.Thread(target=self._recv_loop, daemon=True).start()
         self._start_playback_thread()
-        print(f"# AI Agent: 接続完了（voice={self.voice}, mode={self.mode}）", flush=True)
+        print(f"# AI Agent: 接続完了（model={self.model}, voice={self.voice}, "
+              f"mode={self.mode}）", flush=True)
 
     def _send_session_update(self):
         """現在の設定でsession.updateを送信（GA API形式）.

@@ -1,11 +1,27 @@
 """RealtimeAgent（ファシリテーター）の介入・割り込みロジックのユニットテスト."""
 from __future__ import annotations
 
+from das.asr.live._constants import realtime_url
+from das.asr.live.agents._partner import ConversationPartner
+from das.asr.live.agents._realtime import RealtimeAgent
+
 from .conftest import make_chunk
 
 # ---------------------------------------------------------------------------
 # trigger()
 # ---------------------------------------------------------------------------
+
+def test_realtime_url_uses_configured_model():
+    assert realtime_url("gpt-realtime-test").endswith("?model=gpt-realtime-test")
+
+
+def test_realtime_agents_store_model():
+    agent = RealtimeAgent(api_key="test-key", model="gpt-realtime-test")
+    partner = ConversationPartner(api_key="test-key", model="gpt-realtime-test")
+
+    assert agent.model == "gpt-realtime-test"
+    assert partner.model == "gpt-realtime-test"
+
 
 def test_trigger_sends_create_and_response(agent):
     agent.feed("人間", "これはテスト発言です")

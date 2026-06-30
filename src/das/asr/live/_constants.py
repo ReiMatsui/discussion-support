@@ -1,6 +1,7 @@
 """リアルタイム議事録モジュール定数."""
 from __future__ import annotations
 
+import os
 import re
 
 SR = 16000
@@ -306,7 +307,14 @@ _PROMPT_CONVERSATION = """\
 簡潔に、日本語で返答してください（15秒以内に収まる長さ）。
 会議の文脈を踏まえた上で、役に立つ回答を心がけてください。"""
 
-REALTIME_URL = "wss://api.openai.com/v1/realtime?model=gpt-realtime-2"
+REALTIME_MODEL = os.environ.get("OPENAI_REALTIME_MODEL", "gpt-realtime-2")
+
+
+def realtime_url(model: str | None = None) -> str:
+    return f"wss://api.openai.com/v1/realtime?model={model or REALTIME_MODEL}"
+
+
+REALTIME_URL = realtime_url()
 AGENT_SPEAKER = "ファシリテーター"   # recordsに使うスピーカーキー
 UNSURE_SPEAKER = "?"   # 短い発話で話者を確定できないときのキー（表示は「未確定」）
 # =====================================================================

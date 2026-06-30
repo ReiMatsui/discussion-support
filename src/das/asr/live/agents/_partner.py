@@ -11,7 +11,12 @@ import time
 
 import numpy as np
 
-from .._constants import _ECHO_COOLDOWN, _PROMPT_DEBATE_PARTNER, REALTIME_URL
+from .._constants import (
+    _ECHO_COOLDOWN,
+    _PROMPT_DEBATE_PARTNER,
+    REALTIME_MODEL,
+    realtime_url,
+)
 from .._voice_profiles import VoiceProfiles
 from ._base import _RealtimeBase
 
@@ -29,8 +34,10 @@ class ConversationPartner(_RealtimeBase):
       partner.feed_audio(pcm_24k_bytes)  # マイク音声を継続的に送信
     """
 
-    def __init__(self, api_key: str, voice: str = "echo", topic: str = ""):
+    def __init__(self, api_key: str, voice: str = "echo", topic: str = "",
+                 model: str = REALTIME_MODEL):
         self.api_key = api_key
+        self.model = model
         self.voice = voice
         self.topic = topic
         self.ws = None
@@ -89,7 +96,7 @@ class ConversationPartner(_RealtimeBase):
             return
         try:
             self.ws = connect(
-                REALTIME_URL,
+                realtime_url(self.model),
                 additional_headers={"Authorization": f"Bearer {self.api_key}"},
             )
         except Exception as e:
@@ -99,7 +106,8 @@ class ConversationPartner(_RealtimeBase):
         self._send_session_update()
         threading.Thread(target=self._recv_loop, daemon=True).start()
         self._start_playback_thread()
-        print(f"# Partner: 接続完了（voice={self.voice}）", flush=True)
+        print(f"# Partner: 接続完了（model={self.model}, voice={self.voice}）",
+              flush=True)
 
     def _send_session_update(self):
         """server VAD有効 + 音声入出力の設定."""
