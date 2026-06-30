@@ -7,6 +7,7 @@ import threading
 import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
+from types import SimpleNamespace
 
 from das.asr.live._constants import UNSURE_SPEAKER
 from das.asr.live._session_state import SessionState
@@ -61,6 +62,10 @@ class _FakeTracker:
 
     def active_profile_names(self):
         return list(self.profiles)
+
+
+class _FakeBackend:
+    name = "soniox"
 
 
 # --- session_mode -----------------------------------------------------------
@@ -124,6 +129,18 @@ def test_api_snapshot_exposes_intervention_settings():
         "reason": "count",
         "detail": "10>=10発話",
     }]
+
+
+def test_api_snapshot_exposes_stt_settings():
+    s = _make_state()
+    s.args = SimpleNamespace(model="stt-rt-v5", lang="ja")
+    s.stt_backend = _FakeBackend()
+
+    assert s.api_snapshot()["stt"] == {
+        "provider": "soniox",
+        "model": "stt-rt-v5",
+        "lang": "ja",
+    }
 
 
 def test_api_snapshot_exposes_startup_setup_state():

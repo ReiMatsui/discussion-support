@@ -441,6 +441,11 @@ class SessionState:
                 "provider": getattr(self.diarization_provider, "name", None),
                 "max_speakers": getattr(self.args, "diarization_max_speakers", None),
             },
+            "stt": {
+                "provider": getattr(self.stt_backend, "name", None),
+                "model": getattr(self.args, "model", None),
+                "lang": getattr(self.args, "lang", None),
+            },
             "intervention": {
                 "enabled": self.intervention_enabled,
                 "proactivity": self.proactivity_name,
