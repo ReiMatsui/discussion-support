@@ -59,6 +59,8 @@ class SessionState:
         self.diag_path = diag_path
         self.turns_path = turns_path
         self.interventions_path = self._interventions_path_for(turns_path)
+        # 採否レビュー（shadow Controller の判断ログ, Phase0/1）。
+        self.intervention_review_path = self._intervention_review_path_for(turns_path)
         self.wav_path = wav_path
         self._serve = serve
 
@@ -164,6 +166,14 @@ class SessionState:
         if turns_path.endswith(".jsonl"):
             return turns_path[:-len(".jsonl")] + ".interventions.jsonl"
         return turns_path + ".interventions.jsonl"
+
+    @staticmethod
+    def _intervention_review_path_for(turns_path: str) -> str:
+        if turns_path.endswith(".turns.jsonl"):
+            return turns_path[:-len(".turns.jsonl")] + ".intervention_review.jsonl"
+        if turns_path.endswith(".jsonl"):
+            return turns_path[:-len(".jsonl")] + ".intervention_review.jsonl"
+        return turns_path + ".intervention_review.jsonl"
 
     def disp_name(self, key) -> str:
         key = str(key)
@@ -560,6 +570,7 @@ class SessionState:
         self.diag_path = base + ".diag.jsonl"
         self.turns_path = base + ".turns.jsonl"
         self.interventions_path = self._interventions_path_for(self.turns_path)
+        self.intervention_review_path = self._intervention_review_path_for(self.turns_path)
         self.wav_path = base + ".wav"
         self.open_wav()        # 新しい録音を開く（PCMバッファもリセットしSTTのmsと整合）
 
@@ -962,6 +973,29 @@ class SessionState:
         dst = path or self.interventions_path
         with open(dst, "a", encoding="utf-8") as f:
             f.write(json.dumps(event, ensure_ascii=False) + "\n")
+
+    def write_intervention_review(self, entry: dict, path=None):
+        """採否レビュー（shadow Controller の判断）を追記保存する（Phase0/1）.
+
+        従来の介入ログ（``.interventions.jsonl``）とは別ファイルに分け、
+        「介入候補・従来の採否・Controllerならどう判断したか・抑制理由・latency」を
+        後から追えるようにする。実際の発話採否はこのログでは変わらない。
+        """
+        dst = path or self.intervention_review_path
+        with open(dst, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+    def add_intervention_review(self, entry: dict) -> None:
+        """shadow Controller の判断1件を ``intervention_review.jsonl`` に記録する."""
+        now = datetime.datetime.now()
+        payload = {
+            "type": "shadow_decision",
+            "time": now.strftime("%H:%M:%S"),
+            "created_at": now.isoformat(timespec="seconds"),
+            "meeting_started": self.started.isoformat(timespec="seconds"),
+            **entry,
+        }
+        self.write_intervention_review(payload)
 
     def add_facilitator_delivery_event(self, text: str) -> None:
         """実際に参加者へ届いたファシリテーター発話を介入ログへ残す."""
