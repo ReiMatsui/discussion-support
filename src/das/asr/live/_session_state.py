@@ -613,7 +613,8 @@ class SessionState:
         self.save()
         return {"ok": True, "agenda": topic}
 
-    def add_intervention_event(self, reason: str, detail: str = "") -> None:
+    def add_intervention_event(self, reason: str, detail: str = "",
+                               metadata: dict | None = None) -> None:
         """UIで確認するための介入理由ログを追加する."""
         now = datetime.datetime.now()
         event = {
@@ -627,6 +628,7 @@ class SessionState:
             **event,
             "created_at": now.isoformat(timespec="seconds"),
             "meeting_started": self.started.isoformat(timespec="seconds"),
+            "metadata": metadata or {},
         })
         self.rev += 1
 

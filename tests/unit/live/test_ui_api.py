@@ -159,7 +159,28 @@ def test_add_intervention_event_persists_jsonl(tmp_path):
         "detail": "雑談に逸脱",
         "created_at": rows[0]["created_at"],
         "meeting_started": "2026-01-01T09:00:00",
+        "metadata": {},
     }]
+
+
+def test_add_intervention_event_persists_metadata(tmp_path):
+    s = SessionState(
+        args=object(), started=datetime.datetime(2026, 1, 1, 9, 0, 0),
+        out_path=str(tmp_path / "o.md"), html_path=str(tmp_path / "o.html"),
+        diag_path=str(tmp_path / "o.diag"), turns_path=str(tmp_path / "o.turns.jsonl"),
+        wav_path=str(tmp_path / "o.wav"),
+    )
+
+    s.add_intervention_event("invite", "参加者Bさんに声かけ", metadata={
+        "turn_count": 8,
+        "recent_utterances": [{"speaker": "参加者A", "text": "意見です"}],
+    })
+
+    row = json.loads((tmp_path / "o.interventions.jsonl").read_text(encoding="utf-8"))
+    assert row["metadata"] == {
+        "turn_count": 8,
+        "recent_utterances": [{"speaker": "参加者A", "text": "意見です"}],
+    }
 
 
 def test_reset_for_new_meeting_clears_ui_intervention_events(tmp_path):

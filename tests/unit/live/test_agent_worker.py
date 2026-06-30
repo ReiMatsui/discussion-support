@@ -10,6 +10,7 @@ import threading
 import time
 
 from das.asr.live._workers import (
+    _log_intervention_event,
     _PendingInterventions,
     _run_agent_worker,
     _select_barge_in_decision,
@@ -98,8 +99,13 @@ class FakeState:
     def disp_name(self, k):  # pragma: no cover
         return str(k)
 
-    def add_intervention_event(self, reason: str, detail: str = "") -> None:
-        self.intervention_events.append({"reason": reason, "detail": detail})
+    def add_intervention_event(self, reason: str, detail: str = "",
+                               metadata: dict | None = None) -> None:
+        self.intervention_events.append({
+            "reason": reason,
+            "detail": detail,
+            "metadata": metadata or {},
+        })
 
 
 def test_bargein_decision_prefers_fact_before_retry():
@@ -123,6 +129,29 @@ def test_bargein_decision_prefers_fact_before_retry():
 
     assert decision.reason == "fact"
     assert decision.fact["correction"] == "事実補正です。"
+
+
+def test_log_intervention_event_includes_review_context():
+    agent = FakeAgent()
+    state = FakeState(agent, None)
+    state.proactivity_name = "controlled"
+    state.topics = [{"topic": "AI導入", "speaker": "議題"}]
+    state.records = [
+        {"speaker": "A", "text": f"発話{i}", "ms": i * 1000, "end_ms": i * 1000 + 500}
+        for i in range(6)
+    ]
+
+    _log_intervention_event(state, "drift", "雑談")
+
+    event = state.intervention_events[0]
+    assert event["reason"] == "drift"
+    assert event["metadata"]["mode"] == "facilitator"
+    assert event["metadata"]["proactivity"] == "controlled"
+    assert event["metadata"]["turn_count"] == 6
+    assert event["metadata"]["topics"] == [{"topic": "AI導入", "speaker": "議題"}]
+    assert [u["text"] for u in event["metadata"]["recent_utterances"]] == [
+        "発話1", "発話2", "発話3", "発話4", "発話5",
+    ]
 
 
 def test_bargein_decision_skips_cooldown_drift_then_retries():
@@ -342,7 +371,17 @@ def test_drift_request_triggers_with_reason():
 
     assert agent.trigger_calls, "脱線要求でトリガーされるべき"
     assert agent.trigger_calls[0]["drift_reason"] == "ラーメンの雑談"
-    assert state.intervention_events == [{"reason": "drift", "detail": "ラーメンの雑談"}]
+    assert state.intervention_events == [{
+        "reason": "drift",
+        "detail": "ラーメンの雑談",
+        "metadata": {
+            "mode": "facilitator",
+            "proactivity": None,
+            "turn_count": 0,
+            "recent_utterances": [],
+            "topics": [],
+        },
+    }]
 
 
 def test_fact_request_triggers_before_drift():

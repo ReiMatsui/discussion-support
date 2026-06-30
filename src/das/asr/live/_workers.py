@@ -110,10 +110,38 @@ def _looks_like_fact_claim(text: str) -> bool:
     return not _FACT_META_TALK_RE.search(s)
 
 
+def _intervention_event_metadata(state: SessionState, *, recent_limit: int = 5) -> dict:
+    """介入の事後レビューに必要な最小コンテキストを作る."""
+    with state.state_lock:
+        utterances = [
+            {
+                "speaker": intervention_speaker_name(state, r),
+                "text": str(r.get("text", "")),
+                "ms": r.get("ms"),
+                "end_ms": r.get("end_ms"),
+            }
+            for r in state.records
+            if "speaker" in r and r.get("text")
+        ]
+    with state.topics_lock:
+        topics = [
+            {"topic": str(t.get("topic", "")), "speaker": str(t.get("speaker", ""))}
+            for t in state.topics[:5]
+        ]
+    agent = getattr(state, "agent", None)
+    return {
+        "mode": getattr(agent, "mode", None),
+        "proactivity": getattr(state, "proactivity_name", None),
+        "turn_count": len(utterances),
+        "recent_utterances": utterances[-recent_limit:],
+        "topics": topics,
+    }
+
+
 def _log_intervention_event(state: SessionState, reason: str, detail: str = "") -> None:
     add_event = getattr(state, "add_intervention_event", None)
     if callable(add_event):
-        add_event(reason, detail)
+        add_event(reason, detail, metadata=_intervention_event_metadata(state))
 
 
 def _intervention_enabled(state: SessionState) -> bool:
