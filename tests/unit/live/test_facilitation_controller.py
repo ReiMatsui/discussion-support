@@ -19,6 +19,8 @@ from das.asr.live._facilitation import (
 )
 from das.asr.live._workers import (
     _build_candidates,
+    _controller_barge_in_decision,
+    _controller_normal_decision,
     _PendingInterventions,
     _ShadowControllerRunner,
 )
@@ -254,3 +256,187 @@ def test_shadow_runner_logs_decision_and_dedupes():
                     silence_elapsed=5.0, epoch=3, recent_interventions=[],
                     legacy=None)
     assert len(state.reviews) == 3
+
+
+# ---------------------------------------------------------------------------
+# Phase2: 物理コンテキスト（partner/echo/確認/global cooldown）
+# ---------------------------------------------------------------------------
+
+def test_partner_busy_suppresses_all():
+    now = time.monotonic()
+    c = FacilitationController()
+    d = c.arbitrate(FacilitationInput(
+        candidates=(_fact(now), _drift(now)),
+        recent_interventions=(), silence_elapsed=5.0, snapshot_epoch=1, now=now,
+        partner_busy=True))
+    assert d.candidate_id is None
+    assert all("パートナー発話中" in s["reason"] for s in d.suppressed)
+
+
+def test_echo_window_suppresses_all():
+    now = time.monotonic()
+    c = FacilitationController()
+    d = c.arbitrate(FacilitationInput(
+        candidates=(_fact(now),), recent_interventions=(), silence_elapsed=5.0,
+        snapshot_epoch=1, now=now, in_echo_window=True))
+    assert d.candidate_id is None
+    assert "エコーウィンドウ" in d.suppressed[0]["reason"]
+
+
+def test_drift_confirmation_gate_holds_single_detection():
+    now = time.monotonic()
+    c = FacilitationController()
+    drift = InterventionCandidate(id="drift", kind="drift", brief="脱線",
+                                  created_at=now, payload={"drift_count": 1})
+    d = c.arbitrate(FacilitationInput(
+        candidates=(drift,), recent_interventions=(), silence_elapsed=5.0,
+        snapshot_epoch=1, now=now, required_drift_confirmations=2))
+    assert d.candidate_id is None
+    assert "確認待ち" in d.suppressed[0]["reason"]
+
+
+def test_drift_fires_after_confirmations_met():
+    now = time.monotonic()
+    c = FacilitationController()
+    drift = InterventionCandidate(id="drift", kind="drift", brief="脱線",
+                                  created_at=now, payload={"drift_count": 2})
+    d = c.arbitrate(FacilitationInput(
+        candidates=(drift,), recent_interventions=(), silence_elapsed=5.0,
+        snapshot_epoch=1, now=now, required_drift_confirmations=2))
+    assert d.candidate_id == "drift"
+
+
+def test_drift_global_cooldown_suppresses():
+    """drift は『直前のあらゆる介入』から間隔が空くまで採らない（global cooldown）."""
+    now = time.monotonic()
+    c = FacilitationController()
+    drift = InterventionCandidate(id="drift", kind="drift", brief="脱線",
+                                  created_at=now, payload={"drift_count": 9})
+    # 直前に別種(count)の介入があった → drift は global cooldown で待機
+    d = c.arbitrate(FacilitationInput(
+        candidates=(drift,), recent_interventions=(), silence_elapsed=5.0,
+        snapshot_epoch=1, now=now + 1.0, cooldown=25.0,
+        last_intervention_at=now, required_drift_confirmations=1))
+    assert d.candidate_id is None
+    assert "間隔不足" in d.suppressed[0]["reason"]
+
+
+def test_fact_cooldown_override_is_respected():
+    """fact の同種クールダウンは注入された fast lane 値を使う."""
+    now = time.monotonic()
+    c = FacilitationController()
+    recent = (InterventionLogEntry(at=now, kind="fact"),)
+    # override=1.0、経過0.5s → まだ抑制
+    d = c.arbitrate(FacilitationInput(
+        candidates=(_fact(now),), recent_interventions=recent, silence_elapsed=5.0,
+        snapshot_epoch=1, now=now + 0.5, fact_cooldown=1.0))
+    assert d.candidate_id is None
+    # 経過1.5s → 許可
+    d2 = c.arbitrate(FacilitationInput(
+        candidates=(_fact(now),), recent_interventions=recent, silence_elapsed=5.0,
+        snapshot_epoch=1, now=now + 1.5, fact_cooldown=1.0))
+    assert d2.candidate_id == "fact-1"
+
+
+def test_decision_carries_valid_for_epoch_and_deadline():
+    now = time.monotonic()
+    c = FacilitationController()
+    d = c.arbitrate(FacilitationInput(
+        candidates=(_fact(now),), recent_interventions=(), silence_elapsed=5.0,
+        snapshot_epoch=42, now=now))
+    assert d.valid_for_epoch == 42
+    assert d.deadline_ms == 1500  # fact fast lane の予算
+
+
+# ---------------------------------------------------------------------------
+# Phase2: worker adapter（採否を _BargeInDecision/_NormalTriggerDecision に逆変換）
+# ---------------------------------------------------------------------------
+
+class _FakeProactivityState:
+    def __init__(self, **proactivity):
+        self.proactivity = {"drift_confirmations": 1, **proactivity}
+        self.agent_cursor = 7
+
+
+def _barge(agent, pending, state, **kw):
+    defaults = dict(
+        now=time.monotonic(), last_fact_at=0.0, last_intervention_at=0.0,
+        silence_elapsed=10.0, partner_busy=False, in_echo_window=False,
+        cooldown=25.0, recent_interventions=[], silence_summarize=18.0,
+        stall_breaker=False, last_invited=None, epoch=7)
+    defaults.update(kw)
+    return _controller_barge_in_decision(FacilitationController(), pending=pending,
+                                         agent=agent, state=state, **defaults)
+
+
+def test_barge_adapter_picks_fact_over_drift():
+    now = time.monotonic()
+    pend = _PendingInterventions()
+    pend.facts.append({"correction": "訂正です。", "_queued_at": now,
+                       "confidence": "high"})
+    pend.drift_reason = "脱線"
+    pend.drift_count = 2
+    decision, ctrl, _cands = _barge(_FakeAgent(), pend, _FakeProactivityState(), now=now)
+    assert decision.reason == "fact"
+    assert decision.fact["correction"] == "訂正です。"
+    assert ctrl.candidate_id.startswith("fact-")
+
+
+def test_barge_adapter_holds_when_partner_busy():
+    now = time.monotonic()
+    pend = _PendingInterventions()
+    pend.facts.append({"correction": "訂正です。", "_queued_at": now,
+                       "confidence": "high"})
+    decision, _ctrl, _cands = _barge(_FakeAgent(), pend, _FakeProactivityState(),
+                                     now=now, partner_busy=True)
+    assert decision.reason == "hold"
+
+
+def test_barge_adapter_none_when_no_candidates():
+    decision, ctrl, cands = _barge(_FakeAgent(), _PendingInterventions(),
+                                   _FakeProactivityState())
+    assert decision.reason == "none"
+    assert ctrl is None and cands == []
+
+
+def _normal(agent, pending, **kw):
+    defaults = dict(
+        now=time.monotonic(), silence_elapsed=100.0, silence_summarize=18.0,
+        partner_present=False, stall_breaker=False, last_intervention_at=0.0,
+        cooldown=0.0, last_invited=None, recent_interventions=[], epoch=7)
+    defaults.update(kw)
+    return _controller_normal_decision(FacilitationController(), pending=pending,
+                                       agent=agent, **defaults)
+
+
+def test_normal_adapter_count_before_invite():
+    agent = _FakeAgent(pending_count=10, trigger_n=10)
+    pend = _PendingInterventions(invite="参加者B")
+    decision, _ctrl, _cands = _normal(agent, pend)
+    assert decision.reason == "count"
+
+
+def test_normal_adapter_invite_fires_with_target():
+    agent = _FakeAgent(pending_count=0)
+    pend = _PendingInterventions(invite="参加者B")
+    decision, _ctrl, _cands = _normal(agent, pend)
+    assert decision.reason == "invite"
+    assert decision.invite_target == "参加者B"
+
+
+def test_normal_adapter_skip_invite_for_same_person():
+    agent = _FakeAgent(pending_count=0)
+    pend = _PendingInterventions(invite="参加者B")
+    decision, _ctrl, _cands = _normal(agent, pend, last_invited="参加者B")
+    assert decision.reason == "skip_invite"
+    assert decision.invite_target == "参加者B"
+
+
+def test_normal_adapter_invite_held_during_global_cooldown():
+    """global cooldown 中は声かけを採らず、skip_invite でもなく none（候補は保持）."""
+    now = time.monotonic()
+    agent = _FakeAgent(pending_count=0)
+    pend = _PendingInterventions(invite="参加者B")
+    decision, _ctrl, _cands = _normal(agent, pend, now=now,
+                                      last_intervention_at=now, cooldown=25.0)
+    assert decision.reason == "none"

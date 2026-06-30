@@ -56,6 +56,7 @@ from ._constants import (
 )
 from ._facilitation import (
     FacilitationController,
+    FacilitationDecision,
     FacilitationInput,
     InterventionCandidate,
     InterventionLogEntry,
@@ -464,7 +465,7 @@ def _build_candidates(
                 expires_at=fact_expires_at(queued_at),
                 interrupt_policy="wait_for_pause",
                 retryable=False,
-                payload={"correction": correction},
+                payload={"correction": correction, "fact": f},
             ))
 
     if pending.drift_reason:
@@ -645,6 +646,146 @@ class _ShadowControllerRunner:
             if not self._warned_write_failure:
                 self._warned_write_failure = True
                 print(f"# [diag] shadow review log failed: {exc}", flush=True)
+
+
+# 物理レーン分割（§4）。barge-in は echo/partner ガード前に評価し、
+# 通常トリガーはフロア返却後に評価する。Controller はそれぞれのレーンの
+# 候補集合から「採否」だけを決める（固定優先順位の置換, Phase2）。
+_BARGEIN_KINDS = ("fact", "drift", "retry")
+_NORMAL_KINDS = ("count", "silence", "stall", "invite", "conversation")
+
+_STALL_DRIFT_REASON = "会話が止まっています。本題に戻す一言を簡潔に述べてください。"
+
+
+def _controller_barge_in_decision(
+    controller: FacilitationController,
+    *,
+    pending: _PendingInterventions,
+    agent,
+    state: SessionState,
+    now: float,
+    last_fact_at: float,
+    last_intervention_at: float,
+    silence_elapsed: float,
+    partner_busy: bool,
+    in_echo_window: bool,
+    cooldown: float,
+    recent_interventions: list[InterventionLogEntry],
+    silence_summarize: float | None,
+    stall_breaker: bool,
+    last_invited: str | None,
+    epoch: int,
+) -> tuple[_BargeInDecision, FacilitationDecision | None, list[InterventionCandidate]]:
+    """barge-in レーンの採否を Controller に委ねる（固定優先順位の置換, Phase2）.
+
+    既存checkerが作った候補(fact/drift/retry)を入力にし、Controller が
+    「今どれを採るか／黙るか」を決める。戻り値は既存 dispatch がそのまま使える
+    ``_BargeInDecision`` へ逆変換したもの。物理タイミング（pause/partner/echo）は
+    Controller の eligibility が判定する（§4）。
+    """
+    pending.drop_stale_facts(now=now)  # fast lane: 古い事実補正は破棄（鮮度維持）
+    all_cands = _build_candidates(
+        pending, agent, now=now, silence_summarize=silence_summarize,
+        partner_present=False, stall_breaker=stall_breaker, last_invited=last_invited)
+    cands = [c for c in all_cands if c.kind in _BARGEIN_KINDS]
+    if not cands:
+        return _BargeInDecision("none"), None, []
+    required = int(state.proactivity.get("drift_confirmations", 1))
+    decision = controller.arbitrate(FacilitationInput(
+        candidates=tuple(cands),
+        recent_interventions=tuple(recent_interventions),
+        silence_elapsed=silence_elapsed,
+        snapshot_epoch=epoch,
+        now=now,
+        cooldown=cooldown,
+        partner_busy=partner_busy,
+        in_echo_window=in_echo_window,
+        last_intervention_at=last_intervention_at,
+        required_drift_confirmations=required,
+        fact_cooldown=_FACTCHECK_COOLDOWN,
+    ))
+    if decision.candidate_id is None:
+        # 候補はあるが今は採らない → 保持して次の機会を待つ（hold）。
+        return _BargeInDecision("hold"), decision, cands
+    chosen = next(c for c in cands if c.id == decision.candidate_id)
+    if chosen.kind == "fact":
+        return (_BargeInDecision("fact", fact=chosen.payload.get("fact")),
+                decision, cands)
+    if chosen.kind == "drift":
+        return (_BargeInDecision("drift", drift_reason=chosen.brief),
+                decision, cands)
+    return _BargeInDecision("retry"), decision, cands
+
+
+def _controller_normal_decision(
+    controller: FacilitationController,
+    *,
+    pending: _PendingInterventions,
+    agent,
+    now: float,
+    silence_elapsed: float,
+    silence_summarize: float | None,
+    partner_present: bool,
+    stall_breaker: bool,
+    last_intervention_at: float,
+    cooldown: float,
+    last_invited: str | None,
+    recent_interventions: list[InterventionLogEntry],
+    epoch: int,
+) -> tuple[_NormalTriggerDecision, FacilitationDecision | None, list[InterventionCandidate]]:
+    """通常トリガーレーンの採否を Controller に委ねる（固定優先順位の置換, Phase2）.
+
+    フロア返却後に呼ばれるため partner/echo は通過済み。count/silence/stall/invite/
+    conversation の候補から Controller が採否を決め、既存 dispatch 用の
+    ``_NormalTriggerDecision`` に逆変換する。
+    """
+    all_cands = _build_candidates(
+        pending, agent, now=now, silence_summarize=silence_summarize,
+        partner_present=partner_present, stall_breaker=stall_breaker,
+        last_invited=last_invited)
+    cands = [c for c in all_cands if c.kind in _NORMAL_KINDS]
+    if not cands:
+        return _NormalTriggerDecision("none"), None, []
+    decision = controller.arbitrate(FacilitationInput(
+        candidates=tuple(cands),
+        recent_interventions=tuple(recent_interventions),
+        silence_elapsed=silence_elapsed,
+        snapshot_epoch=epoch,
+        now=now,
+        cooldown=cooldown,
+        partner_busy=False,
+        in_echo_window=False,
+        last_intervention_at=last_intervention_at,
+        required_drift_confirmations=0,
+    ))
+    if decision.candidate_id is None:
+        # 連続声かけ抑制（同じ人を続けて誘わない）→ skip_invite で invite を消費。
+        for s in decision.suppressed:
+            if (s["candidate_id"].startswith("invite-")
+                    and "直前と同じ" in s["reason"]):
+                return (_NormalTriggerDecision(
+                    "skip_invite", invite_target=pending.invite), decision, cands)
+        return _NormalTriggerDecision("none"), decision, cands
+    chosen = next(c for c in cands if c.id == decision.candidate_id)
+    if chosen.kind == "conversation":
+        return (_NormalTriggerDecision("conversation", f"沈黙{silence_elapsed:.1f}秒"),
+                decision, cands)
+    if chosen.kind == "count":
+        return (_NormalTriggerDecision(
+            "count", f"{agent.pending_count}>={agent.trigger_n}発話"), decision, cands)
+    if chosen.kind == "silence":
+        thresh = float(chosen.payload.get("pause_required", 0.0))
+        return (_NormalTriggerDecision(
+            "silence", f"{silence_elapsed:.1f}>{thresh:.1f}秒"), decision, cands)
+    if chosen.kind == "stall":
+        return (_NormalTriggerDecision(
+            "stall", f"介入不要後の沈黙{silence_elapsed:.1f}秒",
+            drift_reason=_STALL_DRIFT_REASON), decision, cands)
+    if chosen.kind == "invite":
+        return (_NormalTriggerDecision(
+            "invite", f"{chosen.target_speaker}さんに声かけ",
+            invite_target=chosen.target_speaker), decision, cands)
+    return _NormalTriggerDecision("none"), decision, cands
 
 
 def _run_agenda_detector(state: SessionState, oai_key: str, oai_model: str):
@@ -1104,7 +1245,11 @@ def _run_agent_worker(state: SessionState):
     _last_fact_at = 0.0
     _last_invited: str | None = None    # 直近に声をかけた相手（連続回避）
     _last_agent_reconnect_at = 0.0
-    # --- shadow Controller（Phase1）: 並走して採否判断だけをログする ---
+    # --- 採否Controller（Phase2）: 固定優先順位に代わり最終採否を担当する ---
+    # 物理タイミング（floor/barge-in）と fact fast lane は維持しつつ、
+    # 「どの候補を今採るか／黙るか」を Controller が一元裁定する。
+    _controller = FacilitationController()
+    # review ログ用に、採否の経緯（採択/抑制/latency）を引き続き記録する。
     _shadow = _ShadowControllerRunner()
     _recent_interventions: collections.deque[InterventionLogEntry] = (
         collections.deque(maxlen=10))
@@ -1202,19 +1347,42 @@ def _run_agent_worker(state: SessionState):
             if agent.mode != "conversation":
                 with state.topics_lock:
                     _bargein_topics = list(state.topics) if state.topics else None
-            decision = _select_barge_in_decision(
-                pending=_pending,
-                agent=agent,
-                state=state,
-                now=_now,
-                last_fact_at=_last_fact_at,
-                last_intervention_at=_last_intervention_at,
-                silence_elapsed=_silence_elapsed,
-                partner_busy=_partner_busy,
-                in_echo_window=bool(agent.in_echo_window),
-                cooldown=_cooldown,
-                diag_tick=_diag_tick,
-            )
+            try:
+                decision, _ctrl_barge, _barge_cands = _controller_barge_in_decision(
+                    _controller,
+                    pending=_pending,
+                    agent=agent,
+                    state=state,
+                    now=_now,
+                    last_fact_at=_last_fact_at,
+                    last_intervention_at=_last_intervention_at,
+                    silence_elapsed=_silence_elapsed,
+                    partner_busy=_partner_busy,
+                    in_echo_window=bool(agent.in_echo_window),
+                    cooldown=_cooldown,
+                    recent_interventions=list(_recent_interventions),
+                    silence_summarize=_silence_summarize,
+                    stall_breaker=_stall_breaker,
+                    last_invited=_last_invited,
+                    epoch=state.agent_cursor,
+                )
+            except Exception as exc:
+                # 採否Controllerの想定外失敗時は、実績のある従来選択にfallback。
+                print(f"# [diag] controller barge-in fallback: {exc}", flush=True)
+                decision = _select_barge_in_decision(
+                    pending=_pending, agent=agent, state=state, now=_now,
+                    last_fact_at=_last_fact_at,
+                    last_intervention_at=_last_intervention_at,
+                    silence_elapsed=_silence_elapsed, partner_busy=_partner_busy,
+                    in_echo_window=bool(agent.in_echo_window), cooldown=_cooldown,
+                    diag_tick=_diag_tick)
+                _ctrl_barge = None
+            # 古い判断の破棄（§8.5）: 裁定後に新しい発話で世代がずれたら採らない。
+            if (decision.reason not in ("none", "hold")
+                    and _ctrl_barge is not None
+                    and _ctrl_barge.valid_for_epoch != state.agent_cursor):
+                print("# [trigger] skip: stale decision (epoch changed)", flush=True)
+                continue
             if decision.reason != "none":
                 if decision.reason == "fact" and decision.fact is not None:
                     _legacy = _legacy_decision_brief(
@@ -1358,19 +1526,38 @@ def _run_agent_worker(state: SessionState):
         # --- モード別トリガー判定 ---
         # （中断された介入のリトライは上のガードバイパス節に集約済み）
         _silence_elapsed = time.monotonic() - _last_utt_time[0]
-        normal_decision = _select_normal_trigger_decision(
-            pending=_pending,
-            agent=agent,
-            silence_elapsed=_silence_elapsed,
-            silence_summarize=_silence_summarize,
-            partner_present=partner is not None,
-            stall_breaker=_stall_breaker,
-            now=time.monotonic(),
-            last_stall_at=_last_stall_at,
-            last_intervention_at=_last_intervention_at,
-            cooldown=_cooldown,
-            last_invited=_last_invited,
-        )
+        try:
+            normal_decision, _ctrl_normal, _normal_cands = _controller_normal_decision(
+                _controller,
+                pending=_pending,
+                agent=agent,
+                now=time.monotonic(),
+                silence_elapsed=_silence_elapsed,
+                silence_summarize=_silence_summarize,
+                partner_present=partner is not None,
+                stall_breaker=_stall_breaker,
+                last_intervention_at=_last_intervention_at,
+                cooldown=_cooldown,
+                last_invited=_last_invited,
+                recent_interventions=list(_recent_interventions),
+                epoch=state.agent_cursor,
+            )
+        except Exception as exc:
+            print(f"# [diag] controller normal fallback: {exc}", flush=True)
+            normal_decision = _select_normal_trigger_decision(
+                pending=_pending, agent=agent, silence_elapsed=_silence_elapsed,
+                silence_summarize=_silence_summarize,
+                partner_present=partner is not None, stall_breaker=_stall_breaker,
+                now=time.monotonic(), last_stall_at=_last_stall_at,
+                last_intervention_at=_last_intervention_at, cooldown=_cooldown,
+                last_invited=_last_invited)
+            _ctrl_normal = None
+        # 古い判断の破棄（§8.5）。
+        if (normal_decision.reason not in ("none", "skip_invite")
+                and _ctrl_normal is not None
+                and _ctrl_normal.valid_for_epoch != state.agent_cursor):
+            print("# [trigger] skip: stale normal decision (epoch changed)", flush=True)
+            continue
         _normal_detail = normal_decision.detail
         if normal_decision.reason == "skip_invite":
             _normal_detail = f"{normal_decision.invite_target}さんへの連続声かけを抑制"
