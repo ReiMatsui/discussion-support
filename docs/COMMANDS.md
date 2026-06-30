@@ -138,6 +138,13 @@ uv run python -m das.asr.live.replay transcripts/<日時>.turns.jsonl \
 レビューUIでは、delivery欠落・発火理由なし発話・文脈欠落・長すぎる介入などを
 軽い品質フラグとして表示する。
 
+集計や後処理に回す場合はレビュー項目だけをJSONLで書き出せる:
+
+```bash
+uv run python -m das.asr.live.replay transcripts/<日時>.turns.jsonl \
+  --no-api --review-out transcripts/<日時>.intervention_review.jsonl
+```
+
 ---
 
 ## 3. AIファシリテータ付きモード（dasオーケストレータ）
