@@ -157,6 +157,7 @@ fetch("/api/replay").then((r) => r.json()).then((data) => {
         <span class="chip">合計: ${esc(reviewSummary.total ?? review.length)}</span>
         <span class="chip">発話済み: ${esc(reviewSummary.status_counts?.delivered ?? 0)}</span>
         <span class="chip">要確認: ${esc(reviewSummary.flagged_count ?? 0)}</span>
+        <span class="chip">10発話あたり: ${esc(reviewSummary.interventions_per_10_turns ?? "-")}</span>
       </div>` + review.map((r) => `<div class="review-item">
         <div><span class="kind">${esc(r.reason || "delivery")}</span>
           <span class="status">${esc(statusLabel(r.status))}</span></div>
@@ -367,6 +368,24 @@ def intervention_review_summary(items: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def intervention_review_run_summary(
+    items: list[dict[str, Any]],
+    *,
+    turn_count: int,
+) -> dict[str, Any]:
+    """Summarize a review with transcript-normalized metrics."""
+    summary = intervention_review_summary(items)
+    delivered = summary["status_counts"].get("delivered", 0)
+    denominator = max(turn_count, 1)
+    summary.update({
+        "turn_count": turn_count,
+        "interventions_per_10_turns": round(summary["total"] / denominator * 10, 3),
+        "delivered_per_10_turns": round(delivered / denominator * 10, 3),
+        "flagged_per_10_turns": round(summary["flagged_count"] / denominator * 10, 3),
+    })
+    return summary
+
+
 def _event(turn: dict, kind: str, detail: str, **extra) -> dict:
     return {
         "turn_id": turn.get("turn_id"),
@@ -533,7 +552,10 @@ def replay_snapshot(source: str | Path, turns: list[dict], events: list[dict],
         "events": events,
         "interventions": interventions,
         "intervention_review": review_items,
-        "intervention_review_summary": intervention_review_summary(review_items),
+        "intervention_review_summary": intervention_review_run_summary(
+            review_items,
+            turn_count=len(turns),
+        ),
     }
 
 

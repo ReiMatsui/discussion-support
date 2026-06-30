@@ -10,6 +10,7 @@ from das.asr.live.replay import (
     ReplayOptions,
     default_interventions_path,
     intervention_review_items,
+    intervention_review_run_summary,
     intervention_review_summary,
     load_interventions,
     load_turns,
@@ -160,6 +161,20 @@ def test_intervention_review_summary_counts_status_reasons_and_flags():
             "no_recent_context": 1,
         },
     }
+
+
+def test_intervention_review_run_summary_adds_normalized_metrics():
+    items = [
+        {"status": "delivered", "reason": "drift", "quality_flags": []},
+        {"status": "missing_delivery", "reason": "invite", "quality_flags": ["missing_delivery"]},
+    ]
+
+    summary = intervention_review_run_summary(items, turn_count=20)
+
+    assert summary["turn_count"] == 20
+    assert summary["interventions_per_10_turns"] == 1.0
+    assert summary["delivered_per_10_turns"] == 0.5
+    assert summary["flagged_per_10_turns"] == 0.5
 
 
 def test_run_replay_fact_candidate_without_api():
@@ -434,6 +449,8 @@ def test_replay_snapshot_for_ui():
     assert snap["interventions"] == interventions
     assert snap["intervention_review"][0]["event_id"] == "int-0001"
     assert snap["intervention_review_summary"]["total"] == 1
+    assert snap["intervention_review_summary"]["turn_count"] == 1
+    assert snap["intervention_review_summary"]["interventions_per_10_turns"] == 10.0
 
 
 def test_cli_help_has_serve_option():
