@@ -125,6 +125,8 @@ def test_bargein_decision_prefers_fact_before_retry():
         last_fact_at=0.0,
         last_intervention_at=0.0,
         silence_elapsed=10.0,
+        partner_busy=False,
+        in_echo_window=False,
         cooldown=0.0,
         diag_tick=1,
     )
@@ -148,6 +150,8 @@ def test_bargein_decision_holds_fact_until_short_silence():
         last_fact_at=0.0,
         last_intervention_at=0.0,
         silence_elapsed=0.1,
+        partner_busy=False,
+        in_echo_window=False,
         cooldown=0.0,
         diag_tick=1,
     )
@@ -195,6 +199,8 @@ def test_bargein_decision_skips_cooldown_drift_then_retries():
         last_fact_at=0.0,
         last_intervention_at=now,
         silence_elapsed=10.0,
+        partner_busy=False,
+        in_echo_window=False,
         cooldown=100.0,
         diag_tick=1,
     )
@@ -225,6 +231,30 @@ def test_normal_trigger_decision_prefers_count_before_invite():
     )
 
     assert decision.reason == "count"
+
+
+def test_count_trigger_waits_for_short_pause():
+    """発話数が十分でも、直後には割り込まず短い間を待つ."""
+    agent = FakeAgent()
+    agent._pending = [{"speaker": "人間", "text": str(i), "_count": True}
+                      for i in range(agent.trigger_n)]
+    pending = _PendingInterventions()
+
+    decision = _select_normal_trigger_decision(
+        pending=pending,
+        agent=agent,
+        silence_elapsed=0.1,
+        silence_summarize=18.0,
+        partner_present=False,
+        stall_breaker=False,
+        now=time.monotonic(),
+        last_stall_at=0.0,
+        last_intervention_at=0.0,
+        cooldown=0.0,
+        last_invited=None,
+    )
+
+    assert decision.reason == "none"
 
 
 def test_normal_trigger_decision_respects_controlled_silence():
@@ -261,12 +291,8 @@ def _run_worker_briefly(state, *, until, timeout=3.0) -> None:
     t.join(timeout=2.0)
 
 
-def test_retry_fires_even_while_partner_speaking():
-    """パートナー発話中でも、中断された介入はリトライされる（Bug 3集約後の核心挙動）.
-
-    旧実装ではパートナー発話ガードの continue により retry に到達せず、
-    会話中はリトライが永久に発火しなかった。
-    """
+def test_retry_waits_while_partner_speaking():
+    """中断された介入の再送も、パートナー発話中は待つ."""
     agent = FakeAgent()
     partner = FakePartner()
     partner.ai_speaking = True
@@ -275,9 +301,23 @@ def test_retry_fires_even_while_partner_speaking():
     }
     state = FakeState(agent, partner)
 
+    _run_worker_briefly(state, until=lambda: False, timeout=1.0)
+
+    assert agent.trigger_calls == []
+
+
+def test_retry_fires_after_pause():
+    """中断された介入は、発話の切れ目ができたら再送できる."""
+    agent = FakeAgent()
+    agent._pending_intervention = {
+        "delivered": "中断された指摘", "created_at": time.monotonic(), "attempts": 1,
+    }
+    state = FakeState(agent, None)
+    state._last_utt_time[0] = time.monotonic() - 10
+
     _run_worker_briefly(state, until=lambda: bool(agent.trigger_calls))
 
-    assert agent.trigger_calls, "パートナー発話中でも中断介入はリトライされるべき"
+    assert agent.trigger_calls
 
 
 def test_retry_waits_while_agent_busy():

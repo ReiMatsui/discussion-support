@@ -367,6 +367,9 @@ _FACTCHECK_MIN_CHARS = 8      # 短すぎる発話は事前除外
 _FACTCHECK_MAX_RETRIES = 2    # API/JSON一時失敗時の再試行上限（永久詰まり防止）
 _FACTCHECK_PENDING_TTL = 30.0 # キュー内の補正が古くなったら会話の自然さを優先して破棄
 
+# --- 介入タイミング ---
+_INTERVENTION_MIN_PAUSE = 1.2 # 自動介入は、参加者の発話が切れる短い間を待つ
+
 # --- デッドエア対策（介入不要後の沈黙ブレーカー） ---
 _STALL_SILENCE = 7.0          # 介入不要後この秒数沈黙したら一押し
 _STALL_COOLDOWN = 30.0        # 一押しの最小間隔（ループ防止）

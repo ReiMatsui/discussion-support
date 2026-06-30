@@ -41,6 +41,7 @@ from ._constants import (
     _FACTCHECK_PENDING_TTL,
     _INTERRUPT_MIN_CHARS,
     _INTERVENTION_COOLDOWN,
+    _INTERVENTION_MIN_PAUSE,
     _INVITE_CHECK_SEC,
     _INVITE_QUIET_RATIO,
     _INVITE_SILENCE,
@@ -230,6 +231,20 @@ class _NormalTriggerDecision:
     drift_reason: str | None = None
 
 
+def _floor_available_for_intervention(
+    *,
+    silence_elapsed: float,
+    partner_busy: bool,
+    in_echo_window: bool,
+) -> bool:
+    """参加者の会話を遮らず、介入が自然に入れる短い間があるか."""
+    return (
+        silence_elapsed >= _INTERVENTION_MIN_PAUSE
+        and not partner_busy
+        and not in_echo_window
+    )
+
+
 def _select_barge_in_decision(
     *,
     pending: _PendingInterventions,
@@ -239,10 +254,17 @@ def _select_barge_in_decision(
     last_fact_at: float,
     last_intervention_at: float,
     silence_elapsed: float,
+    partner_busy: bool,
+    in_echo_window: bool,
     cooldown: float,
     diag_tick: int,
 ) -> _BargeInDecision:
     """ガードを越えて差し込む介入を、優先順位順に1つだけ選ぶ."""
+    floor_available = _floor_available_for_intervention(
+        silence_elapsed=silence_elapsed,
+        partner_busy=partner_busy,
+        in_echo_window=in_echo_window,
+    )
     pending.drop_stale_facts(now=now)
     while pending.facts:
         pending_fact = pending.facts[0]
@@ -250,7 +272,7 @@ def _select_barge_in_decision(
         if not correction:
             pending.facts.popleft()
             continue
-        if silence_elapsed < _FACTCHECK_MIN_SILENCE:
+        if silence_elapsed < _FACTCHECK_MIN_SILENCE or not floor_available:
             if diag_tick % 4 == 0:
                 print("# [trigger] hold: 発話の切れ目待ちの事実補正", flush=True)
             return _BargeInDecision("hold")
@@ -270,6 +292,10 @@ def _select_barge_in_decision(
                     flush=True,
                 )
             return _BargeInDecision("hold")
+        if not floor_available:
+            if diag_tick % 4 == 0:
+                print("# [trigger] hold: 発話の切れ目待ちの脱線介入", flush=True)
+            return _BargeInDecision("hold")
         if now - last_intervention_at < cooldown:
             print("# [trigger] skip: クールダウン中の脱線介入", flush=True)
             pending.clear_drift()
@@ -277,6 +303,10 @@ def _select_barge_in_decision(
             return _BargeInDecision("drift", drift_reason=pending.drift_reason)
 
     if agent._pending_intervention is not None:
+        if not floor_available:
+            if diag_tick % 4 == 0:
+                print("# [trigger] hold: 発話の切れ目待ちの再送", flush=True)
+            return _BargeInDecision("hold")
         return _BargeInDecision("retry")
     return _BargeInDecision("none")
 
@@ -305,6 +335,8 @@ def _select_normal_trigger_decision(
     silence_thresh = (_AGENT_DEBATE_SILENCE if partner_present
                       else silence_summarize)
     if agent.pending_count >= agent.trigger_n:
+        if silence_elapsed < _INTERVENTION_MIN_PAUSE:
+            return _NormalTriggerDecision("none")
         return _NormalTriggerDecision(
             "count", f"{agent.pending_count}>={agent.trigger_n}発話")
     if (silence_thresh is not None
@@ -869,6 +901,8 @@ def _run_agent_worker(state: SessionState):
         # trigger()の呼び出しはこの _run_agent_worker に一元化されている（R2）。
         if not agent._responding and not agent.ai_speaking:
             _now = time.monotonic()
+            _partner_busy = bool(partner is not None
+                                 and (partner.ai_speaking or partner._responding))
             _bargein_topics = None
             if agent.mode != "conversation":
                 with state.topics_lock:
@@ -881,6 +915,8 @@ def _run_agent_worker(state: SessionState):
                 last_fact_at=_last_fact_at,
                 last_intervention_at=_last_intervention_at,
                 silence_elapsed=_now - _last_utt_time[0],
+                partner_busy=_partner_busy,
+                in_echo_window=bool(agent.in_echo_window),
                 cooldown=_cooldown,
                 diag_tick=_diag_tick,
             )
