@@ -18,7 +18,18 @@ from ._diarization import TimeSegment
 from ._ui import _print_line
 
 _VOICEPRINT_RELIABLE_KINDS = {"声紋一致", "補正", "自動登録", "合流"}
+_UNKNOWN_STT_SPEAKERS = {"", "none", "null", "unknown", "uu", UNSURE_SPEAKER}
 RecvStatus = Literal["ok", "finished", "disconnected"]
+
+
+def _is_unknown_stt_speaker(speaker) -> bool:
+    return str(speaker).strip().lower() in _UNKNOWN_STT_SPEAKERS
+
+
+def _stt_speaker_key(speaker) -> str:
+    if _is_unknown_stt_speaker(speaker):
+        return UNSURE_SPEAKER
+    return "#" + str(speaker)
 
 
 class RecvLoop:
@@ -61,6 +72,7 @@ class RecvLoop:
             self.cur_last_token_time = time.monotonic()
             return
         label = str(self.cur_speaker)
+        stt_speaker_unknown = _is_unknown_stt_speaker(self.cur_speaker)
         tracker = s.tracker
         agent = s.agent
         partner = s.partner
@@ -77,11 +89,18 @@ class RecvLoop:
                 wav = np.frombuffer(seg, dtype="<i2").astype(np.float32) / 32768.0
             else:
                 wav = np.zeros(0, dtype=np.float32)
-            # 登録は声ごとの累積文字数で判定するので、この発話の文字数を渡す
-            sp_id = tracker.classify(
-                wav, self.cur_speaker,
-                overlapped=self.overlaps_other(self.cur_ms, self.cur_end, label),
-                count=not _is_backchannel, chars=len(self.cur_text.strip()))
+            if stt_speaker_unknown:
+                sp_id = UNSURE_SPEAKER
+                d = None
+                rec_extra: dict[str, object] = {}
+            else:
+                # 登録は声ごとの累積文字数で判定するので、この発話の文字数を渡す
+                sp_id = tracker.classify(
+                    wav, self.cur_speaker,
+                    overlapped=self.overlaps_other(self.cur_ms, self.cur_end, label),
+                    count=not _is_backchannel, chars=len(self.cur_text.strip()))
+                d = tracker.last
+                rec_extra: dict[str, object] = {}
             # --- 声紋ベースのAIエコー除去 ---
             if (sp_id is not None
                     and sp_id.startswith("__") and sp_id.endswith("__")):
@@ -92,8 +111,6 @@ class RecvLoop:
                 self.cur_ms = None
                 self.cur_end = None
                 return
-            d = tracker.last
-            rec_extra: dict[str, object] = {}
             if d and d["kind"] == "補正":
                 note = (f"声紋でラベル{d['label']}の取り違えを修正"
                         f"（類似{d['sim']:.2f}、放置なら{s.disp_name(d['prev'])}の発言になっていた）")
@@ -116,7 +133,7 @@ class RecvLoop:
                 extra = f" 類似{d['sim']:.2f}({d['name']})" if "sim" in d else ""
                 _print_line(f"# vp判定[{d['kind']}]{extra}")
         else:
-            sp_id = "#" + str(self.cur_speaker)
+            sp_id = _stt_speaker_key(self.cur_speaker)
             rec_extra: dict[str, object] = {}
             d = None
         if (self.cur_ms is not None and self.cur_end is not None
@@ -151,7 +168,9 @@ class RecvLoop:
                         f"# diarization: {s.disp_name(sp_id)} ({resolved.speaker})"
                         f" conf={resolved.confidence:.2f} {resolved.reason}"
                     )
-            elif s.diarization_provider is not None and voiceprint_speaker is None:
+            elif (s.diarization_provider is not None
+                  and voiceprint_speaker is None
+                  and sp_id != UNSURE_SPEAKER):
                 rec_extra["stt_raw_speaker"] = resolved.speaker
                 sp_id = s.key_for_stt_fallback_speaker(resolved.speaker)
                 rec_extra["speaker_source"] = "stt_fallback"

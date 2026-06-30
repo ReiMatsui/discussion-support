@@ -6,6 +6,7 @@ from typing import Any, cast
 
 import click
 
+from das.asr.live._constants import UNSURE_SPEAKER
 from das.asr.live._diarization import (
     DiarizationEvent,
     SpeakerResolver,
@@ -346,6 +347,97 @@ def test_recv_loop_normalizes_stt_label_when_diarization_is_enabled_but_unresolv
         "speaker_reason": "diarization_no_confident_overlap_stt_fallback",
     }]
     assert state.disp_name(state.records[0]["speaker"]) == "参加者A"
+
+
+def test_recv_loop_missing_stt_speaker_becomes_unsure() -> None:
+    import datetime
+
+    class Args:
+        lang = "ja"
+        vp_debug = False
+
+    class Backend:
+        def parse_message(self, raw: dict[str, Any], lang: str) -> dict[str, Any]:
+            return raw
+
+    state = SessionState(  # type: ignore[no-untyped-call]
+        args=Args(),
+        started=datetime.datetime(2026, 1, 1),
+        out_path="/tmp/o.md",
+        html_path="/tmp/o.html",
+        diag_path="/tmp/o.diag",
+        turns_path="/tmp/o.turns",
+        wav_path="/tmp/o.wav",
+        serve=False,
+    )
+    state.save = lambda *a, **k: None  # type: ignore[method-assign]
+    loop = RecvLoop(state, Args(), Backend())  # type: ignore[arg-type]
+    loop.cur_speaker = None  # type: ignore[assignment]
+    loop.cur_text = "これは誰かの発話です"
+    loop.cur_ms = 1000
+    loop.cur_end = 3000
+
+    loop.flush()  # type: ignore[no-untyped-call]
+
+    assert state.records[0]["speaker"] == UNSURE_SPEAKER
+    assert "#None" not in state.anonymous_labels
+
+
+def test_recv_loop_missing_stt_speaker_not_used_as_diarization_fallback() -> None:
+    import datetime
+
+    class Args:
+        lang = "ja"
+        vp_debug = False
+
+    class Backend:
+        def parse_message(self, raw: dict[str, Any], lang: str) -> dict[str, Any]:
+            return raw
+
+    class Provider:
+        name = "fake"
+
+        def start(self) -> None:
+            pass
+
+        def send_audio(self, pcm16k: bytes) -> None:
+            pass
+
+        def drain_events(self) -> list[DiarizationEvent]:
+            return []
+
+        def active_events(self) -> list[DiarizationEvent]:
+            return []
+
+        def close(self) -> None:
+            pass
+
+    state = SessionState(  # type: ignore[no-untyped-call]
+        args=Args(),
+        started=datetime.datetime(2026, 1, 1),
+        out_path="/tmp/o.md",
+        html_path="/tmp/o.html",
+        diag_path="/tmp/o.diag",
+        turns_path="/tmp/o.turns",
+        wav_path="/tmp/o.wav",
+        serve=False,
+        diarization_provider=Provider(),
+    )
+    state.save = lambda *a, **k: None  # type: ignore[method-assign]
+    loop = RecvLoop(state, Args(), Backend())  # type: ignore[arg-type]
+    loop.cur_speaker = None  # type: ignore[assignment]
+    loop.cur_text = "これは誰かの発話です"
+    loop.cur_ms = 1000
+    loop.cur_end = 3000
+
+    loop.flush()  # type: ignore[no-untyped-call]
+
+    assert state.records == [{
+        "ms": 1000,
+        "end_ms": 3000,
+        "speaker": UNSURE_SPEAKER,
+        "text": "これは誰かの発話です",
+    }]
 
 
 def test_recv_loop_returns_disconnected_on_unexpected_ws_close() -> None:
