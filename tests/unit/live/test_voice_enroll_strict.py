@@ -128,6 +128,22 @@ def test_commit_merges_into_existing_person():
     assert not any(k.startswith("人物") for k in vp.profiles)
 
 
+def test_enroll_rejects_existing_different_profile_name():
+    """登録済みの別人名へリネームして、既存プロファイルを上書きしない."""
+    vp = _tracker()
+    yamashita = _unit(1, 0, 0)
+    tanaka = _unit(0, 1, 0)
+    vp.profiles = {"山下くん": yamashita, "人物1": tanaka}
+    vp._active_keys = {"山下くん", "人物1"}
+
+    assert vp.enroll("人物1", "山下くん") is None
+    assert vp.last["reason"] == "duplicate_name"
+
+    assert set(vp.profiles) == {"山下くん", "人物1"}
+    assert np.allclose(vp.profiles["山下くん"], yamashita)
+    assert np.allclose(vp.profiles["人物1"], tanaka)
+
+
 def test_expected_speaker_count_stops_new_anonymous_person():
     """想定話者数に達したら、新しい人物Nも暫定参加者も増やさない."""
     vp = _tracker()

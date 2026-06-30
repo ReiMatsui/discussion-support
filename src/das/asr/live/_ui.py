@@ -186,7 +186,12 @@ class _UIHandler:
                     if s.tracker is not None:
                         old = s.tracker.enroll(label, name)
                         if old is None:
-                            self._json(400, {"error": "この参加者の音声がまだ足りません"})
+                            reason = ((getattr(s.tracker, "last", None) or {})
+                                      .get("reason"))
+                            error = ("同じ名前の声紋が既に登録されています"
+                                     if reason == "duplicate_name"
+                                     else "この参加者の音声がまだ足りません")
+                            self._json(400, {"error": error})
                             return
                         s.rekey(old, name)
                         s.add_sys(None, f"「{name}」の声を登録（次回の会議から自動表示）")

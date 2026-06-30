@@ -465,20 +465,34 @@ class VoiceProfiles:
             return self._enroll(str(label), name)
 
     def _enroll(self, label: str, name: str) -> str | None:
+        name = str(name).strip()
+        if not name:
+            self._note("登録失敗", reason="empty_name")
+            return None
         if label in self.profiles:
+            if name in self.profiles and name != label:
+                self._note("登録失敗", label=label, name=name, reason="duplicate_name")
+                return None
             # 「人物1=名前」: 既存プロファイルのリネーム
             self.profiles[name] = self.profiles.pop(label)
             old = label
         else:
             cur = self.sp_map.get(label)
             if cur is not None and cur in self.profiles:
+                if name in self.profiles and name != cur:
+                    self._note("登録失敗", label=label, name=name, reason="duplicate_name")
+                    return None
                 # ラベルが（自動登録済みの）人物に対応済み → その人物に命名
                 self.profiles[name] = self.profiles.pop(cur)
                 old = cur
             else:
+                if name in self.profiles:
+                    self._note("登録失敗", label=label, name=name, reason="duplicate_name")
+                    return None
                 # ラベルの直近声紋から新規登録
                 embs = self.label_embs.get(label)
                 if not embs:
+                    self._note("登録失敗", label=label, name=name, reason="insufficient_audio")
                     return None
                 prof = np.mean(embs, axis=0)
                 self.profiles[name] = prof / np.linalg.norm(prof)

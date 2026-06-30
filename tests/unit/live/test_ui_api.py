@@ -68,6 +68,16 @@ class _FakeBackend:
     name = "soniox"
 
 
+class _DuplicateNameTracker(_FakeTracker):
+    def __init__(self):
+        super().__init__()
+        self.last = None
+
+    def enroll(self, label, name):
+        self.last = {"kind": "登録失敗", "reason": "duplicate_name"}
+        return None
+
+
 # --- session_mode -----------------------------------------------------------
 
 def test_session_mode_transcribe_when_no_agent():
@@ -204,6 +214,27 @@ def test_http_rename_without_tracker():
             out = json.loads(r.read())
         assert out.get("ok") is True
         assert s.names["#2"] == "田中"
+    finally:
+        httpd.shutdown()
+
+
+def test_http_rename_reports_duplicate_voice_profile_name():
+    s = _make_state()
+    s.tracker = _DuplicateNameTracker()
+    httpd, port = _serve(s)
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/rename",
+            data=json.dumps({"label": "人物1", "name": "田中"}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            urllib.request.urlopen(req)
+        except urllib.error.HTTPError as e:
+            out = json.loads(e.read())
+            assert e.code == 400
+        else:  # pragma: no cover
+            raise AssertionError("duplicate name should fail")
+        assert out["error"] == "同じ名前の声紋が既に登録されています"
     finally:
         httpd.shutdown()
 
