@@ -82,6 +82,7 @@ INDEX_HTML = """<!doctype html>
   .u.facil .who { color: var(--facil); }
   .u .badge { background: #fef3c7; color: #92400e; font-size: .68rem;
     border-radius: 5px; padding: .05em .4em; margin-left: .4em; }
+  .u .badge.low-confidence { background: #f3f4f6; color: #6b7280; }
   .vp-banner { margin: 0 0 .6rem; padding: .5rem .75rem; border-radius: 6px;
     font-size: .85rem; background: #fdecea; color: #8a1c12; border: 1px solid #f3b4ab; }
   .vp-banner.ok { background: #eef7ee; color: #2c6e2c; border-color: #bfe0bf; }
@@ -283,7 +284,10 @@ function renderTranscript(records, partial) {
     if (r.type === "sys") { parts.push(`<div class="sys">⚙ ${esc(r.text)}</div>`); continue; }
     const facil = r.speaker === "ファシリテーター";
     const color = facil ? "var(--facil)" : (r.unsure ? "var(--muted)" : (r.color || "#444"));
-    const badge = r.corrected ? '<span class="badge">声紋補正</span>' : "";
+    let badge = r.corrected ? '<span class="badge">声紋補正</span>' : "";
+    if (r.speaker_source === "stt_fallback") {
+      badge += '<span class="badge low-confidence">話者未確定</span>';
+    }
     const cls = "u" + (facil ? " facil" : "") + (r.bc ? " bc" : "") + (r.unsure ? " unsure" : "");
     parts.push(`<div class="${cls}">`
       + `<span class="ts">${fmtTs(r.ms)}</span>`
