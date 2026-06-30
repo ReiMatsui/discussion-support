@@ -356,6 +356,26 @@ def test_snapshot_unsure_and_backchannel_flags():
     assert all(sp["name"] != "未確定" for sp in snap["speakers"])
 
 
+def test_snapshot_exposes_speaker_attribution_metadata():
+    s = _make_state()
+    s.records = [{
+        "speaker": "@diar:1",
+        "text": "本題です",
+        "ms": 0,
+        "end_ms": 800,
+        "speaker_source": "stt_fallback",
+        "speaker_confidence": 0.0,
+        "speaker_reason": "diarization_no_confident_overlap_stt_fallback",
+    }]
+
+    rec = s.api_snapshot()["records"][0]
+
+    assert rec["speaker"] == "参加者A"
+    assert rec["speaker_source"] == "stt_fallback"
+    assert rec["speaker_confidence"] == 0.0
+    assert rec["speaker_reason"] == "diarization_no_confident_overlap_stt_fallback"
+
+
 def test_speakers_registration_targets():
     """登録対象は声紋確定済みで名前未登録の参加者のみ。暫定/命名済み/未確定/AIは対象外."""
     s = _make_state()

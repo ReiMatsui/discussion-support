@@ -386,6 +386,9 @@ class SessionState:
                         "corrected": r.get("vp") == "補正",
                         "bc": bool(r.get("bc")),
                         "unsure": str(r["speaker"]) == UNSURE_SPEAKER,
+                        "speaker_source": r.get("speaker_source"),
+                        "speaker_confidence": r.get("speaker_confidence"),
+                        "speaker_reason": r.get("speaker_reason"),
                     })
             speakers = []
             _seen: set[str] = set()
