@@ -152,6 +152,8 @@ uv run python -m das.asr.live.replay transcripts/<日時>.turns.jsonl \
   --no-api --review-summary-out transcripts/<日時>.intervention_review_summary.json
 ```
 
+集計JSONには、件数に加えて `interventions_per_10_turns` などの10発話あたり指標も入る。
+
 ---
 
 ## 3. AIファシリテータ付きモード（dasオーケストレータ）
