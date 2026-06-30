@@ -141,6 +141,46 @@ def test_api_snapshot_exposes_intervention_settings():
     }]
 
 
+def test_add_intervention_event_persists_jsonl(tmp_path):
+    s = SessionState(
+        args=object(), started=datetime.datetime(2026, 1, 1, 9, 0, 0),
+        out_path=str(tmp_path / "o.md"), html_path=str(tmp_path / "o.html"),
+        diag_path=str(tmp_path / "o.diag"), turns_path=str(tmp_path / "o.turns.jsonl"),
+        wav_path=str(tmp_path / "o.wav"),
+    )
+
+    s.add_intervention_event("drift", "雑談に逸脱")
+
+    path = tmp_path / "o.interventions.jsonl"
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    assert rows == [{
+        "time": rows[0]["time"],
+        "reason": "drift",
+        "detail": "雑談に逸脱",
+        "created_at": rows[0]["created_at"],
+        "meeting_started": "2026-01-01T09:00:00",
+    }]
+
+
+def test_reset_for_new_meeting_clears_ui_intervention_events(tmp_path):
+    s = SessionState(
+        args=object(), started=datetime.datetime(2026, 1, 1, 9, 0, 0),
+        out_path=str(tmp_path / "o.md"), html_path=str(tmp_path / "o.html"),
+        diag_path=str(tmp_path / "o.diag"), turns_path=str(tmp_path / "o.turns.jsonl"),
+        wav_path=str(tmp_path / "o.wav"),
+    )
+    s.open_wav()
+    old_interventions_path = s.interventions_path
+    s.add_intervention_event("count", "10>=10発話")
+
+    s.reset_for_new_meeting()
+
+    assert s.intervention_events == []
+    assert s.interventions_path != old_interventions_path
+    assert s.interventions_path.endswith(".interventions.jsonl")
+    assert (tmp_path / "o.interventions.jsonl").exists()
+
+
 def test_api_snapshot_exposes_stt_settings():
     s = _make_state()
     s.args = SimpleNamespace(model="stt-rt-v5", lang="ja")

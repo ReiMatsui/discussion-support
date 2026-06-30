@@ -58,6 +58,7 @@ class SessionState:
         self.html_path = html_path
         self.diag_path = diag_path
         self.turns_path = turns_path
+        self.interventions_path = self._interventions_path_for(turns_path)
         self.wav_path = wav_path
         self._serve = serve
 
@@ -154,6 +155,14 @@ class SessionState:
     # ------------------------------------------------------------------
     # 表示ヘルパー
     # ------------------------------------------------------------------
+    @staticmethod
+    def _interventions_path_for(turns_path: str) -> str:
+        if turns_path.endswith(".turns.jsonl"):
+            return turns_path[:-len(".turns.jsonl")] + ".interventions.jsonl"
+        if turns_path.endswith(".jsonl"):
+            return turns_path[:-len(".jsonl")] + ".interventions.jsonl"
+        return turns_path + ".interventions.jsonl"
+
     def disp_name(self, key) -> str:
         key = str(key)
         if key == UNSURE_SPEAKER:
@@ -548,6 +557,7 @@ class SessionState:
         self.html_path = base + ".html"
         self.diag_path = base + ".diag.jsonl"
         self.turns_path = base + ".turns.jsonl"
+        self.interventions_path = self._interventions_path_for(self.turns_path)
         self.wav_path = base + ".wav"
         self.open_wav()        # 新しい録音を開く（PCMバッファもリセットしSTTのmsと整合）
 
@@ -570,6 +580,7 @@ class SessionState:
         self.topic_cursor = 0
         self.drift_cursor = 0
         self.fact_cursor = 0
+        self.intervention_events = []
         self._last_utt_time[0] = time.monotonic()
         self._was_in_echo[0] = False
         for q in (self.drift_requests, self.invite_requests, self.factcheck_requests):
@@ -604,12 +615,19 @@ class SessionState:
 
     def add_intervention_event(self, reason: str, detail: str = "") -> None:
         """UIで確認するための介入理由ログを追加する."""
-        self.intervention_events.append({
-            "time": datetime.datetime.now().strftime("%H:%M:%S"),
+        now = datetime.datetime.now()
+        event = {
+            "time": now.strftime("%H:%M:%S"),
             "reason": reason,
             "detail": detail,
-        })
+        }
+        self.intervention_events.append(event)
         del self.intervention_events[:-20]
+        self.write_intervention_event({
+            **event,
+            "created_at": now.isoformat(timespec="seconds"),
+            "meeting_started": self.started.isoformat(timespec="seconds"),
+        })
         self.rev += 1
 
     def set_proactivity(self, name: str) -> dict:
@@ -927,6 +945,12 @@ class SessionState:
             with open(tmp, "w", encoding="utf-8") as f:
                 f.write("\n".join(lines) + ("\n" if lines else ""))
             os.replace(tmp, dst)
+
+    def write_intervention_event(self, event: dict, path=None):
+        """介入イベントを追記保存する."""
+        dst = path or self.interventions_path
+        with open(dst, "a", encoding="utf-8") as f:
+            f.write(json.dumps(event, ensure_ascii=False) + "\n")
 
     def save(self, live: bool = True):
         self.rev += 1  # 変更を通知（SSEの差分配信用, F2）
