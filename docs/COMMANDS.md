@@ -145,6 +145,13 @@ uv run python -m das.asr.live.replay transcripts/<日時>.turns.jsonl \
   --no-api --review-out transcripts/<日時>.intervention_review.jsonl
 ```
 
+集計だけ欲しい場合:
+
+```bash
+uv run python -m das.asr.live.replay transcripts/<日時>.turns.jsonl \
+  --no-api --review-summary-out transcripts/<日時>.intervention_review_summary.json
+```
+
 ---
 
 ## 3. AIファシリテータ付きモード（dasオーケストレータ）
