@@ -954,6 +954,21 @@ class SessionState:
         with open(dst, "a", encoding="utf-8") as f:
             f.write(json.dumps(event, ensure_ascii=False) + "\n")
 
+    def add_facilitator_delivery_event(self, text: str) -> None:
+        """実際に参加者へ届いたファシリテーター発話を介入ログへ残す."""
+        text = text.strip()
+        if not text or "介入不要" in text:
+            return
+        now = datetime.datetime.now()
+        self.write_intervention_event({
+            "type": "delivery",
+            "time": now.strftime("%H:%M:%S"),
+            "created_at": now.isoformat(timespec="seconds"),
+            "meeting_started": self.started.isoformat(timespec="seconds"),
+            "speaker": "ファシリテーター",
+            "text": text,
+        })
+
     def save(self, live: bool = True):
         self.rev += 1  # 変更を通知（SSEの差分配信用, F2）
         self.write_md()

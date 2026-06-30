@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from das.asr.live._constants import UNSURE_SPEAKER
 from das.asr.live._session_state import SessionState
 from das.asr.live._ui import _UIHandler
+from das.asr.live._workers import _on_agent_text_factory
 
 
 def _make_state():
@@ -181,6 +182,45 @@ def test_add_intervention_event_persists_metadata(tmp_path):
         "turn_count": 8,
         "recent_utterances": [{"speaker": "参加者A", "text": "意見です"}],
     }
+
+
+def test_facilitator_delivery_is_persisted_to_intervention_log(tmp_path):
+    s = SessionState(
+        args=object(), started=datetime.datetime(2026, 1, 1, 9, 0, 0),
+        out_path=str(tmp_path / "o.md"), html_path=str(tmp_path / "o.html"),
+        diag_path=str(tmp_path / "o.diag"), turns_path=str(tmp_path / "o.turns.jsonl"),
+        wav_path=str(tmp_path / "o.wav"),
+    )
+
+    _on_agent_text_factory(s)(" 本題に戻しましょう ")
+
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "o.interventions.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert rows == [{
+        "type": "delivery",
+        "time": rows[0]["time"],
+        "created_at": rows[0]["created_at"],
+        "meeting_started": "2026-01-01T09:00:00",
+        "speaker": "ファシリテーター",
+        "text": "本題に戻しましょう",
+    }]
+    assert s.records[-1]["text"] == "本題に戻しましょう"
+
+
+def test_noop_facilitator_text_is_not_persisted_as_delivery(tmp_path):
+    s = SessionState(
+        args=object(), started=datetime.datetime(2026, 1, 1, 9, 0, 0),
+        out_path=str(tmp_path / "o.md"), html_path=str(tmp_path / "o.html"),
+        diag_path=str(tmp_path / "o.diag"), turns_path=str(tmp_path / "o.turns.jsonl"),
+        wav_path=str(tmp_path / "o.wav"),
+    )
+
+    _on_agent_text_factory(s)("（介入不要）")
+
+    assert not (tmp_path / "o.interventions.jsonl").exists()
+    assert s.records[-1]["text"] == "（介入不要）"
 
 
 def test_reset_for_new_meeting_clears_ui_intervention_events(tmp_path):

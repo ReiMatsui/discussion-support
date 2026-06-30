@@ -611,14 +611,16 @@ def _on_agent_text_factory(state: SessionState):
     def _on_agent_text(text: str):
         from das.asr.live import ON_UTTERANCE
 
+        text = text.strip()
         with state.state_lock:
             state.records.append({"ms": None, "end_ms": None,
-                                  "speaker": AGENT_SPEAKER, "text": text.strip()})
+                                  "speaker": AGENT_SPEAKER, "text": text})
             state.color_of(AGENT_SPEAKER)
         if ON_UTTERANCE is not None:
             with contextlib.suppress(Exception):
-                ON_UTTERANCE("ファシリテーター", text.strip())
-        _print_line(f"\x1b[96m[ファシリテーター]\x1b[0m: {text.strip()}")
+                ON_UTTERANCE("ファシリテーター", text)
+        state.add_facilitator_delivery_event(text)
+        _print_line(f"\x1b[96m[ファシリテーター]\x1b[0m: {text}")
         state.save()
     return _on_agent_text
 
