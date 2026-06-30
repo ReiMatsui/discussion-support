@@ -436,6 +436,10 @@ def _build_candidates(
     agent,
     *,
     now: float,
+    silence_summarize: float | None = None,
+    partner_present: bool = False,
+    stall_breaker: bool = False,
+    last_invited: str | None = None,
 ) -> list[InterventionCandidate]:
     """保留中の介入要求を Controller 入力用の候補へ変換する（読み取り専用）.
 
@@ -496,7 +500,45 @@ def _build_candidates(
             interrupt_policy="wait_for_pause",
         ))
 
+    if mode == "conversation" and getattr(agent, "pending_count", 0) > 0:
+        cands.append(InterventionCandidate(
+            id="conversation",
+            kind="conversation",
+            brief=f"{agent.pending_count}発話が蓄積",
+            created_at=now,
+            interrupt_policy="wait_for_pause",
+        ))
+
+    silence_thresh = (_AGENT_DEBATE_SILENCE if partner_present
+                      else silence_summarize)
+    if (mode != "conversation"
+            and silence_thresh is not None
+            and getattr(agent, "pending_count", 0) > 0):
+        cands.append(InterventionCandidate(
+            id="silence",
+            kind="silence",
+            brief=f"沈黙要約候補（必要{float(silence_thresh):.1f}秒）",
+            created_at=now,
+            interrupt_policy="wait_for_pause",
+            payload={"pause_required": float(silence_thresh)},
+        ))
+
+    if (mode != "conversation"
+            and stall_breaker
+            and getattr(agent, "_last_noop_at", 0.0) > 0):
+        cands.append(InterventionCandidate(
+            id="stall",
+            kind="stall",
+            brief="介入不要後の沈黙ブレーカー候補",
+            created_at=float(getattr(agent, "_last_noop_at", now) or now),
+            interrupt_policy="wait_for_pause",
+            retryable=True,
+        ))
+
     if pending.invite:
+        invite_payload = {}
+        if pending.invite == last_invited:
+            invite_payload["same_as_last_invited"] = True
         cands.append(InterventionCandidate(
             id=f"invite-{pending.invite}",
             kind="invite",
@@ -504,6 +546,7 @@ def _build_candidates(
             target_speaker=str(pending.invite),
             created_at=now,
             interrupt_policy="wait_for_pause",
+            payload=invite_payload,
         ))
 
     return cands
@@ -520,6 +563,15 @@ def _candidate_brief(c: InterventionCandidate) -> dict:
     }
 
 
+def _legacy_decision_brief(reason: str, detail: str = "") -> dict:
+    """shadow比較用に、同一スナップショットの従来判断を最小dict化する."""
+    return {
+        "reason": reason,
+        "detail": detail,
+        "at": datetime.datetime.now().isoformat(timespec="seconds"),
+    }
+
+
 class _ShadowControllerRunner:
     """FacilitationController を shadow mode で並走させる（Phase1）.
 
@@ -532,6 +584,7 @@ class _ShadowControllerRunner:
     def __init__(self) -> None:
         self._controller = FacilitationController()
         self._last_fingerprint: tuple | None = None
+        self._warned_write_failure = False
 
     def evaluate(
         self,
@@ -544,11 +597,21 @@ class _ShadowControllerRunner:
         epoch: int,
         recent_interventions: list[InterventionLogEntry],
         legacy: dict | None,
+        silence_summarize: float | None = None,
+        partner_present: bool = False,
+        stall_breaker: bool = False,
+        last_invited: str | None = None,
     ) -> None:
         add_review = getattr(state, "add_intervention_review", None)
         if not callable(add_review):
             return  # review ログ非対応 → shadow を完全に no-op にする
-        candidates = _build_candidates(pending, agent, now=now)
+        candidates = _build_candidates(
+            pending, agent, now=now,
+            silence_summarize=silence_summarize,
+            partner_present=partner_present,
+            stall_breaker=stall_breaker,
+            last_invited=last_invited,
+        )
         t0 = time.perf_counter()
         decision = self._controller.arbitrate(FacilitationInput(
             candidates=tuple(candidates),
@@ -560,12 +623,16 @@ class _ShadowControllerRunner:
         latency_ms = round((time.perf_counter() - t0) * 1000, 3)
         fingerprint = (
             decision.candidate_id,
+            decision.reason,
             tuple(sorted(s["candidate_id"] for s in decision.suppressed)),
+            tuple(sorted((c.id, c.kind, c.brief) for c in candidates)),
+            (legacy or {}).get("reason"),
+            (legacy or {}).get("detail"),
         )
         if fingerprint == self._last_fingerprint:
             return  # 採否に変化なし → 記録しない
         self._last_fingerprint = fingerprint
-        with contextlib.suppress(Exception):
+        try:
             add_review({
                 "candidates": [_candidate_brief(c) for c in candidates],
                 "legacy_decision": legacy,
@@ -574,6 +641,10 @@ class _ShadowControllerRunner:
                 "latency_ms": latency_ms,
                 "epoch": epoch,
             })
+        except Exception as exc:
+            if not self._warned_write_failure:
+                self._warned_write_failure = True
+                print(f"# [diag] shadow review log failed: {exc}", flush=True)
 
 
 def _run_agenda_detector(state: SessionState, oai_key: str, oai_model: str):
@@ -1037,18 +1108,11 @@ def _run_agent_worker(state: SessionState):
     _shadow = _ShadowControllerRunner()
     _recent_interventions: collections.deque[InterventionLogEntry] = (
         collections.deque(maxlen=10))
-    _last_legacy_decision: dict | None = None
 
     def _note_legacy(at: float, kind: str, detail: str = "") -> None:
-        """実際に発火した従来の採否を shadow 比較用に記録する（挙動不変）."""
-        nonlocal _last_legacy_decision
+        """実際に発火した従来介入を cooldown 用の直近履歴に記録する."""
         _recent_interventions.append(
             InterventionLogEntry(at=at, kind=kind, brief=detail))
-        _last_legacy_decision = {
-            "reason": kind,
-            "detail": detail,
-            "at": datetime.datetime.now().isoformat(timespec="seconds"),
-        }
 
     while not state.stop.is_set():
         time.sleep(0.25)
@@ -1124,19 +1188,6 @@ def _run_agent_worker(state: SessionState):
         # busyでも取りこぼさないよう、キューは毎ループ必ずdrainして最新を保持する。
         _pending.drain(state, now=time.monotonic())
 
-        # --- shadow Controller（Phase1）: 採否判断だけを並走ログ（挙動不変） ---
-        _shadow_now = time.monotonic()
-        _shadow.evaluate(
-            state,
-            pending=_pending,
-            agent=agent,
-            now=_shadow_now,
-            silence_elapsed=_shadow_now - _last_utt_time[0],
-            epoch=state.agent_cursor,
-            recent_interventions=list(_recent_interventions),
-            legacy=_last_legacy_decision,
-        )
-
         # --- 最優先のバージイン（ガードバイパス）:
         # ①事実補正 ②脱線介入 ③中断介入のリトライ ---
         # agentがfree(応答中でなく発話中でもない)になった瞬間に、エコーウィンドウ・
@@ -1164,6 +1215,31 @@ def _run_agent_worker(state: SessionState):
                 cooldown=_cooldown,
                 diag_tick=_diag_tick,
             )
+            if decision.reason != "none":
+                if decision.reason == "fact" and decision.fact is not None:
+                    _legacy = _legacy_decision_brief(
+                        "fact", str(decision.fact.get("correction") or "").strip())
+                elif decision.reason == "drift" and decision.drift_reason is not None:
+                    _legacy = _legacy_decision_brief("drift", decision.drift_reason)
+                elif decision.reason == "retry":
+                    _legacy = _legacy_decision_brief(
+                        "retry", "中断された介入を再送")
+                else:
+                    _legacy = _legacy_decision_brief(decision.reason)
+                _shadow.evaluate(
+                    state,
+                    pending=_pending,
+                    agent=agent,
+                    now=_now,
+                    silence_elapsed=_silence_elapsed,
+                    epoch=state.agent_cursor,
+                    recent_interventions=list(_recent_interventions),
+                    legacy=_legacy,
+                    silence_summarize=_silence_summarize,
+                    partner_present=partner is not None,
+                    stall_breaker=_stall_breaker,
+                    last_invited=_last_invited,
+                )
             if decision.reason == "hold":
                 continue
             if decision.reason == "fact" and decision.fact is not None:
@@ -1228,10 +1304,40 @@ def _run_agent_worker(state: SessionState):
         # エコーウィンドウ中はtriggerしない
         if agent is not None and agent.in_echo_window:
             _was_in_echo[0] = True
+            _shadow_now = time.monotonic()
+            _shadow.evaluate(
+                state,
+                pending=_pending,
+                agent=agent,
+                now=_shadow_now,
+                silence_elapsed=_shadow_now - _last_utt_time[0],
+                epoch=state.agent_cursor,
+                recent_interventions=list(_recent_interventions),
+                legacy=_legacy_decision_brief("hold", "echo_window"),
+                silence_summarize=_silence_summarize,
+                partner_present=partner is not None,
+                stall_breaker=_stall_breaker,
+                last_invited=_last_invited,
+            )
             continue
         # Partnerが発話中はtriggerしない
         if partner is not None and (partner.ai_speaking or partner._responding):
             _was_in_echo[0] = True
+            _shadow_now = time.monotonic()
+            _shadow.evaluate(
+                state,
+                pending=_pending,
+                agent=agent,
+                now=_shadow_now,
+                silence_elapsed=_shadow_now - _last_utt_time[0],
+                epoch=state.agent_cursor,
+                recent_interventions=list(_recent_interventions),
+                legacy=_legacy_decision_brief("hold", "partner_busy"),
+                silence_summarize=_silence_summarize,
+                partner_present=partner is not None,
+                stall_breaker=_stall_breaker,
+                last_invited=_last_invited,
+            )
             continue
         # --- フロア返却 ---
         if _was_in_echo[0]:
@@ -1263,6 +1369,23 @@ def _run_agent_worker(state: SessionState):
             last_stall_at=_last_stall_at,
             last_intervention_at=_last_intervention_at,
             cooldown=_cooldown,
+            last_invited=_last_invited,
+        )
+        _normal_detail = normal_decision.detail
+        if normal_decision.reason == "skip_invite":
+            _normal_detail = f"{normal_decision.invite_target}さんへの連続声かけを抑制"
+        _shadow.evaluate(
+            state,
+            pending=_pending,
+            agent=agent,
+            now=time.monotonic(),
+            silence_elapsed=_silence_elapsed,
+            epoch=state.agent_cursor,
+            recent_interventions=list(_recent_interventions),
+            legacy=_legacy_decision_brief(normal_decision.reason, _normal_detail),
+            silence_summarize=_silence_summarize,
+            partner_present=partner is not None,
+            stall_breaker=_stall_breaker,
             last_invited=_last_invited,
         )
         if normal_decision.reason == "conversation":

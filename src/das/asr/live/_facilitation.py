@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from ._constants import (
+    _AGENT_CONV_SILENCE,
     _FACTCHECK_COOLDOWN,
     _FACTCHECK_PENDING_TTL,
     _INTERVENTION_COOLDOWN,
@@ -154,7 +155,7 @@ _KIND_POLICY: dict[str, _KindPolicy] = {
     "summarize": _KindPolicy(5, _STALL_SILENCE, _STALL_COOLDOWN, 2000, "low"),
     "stall":    _KindPolicy(5, _STALL_SILENCE, _STALL_COOLDOWN, 2000, "low"),
     "invite":   _KindPolicy(6, _INVITE_SILENCE, _INTERVENTION_COOLDOWN, 2000, "wait_for_pause"),
-    "conversation": _KindPolicy(7, 0.0, 0.0, 2000, "low"),
+    "conversation": _KindPolicy(7, _AGENT_CONV_SILENCE, 0.0, 2000, "low"),
 }
 _DEFAULT_POLICY = _KindPolicy(9, 1.0, _INTERVENTION_COOLDOWN, 2000, "low")
 
@@ -219,15 +220,18 @@ class FacilitationController:
         # 期限切れ（§3.1 expires_at）
         if cand.expires_at and inp.now > cand.expires_at:
             return False, "期限切れ（鮮度を失った）"
+        if cand.payload.get("same_as_last_invited"):
+            return False, "直前と同じ参加者への連続声かけ"
         # 同種クールダウン（§3.3）
         if policy.cooldown > 0:
             last = self._last_same_kind(cand.kind, inp.recent_interventions)
             if last is not None and inp.now - last < policy.cooldown:
                 return False, f"直前に同種介入済み（cooldown {policy.cooldown:.0f}s）"
         # floor / 間待ち（§4）。barge-in許可種別は pause を無視できる。
+        pause_required = float(cand.payload.get("pause_required", policy.pause))
         if (cand.interrupt_policy != "allow_barge_in"
-                and inp.silence_elapsed < policy.pause):
-            return False, f"発話の切れ目待ち（必要 {policy.pause:.1f}s）"
+                and inp.silence_elapsed < pause_required):
+            return False, f"発話の切れ目待ち（必要 {pause_required:.1f}s）"
         return True, ""
 
     @staticmethod

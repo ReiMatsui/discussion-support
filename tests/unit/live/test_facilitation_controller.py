@@ -158,6 +158,25 @@ def test_build_candidates_count_when_threshold_reached():
     assert any(c.kind == "count" for c in cands)
 
 
+def test_build_candidates_includes_conversation_silence_and_stall():
+    now = time.monotonic()
+    pend = _PendingInterventions()
+
+    conversation = _build_candidates(
+        pend, _FakeAgent(mode="conversation", pending_count=1), now=now)
+    assert any(c.kind == "conversation" for c in conversation)
+
+    silence = _build_candidates(
+        pend, _FakeAgent(pending_count=1), now=now, silence_summarize=3.0)
+    assert any(c.kind == "silence" and c.payload["pause_required"] == 3.0
+               for c in silence)
+
+    agent = _FakeAgent(pending_count=1)
+    agent._last_noop_at = now - 10
+    stall = _build_candidates(pend, agent, now=now, stall_breaker=True)
+    assert any(c.kind == "stall" for c in stall)
+
+
 def test_build_candidates_retry_from_pending_intervention():
     now = time.monotonic()
     pend = _PendingInterventions()
@@ -224,8 +243,14 @@ def test_shadow_runner_logs_decision_and_dedupes():
     assert "latency_ms" in rec
     assert rec["candidates"][0]["kind"] == "drift"
 
-    # 同じ採否が続く → 記録しない（ログ洪水を避ける）
+    # Controller採否が同じでも legacy が変われば比較上意味があるので記録する
     runner.evaluate(state, pending=pend, agent=agent, now=now,
                     silence_elapsed=5.0, epoch=2, recent_interventions=[],
                     legacy=None)
-    assert len(state.reviews) == 2
+    assert len(state.reviews) == 3
+
+    # 完全に同じ比較状態なら記録しない（ログ洪水を避ける）
+    runner.evaluate(state, pending=pend, agent=agent, now=now,
+                    silence_elapsed=5.0, epoch=3, recent_interventions=[],
+                    legacy=None)
+    assert len(state.reviews) == 3
