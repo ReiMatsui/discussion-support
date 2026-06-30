@@ -196,7 +196,6 @@ def test_fact_candidate_gate_is_only_a_thin_exclusion_filter():
         "2乗が出てきました",
         "さっきは6回ほどかかりました",
         "最初の10個の発話ぐらいから",
-        "式典は普通にやりました",
         "まず対象Aを1個置きます",
     ]
     negatives = [
@@ -214,6 +213,8 @@ def test_fact_candidate_gate_is_only_a_thin_exclusion_filter():
         "優先順位を決めましょう",
         "ランキングについて話しましょう",
         "対象Aは上位かもしれません",
+        "式典は普通にやりました",
+        "理解率は通常50%前後ですよ。25%は最低ラインです。それ以上下げるのはお客様の失礼です。",
     ]
 
     assert [_looks_like_fact_claim(t) for t in positives] == [True] * len(positives)
@@ -221,20 +222,27 @@ def test_fact_candidate_gate_is_only_a_thin_exclusion_filter():
 
 
 def test_fact_candidate_gate_does_not_require_fact_pattern_keywords():
-    """助詞や既知カテゴリに依存せず、断定発話はLLMに渡す."""
+    """事実アンカーがある断定発話だけをLLMに渡す."""
     from das.asr.live._workers import _looks_like_fact_claim
 
-    texts = [
+    positives = [
         "事物Aの高さは200メートルです",
         "対象Aを世界一高い山です",
         "時代Aの次は時代Bです",
         "国Aは地域Bに属しています",
         "対象Aは世界で2番目に人口が多いです",
         "人物Aは大会Bのランキング1位です",
+    ]
+    negatives = [
         "これは未知カテゴリの断定文です",
+        "完全に意識を失った。",
+        "これで準備は整った。",
+        "では、私はこれで。",
+        "理解率は通常50%前後ですよ。25%は最低ラインです。",
     ]
 
-    assert [_looks_like_fact_claim(t) for t in texts] == [True] * len(texts)
+    assert [_looks_like_fact_claim(t) for t in positives] == [True] * len(positives)
+    assert [_looks_like_fact_claim(t) for t in negatives] == [False] * len(negatives)
 
 
 def test_fact_candidate_gate_ignores_low_value_utterances():
@@ -251,6 +259,12 @@ def test_fact_candidate_gate_ignores_low_value_utterances():
         "計算方法の話です",
         "都市Aはきれいです",
         "人物Aはいい人です",
+        "跳ね返った弾丸が私を背後から襲い、コンクリートの壁では本来絨毯はめり込むはずだ。",
+        "そう、弾丸は何にでも跳弾できるように設計したんだ。",
+        "手の中に極小の銃を持ってんだ。ビビ弾以下の弾だが凶悪だぜ。",
+        "その弾丸は奴をめがけて襲いかかる。",
+        "お釣りだ、受け取っとけ。",
+        "理解率は通常50%前後ですよ。25%は最低ラインです。それ以上下げるのはお客様の失礼です。",
     ]
 
     for text in texts:
@@ -282,6 +296,20 @@ def test_check_fact_correction_suppresses_low_confidence(monkeypatch):
 
     assert bootstrap.check_fact_correction(
         [{"speaker": "A", "text": "たぶんそうだった気がします"}], "key", "m"
+    ) == {"should_correct": False}
+
+
+def test_check_fact_correction_suppresses_style_advice(monkeypatch):
+    import das.asr.live._bootstrap as bootstrap
+    monkeypatch.setattr(bootstrap, "_post_chat_json",
+                        lambda *a, **k: {"should_correct": True,
+                                         "confidence": "high",
+                                         "claim": "弾丸は襲いかかる",
+                                         "correction": "弾丸は意思を持たないので、「飛んでいく」と表現するほうが正確です。",
+                                         "reason": "表現の正確さ"})
+
+    assert bootstrap.check_fact_correction(
+        [{"speaker": "A", "text": "その弾丸は奴をめがけて襲いかかる。"}], "key", "m"
     ) == {"should_correct": False}
 
 

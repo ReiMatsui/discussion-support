@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime
 import json
 import os
+import re
 import threading
 import time
 from dataclasses import dataclass
@@ -196,6 +197,12 @@ _FACT_SCHEMA = {
     "required": ["should_correct", "confidence", "claim", "correction", "reason"],
     "additionalProperties": False,
 }
+
+_FACT_STYLE_ADVICE_RE = re.compile(
+    r"(表現|言い方|言い換え|言い換える|語彙|文体|演出|比喩|"
+    r"と表現|といった表現|と言うほう|と言った方|と言ったほう|"
+    r"した方が|する方が|しておくと|誤解しにくい|正確です)"
+)
 
 
 def _build_chat_params(model: str, prompt: str, *, max_out: int,
@@ -392,6 +399,8 @@ def check_fact_correction(utterances: list[dict], api_key: str, model: str) -> d
         return {"should_correct": False}
     correction = str(result.get("correction") or "").strip()
     if not correction:
+        return {"should_correct": False}
+    if _FACT_STYLE_ADVICE_RE.search(correction):
         return {"should_correct": False}
     result["correction"] = correction
     return result

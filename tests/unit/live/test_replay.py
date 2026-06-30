@@ -188,6 +188,29 @@ def test_run_replay_fact_candidate_without_api():
     assert events[0]["turn_id"] == 1
 
 
+def test_run_replay_fact_candidate_ignores_creative_expression_advice():
+    turns = [
+        {
+            "turn_id": 1,
+            "speaker": "A",
+            "text": "跳ね返った弾丸が私を背後から襲い、コンクリートの壁では本来絨毯はめり込むはずだ。",
+            "ms": 0,
+        },
+        {"turn_id": 2, "speaker": "A", "text": "その弾丸は奴をめがけて襲いかかる。", "ms": 1000},
+        {"turn_id": 3, "speaker": "B", "text": "手の中に極小の銃を持ってんだ。ビビ弾以下の弾だが凶悪だぜ。", "ms": 2000},
+        {
+            "turn_id": 4,
+            "speaker": "A",
+            "text": "理解率は通常50%前後ですよ。25%は最低ラインです。それ以上下げるのはお客様の失礼です。",
+            "ms": 3000,
+        },
+    ]
+
+    events = run_replay(turns, ReplayOptions(no_api=True, checks={"fact"}))
+
+    assert events == []
+
+
 def test_run_replay_fact_with_mock_checker():
     turns = [
         {"turn_id": 1, "speaker": "A", "text": "進め方の話です", "ms": 0, "end_ms": 1000},

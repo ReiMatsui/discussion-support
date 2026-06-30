@@ -79,13 +79,25 @@ _FACT_META_TALK_RE = re.compile(
     r"(話しましょう|確認しましょう|決めましょう|考えましょう|進めましょう|"
     r"について話|の話です|という話|話題|論点|議題|雑談)"
 )
+_FACT_CREATIVE_EXPRESSION_RE = re.compile(
+    r"(奴|襲い|跳弾|跳ね返った弾丸|二丁拳銃|拳銃|銃|弾丸|弾切れ|"
+    r"極小の銃|ビビ弾|凶悪だぜ|踊れ|見抜いていた|お釣りだ|"
+    r"受け取っとけ|間合い)"
+)
+_FACT_STRONG_ANCHOR_RE = re.compile(
+    r"([=＋+\-*/÷]|cm|m|km|kg|g|メートル|キロ|円|ドル|回|個|勝|日付|"
+    r"計算式|数式|の式|式は|値|定義|単位|制度|上限|下限|分子|分母|2乗|二乗|"
+    r"首都|所属|出身|作者|CEO|国|地域|地方|都道府県|東北|関東|中部|"
+    r"山|湖|川|島|時代|順序|ランキング|順位|トップ|番目)"
+)
 
 
 def _looks_like_fact_claim(text: str) -> bool:
-    """LLMに渡す前の薄い除外フィルタ。
+    """LLMに渡す前の保守的な候補フィルタ。
 
-    明確な誤りかどうかはLLMに任せる。ここでは相槌・質問・曖昧表現・
-    好みなど、訂正対象になりにくい発話だけを落とす。
+    明確な誤りかどうかはLLMに任せる。ただし会議を止めないため、
+    相槌・質問・曖昧表現・好み・創作表現に加えて、外部確認に向く
+    事実アンカーが薄い発話は落とす。
     """
     s = (text or "").strip()
     if len(s) < _FACTCHECK_MIN_CHARS:
@@ -107,7 +119,11 @@ def _looks_like_fact_claim(text: str) -> bool:
         return False
     if _FACT_PREFERENCE_RE.search(s):
         return False
-    return not _FACT_META_TALK_RE.search(s)
+    if _FACT_CREATIVE_EXPRESSION_RE.search(s):
+        return False
+    if _FACT_META_TALK_RE.search(s):
+        return False
+    return bool(_FACT_STRONG_ANCHOR_RE.search(s))
 
 
 def _intervention_event_metadata(state: SessionState, *, recent_limit: int = 5) -> dict:
@@ -457,8 +473,9 @@ def _run_drift_checker(state: SessionState, oai_key: str, oai_model: str):
 def _run_fact_checker(state: SessionState, oai_key: str, oai_model: str):
     """明確な事実誤りだけを短く補正する要求を積む.
 
-    脱線や発話量とは別ルートにする。ローカルでは明らかに不要な発話だけを落とし、
-    明確な誤りかどうかはLLMに任せる。採用するのは high confidence の訂正だけ。
+    脱線や発話量とは別ルートにする。ローカルでは会議を妨げやすい
+    低価値候補を保守的に落とし、明確な誤りかどうかはLLMに任せる。
+    採用するのは high confidence の訂正だけ。
     """
     from das.asr.live._bootstrap import check_fact_correction as _check_fact
 
