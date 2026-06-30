@@ -9,6 +9,11 @@ from collections.abc import Iterable
 
 # 1人あたりの公平シェア比 = 1/人数。これを下回る度合いで「静か」を測る。
 _DEFAULT_WINDOW_MS = 300_000  # 直近5分
+_PARTICIPATION_SHARE_LABELS = {
+    "time_share": "発話時間",
+    "char_share": "発話文字数",
+    "turn_share": "発話回数",
+}
 
 
 def participation_stats(records: list[dict], *,
@@ -68,3 +73,29 @@ def participation_stats(records: list[dict], *,
         d["turn_share"] = (d["turns"] / total_turns) if total_turns > 0 else 0.0
         d["char_share"] = (d["chars"] / total_chars) if total_chars > 0 else 0.0
     return stats
+
+
+def participation_share_key(stats: dict[str, dict]) -> str:
+    """声かけ判断で使う参加シェア指標を返す.
+
+    STTやリプレイ入力によっては ms/end_ms が欠けるため、時間情報が全くない
+    場合は文字数、文字数もない場合は発話回数を自然な代替指標として使う。
+    """
+    if any(d.get("talk_ms", 0.0) > 0 for d in stats.values()):
+        return "time_share"
+    if any(d.get("chars", 0) > 0 for d in stats.values()):
+        return "char_share"
+    return "turn_share"
+
+
+def quietest_participation_share(stats: dict[str, dict]) -> float:
+    """声かけ事前ゲートで使う最小参加シェアを返す."""
+    if not stats:
+        return 1.0
+    key = participation_share_key(stats)
+    return min(float(d.get(key, 0.0)) for d in stats.values())
+
+
+def participation_share_label(key: str) -> str:
+    """参加シェア指標のプロンプト表示名を返す."""
+    return _PARTICIPATION_SHARE_LABELS.get(key, "発話時間")

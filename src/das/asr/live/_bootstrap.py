@@ -339,14 +339,18 @@ def check_participation(participation: list[dict], utterances: list[dict],
                         api_key: str, model: str) -> dict:
     """発話量の偏りから、誰かに声かけすべきか判定する（S4）.
 
-    participation: [{"speaker": 名前, "time_share": 0-1, "turns": int,
-                     "silent_sec": float}, ...]
+    participation: [{"speaker": 名前, "time_share": 0-1,
+                     "participation_share": 0-1 | optional,
+                     "participation_share_label": str | optional,
+                     "turns": int, "silent_sec": float}, ...]
     Returns: {"invite": bool, "speaker": 名前|None, "reason": str}
     """
     if not participation or not api_key:
         return {"invite": False}
     part_text = "\n".join(
-        f"- {p['speaker']}: 発話時間{p['time_share'] * 100:.0f}% / "
+        f"- {p['speaker']}: "
+        f"{p.get('participation_share_label', '発話時間')}"
+        f"{p.get('participation_share', p['time_share']) * 100:.0f}% / "
         f"{p['turns']}回 / 最終発言{p['silent_sec']:.0f}秒前"
         for p in participation)
     utt_text = "\n".join(f"- {u['speaker']}: {u['text']}" for u in utterances)

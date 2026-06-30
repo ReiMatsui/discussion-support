@@ -25,7 +25,12 @@ from das.asr.live._constants import (
     _INVITE_WARMUP,
     AGENT_SPEAKER,
 )
-from das.asr.live._participation import participation_stats
+from das.asr.live._participation import (
+    participation_share_key,
+    participation_share_label,
+    participation_stats,
+    quietest_participation_share,
+)
 from das.asr.live._speaker_policy import is_intervention_signal, reliable_human_records
 from das.asr.live._workers import _looks_like_fact_claim
 
@@ -262,12 +267,14 @@ def _run_invite_check(
     if len(stats) < 2:
         return None
     equal = 1.0 / len(stats)
-    if min(d["time_share"] for d in stats.values()) >= equal * _INVITE_QUIET_RATIO:
+    if quietest_participation_share(stats) >= equal * _INVITE_QUIET_RATIO:
         return None
     now_ms = max((d["last_end_ms"] for d in stats.values()
                   if d["last_end_ms"] is not None), default=None)
     participation = []
     valid_invite_targets: set[str] = set()
+    share_key = participation_share_key(stats)
+    share_label = participation_share_label(share_key)
     for speaker, data in stats.items():
         silent = ((now_ms - data["last_end_ms"]) / 1000.0
                   if now_ms is not None and data["last_end_ms"] is not None else 0.0)
@@ -275,6 +282,8 @@ def _run_invite_check(
         participation.append({
             "speaker": speaker,
             "time_share": data["time_share"],
+            "participation_share": data[share_key],
+            "participation_share_label": share_label,
             "turns": data["turns"],
             "silent_sec": silent,
         })

@@ -167,6 +167,55 @@ def test_run_replay_invite_rejects_unknown_target():
     assert events[-1]["detail"] == "C"
 
 
+def test_run_replay_invite_skips_balanced_text_without_timestamps():
+    turns = [
+        {"turn_id": i + 1, "speaker": "A" if i % 2 == 0 else "B", "text": "同じ長さ"}
+        for i in range(_INVITE_WARMUP)
+    ]
+    calls = []
+
+    def fake_invite(_participation, _utts, _key, _model):
+        calls.append(1)
+        return {"invite": True, "speaker": "B", "reason": "静か"}
+
+    events = run_replay(
+        turns,
+        ReplayOptions(api_key="key", checks={"invite"}),
+        check_participation=fake_invite,
+    )
+
+    assert calls == []
+    assert events == []
+
+
+def test_run_replay_invite_uses_char_share_without_timestamps():
+    turns = [
+        {
+            "turn_id": i + 1,
+            "speaker": "A" if i < _INVITE_WARMUP - 1 else "B",
+            "text": "長い発言です" if i < _INVITE_WARMUP - 1 else "短",
+        }
+        for i in range(_INVITE_WARMUP)
+    ]
+    seen = []
+
+    def fake_invite(participation, _utts, _key, _model):
+        seen.extend(participation)
+        return {"invite": True, "speaker": "B", "reason": "静か"}
+
+    events = run_replay(
+        turns,
+        ReplayOptions(api_key="key", checks={"invite"}),
+        check_participation=fake_invite,
+    )
+
+    target = next(p for p in seen if p["speaker"] == "B")
+    assert target["time_share"] == 0.0
+    assert target["participation_share_label"] == "発話文字数"
+    assert target["participation_share"] < 0.25
+    assert events[-1]["type"] == "invite"
+
+
 def test_cli_no_api_outputs_fact_candidate(tmp_path):
     p = tmp_path / "sample.turns.jsonl"
     _write_turns(p, [

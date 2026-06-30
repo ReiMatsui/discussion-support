@@ -49,7 +49,12 @@ from ._constants import (
     AGENT_SPEAKER,
     SR,
 )
-from ._participation import participation_stats
+from ._participation import (
+    participation_share_key,
+    participation_share_label,
+    participation_stats,
+    quietest_participation_share,
+)
 from ._speaker_policy import (
     intervention_records,
     intervention_speaker_name,
@@ -539,13 +544,15 @@ def _run_participation_checker(state: SessionState, oai_key: str, oai_model: str
             continue  # 信頼できる参加者が2人未満なら声かけの意味がない
         # 事前ゲート: 公平シェアの_INVITE_QUIET_RATIO未満の人がいる時だけLLMを呼ぶ
         equal = 1.0 / len(stats)
-        if min(d["time_share"] for d in stats.values()) >= equal * _INVITE_QUIET_RATIO:
+        if quietest_participation_share(stats) >= equal * _INVITE_QUIET_RATIO:
             continue
         _last_check = time.monotonic()
         now_ms = max((d["last_end_ms"] for d in stats.values()
                       if d["last_end_ms"] is not None), default=None)
         participation = []
         valid_invite_targets: set[str] = set()
+        share_key = participation_share_key(stats)
+        share_label = participation_share_label(share_key)
         for sp, d in stats.items():
             silent = ((now_ms - d["last_end_ms"]) / 1000.0
                       if now_ms is not None and d["last_end_ms"] is not None else 0.0)
@@ -553,6 +560,8 @@ def _run_participation_checker(state: SessionState, oai_key: str, oai_model: str
             valid_invite_targets.add(speaker_name)
             participation.append({"speaker": speaker_name,
                                   "time_share": d["time_share"],
+                                  "participation_share": d[share_key],
+                                  "participation_share_label": share_label,
                                   "turns": d["turns"], "silent_sec": silent})
         window = talk_rs[-_DRIFT_CHECK_WINDOW:]
         utts = [{"speaker": intervention_speaker_name(state, r), "text": r["text"]}

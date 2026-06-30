@@ -1,7 +1,11 @@
 """参加度メトリクス（S2）のユニットテスト."""
 from __future__ import annotations
 
-from das.asr.live._participation import participation_stats
+from das.asr.live._participation import (
+    participation_share_key,
+    participation_stats,
+    quietest_participation_share,
+)
 
 
 def test_empty_records():
@@ -67,3 +71,25 @@ def test_missing_timestamps_counts_turns_only():
     assert s["話者1"]["talk_ms"] == 0.0
     assert s["話者1"]["turn_share"] == 1.0
     assert s["話者1"]["time_share"] == 0.0  # 時間情報なし → 0
+
+
+def test_quietest_share_uses_chars_when_timestamps_are_missing():
+    records = [
+        {"speaker": "話者1", "text": "同じ長さ", "ms": None, "end_ms": None},
+        {"speaker": "話者2", "text": "同じ長さ", "ms": None, "end_ms": None},
+    ]
+
+    s = participation_stats(records)
+
+    assert s["話者1"]["time_share"] == 0.0
+    assert participation_share_key(s) == "char_share"
+    assert quietest_participation_share(s) == 0.5
+
+
+def test_quietest_share_falls_back_to_turns_when_chars_are_missing():
+    stats = {
+        "話者1": {"talk_ms": 0.0, "chars": 0, "turn_share": 0.25},
+        "話者2": {"talk_ms": 0.0, "chars": 0, "turn_share": 0.75},
+    }
+
+    assert quietest_participation_share(stats) == 0.25
