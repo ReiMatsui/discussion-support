@@ -125,6 +125,13 @@ const statusLabel = (s) => ({
   missing_delivery: "発話未確認",
   orphan_delivery: "発火理由なし",
 }[s] || s);
+const flagLabel = (s) => ({
+  missing_delivery: "発話なし",
+  orphan_delivery: "理由なし発話",
+  no_recent_context: "文脈なし",
+  drift_without_topic: "議題なし脱線",
+  long_delivery: "長い介入",
+}[s] || s);
 fetch("/api/replay").then((r) => r.json()).then((data) => {
   const events = data.events || [];
   const review = data.intervention_review || [];
@@ -150,6 +157,9 @@ fetch("/api/replay").then((r) => r.json()).then((data) => {
           <span class="status">${esc(statusLabel(r.status))}</span></div>
         ${r.detail ? `<div class="detail">${esc(r.detail)}</div>` : ""}
         ${r.delivery_text ? `<div class="delivery">${esc(r.delivery_text)}</div>` : ""}
+        ${r.quality_flags?.length ? `<div class="chips">${
+          r.quality_flags.map((f) => `<span class="chip">${esc(flagLabel(f))}</span>`).join("")
+        }</div>` : ""}
         <div class="context">turns: ${esc(r.turn_count ?? "-")}
           ${r.topics?.length ? ` / 論点: ${esc(r.topics.map((t) => t.topic).join(", "))}` : ""}</div>
         ${r.recent_utterances?.length ? `<div class="quote">${
@@ -237,6 +247,27 @@ def load_interventions(path: str | Path | None) -> list[dict[str, Any]]:
     return events
 
 
+def _intervention_quality_flags(
+    *,
+    status: str,
+    reason: str,
+    delivery_text: str,
+    metadata: dict[str, Any],
+) -> list[str]:
+    flags: list[str] = []
+    if status == "missing_delivery":
+        flags.append("missing_delivery")
+    if status == "orphan_delivery":
+        flags.append("orphan_delivery")
+    if not metadata.get("recent_utterances"):
+        flags.append("no_recent_context")
+    if reason == "drift" and not metadata.get("topics"):
+        flags.append("drift_without_topic")
+    if len(delivery_text) > 80:
+        flags.append("long_delivery")
+    return flags
+
+
 def intervention_review_items(interventions: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Pair trigger and delivery records for human review."""
     triggers = {
@@ -259,20 +290,30 @@ def intervention_review_items(interventions: list[dict[str, Any]]) -> list[dict[
     for event_id, trigger in triggers.items():
         delivery = deliveries_by_trigger.get(event_id, [None])[0]
         metadata = trigger.get("metadata") if isinstance(trigger.get("metadata"), dict) else {}
+        reason = str(trigger.get("reason") or "")
+        delivery_text = str(delivery.get("text", "") if delivery else "")
+        status = "delivered" if delivery else "missing_delivery"
         items.append({
             "event_id": event_id,
-            "status": "delivered" if delivery else "missing_delivery",
-            "reason": trigger.get("reason", ""),
+            "status": status,
+            "reason": reason,
             "detail": trigger.get("detail", ""),
             "created_at": trigger.get("created_at"),
             "turn_count": metadata.get("turn_count"),
             "recent_utterances": metadata.get("recent_utterances", []),
             "topics": metadata.get("topics", []),
-            "delivery_text": delivery.get("text", "") if delivery else "",
+            "delivery_text": delivery_text,
+            "quality_flags": _intervention_quality_flags(
+                status=status,
+                reason=reason,
+                delivery_text=delivery_text,
+                metadata=metadata,
+            ),
             "trigger": trigger,
             "delivery": delivery,
         })
     for delivery in orphans:
+        delivery_text = str(delivery.get("text", ""))
         items.append({
             "event_id": None,
             "status": "orphan_delivery",
@@ -282,7 +323,13 @@ def intervention_review_items(interventions: list[dict[str, Any]]) -> list[dict[
             "turn_count": None,
             "recent_utterances": [],
             "topics": [],
-            "delivery_text": delivery.get("text", ""),
+            "delivery_text": delivery_text,
+            "quality_flags": _intervention_quality_flags(
+                status="orphan_delivery",
+                reason="",
+                delivery_text=delivery_text,
+                metadata={},
+            ),
             "trigger": None,
             "delivery": delivery,
         })

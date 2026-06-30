@@ -86,6 +86,7 @@ def test_intervention_review_items_pair_trigger_and_delivery(tmp_path):
         "recent_utterances": [{"speaker": "A", "text": "話"}],
         "topics": [{"topic": "AI導入", "speaker": "議題"}],
         "delivery_text": "本題に戻しましょう",
+        "quality_flags": [],
         "trigger": load_interventions(path)[0],
         "delivery": load_interventions(path)[1],
     }]
@@ -102,6 +103,7 @@ def test_intervention_review_items_marks_missing_delivery():
 
     assert items[0]["status"] == "missing_delivery"
     assert items[0]["delivery_text"] == ""
+    assert items[0]["quality_flags"] == ["missing_delivery", "no_recent_context"]
 
 
 def test_intervention_review_items_marks_orphan_delivery():
@@ -113,6 +115,26 @@ def test_intervention_review_items_marks_orphan_delivery():
 
     assert items[0]["status"] == "orphan_delivery"
     assert items[0]["delivery_text"] == "本題に戻しましょう"
+    assert items[0]["quality_flags"] == ["orphan_delivery", "no_recent_context"]
+
+
+def test_intervention_review_items_flags_long_delivery_and_drift_without_topic():
+    items = intervention_review_items([
+        {
+            "event_id": "int-0001",
+            "type": "trigger",
+            "reason": "drift",
+            "detail": "雑談",
+            "metadata": {"recent_utterances": [{"speaker": "A", "text": "話"}]},
+        },
+        {
+            "type": "delivery",
+            "trigger_event_id": "int-0001",
+            "text": "長い介入です。" * 20,
+        },
+    ])
+
+    assert items[0]["quality_flags"] == ["drift_without_topic", "long_delivery"]
 
 
 def test_run_replay_fact_candidate_without_api():
