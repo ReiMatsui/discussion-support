@@ -209,6 +209,22 @@ def test_trigger_with_fact_correction(agent):
     assert agent._responding is True
 
 
+def test_interrupted_fact_correction_is_not_saved_for_retry(agent):
+    """事実補正は、参加者に遮られたら再送せず流す."""
+    agent.trigger(fact_correction={
+        "claim": "指標Xの計算式は分母を分子で割る",
+        "correction": "指標Xは分子を分母で割ります。",
+        "reason": "式が逆",
+    })
+    agent.ai_speaking = True
+    agent._responding = False
+    agent._ai_text_buf = "指標Xは分子を分母で割ります。"
+
+    agent.interrupt()
+
+    assert agent._pending_intervention is None
+
+
 # ---------------------------------------------------------------------------
 # interrupt() と介入内容の保存
 # ---------------------------------------------------------------------------

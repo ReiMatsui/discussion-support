@@ -42,10 +42,11 @@ class FakeAgent:
         self.feeds.append((speaker, text))
 
     def trigger(self, *, topics=None, drift_reason=None, invite_target=None,
-                fact_correction=None) -> None:
+                fact_correction=None, retry_intervention=None) -> None:
         self.trigger_calls.append({"topics": topics, "drift_reason": drift_reason,
                                    "invite_target": invite_target,
-                                   "fact_correction": fact_correction})
+                                   "fact_correction": fact_correction,
+                                   "retry_intervention": retry_intervention})
         # 実エージェントの挙動を模倣: トリガーで介入と保留発話を消費
         self._pending_intervention = None
         self._pending.clear()
@@ -402,6 +403,7 @@ def test_fact_request_triggers_before_drift():
     assert agent.trigger_calls
     assert agent.trigger_calls[0]["fact_correction"]["correction"].startswith("指標Xは")
     assert agent.trigger_calls[0]["drift_reason"] is None
+    assert agent.trigger_calls[0]["retry_intervention"] is False
     assert state.intervention_events[0]["reason"] == "fact"
 
 

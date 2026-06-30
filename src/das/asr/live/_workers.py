@@ -884,7 +884,8 @@ def _run_agent_worker(state: SessionState):
                 print(f"# [trigger] fact: {correction}", flush=True)
                 _log_intervention_event(state, "fact", correction)
                 agent.trigger(topics=_bargein_topics,
-                              fact_correction=decision.fact)
+                              fact_correction=decision.fact,
+                              retry_intervention=False)
                 _pending.facts.popleft()
                 _last_fact_at = time.monotonic()
                 _last_intervention_at = _last_fact_at

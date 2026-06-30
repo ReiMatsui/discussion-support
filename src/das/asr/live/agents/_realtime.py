@@ -96,6 +96,7 @@ class RealtimeAgent(_RealtimeBase):
         self._preflight_chars = 3              # この文字数まで蓄積して判定
         # --- 介入内容の保存（割り込まれても内容を失わない） ---
         self._pending_intervention: dict | None = None  # 割り込みで中断された介入内容
+        self._active_intervention_retryable = True       # 現在の応答を中断時に再送するか
         self._INTERVENTION_TTL = 60.0                   # 保存した介入の有効期限（秒）
         self._INTERVENTION_MAX_RETRIES = 2              # 再試行上限
         # --- デッドエア対策: 「介入不要」と判断した時刻（Fix 10） ---
@@ -341,7 +342,8 @@ class RealtimeAgent(_RealtimeBase):
     def trigger(self, *, topics: list[dict] | None = None,
                 drift_reason: str | None = None,
                 invite_target: str | None = None,
-                fact_correction: dict | None = None):
+                fact_correction: dict | None = None,
+                retry_intervention: bool | None = None):
         """蓄積した発話をRealtimeAPIに送信し応答を要求.
 
         topics: 現在の論点一覧（_topic_workerが抽出したもの）。
@@ -353,11 +355,19 @@ class RealtimeAgent(_RealtimeBase):
                 _pendingが空でも送信し、その人に声をかける発話を促す。
         fact_correction: 高確信の事実誤り補正。設定されていると、
                 _pendingが空でも送信し、短い補足だけを促す。
+        retry_intervention: 割り込みで中断されたときに、発話内容を保存して
+                次の機会に再送してよいか。未指定なら、事実補正は再送せず、
+                それ以外の介入だけ再送候補にする。
         保存された介入内容（割り込みで中断された発言）がある場合、
         コンテキストに追加して再試行の機会を与える。
         """
         if not self._connected or not self.enabled or not self.ws:
             return
+        active_retryable = (
+            bool(retry_intervention)
+            if retry_intervention is not None
+            else fact_correction is None
+        )
         # --- _responding を test-and-set でアトミックに確保（Bug 4） ---
         # 複数スレッドからの同時triggerで二重にresponse.createが飛ぶのを防ぐ。
         # ここで確保した後に送信できなかった場合（送るものがない/送信例外）は、
@@ -453,6 +463,7 @@ class RealtimeAgent(_RealtimeBase):
             return
         # --- 送信成功（_responding は確保済みのまま維持） ---
         with self._state_lock:
+            self._active_intervention_retryable = active_retryable
             # 送信したスナップショット分だけ削除（送信中にfeedされた新発話は残す）
             del self._pending[:len(pending_snapshot)]
             # 消費した介入をクリア。送信中に新しい介入が入っていたら残す。
@@ -477,18 +488,22 @@ class RealtimeAgent(_RealtimeBase):
         delivered = self._ai_text_buf.strip()
         if delivered and self._CANCEL_MARKER not in delivered:
             with self._state_lock:
-                existing = self._pending_intervention
-                attempts = (existing["attempts"] if existing else 0) + 1
-                if attempts <= self._INTERVENTION_MAX_RETRIES:
-                    self._pending_intervention = {
-                        "delivered": delivered,
-                        "created_at": time.monotonic(),
-                        "attempts": attempts,
-                    }
-                    _msg = f"# AI Agent: 介入内容を保存（試行{attempts}回目、次の機会で再試行）"
-                else:
+                if not self._active_intervention_retryable:
                     self._pending_intervention = None
-                    _msg = "# AI Agent: 介入内容を破棄（再試行上限に達した）"
+                    _msg = "# AI Agent: 中断された介入を破棄（再送しない種別）"
+                else:
+                    existing = self._pending_intervention
+                    attempts = (existing["attempts"] if existing else 0) + 1
+                    if attempts <= self._INTERVENTION_MAX_RETRIES:
+                        self._pending_intervention = {
+                            "delivered": delivered,
+                            "created_at": time.monotonic(),
+                            "attempts": attempts,
+                        }
+                        _msg = f"# AI Agent: 介入内容を保存（試行{attempts}回目、次の機会で再試行）"
+                    else:
+                        self._pending_intervention = None
+                        _msg = "# AI Agent: 介入内容を破棄（再試行上限に達した）"
             print(_msg, flush=True)
         # --- Graceful yield: キュー内の音声を少しだけ残して自然に終了 ---
         # 24kHz 16bit PCM = 48000 bytes/sec → 300ms ≒ 14400 bytes
