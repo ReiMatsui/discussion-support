@@ -9,7 +9,7 @@ import urllib.request
 from http.server import ThreadingHTTPServer
 from types import SimpleNamespace
 
-from das.asr.live._constants import UNSURE_SPEAKER
+from das.asr.live._constants import AGENT_SPEAKER, UNSURE_SPEAKER
 from das.asr.live._session_state import SessionState
 from das.asr.live._ui import _UIHandler
 from das.asr.live._workers import _on_agent_text_factory
@@ -323,6 +323,47 @@ def test_participant_count_includes_named_human_speakers():
     ]
 
     assert s.constrain_human_speaker_key("#3") == UNSURE_SPEAKER
+
+
+def _locked_roster_state(names):
+    s = _make_state()
+    tr = _FakeTracker(auto=False)
+    tr.profiles = {n: 1 for n in names}
+    s.tracker = tr
+    return s
+
+
+def test_closed_roster_coerces_anonymous_keys_to_unsure():
+    """名簿確定中は、登録済みの人 or 未確定のみ。匿名キーは全て未確定に落とす."""
+    s = _locked_roster_state(["黒田", "としや", "松井"])
+
+    assert s.constrain_human_speaker_key("#1") == UNSURE_SPEAKER
+    assert s.constrain_human_speaker_key("@diar:2") == UNSURE_SPEAKER
+    assert s.constrain_human_speaker_key("人物1") == UNSURE_SPEAKER
+    # 登録済みの人・AI・未確定はそのまま
+    assert s.constrain_human_speaker_key("黒田") == "黒田"
+    assert s.constrain_human_speaker_key(UNSURE_SPEAKER) == UNSURE_SPEAKER
+    assert s.constrain_human_speaker_key(AGENT_SPEAKER) == AGENT_SPEAKER
+
+
+def test_closed_roster_ignores_participant_count_setting():
+    """名簿確定が優先。参加人数が未設定でも上限より大きくても、匿名は増やさない."""
+    s = _locked_roster_state(["黒田", "としや", "松井"])
+    # 参加人数未設定 → それでも closed roster では匿名を作らない
+    assert s.constrain_human_speaker_key("@diar:9") == UNSURE_SPEAKER
+    # 参加人数を大きく設定しても closed roster が優先
+    s.set_diarization_max_speakers(10)
+    assert s.constrain_human_speaker_key("#4") == UNSURE_SPEAKER
+
+
+def test_open_roster_still_allows_anonymous_within_cap():
+    """名簿未確定(auto=True)なら従来どおり匿名スロットを許容する（退行なし）."""
+    s = _make_state()
+    tr = _FakeTracker(auto=True)
+    s.tracker = tr
+    s.set_diarization_max_speakers(2)
+    assert s.constrain_human_speaker_key("#1") == "#1"
+    assert s.constrain_human_speaker_key("@diar:1") == "@diar:1"
 
 
 def test_http_rename_without_tracker():
