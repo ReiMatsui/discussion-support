@@ -1,8 +1,8 @@
-"""FacilitationController（shadow 採否）と shadow ランナーのユニットテスト.
+"""FacilitationController（採否）と採否レビュー記録のユニットテスト.
 
-Phase1 の不変条件:
+不変条件:
   - Controller は採否だけを行う（抽出・fact検査・文案生成をしない）。
-  - shadow ランナーは実際の発話採否を変えず、判断だけをログする。
+  - レビュー記録は採否の経緯（採択・抑制・latency）をログするだけ。
   - review ログ非対応の state では完全に no-op（既存挙動を壊さない）。
 """
 from __future__ import annotations
@@ -21,8 +21,8 @@ from das.asr.live._workers import (
     _build_candidates,
     _controller_barge_in_decision,
     _controller_normal_decision,
+    _InterventionReviewRecorder,
     _PendingInterventions,
-    _ShadowControllerRunner,
 )
 
 
@@ -175,12 +175,11 @@ def test_build_candidates_includes_conversation_and_silence():
 
 
 def test_build_candidates_never_includes_stall():
-    """Phase3: stall 候補は生成されない（「介入不要」履歴があっても）."""
+    """stall 候補は生成されない（Phase3 で廃止済みの概念）."""
     now = time.monotonic()
     pend = _PendingInterventions()
     agent = _FakeAgent(pending_count=1)
-    agent._last_noop_at = now - 10
-    cands = _build_candidates(pend, agent, now=now, stall_breaker=True)
+    cands = _build_candidates(pend, agent, now=now)
     assert all(c.kind != "stall" for c in cands)
 
 
@@ -195,7 +194,7 @@ def test_build_candidates_retry_from_pending_intervention():
 
 
 # ---------------------------------------------------------------------------
-# _ShadowControllerRunner（並走・挙動不変）
+# _InterventionReviewRecorder（並走・挙動不変）
 # ---------------------------------------------------------------------------
 
 class _ReviewState:
@@ -212,9 +211,9 @@ class _NoReviewState:
     """review ログ非対応の state（既存 FakeState 相当）."""
 
 
-def test_shadow_runner_noop_without_review_support():
+def test_review_recorder_noop_without_review_support():
     """review 非対応の state では完全に no-op（既存挙動を壊さない）."""
-    runner = _ShadowControllerRunner()
+    runner = _InterventionReviewRecorder()
     pend = _PendingInterventions()
     pend.drift_reason = "脱線"
     # 例外を投げず、何もしないこと（state にメソッドが無くてもOK）
@@ -223,8 +222,8 @@ def test_shadow_runner_noop_without_review_support():
                     recent_interventions=[], legacy=None)
 
 
-def test_shadow_runner_logs_decision_and_dedupes():
-    runner = _ShadowControllerRunner()
+def test_review_recorder_logs_decision_and_dedupes():
+    runner = _InterventionReviewRecorder()
     state = _ReviewState()
     pend = _PendingInterventions()
     agent = _FakeAgent()
@@ -368,7 +367,7 @@ def _barge(agent, pending, state, **kw):
         now=time.monotonic(), last_fact_at=0.0, last_intervention_at=0.0,
         silence_elapsed=10.0, partner_busy=False, in_echo_window=False,
         cooldown=25.0, recent_interventions=[], silence_summarize=18.0,
-        stall_breaker=False, last_invited=None, epoch=7)
+        last_invited=None, epoch=7)
     defaults.update(kw)
     return _controller_barge_in_decision(FacilitationController(), pending=pending,
                                          agent=agent, state=state, **defaults)
@@ -407,7 +406,7 @@ def test_barge_adapter_none_when_no_candidates():
 def _normal(agent, pending, **kw):
     defaults = dict(
         now=time.monotonic(), silence_elapsed=100.0, silence_summarize=18.0,
-        partner_present=False, stall_breaker=False, last_intervention_at=0.0,
+        partner_present=False, last_intervention_at=0.0,
         cooldown=0.0, last_invited=None, recent_interventions=[], epoch=7)
     defaults.update(kw)
     return _controller_normal_decision(FacilitationController(), pending=pending,
@@ -461,8 +460,8 @@ def test_barge_adapter_discards_drift_during_global_cooldown():
     assert pend.drift_reason is None
 
 
-def test_shadow_record_logs_supplied_controller_decision_without_reevaluation():
-    runner = _ShadowControllerRunner()
+def test_review_record_logs_supplied_controller_decision_without_reevaluation():
+    runner = _InterventionReviewRecorder()
     state = _ReviewState()
     now = time.monotonic()
     cand = InterventionCandidate(id="fact-1", kind="fact", brief="訂正",

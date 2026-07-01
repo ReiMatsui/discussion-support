@@ -375,7 +375,6 @@ function renderInterventionEvents(list) {
     silence: "沈黙",
     drift: "脱線",
     invite: "声かけ",
-    stall: "停滞",
     retry: "再送",
     conversation: "会話",
     interrupt: "中断",
