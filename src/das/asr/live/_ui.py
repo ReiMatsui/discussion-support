@@ -194,7 +194,8 @@ class _UIHandler:
                             self._json(400, {"error": error})
                             return
                         s.rekey(old, name)
-                        s.add_sys(None, f"「{name}」の声を登録（次回の会議から自動表示）")
+                        msg = f"「{name}」の声を登録しました（以後の新しい発話から照合）"
+                        s.add_sys(None, msg)
                         s.save()
                         _print_line(f"# {name} の声を登録しました（UIから）")
                     else:
@@ -245,17 +246,22 @@ class _UIHandler:
                     with s.buf_lock:
                         seg = bytes(s.pcm_buf[-nbytes:]) if nbytes else bytes(s.pcm_buf)
                     if len(seg) < SR * 2 * 2:   # 2秒未満
-                        self._json(400, {"error": "音声が足りません（もう少し話してから登録してください）"})
+                        self._json(400, {"error": "登録中は、その人が1人で5秒ほど話してください"})
                         return
                     wav = np.frombuffer(seg, dtype="<i2").astype(np.float32) / 32768.0
                     if not s.tracker.enroll_from_audio(name, wav):
                         self._json(400, {"error": "声紋の計算に失敗しました"})
                         return
-                    s.add_sys(None, f"「{name}」の声を事前登録しました（{len(seg) / (SR * 2):.0f}秒）")
+                    actual_seconds = round(len(seg) / (SR * 2), 1)
+                    msg = f"「{name}」の声を事前登録しました（以後の新しい発話から照合）"
+                    s.add_sys(None, msg)
                     s.save()
-                    _print_line(f"# {name} を事前登録（{len(seg) / (SR * 2):.0f}秒、UIから）")
+                    _print_line(f"# {name} を事前登録（{actual_seconds:.0f}秒、UIから）")
                     self._json(200, {"ok": True, "name": name,
-                                     "seconds": round(len(seg) / (SR * 2), 1)})
+                                     "seconds": actual_seconds,
+                                     "active": True,
+                                     "applies_from": "future_utterances",
+                                     "message": msg})
                 elif self.path == "/api/roster":
                     # 名簿の確定/解除: 確定すると自動登録オフ（登録済みだけと照合し増殖を止める）
                     length = int(self.headers.get("Content-Length", 0))

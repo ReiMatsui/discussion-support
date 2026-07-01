@@ -606,6 +606,9 @@ def test_http_enroll_from_buffer():
         with urllib.request.urlopen(req) as r:
             out = json.loads(r.read())
         assert out["ok"] is True and out["name"] == "黒田"
+        assert out["active"] is True
+        assert out["applies_from"] == "future_utterances"
+        assert "以後の新しい発話" in out["message"]
         assert s.tracker.enrolled and s.tracker.enrolled[0][0] == "黒田"
     finally:
         httpd.shutdown()

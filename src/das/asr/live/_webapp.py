@@ -187,11 +187,11 @@ INDEX_HTML = """<!doctype html>
     <div class="side">
       <div class="panel" id="enroll-panel" hidden>
         <h2>声の事前登録</h2>
-        <p class="enroll-hint">会議の前に、各人が順に20秒ほど一人で話して登録すると精度が上がります。</p>
+        <p class="enroll-hint">名前を入れて押したあと、表示中はその人だけが話してください。完了後すぐ、以後の新しい発話から反映されます。</p>
         <div id="roster" class="roster"></div>
         <div class="enroll-row">
           <input id="enroll-name" placeholder="名前">
-          <button class="btn" id="enroll-btn">20秒録音して登録</button>
+          <button class="btn" id="enroll-btn">20秒話して登録</button>
         </div>
         <div id="enroll-status" class="enroll-status"></div>
         <label class="roster-lock">
@@ -481,7 +481,10 @@ async function enrollPerson() {
       body: JSON.stringify({ name: name, seconds: secs }),
     });
     const d = await res.json();
-    if (res.ok) { st.textContent = `✓ ${esc(name)} を登録しました（${d.seconds}秒）`; $("enroll-name").value = ""; }
+    if (res.ok) {
+      st.textContent = d.message || `✓ ${esc(name)} を登録しました。以後の新しい発話から反映されます`;
+      $("enroll-name").value = "";
+    }
     else { st.textContent = "登録失敗: " + (d.error || ""); }
   } catch (e) { st.textContent = "登録に失敗しました"; }
   btn.disabled = false; enrolling = false;
