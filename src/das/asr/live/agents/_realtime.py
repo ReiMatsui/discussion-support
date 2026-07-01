@@ -99,6 +99,7 @@ class RealtimeAgent(_RealtimeBase):
         # --- 介入内容の保存（割り込まれても内容を失わない） ---
         self._pending_intervention: dict | None = None  # 割り込みで中断された介入内容
         self._active_intervention_retryable = True       # 現在の応答を中断時に再送するか
+        self._active_intervention_fallback = ""          # transcript前割り込み用の介入意図
         self._INTERVENTION_TTL = 60.0                   # 保存した介入の有効期限（秒）
         self._INTERVENTION_MAX_RETRIES = 2              # 再試行上限
 
@@ -206,6 +207,7 @@ class RealtimeAgent(_RealtimeBase):
         with self._state_lock:
             self._pending.clear()
             self._pending_intervention = None
+            self._active_intervention_fallback = ""
 
     # --- WebSocket受信 ---
 
@@ -262,6 +264,7 @@ class RealtimeAgent(_RealtimeBase):
             self._responding = False
             self._interrupted = False     # 次の応答に備えてリセット
             self._current_item_id = None
+            self._active_intervention_fallback = ""
             self._log_state("→IDLE (response.done)")
 
         elif etype == "error":
@@ -302,6 +305,28 @@ class RealtimeAgent(_RealtimeBase):
             "ファシリテーターとして必要な場合だけ短く介入してください。\n"
             f"{lines}"
         )
+
+    @staticmethod
+    def _retry_fallback_text(
+        *,
+        pending: list[dict],
+        drift_reason: str | None,
+        invite_target: str | None,
+        fact_correction: dict | None,
+        pending_intervention: dict | None,
+    ) -> str:
+        """transcript到着前に割り込まれた時のため、再送できる介入意図を残す."""
+        if fact_correction is not None:
+            return ""
+        if pending_intervention is not None:
+            return str(pending_intervention.get("delivered") or "").strip()
+        if drift_reason:
+            return f"脱線検出への短い介入: {drift_reason}"
+        if invite_target:
+            return f"{invite_target}さんに今の論点への意見を尋ねる短い声かけ"
+        if pending:
+            return "直近の参加者発話を踏まえた短い整理・確認"
+        return ""
 
     def trigger(self, *, topics: list[dict] | None = None,
                 drift_reason: str | None = None,
@@ -410,6 +435,13 @@ class RealtimeAgent(_RealtimeBase):
         if not conv:
             self._responding = False  # 送るものがない → 確保を解放（Bug 4）
             return  # 期限切れで破棄された場合など、送るものがない
+        retry_fallback = self._retry_fallback_text(
+            pending=pending_snapshot,
+            drift_reason=drift_reason,
+            invite_target=invite_target,
+            fact_correction=fact_correction,
+            pending_intervention=pi if include_pi else None,
+        )
         try:
             self.ws.send(json.dumps({
                 "type": "conversation.item.create",
@@ -428,6 +460,7 @@ class RealtimeAgent(_RealtimeBase):
         # --- 送信成功（_responding は確保済みのまま維持） ---
         with self._state_lock:
             self._active_intervention_retryable = active_retryable
+            self._active_intervention_fallback = retry_fallback
             # 送信したスナップショット分だけ削除（送信中にfeedされた新発話は残す）
             del self._pending[:len(pending_snapshot)]
             # 消費した介入をクリア。送信中に新しい介入が入っていたら残す。
@@ -450,7 +483,8 @@ class RealtimeAgent(_RealtimeBase):
         self._interrupted = True
         # --- 介入内容の保存: 割り込まれた内容を記憶（read-modify-writeを原子化, R1） ---
         delivered = self._ai_text_buf.strip()
-        if delivered:
+        retry_text = delivered or self._active_intervention_fallback.strip()
+        if retry_text:
             with self._state_lock:
                 if not self._active_intervention_retryable:
                     self._pending_intervention = None
@@ -460,11 +494,14 @@ class RealtimeAgent(_RealtimeBase):
                     attempts = (existing["attempts"] if existing else 0) + 1
                     if attempts <= self._INTERVENTION_MAX_RETRIES:
                         self._pending_intervention = {
-                            "delivered": delivered,
+                            "delivered": retry_text,
                             "created_at": time.monotonic(),
                             "attempts": attempts,
                         }
-                        _msg = f"# AI Agent: 介入内容を保存（試行{attempts}回目、次の機会で再試行）"
+                        if delivered:
+                            _msg = f"# AI Agent: 介入内容を保存（試行{attempts}回目、次の機会で再試行）"
+                        else:
+                            _msg = f"# AI Agent: 介入意図を保存（試行{attempts}回目、次の機会で再試行）"
                     else:
                         self._pending_intervention = None
                         _msg = "# AI Agent: 介入内容を破棄（再試行上限に達した）"

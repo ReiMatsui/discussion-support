@@ -244,6 +244,38 @@ def test_interrupt_saves_pending_intervention(agent):
     assert "conversation.item.truncate" in agent.ws.types()
 
 
+def test_interrupt_before_transcript_saves_retry_intent(agent):
+    """Phase3の即再生で transcript 到着前に遮られても、介入意図を再送候補に残す."""
+    agent.feed("人間", "ここまでの論点を一度整理したいです")
+    agent.trigger()
+    agent._handle({"type": "response.output_item.added", "item": {"id": "item-1"}})
+    agent._handle({"type": "response.output_audio.delta", "delta": make_chunk()})
+    agent._ai_text_buf = ""  # 音声だけ先に来て、転写はまだ届いていない
+
+    agent.interrupt()
+
+    pi = agent._pending_intervention
+    assert pi is not None
+    assert pi["delivered"] == "直近の参加者発話を踏まえた短い整理・確認"
+    assert pi["attempts"] == 1
+
+
+def test_interrupted_fact_before_transcript_is_not_saved_for_retry(agent):
+    """事実補正は transcript 前に遮られても再送しない（鮮度優先の方針を維持）."""
+    agent.trigger(fact_correction={
+        "claim": "指標Xの計算式は分母を分子で割る",
+        "correction": "指標Xは分子を分母で割ります。",
+        "reason": "式が逆",
+    })
+    agent._handle({"type": "response.output_item.added", "item": {"id": "item-1"}})
+    agent._handle({"type": "response.output_audio.delta", "delta": make_chunk()})
+    agent._ai_text_buf = ""
+
+    agent.interrupt()
+
+    assert agent._pending_intervention is None
+
+
 def test_interrupt_increments_attempts(agent):
     agent._pending_intervention = {"delivered": "前回", "created_at": 0.0, "attempts": 1}
     agent.ai_speaking = True
