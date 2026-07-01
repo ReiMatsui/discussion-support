@@ -85,7 +85,10 @@ _FACT_UNCERTAIN_RE = re.compile(
 )
 _FACT_PREFERENCE_RE = re.compile(
     r"(好き|嫌い|好み|苦手|うれしい|嬉しい|楽しい|面白い|つまらない|"
-    r"良い|いい|悪い|きれい|綺麗|かわいい|かっこいい|おいしい|美味しい)"
+    r"良い|いい|悪い|きれい|綺麗|かわいい|かっこいい|おいしい|美味しい|"
+    # 評価・主観（「XはYです」を通す前に、評価文を確実に落とすため強化）
+    r"良さそう|よさそう|良さげ|よさげ|悪そう|わるそう|うまそう|まずそう|"
+    r"微妙|最悪|素晴らしい|すばらしい|失礼|最低ライン)"
 )
 _FACT_META_TALK_RE = re.compile(
     r"(話しましょう|確認しましょう|決めましょう|考えましょう|進めましょう|"
@@ -102,14 +105,30 @@ _FACT_STRONG_ANCHOR_RE = re.compile(
     r"首都|所属|出身|作者|CEO|国|地域|地方|都道府県|東北|関東|中部|"
     r"山|湖|川|島|時代|順序|ランキング|順位|トップ|番目)"
 )
+# 含有・成分関係（食品成分など安定した一般事実。question/uncertain 等の
+# negative filter を通過したものだけがここに来る）。
+_FACT_CONTAINMENT_RE = re.compile(r"(含まれ|含む|含有|成分|主成分)")
+# 「XはYです / XはYではありません / XはYに属します / XはYで発生しました」等の
+# 断定文。負のフィルタ（好み・質問・曖昧・メタ・創作）を先に通したうえで拾う。
+_FACT_ASSERTION_RE = re.compile(
+    r".+は.+?(です|である|ではありません|ではない|じゃありません|"
+    r"に属し|に分類され|で発生し)"
+)
+# 指示語主語（これ/それ/あれは…）は外部照合に向かない自己言及・曖昧断定なので、
+# 断定ゲートからは除外する（強アンカー・含有ゲートには影響しない）。
+_FACT_DEICTIC_SUBJECT_RE = re.compile(
+    r"^[\s、。]*(これ|それ|あれ|こちら|そちら|あちら)(は|が|も)"
+)
 
 
 def _looks_like_fact_claim(text: str) -> bool:
-    """LLMに渡す前の保守的な候補フィルタ。
+    """LLMに渡す前の候補フィルタ（「明らかに判定不要なものを落とす」中心）。
 
-    明確な誤りかどうかはLLMに任せる。ただし会議を止めないため、
-    相槌・質問・曖昧表現・好み・創作表現に加えて、外部確認に向く
-    事実アンカーが薄い発話は落とす。
+    明確な誤りかどうかの最終判断は LLM（confidence==high のみ採用）に任せる。
+    前段は会議を止めないため、相槌・質問・曖昧表現・好み/評価・創作表現・メタ発話・
+    電話番号を確実に落とす。そのうえで、明確な事実断定らしいもの（強い事実アンカー・
+    含有/成分・断定文）は広めに LLM へ通す。「強いアンカー必須」ではなく
+    「明確な除外に該当しなければ、断定文なら通す」方針。
     """
     s = (text or "").strip()
     if len(s) < _FACTCHECK_MIN_CHARS:
@@ -123,6 +142,7 @@ def _looks_like_fact_claim(text: str) -> bool:
     )
     if uncertain_only:
         return False
+    # --- 明確に判定不要なものを落とす（negative filters） ---
     if _FACT_PHONE_NUMBER_RE.search(s):
         return False
     if _FACT_QUESTION_RE.search(s):
@@ -135,7 +155,13 @@ def _looks_like_fact_claim(text: str) -> bool:
         return False
     if _FACT_META_TALK_RE.search(s):
         return False
-    return bool(_FACT_STRONG_ANCHOR_RE.search(s))
+    # --- 事実断定らしいものを通す（positive gates。最終判断はLLM） ---
+    if _FACT_STRONG_ANCHOR_RE.search(s):
+        return True
+    if _FACT_CONTAINMENT_RE.search(s):
+        return True
+    return bool(_FACT_ASSERTION_RE.search(s)
+                and not _FACT_DEICTIC_SUBJECT_RE.match(s))
 
 
 def _intervention_event_metadata(
