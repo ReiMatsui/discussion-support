@@ -417,24 +417,26 @@ def test_agent_worker_reconnects_disconnected_enabled_agent():
     assert agent._connected is True
 
 
-def test_stall_breaker_fires_after_noop_silence():
-    """activeでは介入不要後に沈黙が続いたら、一押しをトリガーする."""
+def test_stall_breaker_no_longer_fires_after_noop_silence():
+    """Phase3: stall（介入不要後の一押し）は廃止。activeでも発火しない.
+
+    Speaker から「介入不要」判断を外したため、その履歴に依存する stall は
+    候補にもならない。発言が溜まっていなければ沈黙が続いても黙る。
+    """
     agent = FakeAgent()
-    agent._last_noop_at = time.monotonic()      # 直前に「介入不要」と判断
+    agent._last_noop_at = time.monotonic()      # 旧来の「介入不要」履歴があっても
     state = FakeState(agent, None)
     state.proactivity = {"silence_summarize": 8.0, "cooldown": 15.0,
                          "stall_breaker": True}
     state._last_utt_time[0] = time.monotonic() - 100  # 十分な沈黙を模擬
 
-    _run_worker_briefly(state, until=lambda: bool(agent.trigger_calls))
+    _run_worker_briefly(state, until=lambda: False, timeout=1.0)
 
-    assert agent.trigger_calls, "介入不要後の沈黙で一押しが入るべき"
-    assert "止まって" in (agent.trigger_calls[0]["drift_reason"] or "")
-    assert agent._last_noop_at == 0.0  # 発火後はマーカーを解除
+    assert agent.trigger_calls == [], "stall は廃止されたので一押しは入らない"
 
 
 def test_controlled_proactivity_no_stall_breaker_after_noop():
-    """controlledでは介入不要後の沈黙でも、黙る判断を尊重する."""
+    """controlledでは介入不要後の沈黙でも、黙る判断を尊重する（Phase3でも不変）."""
     agent = FakeAgent()
     agent._last_noop_at = time.monotonic()
     state = FakeState(agent, None)

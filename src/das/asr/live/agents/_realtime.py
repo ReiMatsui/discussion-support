@@ -39,9 +39,14 @@ class RealtimeAgent(_RealtimeBase):
     interrupt()時はresponse.cancel + conversation.item.truncateで
     AIの会話履歴を正確に保つ。
 
+    Speaker分離（Phase3）: 「喋るかどうか」は上流の FacilitationController が
+    決める。RealtimeAgent は trigger() で渡された採択済み候補を話すだけで、
+    自ら「介入不要」と判断してキャンセルする層は持たない。音声はテキスト確認を
+    待たず即再生する（介入不要応答が生成されない前提）。
+
     モード:
       off          = 無効
-      facilitator  = N発話 or 沈黙でトリガー、介入不要なら黙る
+      facilitator  = Controllerが採択した候補だけを話す（自分では黙る判断をしない）
       conversation = 毎発話でトリガー、必ず返答する
     """
 
@@ -75,6 +80,7 @@ class RealtimeAgent(_RealtimeBase):
         self._conn_error = ""              # 接続エラーメッセージ（UI表示用）
         self.on_ai_utterance = None        # callback(text: str) AI発話確定時
         self.on_speech_start = None        # callback() 音声生成開始時（即座に通知）
+        self._speech_started = False       # 現応答で on_speech_start を通知済みか
         self._playback_thread: threading.Thread | None = None
         # --- エコー防止 ---
         self._responding = False           # response生成中フラグ
@@ -90,46 +96,20 @@ class RealtimeAgent(_RealtimeBase):
         self._ai_voice_buf: list[np.ndarray] = []   # 16kHz float32 チャンク
         self._ai_voice_sec = 0.0                     # 蓄積秒数
         self._ai_voice_enrolled = False              # 登録済みフラグ
-        # --- プリフライトバッファ（「介入不要」音声漏れ防止） ---
-        self._preflight_buf: list[bytes] = []  # 再生前の音声チャンクバッファ
-        self._preflight_cleared = False        # テキスト確認OK → 再生開始済み
-        self._preflight_chars = 3              # この文字数まで蓄積して判定
         # --- 介入内容の保存（割り込まれても内容を失わない） ---
         self._pending_intervention: dict | None = None  # 割り込みで中断された介入内容
         self._active_intervention_retryable = True       # 現在の応答を中断時に再送するか
         self._INTERVENTION_TTL = 60.0                   # 保存した介入の有効期限（秒）
         self._INTERVENTION_MAX_RETRIES = 2              # 再試行上限
-        # --- デッドエア対策: 「介入不要」と判断した時刻（Fix 10） ---
-        self._last_noop_at = 0.0
 
     AI_VOICE_KEY = "__AI__"             # VoiceProfiles内のAI声紋キー（セッション限り）
     _LABEL = "AI Agent"                  # ログ用ラベル（基底クラス用）
-    _CANCEL_MARKER = "介入不要"          # この語が転写に現れたら応答をキャンセル
     # 良性エラー（実害なし）の判定用部分文字列。すべて小文字で比較する。
     _BENIGN_ERROR_SUBSTRINGS = (
         "no active response",
         "cancellation failed",
         "already has an active response",
     )
-
-    @staticmethod
-    def _is_cancel_prefix(buf: str) -> bool:
-        """buf がキャンセルマーカー「介入不要」に到達しうる前置きか.
-
-        モデルは介入不要時に「（介入不要）」とだけ返す。転写が1文字ずつ届く間、
-        先頭の空白・引用符・括弧を無視した中身がマーカーの prefix（途中まで一致）
-        である限り、まだ介入不要かどうか確定できない。この間は再生を保留する。
-
-        これにより、マーカー確定前にフラッシュして音声が漏れたり
-        on_speech_start でパートナーを誤って中断したりするのを防ぐ。
-        """
-        core = buf.strip().lstrip("（(「『\"' 　")
-        if core == "":
-            # まだ記号・括弧のみ → マーカー先頭の「（」かもしれない
-            return True
-        marker = RealtimeAgent._CANCEL_MARKER
-        # core が marker の途中まで一致（完全一致は in 判定側でキャンセル済み）
-        return marker.startswith(core) and core != marker
 
     @property
     def _prompt(self) -> str:
@@ -226,7 +206,6 @@ class RealtimeAgent(_RealtimeBase):
         with self._state_lock:
             self._pending.clear()
             self._pending_intervention = None
-        self._last_noop_at = 0.0
 
     # --- WebSocket受信 ---
 
@@ -239,13 +218,11 @@ class RealtimeAgent(_RealtimeBase):
             self._current_item_id = item.get("id")
             self._played_bytes = 0
             self._play_epoch += 1  # 応答世代を進める（Bug 6）
+            self._speech_started = False  # この応答の on_speech_start 未通知
             # 新応答の開始 → 前の中断状態(_interrupted)を解除する。
             # これにより _interrupted のリセットが response.done の到着に依存せず、
             # done取りこぼし時に次応答が無音になる固着を防ぐ（堅牢化）。
             self._interrupted = False
-            # プリフライトバッファをリセット（新応答の開始）
-            self._preflight_buf.clear()
-            self._preflight_cleared = False
 
         elif etype == "response.output_audio.delta":
             if self._interrupted:
@@ -253,36 +230,25 @@ class RealtimeAgent(_RealtimeBase):
             chunk = ev.get("delta", "")
             if chunk:
                 pcm = base64.b64decode(chunk)
-                if self._preflight_cleared:
-                    # テキスト確認済み → そのまま再生キューへ
-                    self._q_put(pcm)
-                else:
-                    # まだテキスト未確認 → バッファに溜める
-                    self._preflight_buf.append(pcm)
+                # Speaker分離（Phase3）: 採択済み候補を話すだけなので、テキスト確認を
+                # 待たずに即再生する。最初の音声で発話開始を通知（Partner停止用）。
+                if not self._speech_started:
+                    self._speech_started = True
+                    self._log_state("→SPEAKING (first audio)")
+                    if self.on_speech_start:
+                        with contextlib.suppress(Exception):
+                            self.on_speech_start()
+                self._q_put(pcm)
                 self.ai_speaking = True
 
         elif etype == "response.output_audio_transcript.delta":
             if not self._interrupted:
                 self._ai_text_buf += ev.get("delta", "")
-                # 「介入不要」を検出したら即座に応答をキャンセル
-                if self._CANCEL_MARKER in self._ai_text_buf:
-                    self._cancel_response()
-                # プリフライト判定: キャンセルマーカーのprefixでなくなった時点で再生開始。
-                # マーカー確定前にフラッシュしないため、介入不要応答の音声漏れを防ぐ。
-                elif (not self._preflight_cleared
-                      and not self._is_cancel_prefix(self._ai_text_buf)):
-                    self._flush_preflight()
 
         elif etype == "response.output_audio_transcript.done":
             transcript = ev.get("transcript", "") or self._ai_text_buf
             self._ai_text_buf = ""
-            # transcript.doneが来たのにまだプリフライト中なら確定フラッシュ
-            if not self._preflight_cleared and not self._interrupted:
-                if self._CANCEL_MARKER in (transcript or ""):
-                    self._cancel_response()
-                else:
-                    self._flush_preflight()
-            if transcript and self._CANCEL_MARKER not in transcript:
+            if transcript:
                 self._recent_ai_texts.append(transcript)
                 if not self._interrupted and self.on_ai_utterance:
                     self.on_ai_utterance(transcript)
@@ -296,8 +262,6 @@ class RealtimeAgent(_RealtimeBase):
             self._responding = False
             self._interrupted = False     # 次の応答に備えてリセット
             self._current_item_id = None
-            self._preflight_buf.clear()
-            self._preflight_cleared = False
             self._log_state("→IDLE (response.done)")
 
         elif etype == "error":
@@ -486,7 +450,7 @@ class RealtimeAgent(_RealtimeBase):
         self._interrupted = True
         # --- 介入内容の保存: 割り込まれた内容を記憶（read-modify-writeを原子化, R1） ---
         delivered = self._ai_text_buf.strip()
-        if delivered and self._CANCEL_MARKER not in delivered:
+        if delivered:
             with self._state_lock:
                 if not self._active_intervention_retryable:
                     self._pending_intervention = None
@@ -545,59 +509,6 @@ class RealtimeAgent(_RealtimeBase):
         self._current_item_id = None
         print("# AI Agent: 割り込み検出 — 応答を中断", flush=True)
         self._log_state("→INTERRUPTED (割り込み)")
-
-    def _flush_preflight(self):
-        """プリフライトバッファの音声を再生キューに一括フラッシュ.
-
-        注: ai_speakingはaudio.deltaで先にTrueになるため、
-        on_speech_startの発火条件にai_speakingを使ってはならない。
-        _preflight_clearedガードで重複呼び出しは既に防がれている。
-        """
-        if self._preflight_cleared:
-            return
-        self._preflight_cleared = True
-        self._log_state("→SPEAKING (preflightフラッシュ)")
-        # 音声再生開始を通知（Partner停止用）
-        if self.on_speech_start:
-            with contextlib.suppress(Exception):
-                self.on_speech_start()
-        for chunk in self._preflight_buf:
-            self._q_put(chunk)
-        self._preflight_buf.clear()
-
-    def _cancel_response(self):
-        """「介入不要」応答を静かにキャンセル。音声再生を止め、会話履歴から削除する."""
-        print("# AI Agent: 介入不要と判断 — 応答をキャンセル", flush=True)
-        self._log_state("→NOOP (介入不要)")
-        self._interrupted = True
-        self._last_noop_at = time.monotonic()  # デッドエア対策（Fix 10）
-        self._preflight_buf.clear()        # バッファも破棄
-        self._preflight_cleared = False
-        with self._state_lock:
-            self._pending_intervention = None  # 介入不要の内容は再試行しない
-        # 再生キューを空にして停止
-        while True:
-            try:
-                self._audio_q.get_nowait()
-            except queue.Empty:
-                break
-        self._q_put(None)
-        self.ai_speaking = False
-        self._responding = False
-        self._ai_text_buf = ""
-        # Realtime APIの応答をキャンセル + 会話履歴からこのアイテムを削除
-        if self.ws:
-            with contextlib.suppress(Exception):
-                self.ws.send(json.dumps({"type": "response.cancel"}))
-            # 介入不要の応答はtruncateではなく削除（会話履歴に残さない）
-            item_id = self._current_item_id
-            if item_id:
-                with contextlib.suppress(Exception):
-                    self.ws.send(json.dumps({
-                        "type": "conversation.item.delete",
-                        "item_id": item_id,
-                    }))
-        self._current_item_id = None
 
     @property
     def pending_count(self) -> int:

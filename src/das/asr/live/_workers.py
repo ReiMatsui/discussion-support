@@ -49,8 +49,6 @@ from ._constants import (
     _INVITE_QUIET_RATIO,
     _INVITE_SILENCE,
     _INVITE_WARMUP,
-    _STALL_COOLDOWN,
-    _STALL_SILENCE,
     AGENT_SPEAKER,
     SR,
 )
@@ -413,15 +411,8 @@ def _select_normal_trigger_decision(
             and silence_elapsed > silence_thresh):
         return _NormalTriggerDecision(
             "silence", f"{silence_elapsed:.1f}>{silence_thresh:.1f}秒")
-    if (stall_breaker
-            and agent._last_noop_at > 0
-            and silence_elapsed > _STALL_SILENCE
-            and now - last_stall_at > _STALL_COOLDOWN):
-        return _NormalTriggerDecision(
-            "stall",
-            f"介入不要後の沈黙{silence_elapsed:.1f}秒",
-            drift_reason="会話が止まっています。本題に戻す一言を簡潔に述べてください。",
-        )
+    # Phase3: stall（介入不要後の一押し）は廃止。stall_breaker/last_stall_at は
+    # 後方互換のため引数に残すが判定には使わない。
     if (pending.invite is not None
             and silence_elapsed > _INVITE_SILENCE
             and now - last_intervention_at > cooldown):
@@ -524,17 +515,8 @@ def _build_candidates(
             payload={"pause_required": float(silence_thresh)},
         ))
 
-    if (mode != "conversation"
-            and stall_breaker
-            and getattr(agent, "_last_noop_at", 0.0) > 0):
-        cands.append(InterventionCandidate(
-            id="stall",
-            kind="stall",
-            brief="介入不要後の沈黙ブレーカー候補",
-            created_at=float(getattr(agent, "_last_noop_at", now) or now),
-            interrupt_policy="wait_for_pause",
-            retryable=True,
-        ))
+    # Phase3: stall（介入不要後の沈黙ブレーカー）は廃止した。Speaker から
+    # 「介入不要」判断を外したため、その履歴に依存する一押しは行わない。
 
     if pending.invite:
         invite_payload = {}
@@ -697,9 +679,8 @@ class _ShadowControllerRunner:
 # 通常トリガーはフロア返却後に評価する。Controller はそれぞれのレーンの
 # 候補集合から「採否」だけを決める（固定優先順位の置換, Phase2）。
 _BARGEIN_KINDS = ("fact", "drift", "retry")
-_NORMAL_KINDS = ("count", "silence", "stall", "invite", "conversation")
-
-_STALL_DRIFT_REASON = "会話が止まっています。本題に戻す一言を簡潔に述べてください。"
+# Phase3: stall は廃止（Speaker から「介入不要」判断を外したため）。
+_NORMAL_KINDS = ("count", "silence", "invite", "conversation")
 
 
 def _suppressed_for(
@@ -846,10 +827,6 @@ def _controller_normal_decision(
         thresh = float(chosen.payload.get("pause_required", 0.0))
         return (_NormalTriggerDecision(
             "silence", f"{silence_elapsed:.1f}>{thresh:.1f}秒"), decision, cands, latency_ms)
-    if chosen.kind == "stall":
-        return (_NormalTriggerDecision(
-            "stall", f"介入不要後の沈黙{silence_elapsed:.1f}秒",
-            drift_reason=_STALL_DRIFT_REASON), decision, cands, latency_ms)
     if chosen.kind == "invite":
         return (_NormalTriggerDecision(
             "invite", f"{chosen.target_speaker}さんに声かけ",
@@ -1361,7 +1338,6 @@ def _run_agent_worker(state: SessionState):
             new_texts = [r.get("text", "") for r in new_records]
             if new_records:
                 _last_utt_time[0] = time.monotonic()
-                agent._last_noop_at = 0.0  # 新たな発話で会話が動いた → 沈黙ブレーカー解除
             if _enabled:
                 for r in new_records:
                     agent.feed(intervention_speaker_name(state, r), r.get("text", ""))
@@ -1706,22 +1682,6 @@ def _run_agent_worker(state: SessionState):
             agent.trigger(topics=_topics)
             _last_intervention_at = time.monotonic()
             _note_legacy(_last_intervention_at, "silence", normal_decision.detail)
-        elif normal_decision.reason == "stall":
-            timing = _intervention_timing_metadata(
-                kind="stall",
-                now=time.monotonic(),
-                silence_elapsed=_silence_elapsed,
-                pause_required=_STALL_SILENCE,
-                policy="noop_stall_pause",
-            )
-            print(f"# [trigger] stall: {normal_decision.detail}", flush=True)
-            _log_intervention_event(state, "stall", normal_decision.detail, timing=timing)
-            agent.trigger(topics=_topics,
-                          drift_reason=normal_decision.drift_reason)
-            _last_stall_at = time.monotonic()
-            _last_intervention_at = time.monotonic()
-            agent._last_noop_at = 0.0
-            _note_legacy(_last_intervention_at, "stall", normal_decision.detail)
         elif normal_decision.reason == "invite":
             timing = _intervention_timing_metadata(
                 kind="invite",

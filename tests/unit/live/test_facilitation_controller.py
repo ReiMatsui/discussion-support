@@ -160,7 +160,7 @@ def test_build_candidates_count_when_threshold_reached():
     assert any(c.kind == "count" for c in cands)
 
 
-def test_build_candidates_includes_conversation_silence_and_stall():
+def test_build_candidates_includes_conversation_and_silence():
     now = time.monotonic()
     pend = _PendingInterventions()
 
@@ -173,10 +173,15 @@ def test_build_candidates_includes_conversation_silence_and_stall():
     assert any(c.kind == "silence" and c.payload["pause_required"] == 3.0
                for c in silence)
 
+
+def test_build_candidates_never_includes_stall():
+    """Phase3: stall 候補は生成されない（「介入不要」履歴があっても）."""
+    now = time.monotonic()
+    pend = _PendingInterventions()
     agent = _FakeAgent(pending_count=1)
     agent._last_noop_at = now - 10
-    stall = _build_candidates(pend, agent, now=now, stall_breaker=True)
-    assert any(c.kind == "stall" for c in stall)
+    cands = _build_candidates(pend, agent, now=now, stall_breaker=True)
+    assert all(c.kind != "stall" for c in cands)
 
 
 def test_build_candidates_retry_from_pending_intervention():

@@ -268,18 +268,8 @@ def test_interrupt_noop_when_idle(agent):
 
 
 # ---------------------------------------------------------------------------
-# _cancel_response（「介入不要」）
+# 中断状態の自己回復と残留破棄（Speaker分離後も維持）
 # ---------------------------------------------------------------------------
-
-def test_cancel_response_clears_intervention_and_deletes_item(agent):
-    agent._pending_intervention = {"delivered": "x", "created_at": 0.0, "attempts": 1}
-    agent._current_item_id = "item-1"
-    agent._cancel_response()
-    assert agent._pending_intervention is None
-    assert agent.ai_speaking is False
-    assert "response.cancel" in agent.ws.types()
-    assert "conversation.item.delete" in agent.ws.types()
-
 
 def test_interrupted_self_heals_on_new_response(agent):
     """response.done取りこぼしで_interruptedが残っても、新応答開始で解除される（堅牢化）.
@@ -292,8 +282,7 @@ def test_interrupted_self_heals_on_new_response(agent):
     agent._handle({"type": "response.output_item.added", "item": {"id": "new-item"}})
     assert agent._interrupted is False, "新応答開始で中断状態を解除すべき"
 
-    # 解除後は新応答の音声がちゃんとキューに積まれる（preflight確認後）
-    agent._preflight_cleared = True
+    # 解除後は新応答の音声がちゃんとキューに積まれる（即再生）
     agent._handle({"type": "response.output_audio.delta", "delta": make_chunk()})
     assert agent.ai_speaking is True
     payloads = [p for (_e, p) in list(agent._audio_q.queue) if p is not None]
@@ -302,19 +291,11 @@ def test_interrupted_self_heals_on_new_response(agent):
 
 def test_interrupt_residuals_still_discarded_within_same_response(agent):
     """同一応答内では、interrupt後の残留deltaは従来どおり破棄される（退行なし）."""
-    agent._preflight_cleared = True
     agent._interrupted = True   # interrupt済み（新しいoutput_item.addedは来ていない）
     agent._handle({"type": "response.output_audio.delta", "delta": make_chunk()})
     # 新応答境界が無いので破棄され続ける
     payloads = [p for (_e, p) in list(agent._audio_q.queue) if p is not None]
     assert payloads == []
-
-
-def test_cancel_response_marks_noop_time(agent):
-    """介入不要の判断時刻を記録する（デッドエア対策のトリガー、Fix 10）."""
-    assert agent._last_noop_at == 0.0
-    agent._cancel_response()
-    assert agent._last_noop_at > 0.0
 
 
 def test_facilitator_benign_error_ignored(agent):
@@ -337,40 +318,55 @@ def test_facilitator_unexpected_error_resets_responding(agent):
 
 
 # ---------------------------------------------------------------------------
-# プリフライト: 「介入不要」応答で音声を漏らさない（Bug 1 の回帰テスト）
+# Speaker分離（Phase3）: 採択済み候補を即再生し、「介入不要」自己判断を持たない
 # ---------------------------------------------------------------------------
 
-def test_preflight_no_leak_on_cancel_marker(agent):
-    """「（介入不要）」と判定される応答では、音声再生も on_speech_start も起きない。
-
-    プリフライトの本来の目的（介入不要の音声漏れ防止）を保証する。
-    """
-    started: list[bool] = []
-    agent.on_speech_start = lambda: started.append(True)
-
-    agent._handle({"type": "response.output_item.added", "item": {"id": "it1"}})
-    # 音声が先着（preflightバッファに溜まる）
-    agent._handle({"type": "response.output_audio.delta", "delta": make_chunk()})
-    # 「（介入不要）」が1文字ずつ届く
-    for ch in "（介入不要）":
-        agent._handle({"type": "response.output_audio_transcript.delta", "delta": ch})
-
-    assert started == [], "介入不要の応答で on_speech_start が呼ばれてはならない"
-    assert agent.ai_speaking is False
-
-
-def test_preflight_flushes_for_real_intervention(agent):
-    """通常の介入では、テキスト確認後に音声がフラッシュされ on_speech_start が発火する."""
+def test_audio_plays_immediately_and_starts_speech(agent):
+    """最初の音声で on_speech_start が発火し、音声はテキスト確認を待たず即再生する."""
     started: list[bool] = []
     agent.on_speech_start = lambda: started.append(True)
 
     agent._handle({"type": "response.output_item.added", "item": {"id": "it1"}})
     agent._handle({"type": "response.output_audio.delta", "delta": make_chunk()})
-    for ch in "それは論点がずれています":
-        agent._handle({"type": "response.output_audio_transcript.delta", "delta": ch})
 
     assert started == [True]
-    assert agent._preflight_cleared is True
+    assert agent.ai_speaking is True
+    payloads = [p for (_e, p) in list(agent._audio_q.queue) if p is not None]
+    assert len(payloads) == 1  # preflight バッファに溜めず即キューへ
+
+
+def test_on_speech_start_fires_once_per_response(agent):
+    """1応答の間、on_speech_start は最初の音声で1回だけ発火する."""
+    started: list[bool] = []
+    agent.on_speech_start = lambda: started.append(True)
+
+    agent._handle({"type": "response.output_item.added", "item": {"id": "it1"}})
+    agent._handle({"type": "response.output_audio.delta", "delta": make_chunk()})
+    agent._handle({"type": "response.output_audio.delta", "delta": make_chunk()})
+
+    assert started == [True]
+
+
+def test_transcript_delivered_without_marker_filtering(agent):
+    """転写はマーカー判定なしでそのまま on_ai_utterance に渡る（Speaker分離）."""
+    utterances: list[str] = []
+    agent.on_ai_utterance = utterances.append
+
+    agent._handle({"type": "response.output_item.added", "item": {"id": "it1"}})
+    agent._handle({
+        "type": "response.output_audio_transcript.done",
+        "transcript": "それは論点がずれています",
+    })
+
+    assert utterances == ["それは論点がずれています"]
+
+
+def test_no_selfcancel_machinery_remains(agent):
+    """Phase3: 「介入不要」自己キャンセルの層が消えていること."""
+    for attr in ("_CANCEL_MARKER", "_cancel_response", "_is_cancel_prefix",
+                 "_flush_preflight", "_preflight_buf", "_preflight_cleared",
+                 "_last_noop_at"):
+        assert not hasattr(agent, attr), f"{attr} は Phase3 で削除されるべき"
 
 
 # ---------------------------------------------------------------------------
@@ -381,7 +377,6 @@ def test_output_item_added_bumps_epoch_and_tags_queue(agent):
     """新しい出力アイテムでepochが進み、音声・終端が現epochでタグ付けされる."""
     agent._handle({"type": "response.output_item.added", "item": {"id": "it1"}})
     assert agent._play_epoch == 1
-    agent._preflight_cleared = True  # フラッシュ済みとして直接エンキューさせる
     agent._handle({"type": "response.output_audio.delta", "delta": make_chunk()})
     agent._handle({"type": "response.output_audio.done"})
     epochs = [e for (e, _payload) in list(agent._audio_q.queue)]
