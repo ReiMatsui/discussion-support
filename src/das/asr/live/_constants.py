@@ -369,6 +369,12 @@ _INTERVENTION_PAUSE_FACT = 0.9   # 事実補正: 鮮度優先。ただし発話�
 _INTERVENTION_PAUSE_DRIFT = 1.8  # 脱線: 会話の自律的な復帰を少し待つ
 _INTERVENTION_PAUSE_RETRY = 2.4  # 再送: しつこさを避け、十分な間がある時だけ
 _INTERVENTION_PAUSE_COUNT = 1.5  # 発話数整理: 参加者の連続発話を遮らない
+_INTERVENTION_PAUSE_MANUAL = 1.0  # 手動呼び出し: 発話には被せないが drift/invite より早く反応
+
+# --- 手動呼び出し（ファシリテーターを明示的に呼ぶ, Phase1） ---
+_MANUAL_CALL_COOLDOWN = 5.0      # 同種の連打防止（global cooldown の影響は受けない）
+_MANUAL_CALL_TTL = 30.0          # 古すぎる手動呼び出しは破棄
+_MANUAL_CALL_MAX_CHARS = 100     # 依頼文の最大長（超過分は切り詰め）
 
 # --- エコー防止 ---
 _ECHO_COOLDOWN = 2.0          # AI発話終了後のエコーウィンドウ秒数（agent/partner共通）

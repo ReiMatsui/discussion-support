@@ -163,6 +163,19 @@ class _UIHandler:
                         "proactivity": s.proactivity_name,
                         "trigger_n": getattr(s.agent, "trigger_n", None),
                     })
+                elif self.path == "/api/facilitator/call":
+                    # 手動呼び出し（Phase1）: キューに積むだけ。発話は worker + Controller
+                    # 経路が採否する（直接 agent.trigger() しない）。
+                    length = int(self.headers.get("Content-Length", 0))
+                    body = json.loads(self.rfile.read(length)) if length else {}
+                    result = s.queue_manual_facilitator_call(
+                        str(body.get("request", "")))
+                    if not result.get("ok"):
+                        self._json(400, result)
+                        return
+                    _print_line("# ファシリテーター手動呼び出し（UIから）: "
+                                f"{result.get('request') or '直近の議論整理'}")
+                    self._json(200, result)
                 elif self.path == "/api/diarization":
                     length = int(self.headers.get("Content-Length", 0))
                     body = json.loads(self.rfile.read(length))

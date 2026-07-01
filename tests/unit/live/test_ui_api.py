@@ -134,6 +134,7 @@ def test_api_snapshot_exposes_intervention_settings():
         "proactivity": "controlled",
         "trigger_n": 10,
         "model": "gpt-realtime-2",
+        "agent_active": True,
     }
     assert snap["intervention_events"] == [{
         "time": snap["intervention_events"][0]["time"],
@@ -883,6 +884,79 @@ def test_http_set_intervention_settings():
         httpd.shutdown()
 
 
+def _post_facilitator_call(port, request):
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}/api/facilitator/call",
+        data=json.dumps({"request": request}).encode(),
+        headers={"Content-Type": "application/json"}, method="POST")
+    return urllib.request.urlopen(req)
+
+
+def test_http_facilitator_call_queues():
+    """POST /api/facilitator/call が manual_call_requests に積む（直接triggerしない）."""
+    s = _make_state()
+    s.agent = _FakeAgent(mode="facilitator")
+    httpd, port = _serve(s)
+    try:
+        with _post_facilitator_call(port, "ここまで整理して") as r:
+            out = json.loads(r.read())
+        assert out["ok"] is True and out["queued"] is True
+        item = s.manual_call_requests.get_nowait()
+        assert item["request"] == "ここまで整理して"
+        assert item["source"] == "ui"
+        assert "created_at" in item
+    finally:
+        httpd.shutdown()
+
+
+def test_http_facilitator_call_trims_and_limits():
+    """改行は空白に正規化し、長すぎる依頼は切り詰める."""
+    s = _make_state()
+    s.agent = _FakeAgent(mode="facilitator")
+    httpd, port = _serve(s)
+    try:
+        with _post_facilitator_call(port, "  整理\nして  " + "あ" * 200) as r:
+            out = json.loads(r.read())
+        assert out["ok"] is True
+        item = s.manual_call_requests.get_nowait()
+        assert "\n" not in item["request"]
+        assert item["request"].startswith("整理 して")
+        assert len(item["request"]) <= 100
+    finally:
+        httpd.shutdown()
+
+
+def test_http_facilitator_call_rejected_when_disabled():
+    s = _make_state()
+    s.agent = _FakeAgent(mode="facilitator")
+    s.intervention_enabled = False
+    httpd, port = _serve(s)
+    try:
+        try:
+            _post_facilitator_call(port, "整理して")
+            raise AssertionError("拒否されるはず")
+        except urllib.error.HTTPError as e:
+            assert e.code == 400
+        assert s.manual_call_requests.empty()
+    finally:
+        httpd.shutdown()
+
+
+def test_http_facilitator_call_rejected_when_agent_off():
+    s = _make_state()
+    s.agent = _FakeAgent(mode="off")
+    httpd, port = _serve(s)
+    try:
+        try:
+            _post_facilitator_call(port, "整理して")
+            raise AssertionError("拒否されるはず")
+        except urllib.error.HTTPError as e:
+            assert e.code == 400
+        assert s.manual_call_requests.empty()
+    finally:
+        httpd.shutdown()
+
+
 def test_http_get_root_serves_spa():
     """GET / が新SPA(HTML)を配信する."""
     state = _make_state()
@@ -907,6 +981,9 @@ def test_http_get_root_serves_spa():
         assert 'id="intervention-enabled"' in html
         assert 'id="proactivity"' in html
         assert 'id="intervention-summary"' in html
+        assert 'id="manual-call-text"' in html      # 手動呼び出し入力
+        assert 'id="manual-call-btn"' in html        # 呼ぶボタン
+        assert "/api/facilitator/call" in html       # 手動呼び出しAPI
         assert 'id="event-panel"' in html
         assert "話者未確定" in html
         assert "list.length < 1" in html  # 発言量は1人でも表示する

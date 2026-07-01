@@ -321,6 +321,7 @@ class RealtimeAgent(_RealtimeBase):
         drift_reason: str | None,
         invite_target: str | None,
         fact_correction: dict | None,
+        manual_request: dict | None,
         pending_intervention: dict | None,
     ) -> str:
         """transcript到着前に割り込まれた時のため、再送できる介入意図を残す."""
@@ -328,6 +329,10 @@ class RealtimeAgent(_RealtimeBase):
             return ""
         if pending_intervention is not None:
             return str(pending_intervention.get("delivered") or "").strip()
+        if manual_request is not None:
+            req = str(manual_request.get("request") or "").strip()
+            return (f"手動呼び出しへの短い支援: {req}" if req
+                    else "手動呼び出しへの短い整理・確認")
         if drift_reason:
             return f"脱線検出への短い介入: {drift_reason}"
         if invite_target:
@@ -340,6 +345,7 @@ class RealtimeAgent(_RealtimeBase):
                 drift_reason: str | None = None,
                 invite_target: str | None = None,
                 fact_correction: dict | None = None,
+                manual_request: dict | None = None,
                 retry_intervention: bool | None = None):
         """蓄積した発話をRealtimeAPIに送信し応答を要求.
 
@@ -373,7 +379,8 @@ class RealtimeAgent(_RealtimeBase):
             if self._responding:
                 return  # 既に応答生成中、または別スレッドが確保済み
             if (not self._pending and self._pending_intervention is None
-                    and not drift_reason and not invite_target and not fact_correction):
+                    and not drift_reason and not invite_target and not fact_correction
+                    and not manual_request):
                 return
             self._responding = True  # 確保（この時点でレースは閉じる）
             # スナップショットのみ取得。実際のクリアは送信成功後に行い、
@@ -416,6 +423,18 @@ class RealtimeAgent(_RealtimeBase):
                 "説教・長い説明・追加論点の展開はしないでください。"
             )
             conv = f"{fact_note}\n\n{conv}" if conv else fact_note
+        # --- 手動呼び出しコンテキスト（Phase1） ---
+        if manual_request:
+            request = str(manual_request.get("request") or "").strip()
+            task = request or "直近の議論を短く整理し、次に進める一言を述べる"
+            manual_note = (
+                "[手動呼び出し]\n"
+                "参加者がファシリテーターに明示的に助けを求めています。\n"
+                f"依頼: {task}\n"
+                "直近の発話を踏まえ、1〜2文で短く支援してください。\n"
+                "会議を乗っ取らず、必要な確認・整理・声かけだけを行ってください。"
+            )
+            conv = f"{manual_note}\n\n{conv}" if conv else manual_note
         # --- 保存された介入内容をコンテキストに追加 ---
         # 注: 有効な介入は送信成功までクリアしない（Bug 2）。
         #     期限切れの介入のみ、送信成否に関わらずここで破棄する。
@@ -448,6 +467,7 @@ class RealtimeAgent(_RealtimeBase):
             drift_reason=drift_reason,
             invite_target=invite_target,
             fact_correction=fact_correction,
+            manual_request=manual_request,
             pending_intervention=pi if include_pi else None,
         )
         try:

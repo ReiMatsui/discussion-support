@@ -44,11 +44,13 @@ from ._constants import (
     _INTERVENTION_PAUSE_COUNT,
     _INTERVENTION_PAUSE_DRIFT,
     _INTERVENTION_PAUSE_FACT,
+    _INTERVENTION_PAUSE_MANUAL,
     _INTERVENTION_PAUSE_RETRY,
     _INVITE_CHECK_SEC,
     _INVITE_QUIET_RATIO,
     _INVITE_SILENCE,
     _INVITE_WARMUP,
+    _MANUAL_CALL_TTL,
     AGENT_SPEAKER,
     SR,
 )
@@ -227,6 +229,7 @@ class _PendingInterventions:
     facts: collections.deque[dict] = field(
         default_factory=lambda: collections.deque(maxlen=5))
     invite: str | None = None
+    manual_call: dict | None = None
 
     def drain(self, state: SessionState, *, now: float) -> None:
         """各監視ワーカーのキューを回収し、保留状態に反映する."""
@@ -255,6 +258,38 @@ class _PendingInterventions:
                 self.facts.append(fact)
             except queue.Empty:
                 break
+        manual_q = getattr(state, "manual_call_requests", None)
+        if manual_q is not None:
+            while True:
+                try:
+                    # 複数回押されても最新の依頼だけを保持する。
+                    self.manual_call = manual_q.get_nowait()
+                    self.manual_call.setdefault("created_at", now)
+                except queue.Empty:
+                    break
+
+    def drop_stale_manual(self, *, now: float) -> None:
+        """会話タイミングを外した古い手動呼び出しを破棄する（TTL）."""
+        if self.manual_call is None:
+            return
+        age = now - float(self.manual_call.get("created_at", now))
+        if age > _MANUAL_CALL_TTL:
+            print(f"# [trigger] skip: 古い手動呼び出しを破棄（{age:.0f}秒経過）",
+                  flush=True)
+            self.manual_call = None
+
+    def clear_manual(self) -> None:
+        self.manual_call = None
+
+    def clear_all(self) -> None:
+        """介入オフ/モードオフ時に、worker内で保持した候補も破棄する."""
+        self.drift_reason = None
+        self.drift_count = 0
+        self.last_drift_request_at = 0.0
+        self.last_drift_request_wall_at = None
+        self.facts.clear()
+        self.invite = None
+        self.manual_call = None
 
     def drop_stale_facts(self, *, now: float) -> None:
         """会話タイミングを外した古い事実補正を破棄する."""
@@ -276,6 +311,7 @@ class _BargeInDecision:
     reason: str
     fact: dict | None = None
     drift_reason: str | None = None
+    manual: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -482,6 +518,21 @@ def _build_candidates(
                 retryable=False,
                 payload={"correction": correction, "fact": f},
             ))
+
+    if pending.manual_call:
+        m = pending.manual_call
+        request = str(m.get("request") or "").strip()
+        created = float(m.get("created_at", now))
+        cands.append(InterventionCandidate(
+            id="manual",
+            kind="manual",
+            brief=request or "直近の議論整理",
+            created_at=created,
+            expires_at=created + _MANUAL_CALL_TTL,
+            interrupt_policy="wait_for_pause",
+            retryable=True,
+            payload={"request": request, "source": str(m.get("source") or "ui")},
+        ))
 
     if pending.drift_reason:
         cands.append(InterventionCandidate(
@@ -713,7 +764,7 @@ class _InterventionReviewRecorder:
 # 物理レーン分割（§4）。barge-in は echo/partner ガード前に評価し、
 # 通常トリガーはフロア返却後に評価する。Controller はそれぞれのレーンの
 # 候補集合から「採否」だけを決める（固定優先順位の置換, Phase2）。
-_BARGEIN_KINDS = ("fact", "drift", "retry")
+_BARGEIN_KINDS = ("fact", "manual", "drift", "retry")
 # Phase3: stall は廃止（Speaker から「介入不要」判断を外したため）。
 _NORMAL_KINDS = ("count", "silence", "invite", "conversation")
 
@@ -758,6 +809,7 @@ def _controller_barge_in_decision(
     Controller の eligibility が判定する（§4）。
     """
     pending.drop_stale_facts(now=now)  # fast lane: 古い事実補正は破棄（鮮度維持）
+    pending.drop_stale_manual(now=now)  # 古い手動呼び出しは破棄（TTL）
     all_cands = _build_candidates(
         pending, agent, now=now, silence_summarize=silence_summarize,
         partner_present=False, last_invited=last_invited)
@@ -792,6 +844,9 @@ def _controller_barge_in_decision(
     chosen = next(c for c in cands if c.id == decision.candidate_id)
     if chosen.kind == "fact":
         return (_BargeInDecision("fact", fact=chosen.payload.get("fact")),
+                decision, cands, latency_ms)
+    if chosen.kind == "manual":
+        return (_BargeInDecision("manual", manual=chosen.payload),
                 decision, cands, latency_ms)
     if chosen.kind == "drift":
         return (_BargeInDecision("drift", drift_reason=chosen.brief),
@@ -1346,6 +1401,8 @@ def _run_agent_worker(state: SessionState):
         _diag_tick += 1
         partner = state.partner  # 動的参照: 実行中のパートナー接続/切断に追従（F3）
         if agent is None or not agent._connected or not agent.enabled:
+            if agent is None or not agent.enabled:
+                _pending.clear_all()
             if agent is not None and agent.enabled and not agent._connected:
                 now = time.monotonic()
                 if now - _last_agent_reconnect_at >= 5.0:
@@ -1394,7 +1451,9 @@ def _run_agent_worker(state: SessionState):
                             "人間", utt,
                             request_response=is_last)
         if not _enabled:
-            for q in (state.drift_requests, state.invite_requests, state.factcheck_requests):
+            _pending.clear_all()
+            for q in (state.drift_requests, state.invite_requests,
+                      state.factcheck_requests, state.manual_call_requests):
                 while True:
                     try:
                         q.get_nowait()
@@ -1470,6 +1529,11 @@ def _run_agent_worker(state: SessionState):
                 if decision.reason == "fact" and decision.fact is not None:
                     _legacy = _legacy_decision_brief(
                         "fact", str(decision.fact.get("correction") or "").strip())
+                elif decision.reason == "manual" and decision.manual is not None:
+                    _legacy = _legacy_decision_brief(
+                        "manual_call",
+                        str(decision.manual.get("request") or "").strip()
+                        or "直近の議論整理")
                 elif decision.reason == "drift" and decision.drift_reason is not None:
                     _legacy = _legacy_decision_brief("drift", decision.drift_reason)
                 elif decision.reason == "retry":
@@ -1523,6 +1587,29 @@ def _run_agent_worker(state: SessionState):
                 _last_fact_at = time.monotonic()
                 _last_intervention_at = _last_fact_at
                 _note_intervention(_last_fact_at, "fact", correction)
+                continue
+            if decision.reason == "manual" and decision.manual is not None:
+                manual = decision.manual
+                request = str(manual.get("request") or "").strip()
+                detail = request or "直近の議論整理"
+                timing = _intervention_timing_metadata(
+                    kind="manual",
+                    now=_now,
+                    silence_elapsed=_silence_elapsed,
+                    pause_required=_INTERVENTION_PAUSE_MANUAL,
+                    queued_at=float(_pending.manual_call.get("created_at", _now))
+                    if _pending.manual_call else _now,
+                    policy="manual_call_pause",
+                )
+                print(f"# [trigger] manual_call: {detail}", flush=True)
+                _log_intervention_event(
+                    state, "manual_call", detail,
+                    timing={**timing, "source": manual.get("source", "ui"),
+                            "request": request})
+                agent.trigger(topics=_bargein_topics, manual_request=manual)
+                _pending.clear_manual()
+                _last_intervention_at = time.monotonic()
+                _note_intervention(_last_intervention_at, "manual", detail)
                 continue
             if decision.reason == "drift" and decision.drift_reason is not None:
                 timing = _intervention_timing_metadata(

@@ -41,10 +41,12 @@ class FakeAgent:
         self.feeds.append((speaker, text))
 
     def trigger(self, *, topics=None, drift_reason=None, invite_target=None,
-                fact_correction=None, retry_intervention=None) -> None:
+                fact_correction=None, manual_request=None,
+                retry_intervention=None) -> None:
         self.trigger_calls.append({"topics": topics, "drift_reason": drift_reason,
                                    "invite_target": invite_target,
                                    "fact_correction": fact_correction,
+                                   "manual_request": manual_request,
                                    "retry_intervention": retry_intervention})
         # 実エージェントの挙動を模倣: トリガーで介入と保留発話を消費
         self._pending_intervention = None
@@ -91,6 +93,7 @@ class FakeState:
         self.drift_requests: queue.Queue[str] = queue.Queue()
         self.invite_requests: queue.Queue[str] = queue.Queue()
         self.factcheck_requests: queue.Queue[dict] = queue.Queue()
+        self.manual_call_requests: queue.Queue[dict] = queue.Queue()
         self.fac_events: queue.Queue = queue.Queue()
         self.proactivity = {"silence_summarize": 18.0, "cooldown": 25.0}
         self.intervention_enabled = True
@@ -487,6 +490,128 @@ def test_drift_request_triggers_with_reason():
     assert event["metadata"]["timing"]["kind"] == "drift"
     assert event["metadata"]["timing"]["policy"] == "drift_confirmation_pause"
     assert event["metadata"]["timing"]["candidate_wait_sec"] >= 0
+
+
+def test_manual_call_triggers_with_request():
+    """手動呼び出しが agent.trigger(manual_request=...) を呼び、ログに残る."""
+    agent = FakeAgent()
+    state = FakeState(agent, None)
+    state.manual_call_requests.put({"request": "ここまで整理して", "source": "ui"})
+
+    _run_worker_briefly(state, until=lambda: bool(agent.trigger_calls))
+
+    assert agent.trigger_calls, "手動呼び出しでトリガーされるべき"
+    assert agent.trigger_calls[0]["manual_request"]["request"] == "ここまで整理して"
+    event = state.intervention_events[0]
+    assert event["reason"] == "manual_call"
+    assert event["detail"] == "ここまで整理して"
+    assert event["metadata"]["timing"]["kind"] == "manual"
+    assert event["metadata"]["timing"]["policy"] == "manual_call_pause"
+    assert event["metadata"]["timing"]["source"] == "ui"
+
+
+def test_manual_call_empty_request_uses_default_detail():
+    agent = FakeAgent()
+    state = FakeState(agent, None)
+    state.manual_call_requests.put({"request": "", "source": "ui"})
+
+    _run_worker_briefly(state, until=lambda: bool(agent.trigger_calls))
+
+    assert agent.trigger_calls
+    assert state.intervention_events[0]["detail"] == "直近の議論整理"
+
+
+def test_manual_call_preferred_over_drift():
+    """manual は drift より優先（明示呼び出しを尊重）."""
+    agent = FakeAgent()
+    state = FakeState(agent, None)
+    state.manual_call_requests.put({"request": "整理して", "source": "ui"})
+    state.drift_requests.put("式の話題")
+
+    _run_worker_briefly(state, until=lambda: bool(agent.trigger_calls))
+
+    assert agent.trigger_calls
+    assert agent.trigger_calls[0]["manual_request"] is not None
+    assert agent.trigger_calls[0]["drift_reason"] is None
+    assert state.intervention_events[0]["reason"] == "manual_call"
+
+
+def test_manual_call_held_while_partner_speaking_then_fires():
+    """パートナー発話中は保持し、空いたら手動呼び出しが発火する（すぐ捨てない）."""
+    agent = FakeAgent()
+    partner = FakePartner()
+    partner.ai_speaking = True
+    state = FakeState(agent, partner)
+    state.manual_call_requests.put({"request": "整理して", "source": "ui"})
+
+    t = threading.Thread(target=_run_agent_worker, args=(state,), daemon=True)
+    t.start()
+    try:
+        time.sleep(1.0)
+        assert agent.trigger_calls == [], "パートナー発話中は保持（発火しない）"
+        partner.ai_speaking = False
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and not agent.trigger_calls:
+            time.sleep(0.05)
+    finally:
+        state.stop.set()
+        t.join(timeout=2.0)
+
+    assert agent.trigger_calls, "空いたら保持していた手動呼び出しで発火するべき"
+    assert agent.trigger_calls[0]["manual_request"]["request"] == "整理して"
+
+
+def test_manual_call_dropped_after_ttl():
+    """TTLを超えた古い手動呼び出しは破棄して発火しない."""
+    agent = FakeAgent()
+    state = FakeState(agent, None)
+    state.manual_call_requests.put({
+        "request": "整理して", "source": "ui",
+        "created_at": time.monotonic() - 100,   # TTL(30s)超過
+    })
+
+    _run_worker_briefly(state, until=lambda: False, timeout=1.0)
+
+    assert agent.trigger_calls == []
+
+
+def test_manual_call_ignored_when_intervention_disabled():
+    agent = FakeAgent()
+    state = FakeState(agent, None)
+    state.intervention_enabled = False
+    state.manual_call_requests.put({"request": "整理して", "source": "ui"})
+
+    _run_worker_briefly(state, until=lambda: False, timeout=1.0)
+
+    assert agent.trigger_calls == []
+
+
+def test_pending_manual_call_cleared_when_intervention_disabled():
+    """worker内に保持された手動呼び出しも、介入オフで破棄する."""
+    agent = FakeAgent()
+    partner = FakePartner()
+    partner.ai_speaking = True
+    state = FakeState(agent, partner)
+    state.manual_call_requests.put({"request": "整理して", "source": "ui"})
+
+    t = threading.Thread(target=_run_agent_worker, args=(state,), daemon=True)
+    t.start()
+    try:
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline and not state.manual_call_requests.empty():
+            time.sleep(0.05)
+        assert state.manual_call_requests.empty(), "workerが手動呼び出しを保持している前提"
+
+        state.intervention_enabled = False
+        partner.ai_speaking = False
+        time.sleep(0.4)
+        state.intervention_enabled = True
+        time.sleep(0.6)
+    finally:
+        state.stop.set()
+        t.join(timeout=2.0)
+
+    assert agent.trigger_calls == []
 
 
 def test_fact_request_triggers_before_drift():

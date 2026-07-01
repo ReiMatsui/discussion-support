@@ -47,6 +47,18 @@ def _drift(now):
                                  created_at=now)
 
 
+def _manual(now, *, request="ここまで整理して", expires_at=0.0):
+    return InterventionCandidate(
+        id="manual", kind="manual", brief=request, created_at=now,
+        expires_at=expires_at, retryable=True,
+        payload={"request": request, "source": "ui"})
+
+
+def _count(now):
+    return InterventionCandidate(id="count", kind="count", brief="10発話が蓄積",
+                                 created_at=now)
+
+
 # ---------------------------------------------------------------------------
 # arbitrate()
 # ---------------------------------------------------------------------------
@@ -121,6 +133,71 @@ def test_confidence_score_mapping():
 
 
 # ---------------------------------------------------------------------------
+# manual（手動呼び出し）の採否
+# ---------------------------------------------------------------------------
+
+def test_manual_preferred_over_count_and_invite():
+    now = time.monotonic()
+    c = FacilitationController()
+    d = c.arbitrate(_inp([_count(now), _manual(now)], now=now))
+    assert d.candidate_id == "manual"
+    assert d.deadline_ms == 3000
+    assert any(s["candidate_id"] == "count" for s in d.suppressed)
+
+
+def test_fact_preferred_over_manual():
+    now = time.monotonic()
+    c = FacilitationController()
+    d = c.arbitrate(_inp([_manual(now), _fact(now)], now=now))
+    assert d.candidate_id == "fact-1"
+    assert any(s["candidate_id"] == "manual" for s in d.suppressed)
+
+
+def test_manual_preferred_over_drift():
+    """ユーザーが明示的に呼んだ manual は drift より優先する."""
+    now = time.monotonic()
+    c = FacilitationController()
+    d = c.arbitrate(_inp([_drift(now), _manual(now)], now=now))
+    assert d.candidate_id == "manual"
+
+
+def test_manual_holds_until_short_pause():
+    now = time.monotonic()
+    c = FacilitationController()
+    d = c.arbitrate(_inp([_manual(now)], silence_elapsed=0.3, now=now))
+    assert d.candidate_id is None
+    assert "発話の切れ目待ち" in d.suppressed[0]["reason"]
+
+
+def test_manual_same_kind_cooldown_suppresses():
+    now = time.monotonic()
+    c = FacilitationController()
+    recent = [InterventionLogEntry(at=now, kind="manual", brief="x")]
+    d = c.arbitrate(_inp([_manual(now)], recent=recent, now=now + 1.0))
+    assert d.candidate_id is None
+    assert "同種介入済み" in d.suppressed[0]["reason"]
+
+
+def test_manual_not_blocked_by_global_cooldown():
+    """manual は kind scope。直前に別種介入があっても global cooldown で待たない."""
+    now = time.monotonic()
+    c = FacilitationController()
+    d = c.arbitrate(FacilitationInput(
+        candidates=(_manual(now),), recent_interventions=(), silence_elapsed=5.0,
+        snapshot_epoch=1, now=now + 1.0, cooldown=25.0, last_intervention_at=now))
+    assert d.candidate_id == "manual"
+
+
+def test_expired_manual_is_suppressed():
+    now = time.monotonic()
+    c = FacilitationController()
+    stale = _manual(now - 100, expires_at=now - 10)
+    d = c.arbitrate(_inp([stale], now=now))
+    assert d.candidate_id is None
+    assert "期限切れ" in d.suppressed[0]["reason"]
+
+
+# ---------------------------------------------------------------------------
 # _build_candidates()（読み取り専用・pending を変えない）
 # ---------------------------------------------------------------------------
 
@@ -191,6 +268,29 @@ def test_build_candidates_retry_from_pending_intervention():
     cands = _build_candidates(pend, agent, now=now)
     retry = [c for c in cands if c.kind == "retry"]
     assert retry and retry[0].brief == "中断された指摘"
+
+
+def test_build_candidates_manual_from_pending_call():
+    now = time.monotonic()
+    pend = _PendingInterventions()
+    pend.manual_call = {"request": "ここまで整理して", "source": "ui",
+                        "created_at": now}
+    cands = _build_candidates(pend, _FakeAgent(), now=now)
+    manual = [c for c in cands if c.kind == "manual"]
+    assert manual and manual[0].brief == "ここまで整理して"
+    assert manual[0].payload["source"] == "ui"
+    assert manual[0].expires_at > now
+    # pending は変更しない（読み取り専用）
+    assert pend.manual_call is not None
+
+
+def test_build_candidates_manual_default_brief_when_empty():
+    now = time.monotonic()
+    pend = _PendingInterventions()
+    pend.manual_call = {"request": "", "source": "ui", "created_at": now}
+    cands = _build_candidates(pend, _FakeAgent(), now=now)
+    manual = [c for c in cands if c.kind == "manual"]
+    assert manual and manual[0].brief == "直近の議論整理"
 
 
 # ---------------------------------------------------------------------------
