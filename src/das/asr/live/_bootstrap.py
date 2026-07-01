@@ -710,11 +710,20 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
                 with _contextlib.suppress(Exception):
                     if state.stt_ws is not None:
                         state.stt_ws.close()
+                state.stt_ws = None
                 state.reset_for_new_meeting()
                 if state.diarization_provider is not None:
                     with _contextlib.suppress(Exception):
                         state.diarization_provider.close()
                     state.diarization_provider.start()
+                if state.waiting_to_start:
+                    state.resetting = False
+                    state.rev += 1
+                    print("# 開始前設定: 確認後に「会議を開始」を押してください", flush=True)
+                    while not state.stop.is_set() and not state.start_requested.wait(timeout=0.2):
+                        pass
+                    if state.stop.is_set():
+                        break
                 state.stt_ws = _connect_stt()
                 recv = RecvLoop(state, args, backend)
                 state.reset_requested.clear()

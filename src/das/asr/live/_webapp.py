@@ -58,6 +58,8 @@ INDEX_HTML = """<!doctype html>
   .setup-controls label { font-size: .82rem; color: var(--muted); }
   .setup-controls select { border: 1px solid var(--line); border-radius: 6px;
     padding: .35rem .5rem; background: var(--card); }
+  .setup-enroll { margin-top: .7rem; padding-top: .7rem; border-top: 1px solid #fed7aa; }
+  .setup-enroll h3 { font-size: .84rem; margin: 0 0 .45rem; }
   .agenda-label { font-size: .82rem; color: var(--muted); font-weight: 600;
     flex-shrink: 0; }
   .agenda-bar input { flex: 1; min-width: 0; border: 1px solid var(--line);
@@ -172,6 +174,19 @@ INDEX_HTML = """<!doctype html>
       <select id="setup-speaker-count"></select>
       <button class="btn" id="start-session">会議を開始</button>
     </div>
+    <div class="setup-enroll" id="enroll-panel" hidden>
+      <h3>声の事前登録</h3>
+      <p class="enroll-hint">名前を入れて押したあと、表示中はその人だけが話してください。完了後すぐ、以後の新しい発話から反映されます。</p>
+      <div id="roster" class="roster"></div>
+      <div class="enroll-row">
+        <input id="enroll-name" placeholder="名前">
+        <button class="btn" id="enroll-btn">20秒話して登録</button>
+      </div>
+      <div id="enroll-status" class="enroll-status"></div>
+      <label class="roster-lock">
+        <input type="checkbox" id="roster-lock"> 名簿を確定（登録済みの人だけで進める）
+      </label>
+    </div>
   </div>
 
   <div class="agenda-bar">
@@ -185,19 +200,6 @@ INDEX_HTML = """<!doctype html>
       <div class="transcript" id="transcript"><div class="empty">まだ発話がありません</div></div>
     </div>
     <div class="side">
-      <div class="panel" id="enroll-panel" hidden>
-        <h2>声の事前登録</h2>
-        <p class="enroll-hint">名前を入れて押したあと、表示中はその人だけが話してください。完了後すぐ、以後の新しい発話から反映されます。</p>
-        <div id="roster" class="roster"></div>
-        <div class="enroll-row">
-          <input id="enroll-name" placeholder="名前">
-          <button class="btn" id="enroll-btn">20秒話して登録</button>
-        </div>
-        <div id="enroll-status" class="enroll-status"></div>
-        <label class="roster-lock">
-          <input type="checkbox" id="roster-lock"> 名簿を確定（登録済みの人だけで進める）
-        </label>
-      </div>
       <div class="panel" id="diar-panel">
         <h2>参加人数</h2>
         <div class="setting-row">

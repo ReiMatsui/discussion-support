@@ -421,6 +421,25 @@ def test_reset_for_new_meeting():
     assert s.started >= old_started        # 新しい開始時刻
 
 
+def test_reset_for_new_meeting_reopens_setup_when_served(tmp_path):
+    """サーバーUI利用時は新しい会議で開始前設定に戻る."""
+    s = SessionState(
+        args=SimpleNamespace(setup=True, wav=None, simulate=None),
+        started=datetime.datetime(2026, 1, 1),
+        out_path=str(tmp_path / "o.md"), html_path=str(tmp_path / "o.html"),
+        diag_path=str(tmp_path / "o.diag"), turns_path=str(tmp_path / "o.turns"),
+        wav_path=str(tmp_path / "o.wav"), serve=True,
+    )
+    s.waiting_to_start = False
+    s.start_requested.set()
+
+    result = s.reset_for_new_meeting()
+
+    assert result["waiting"] is True
+    assert s.api_snapshot()["setup"] == {"waiting": True}
+    assert not s.start_requested.is_set()
+
+
 def test_reset_calls_tracker_reset_session():
     """リセット時に声紋トラッカーのセッション状態もリセットする（課題③）."""
     s = _make_state()
@@ -838,6 +857,7 @@ def test_http_get_root_serves_spa():
         assert "/api/start" in html
         assert 'id="setup-panel"' in html
         assert 'id="start-session"' in html
+        assert html.index('id="setup-panel"') < html.index('id="enroll-panel"') < html.index('id="agenda"')
         assert "/api/intervention" in html
         assert 'id="speaker-count-status"' in html
         assert 'id="intervention-enabled"' in html

@@ -606,9 +606,19 @@ class SessionState:
                     break
         if self.agent is not None:
             self.agent.reset_meeting()
+        should_wait_for_setup = bool(
+            getattr(self.args, "setup", True)
+            and self._serve
+            and not getattr(self.args, "wav", None)
+            and not getattr(self.args, "simulate", None)
+        )
+        self.waiting_to_start = should_wait_for_setup
+        if should_wait_for_setup:
+            self.start_requested.clear()
         self.rev += 1
         self.save()  # 空の新会議ファイルを作成
-        return {"ok": True, "started": self.started.strftime("%Y-%m-%d %H:%M:%S")}
+        return {"ok": True, "started": self.started.strftime("%Y-%m-%d %H:%M:%S"),
+                "waiting": self.waiting_to_start}
 
     _AGENDA_SPEAKERS = ("議題", "議題(自動)")
 
