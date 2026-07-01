@@ -82,6 +82,22 @@ def test_sender_keeps_only_successfully_sent_audio_for_asr_buffer() -> None:
     assert provider.drains == 1
 
 
+def test_sender_buffers_setup_audio_without_recording_or_stt_send() -> None:
+    state = _make_state()
+    state.waiting_to_start = True
+    state.stt_ws = None
+    pcm = b"\x03\x00" * 1600
+
+    state.audio_q.put(pcm)
+    state.audio_q.put(None)
+    _run_sender(state, _Backend())  # type: ignore[arg-type]
+
+    assert state.pcm_buf == pcm
+    assert state.pcm_total_bytes == 0
+    assert state.asr_pcm_buf == bytearray()
+    assert state.asr_pcm_total_bytes == 0
+
+
 def test_open_wav_resets_asr_buffer_offsets() -> None:
     state = _make_state()
     state.asr_pcm_buf.extend(b"abc")

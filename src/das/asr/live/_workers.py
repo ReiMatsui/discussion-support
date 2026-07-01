@@ -1835,14 +1835,16 @@ def _run_sender(state: SessionState, backend: STTBackend):
                 with contextlib.suppress(Exception):
                     ws.send(backend.make_end_message(seq))
             break
+        setup_capture_only = state.waiting_to_start and ws is None
         with state.buf_lock:
             state.pcm_buf.extend(pcm)
-            state.pcm_total_bytes += len(pcm)
+            if not setup_capture_only:
+                state.pcm_total_bytes += len(pcm)
             if len(state.pcm_buf) > state._PCM_KEEP_BYTES + SR * 2 * 10:
                 trim = len(state.pcm_buf) - state._PCM_KEEP_BYTES
                 del state.pcm_buf[:trim]
                 state.pcm_buf_offset += trim
-        if state.pcm_file is not None:
+        if not setup_capture_only and state.pcm_file is not None:
             try:
                 state.pcm_file.write(pcm)
                 state.pcm_file.flush()

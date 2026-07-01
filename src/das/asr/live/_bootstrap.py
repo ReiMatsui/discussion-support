@@ -613,6 +613,13 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
             webbrowser.open(f"http://127.0.0.1:{args.port}/")
         else:
             webbrowser.open("file://" + os.path.abspath(html_path))
+    audio_started = False
+    if state.waiting_to_start and not args.wav and not args.simulate:
+        threading.Thread(target=_run_from_mic, args=(state, args.device),
+                         daemon=True).start()
+        threading.Thread(target=_run_sender, args=(state, backend),
+                         daemon=True).start()
+        audio_started = True
     if state.waiting_to_start:
         print("# 開始前設定: ブラウザで参加人数などを確認し、「会議を開始」を押してください", flush=True)
         while not state.stop.is_set() and not state.start_requested.wait(timeout=0.2):
@@ -635,7 +642,7 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
             if args.wav:
                 threading.Thread(target=_run_from_wav, args=(state, args),
                                  daemon=True).start()
-            else:
+            elif not audio_started:
                 threading.Thread(target=_run_from_mic, args=(state, args.device),
                                  daemon=True).start()
         threading.Thread(target=_run_stdin_commands, args=(state,),
@@ -671,8 +678,9 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
             print(f"# Partner: voice={state.partner.voice} topic={state.partner.topic}",
                   flush=True)
 
-        threading.Thread(target=_run_sender, args=(state, backend),
-                         daemon=True).start()
+        if not audio_started:
+            threading.Thread(target=_run_sender, args=(state, backend),
+                             daemon=True).start()
 
         state.save()
         print("# 開始。話してください（名前登録はブラウザUIから / UIの停止ボタン or Ctrl+Cで終了）",
