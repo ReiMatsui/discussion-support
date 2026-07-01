@@ -1001,13 +1001,17 @@ class SessionState:
         }
         self.write_intervention_review(payload)
 
-    def add_facilitator_delivery_event(self, text: str) -> None:
-        """実際に参加者へ届いたファシリテーター発話を介入ログへ残す."""
+    def add_facilitator_delivery_event(self, text: str,
+                                       timing: dict | None = None) -> None:
+        """実際に参加者へ届いたファシリテーター発話を介入ログへ残す.
+
+        timing: 任意の観測情報（例: speak_start_latency_ms = trigger→発話開始の遅延）。
+        """
         text = text.strip()
         if not text or "介入不要" in text:
             return
         now = datetime.datetime.now()
-        self.write_intervention_event({
+        event = {
             "type": "delivery",
             "trigger_event_id": self._last_intervention_event_id,
             "time": now.strftime("%H:%M:%S"),
@@ -1015,7 +1019,10 @@ class SessionState:
             "meeting_started": self.started.isoformat(timespec="seconds"),
             "speaker": "ファシリテーター",
             "text": text,
-        })
+        }
+        if timing:
+            event["timing"] = timing
+        self.write_intervention_event(event)
 
     def save(self, live: bool = True):
         self.rev += 1  # 変更を通知（SSEの差分配信用, F2）

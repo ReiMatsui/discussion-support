@@ -477,3 +477,33 @@ def test_review_record_logs_supplied_controller_decision_without_reevaluation():
 
     assert state.reviews[0]["controller_decision"]["candidate_id"] is None
     assert "エコーウィンドウ" in state.reviews[0]["controller_decision"]["suppressed"][0]["reason"]
+    # record は実 dispatch 経路なので dispatched=True（分析時に what-if と区別）
+    assert state.reviews[0]["dispatched"] is True
+
+
+def test_review_dispatched_flag_distinguishes_record_from_evaluate():
+    """record（実採択）は dispatched=True、evaluate（hold時のwhat-if）は False."""
+    now = time.monotonic()
+
+    # evaluate: hold/echo 局面の再評価 → dispatched=False
+    s_eval = _ReviewState()
+    pend = _PendingInterventions()
+    pend.drift_reason = "脱線"
+    pend.last_drift_request_at = now
+    _InterventionReviewRecorder().evaluate(
+        s_eval, pending=pend, agent=_FakeAgent(), now=now, silence_elapsed=5.0,
+        epoch=0, recent_interventions=[],
+        legacy={"reason": "hold", "detail": "echo_window"})
+    assert s_eval.reviews[0]["dispatched"] is False
+
+    # record: 実際に採択した判断 → dispatched=True
+    s_rec = _ReviewState()
+    cand = InterventionCandidate(id="drift", kind="drift", brief="脱線",
+                                 created_at=now)
+    decision = FacilitationController().arbitrate(FacilitationInput(
+        candidates=(cand,), recent_interventions=(), silence_elapsed=5.0,
+        snapshot_epoch=1, now=now))
+    _InterventionReviewRecorder().record(
+        s_rec, candidates=[cand], decision=decision, silence_elapsed=5.0,
+        epoch=1, legacy={"reason": "drift", "detail": "脱線"}, latency_ms=0.1)
+    assert s_rec.reviews[0]["dispatched"] is True
