@@ -90,6 +90,52 @@ def test_anonymous_person_keeps_same_label_on_moderate_match():
     assert vp.last["kind"] == "低信頼追従"
 
 
+def _closed_roster_tracker(emb: np.ndarray) -> VoiceProfiles:
+    """登録済み A/B/C を持つ名簿確定(auto=False)トラッカー（4次元・直交声紋）."""
+    vp = _tracker(emb)
+    vp.profiles = {
+        "A": _unit(1, 0, 0, 0),
+        "B": _unit(0, 1, 0, 0),
+        "C": _unit(0, 0, 1, 0),
+    }
+    vp._active_keys = {"A", "B", "C"}
+    vp.sp_map = {}
+    vp.auto = False   # 名簿を確定
+    return vp
+
+
+def test_closed_roster_long_unknown_marks_unsure():
+    """閉じた名簿で、登録者の誰とも一致しない長い声は未確定（新規匿名を作らない）."""
+    vp = _closed_roster_tracker(_unit(0, 0, 0, 1))   # A/B/C いずれとも直交=無一致
+    assert vp.classify(_LONG, "7", count=True, chars=60) == UNSURE_SPEAKER
+    assert vp.sp_map["7"] == UNSURE_SPEAKER
+    assert vp.profiles.keys() == {"A", "B", "C"}     # 人物Nを増やさない
+    assert vp.n_anon == 0
+
+
+def test_closed_roster_confident_match_keeps_registered_name():
+    """閉じた名簿でも、はっきり登録者の声なら従来どおりその名前に割り当てる."""
+    vp = _closed_roster_tracker(_unit(1, 0, 0, 0))   # まさにAの声
+    assert vp.classify(_LONG, "7", count=True, chars=60) == "A"
+
+
+def test_closed_roster_does_not_autoenroll_unknown():
+    """閉じた名簿では、未一致の声を何度受け取っても人物Nに自動登録しない."""
+    vp = _closed_roster_tracker(_unit(0, 0, 0, 1))
+    for _ in range(4):
+        assert vp.classify(_LONG, "7", count=True, chars=60) == UNSURE_SPEAKER
+    assert vp.profiles.keys() == {"A", "B", "C"}
+    assert vp.n_anon == 0
+    assert vp.pool == []
+
+
+def test_closed_roster_unknown_does_not_inherit_registered_label():
+    """STTが登録者と同じ生ラベルを別人に再利用しても、登録者を継がず未確定にする."""
+    vp = _closed_roster_tracker(_unit(0, 0, 0, 1))   # Aと全く違う声
+    vp.sp_map = {"2": "A"}                            # ラベル2は直前までA
+    assert vp.classify(_LONG, "2", count=True, chars=60) == UNSURE_SPEAKER
+
+
 def test_max_speakers_turns_extra_new_voice_unsure():
     """参加人数上限に達した後の新しい声は、新参加者ではなく未確定にする."""
     vp = _tracker(_unit(0, 1, 0))

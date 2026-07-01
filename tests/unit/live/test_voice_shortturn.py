@@ -62,12 +62,17 @@ def test_short_turn_ambiguous_marks_unsure():
     assert vp.sp_map["1"] == "B"             # マッピングは保持（次の確信発話の連続性）
 
 
-def test_short_turn_closed_roster_no_unsure():
-    """閉じた名簿(auto=False)では短い曖昧発話を未確定にせず直近に追従（固着回避）."""
+def test_short_turn_closed_roster_marks_unsure():
+    """閉じた名簿(auto=False)でも、判別できない短い曖昧発話は未確定にする.
+
+    名簿確定モードは「登録済みの人 or 未確定」。証拠の無い曖昧な短発話を
+    直近の確定者(B)に決めつけるのは、誤った確信付与になるので避ける。
+    """
     vp = _tracker(_unit(1, 1, 0))      # A/Bの中間で判別不能
     vp.auto = False                    # 名簿確定モード
     vp.sp_map["1"] = "B"               # 直前はB
-    assert vp.classify(_SHORT, "1", count=True) == "B"   # 未確定(?)ではなくprev
+    assert vp.classify(_SHORT, "1", count=True) == "?"   # Bと言い切らず未確定
+    assert vp.sp_map["1"] == "B"       # マッピングは保持（次の確信発話の連続性）
 
 
 def test_short_turn_skipped_for_backchannel():

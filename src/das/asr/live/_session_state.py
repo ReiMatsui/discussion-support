@@ -240,10 +240,19 @@ class SessionState:
         参加人数は「表示できる人間スロット数」として扱う。既に出現済みの人間話者は
         維持するが、上限到達後の新しい #/@diar:/人物N は増やさない。設定前に
         余剰ラベルが作られていた場合も、以後は上限外として未確定に寄せる。
+
+        名簿を確定（closed roster, tracker.auto == False）している場合はこれより優先し、
+        「登録済みのアクティブな人 or 未確定」だけを許す。声紋以外の経路（外部
+        diarization の @diar:N や STT フォールバック）で作られた匿名キーも含めて
+        未確定に落とし、参加人数(diarization_max_speakers)には依存しない。
         """
         key = str(key)
         if key in (AGENT_SPEAKER, "パートナー", UNSURE_SPEAKER):
             return key
+        tracker = self.tracker
+        if tracker is not None and not getattr(tracker, "auto", True):
+            roster = set(tracker.active_profile_names())
+            return key if key in roster else UNSURE_SPEAKER
         if not (self._is_anonymous_speaker_key(key) or self._is_system_anonymous_name(key)):
             return key
         max_speakers = self._max_human_speakers()

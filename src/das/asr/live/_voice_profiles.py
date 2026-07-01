@@ -442,14 +442,22 @@ class VoiceProfiles:
                                    label=sp, sim=round(sim, 3), second=round(second, 3),
                                    name=cand, prev=prev, short=True)
                         return cand
-                # 厳格に決められない短い発話。自動登録ありの探索中(open-set)は、確定済みの
-                # 人へ誤って追従しないよう未確定にする。閉じた名簿(auto=False)では、未確定で
-                # 固着させず直近の割り当て/話者ラベルに倒す（話者Nで安定した仮人格を与える）。
-                if self.auto and prev is not None and not prev.startswith("#"):
+                # 厳格に決められない短い発話は、確定済みの人へ誤って追従せず未確定にする。
+                # 開いた名簿でも閉じた名簿でも同じ扱い（証拠の無い決めつけ＝誤った確信付与を
+                # 避ける）。sp_map は保持し、次の確信ある発話で連続性を回復する。
+                if prev is not None and not prev.startswith("#"):
                     self._note("未確定", label=sp, prev=prev, short=True)
                     return UNSURE_SPEAKER
         # 声紋で決められない（重なり/短い相槌/蓄積中）→ ラベルの直近判定に追従
         key = prev if prev is not None else "#" + sp
+        # 閉じた名簿（名簿を確定, auto=False）: 許すのは「登録済みのアクティブな名前付き
+        # プロファイルへの継続」だけ。未知/匿名(#ラベル・人物N)は新規参加者を作らず未確定に
+        # する。確信ある一致・AI声紋・登録者への証拠つき継続は上流で既に return 済み。
+        if not self.auto:
+            active = self._active_human()
+            if key not in active or self.ANON.match(str(key)):
+                key = UNSURE_SPEAKER
+                kind = "未確定"
         self.sp_map[sp] = key
         self._note(kind, label=sp, **info)
         return key
