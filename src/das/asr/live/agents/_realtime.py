@@ -81,6 +81,9 @@ class RealtimeAgent(_RealtimeBase):
         self.on_ai_utterance = None        # callback(text: str) AI発話確定時
         self.on_speech_start = None        # callback() 音声生成開始時（即座に通知）
         self._speech_started = False       # 現応答で on_speech_start を通知済みか
+        # --- 観測: trigger送信 → 最初の音声（発話開始）までの遅延（§3.5 予算検証用） ---
+        self._speak_trigger_at = 0.0       # trigger送信の時刻（monotonic）。0=未計測
+        self._last_speak_latency_ms: float | None = None  # 直近の trigger→発話開始 ms
         self._playback_thread: threading.Thread | None = None
         # --- エコー防止 ---
         self._responding = False           # response生成中フラグ
@@ -236,6 +239,11 @@ class RealtimeAgent(_RealtimeBase):
                 # 待たずに即再生する。最初の音声で発話開始を通知（Partner停止用）。
                 if not self._speech_started:
                     self._speech_started = True
+                    # trigger → 発話開始の遅延を確定（§3.5 予算検証用）。
+                    if self._speak_trigger_at:
+                        self._last_speak_latency_ms = round(
+                            (time.monotonic() - self._speak_trigger_at) * 1000, 1)
+                        self._speak_trigger_at = 0.0
                     self._log_state("→SPEAKING (first audio)")
                     if self.on_speech_start:
                         with contextlib.suppress(Exception):
@@ -466,6 +474,8 @@ class RealtimeAgent(_RealtimeBase):
             # 消費した介入をクリア。送信中に新しい介入が入っていたら残す。
             if include_pi and self._pending_intervention is pi:
                 self._pending_intervention = None
+        # 発話開始遅延の計測開始（最初の音声で確定する, §3.5）。
+        self._speak_trigger_at = time.monotonic()
         self._log_state("→RESPONDING (trigger送信)")
 
     def interrupt(self):

@@ -379,6 +379,31 @@ def test_on_speech_start_fires_once_per_response(agent):
     assert started == [True]
 
 
+def test_speak_start_latency_measured_from_trigger_to_first_audio(agent):
+    """trigger送信 → 最初の音声までの遅延を計測する（§3.5 予算検証用, Phase4観測）."""
+    import time
+    agent._speak_trigger_at = time.monotonic() - 0.3   # trigger を0.3秒前に模擬
+    agent._handle({"type": "response.output_item.added", "item": {"id": "it1"}})
+    agent._handle({"type": "response.output_audio.delta", "delta": make_chunk()})
+
+    assert agent._last_speak_latency_ms is not None
+    assert 250 < agent._last_speak_latency_ms < 500  # ~300ms
+    assert agent._speak_trigger_at == 0.0  # 計測後はリセット（次trigger待ち）
+
+
+def test_speak_latency_not_recomputed_without_new_trigger(agent):
+    """新しい trigger が無ければ、後続の音声で遅延を再計算しない."""
+    import time
+    agent._speak_trigger_at = time.monotonic()
+    agent._handle({"type": "response.output_item.added", "item": {"id": "it1"}})
+    agent._handle({"type": "response.output_audio.delta", "delta": make_chunk()})
+    first = agent._last_speak_latency_ms
+    # 次の応答（新trigger無し = _speak_trigger_at=0）では latency を上書きしない
+    agent._handle({"type": "response.output_item.added", "item": {"id": "it2"}})
+    agent._handle({"type": "response.output_audio.delta", "delta": make_chunk()})
+    assert agent._last_speak_latency_ms == first
+
+
 def test_transcript_delivered_without_marker_filtering(agent):
     """転写はマーカー判定なしでそのまま on_ai_utterance に渡る（Speaker分離）."""
     utterances: list[str] = []

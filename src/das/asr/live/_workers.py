@@ -619,6 +619,10 @@ class _InterventionReviewRecorder:
         self._last_fingerprint = fingerprint
         try:
             add_review({
+                # dispatched=False: これは hold/echo/partner 等で発話しない局面の
+                # 「もし採るなら」再評価（物理コンテキスト無し）。controller_decision の
+                # candidate_id は実際には dispatch されていない what-if 値（分析時に注意）。
+                "dispatched": False,
                 "candidates": [_candidate_brief(c) for c in candidates],
                 "legacy_decision": legacy,
                 "controller_decision": decision.as_dict(),
@@ -664,6 +668,9 @@ class _InterventionReviewRecorder:
         self._last_fingerprint = fingerprint
         try:
             add_review({
+                # dispatched=True: 実際に dispatch へ使った採否。controller_decision の
+                # candidate_id が実発話に対応する（legacy_decision.reason も実 kind）。
+                "dispatched": True,
                 "candidates": [_candidate_brief(c) for c in candidates],
                 "legacy_decision": legacy,
                 "controller_decision": decision.as_dict(),
@@ -1144,7 +1151,12 @@ def _on_agent_text_factory(state: SessionState):
         if ON_UTTERANCE is not None:
             with contextlib.suppress(Exception):
                 ON_UTTERANCE("ファシリテーター", text)
-        state.add_facilitator_delivery_event(text)
+        # 観測: trigger → 発話開始の遅延（§3.5 予算検証用）。属性が無い agent でも安全。
+        timing = None
+        speak_latency = getattr(state.agent, "_last_speak_latency_ms", None)
+        if speak_latency is not None:
+            timing = {"speak_start_latency_ms": speak_latency}
+        state.add_facilitator_delivery_event(text, timing=timing)
         _print_line(f"\x1b[96m[ファシリテーター]\x1b[0m: {text}")
         state.save()
     return _on_agent_text
