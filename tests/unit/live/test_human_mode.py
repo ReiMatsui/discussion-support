@@ -270,6 +270,45 @@ def test_fact_candidate_gate_ignores_low_value_utterances():
         assert not _looks_like_fact_claim(text), text
 
 
+def test_fact_prefilter_accepts_stable_containment_claims():
+    from das.asr.live._workers import _looks_like_fact_claim
+    positives = [
+        "コーヒーにはカフェインが含まれていません。",
+        "コーヒーには通常カフェインが含まれます。",
+        "緑茶にはカフェインが含まれていません。",
+        "砂糖はタンパク質です。",
+        "牛乳にはアルコールが含まれています。",
+    ]
+    assert [_looks_like_fact_claim(t) for t in positives] == [True] * len(positives)
+
+
+def test_fact_prefilter_accepts_plain_assertions_without_anchor():
+    """強い事実アンカーが無くても、断定文なら LLM へ通す（除外中心の前段）."""
+    from das.asr.live._workers import _looks_like_fact_claim
+    positives = [
+        "砂糖はタンパク質です。",              # XはYです（分類）
+        "砂糖はタンパク質ではありません。",     # XはYではありません
+        "牛乳は飲み物です。",                 # 分類
+        "地震はプレートの境界で発生します。",   # で発生
+    ]
+    assert [_looks_like_fact_claim(t) for t in positives] == [True] * len(positives)
+
+
+def test_fact_prefilter_still_excludes_low_value_assertions():
+    """断定ゲートを広げても、質問・評価・指示語主語・メタは落とし続ける（過剰介入抑制）."""
+    from das.asr.live._workers import _looks_like_fact_claim
+    negatives = [
+        "コーヒーにはカフェインが含まれていますか？",  # 質問
+        "たぶんカフェイン入ってた気がします。",        # 曖昧
+        "コーヒーは美味しいです。",                   # 好み/評価
+        "これは良さそうです。",                       # 評価
+        "コーヒーについて話しましょう。",             # メタ
+        "これは未知カテゴリの断定文です",             # 指示語主語（外部照合に不向き）
+        "理解率は通常50%前後ですよ。25%は最低ラインです。それ以上下げるのはお客様の失礼です。",
+    ]
+    assert [_looks_like_fact_claim(t) for t in negatives] == [False] * len(negatives)
+
+
 def test_check_fact_correction_accepts_high_confidence(monkeypatch):
     import das.asr.live._bootstrap as bootstrap
     monkeypatch.setattr(bootstrap, "_post_chat_json",
