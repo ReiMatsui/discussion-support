@@ -88,7 +88,7 @@ class LiveArgs:
     debate: str | None = None
     debate_voice: str = "echo"
     topic: str | None = None   # 人間同士モードの議題（脱線判定の基準）
-    proactivity: str = "controlled"  # 介入の積極性（controlled/standard/active）
+    proactivity: str = "standard"  # 介入の積極性（controlled/standard/active）
 
 
 # ---------------------------------------------------------------------------

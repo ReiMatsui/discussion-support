@@ -20,7 +20,7 @@ def test_cli_has_topic_option():
 
 
 def test_liveargs_has_proactivity():
-    assert LiveArgs().proactivity == "controlled"
+    assert LiveArgs().proactivity == "standard"
     assert LiveArgs(proactivity="standard").proactivity == "standard"
 
 
@@ -36,7 +36,7 @@ def test_cli_has_proactivity_option():
 
 def test_proactivity_profiles():
     from das.asr.live._constants import _PROACTIVITY_DEFAULT, _PROACTIVITY_PROFILES
-    assert _PROACTIVITY_DEFAULT == "controlled"
+    assert _PROACTIVITY_DEFAULT == "standard"
     assert _PROACTIVITY_PROFILES["controlled"]["silence_summarize"] is None
     assert _PROACTIVITY_PROFILES["controlled"]["drift_confirmations"] >= 2
     assert _PROACTIVITY_PROFILES["standard"]["silence_summarize"] == 18.0

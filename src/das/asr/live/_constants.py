@@ -377,7 +377,7 @@ _ECHO_COOLDOWN = 2.0          # AI発話終了後のエコーウィンドウ秒�
 # silence_summarize: 沈黙がこの秒数続いたら要約/整理の介入を検討（None=しない）。
 # cooldown: 脱線介入・声かけの最小間隔（しつこさ防止）。
 # drift_confirmations: 脱線を採るまでに必要な連続検出回数。
-# 既定は controlled。まずは明確な問題時だけ介入する。
+# 既定は standard。デモや通常利用では、沈黙時の短い整理も許可する。
 # 注: 旧 stall_breaker（「介入不要」後のデッドエア一押し）は Phase3 で廃止した。
 # Speaker から「介入不要」判断を外したため、その履歴に依存する一押しは行わない。
 _PROACTIVITY_PROFILES = {
@@ -388,7 +388,7 @@ _PROACTIVITY_PROFILES = {
     "active":     {"silence_summarize": 8.0,  "cooldown": 15.0,
                    "drift_confirmations": 1},
 }
-_PROACTIVITY_DEFAULT = "controlled"
+_PROACTIVITY_DEFAULT = "standard"
 # 相槌判定: 相槌パターンに一致する発話ではPartnerを止めない
 _BACKCHANNEL_RE = re.compile(
     r'^[\s、。,.!?！？]*'

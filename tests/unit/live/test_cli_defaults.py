@@ -14,7 +14,7 @@ def test_live_args_defaults_match_recommended_live_setup() -> None:
     assert args.model == "stt-rt-v5"
     assert args.agent is True
     assert args.setup is True
-    assert args.proactivity == "controlled"
+    assert args.proactivity == "standard"
     assert args.soniox_endpoint is True
 
 

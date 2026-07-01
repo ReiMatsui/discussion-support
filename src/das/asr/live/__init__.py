@@ -105,9 +105,9 @@ def post_system(text: str) -> None:
 @click.option("--topic", metavar="TOPIC", default=None,
               help="人間同士の議論の議題（AI有効時の脱線判定の基準。"
                    "未指定なら会議冒頭から自動推定）")
-@click.option("--proactivity", default="controlled",
+@click.option("--proactivity", default="standard",
               type=click.Choice(["controlled", "standard", "active"]),
-              help="ファシリテーターの介入の積極性（既定controlled。"
+              help="ファシリテーターの介入の積極性（既定standard。"
                    "controlled=明確な問題時のみ）")
 def main(**kwargs):
     """リアルタイム議事録 + AIファシリテーション."""

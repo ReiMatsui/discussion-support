@@ -448,7 +448,7 @@ function renderIntervention(config) {
   const trig = $("trigger-n");
   const summary = $("intervention-summary");
   if (document.activeElement !== enabled) enabled.checked = !config || config.enabled !== false;
-  if (document.activeElement !== pro) pro.value = (config && config.proactivity) || "controlled";
+  if (document.activeElement !== pro) pro.value = (config && config.proactivity) || "standard";
   if (document.activeElement !== trig) trig.value = config && config.trigger_n ? String(config.trigger_n) : "";
   const disabled = config && config.enabled === false;
   pro.disabled = disabled;
