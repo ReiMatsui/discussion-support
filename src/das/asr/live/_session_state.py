@@ -59,7 +59,7 @@ class SessionState:
         self.diag_path = diag_path
         self.turns_path = turns_path
         self.interventions_path = self._interventions_path_for(turns_path)
-        # 採否レビュー（shadow Controller の判断ログ, Phase0/1）。
+        # 採否レビュー（Controller が実際に採択した判断のログ）。
         self.intervention_review_path = self._intervention_review_path_for(turns_path)
         self.wav_path = wav_path
         self._serve = serve
@@ -975,18 +975,22 @@ class SessionState:
             f.write(json.dumps(event, ensure_ascii=False) + "\n")
 
     def write_intervention_review(self, entry: dict, path=None):
-        """採否レビュー（shadow Controller の判断）を追記保存する（Phase0/1）.
+        """採否レビューを追記保存する.
 
         従来の介入ログ（``.interventions.jsonl``）とは別ファイルに分け、
-        「介入候補・従来の採否・Controllerならどう判断したか・抑制理由・latency」を
-        後から追えるようにする。実際の発話採否はこのログでは変わらない。
+        「介入候補・採択した Controller 判断・抑制理由・latency」を後から
+        追えるようにする（なぜ話したか／黙ったかの観測用）。
         """
         dst = path or self.intervention_review_path
         with open(dst, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
     def add_intervention_review(self, entry: dict) -> None:
-        """shadow Controller の判断1件を ``intervention_review.jsonl`` に記録する."""
+        """Controller の採否判断1件を ``intervention_review.jsonl`` に記録する.
+
+        注: ``type`` は歴史的に ``shadow_decision``（Phase1 で shadow 判断を
+        ログしていた頃の名残）。既存ログとの互換のため値は据え置く。
+        """
         now = datetime.datetime.now()
         payload = {
             "type": "shadow_decision",

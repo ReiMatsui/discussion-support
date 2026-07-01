@@ -26,7 +26,6 @@ class FakeAgent:
         self.ai_speaking = False
         self._responding = False
         self._pending_intervention: dict | None = None
-        self._last_noop_at = 0.0
         self.trigger_n = 10
         self.in_echo_window = False
         self._pending: list = []
@@ -269,9 +268,7 @@ def test_normal_trigger_decision_prefers_count_before_invite():
         silence_elapsed=100.0,
         silence_summarize=18.0,
         partner_present=False,
-        stall_breaker=False,
         now=time.monotonic(),
-        last_stall_at=0.0,
         last_intervention_at=0.0,
         cooldown=0.0,
         last_invited=None,
@@ -293,9 +290,7 @@ def test_count_trigger_waits_for_short_pause():
         silence_elapsed=0.1,
         silence_summarize=18.0,
         partner_present=False,
-        stall_breaker=False,
         now=time.monotonic(),
-        last_stall_at=0.0,
         last_intervention_at=0.0,
         cooldown=0.0,
         last_invited=None,
@@ -316,9 +311,7 @@ def test_normal_trigger_decision_respects_controlled_silence():
         silence_elapsed=100.0,
         silence_summarize=None,
         partner_present=False,
-        stall_breaker=False,
         now=time.monotonic(),
-        last_stall_at=0.0,
         last_intervention_at=0.0,
         cooldown=0.0,
         last_invited=None,
@@ -417,36 +410,22 @@ def test_agent_worker_reconnects_disconnected_enabled_agent():
     assert agent._connected is True
 
 
-def test_stall_breaker_no_longer_fires_after_noop_silence():
-    """Phase3: stall（介入不要後の一押し）は廃止。activeでも発火しない.
+def test_dead_air_alone_does_not_trigger_push():
+    """デッドエアの一押し（旧 stall）は廃止済み。発言が溜まっていなければ黙る.
 
-    Speaker から「介入不要」判断を外したため、その履歴に依存する stall は
-    候補にもならない。発言が溜まっていなければ沈黙が続いても黙る。
+    以前は「介入不要」後の沈黙で一押ししていたが、Phase3 で Speaker から
+    「介入不要」判断を外したため、その概念ごと廃止した。activeプロファイルで
+    沈黙が続いても、pending が無ければ何もトリガーしない。
     """
     agent = FakeAgent()
-    agent._last_noop_at = time.monotonic()      # 旧来の「介入不要」履歴があっても
     state = FakeState(agent, None)
     state.proactivity = {"silence_summarize": 8.0, "cooldown": 15.0,
-                         "stall_breaker": True}
+                         "drift_confirmations": 1}
     state._last_utt_time[0] = time.monotonic() - 100  # 十分な沈黙を模擬
 
     _run_worker_briefly(state, until=lambda: False, timeout=1.0)
 
-    assert agent.trigger_calls == [], "stall は廃止されたので一押しは入らない"
-
-
-def test_controlled_proactivity_no_stall_breaker_after_noop():
-    """controlledでは介入不要後の沈黙でも、黙る判断を尊重する（Phase3でも不変）."""
-    agent = FakeAgent()
-    agent._last_noop_at = time.monotonic()
-    state = FakeState(agent, None)
-    state.proactivity = {"silence_summarize": None, "cooldown": 40.0,
-                         "stall_breaker": False}
-    state._last_utt_time[0] = time.monotonic() - 100
-
-    _run_worker_briefly(state, until=lambda: False, timeout=1.0)
-
-    assert agent.trigger_calls == []
+    assert agent.trigger_calls == [], "デッドエアの一押し（stall）は廃止済み"
 
 
 def test_controlled_proactivity_no_silence_summarize():
@@ -708,17 +687,6 @@ def test_invite_waits_for_pause():
     state = FakeState(agent, None)
     state.invite_requests.put("参加者B")
     state._last_utt_time[0] = time.monotonic()  # たった今発話があった → 間が無い
-
-    _run_worker_briefly(state, until=lambda: False, timeout=1.0)
-
-    assert agent.trigger_calls == []
-
-
-def test_no_stall_breaker_without_noop():
-    """介入不要の履歴がなければ、沈黙していても一押しはしない（通常の間は尊重）."""
-    agent = FakeAgent()
-    state = FakeState(agent, None)
-    state._last_utt_time[0] = time.monotonic() - 100
 
     _run_worker_briefly(state, until=lambda: False, timeout=1.0)
 

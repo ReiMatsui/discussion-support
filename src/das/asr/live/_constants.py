@@ -328,7 +328,6 @@ UNSURE_SPEAKER = "?"   # 短い発話で話者を確定できないときのキ�
 #     debateモードはPartner会話が主なので沈黙閾値を長めにする。
 #   - 並列ドリフトチェッカーは、ウォームアップ後、INTERVAL発話ごとに
 #     直近WINDOW発話を見て脱線判定する。
-#   - 介入不要後にデッドエアになったら STALL_SILENCE 秒で一押し（COOLDOWNで抑制）。
 #   - エコーウィンドウ = AI発話終了後 ECHO_COOLDOWN 秒。この間はトリガー抑止＆
 #     テキスト類似エコー除去を適用する。
 # =====================================================================
@@ -371,25 +370,23 @@ _INTERVENTION_PAUSE_DRIFT = 1.8  # 脱線: 会話の自律的な復帰を少し�
 _INTERVENTION_PAUSE_RETRY = 2.4  # 再送: しつこさを避け、十分な間がある時だけ
 _INTERVENTION_PAUSE_COUNT = 1.5  # 発話数整理: 参加者の連続発話を遮らない
 
-# --- デッドエア対策（介入不要後の沈黙ブレーカー） ---
-_STALL_SILENCE = 7.0          # 介入不要後この秒数沈黙したら一押し
-_STALL_COOLDOWN = 30.0        # 一押しの最小間隔（ループ防止）
-
 # --- エコー防止 ---
 _ECHO_COOLDOWN = 2.0          # AI発話終了後のエコーウィンドウ秒数（agent/partner共通）
 
 # --- 積極性プロファイル（人間ファシリテーションの介入頻度, S5） ---
 # silence_summarize: 沈黙がこの秒数続いたら要約/整理の介入を検討（None=しない）。
-# stall_breaker: 「介入不要」後の沈黙に一押しするか。active以外では黙る判断を尊重。
 # cooldown: 脱線介入・声かけの最小間隔（しつこさ防止）。
+# drift_confirmations: 脱線を採るまでに必要な連続検出回数。
 # 既定は controlled。まずは明確な問題時だけ介入する。
+# 注: 旧 stall_breaker（「介入不要」後のデッドエア一押し）は Phase3 で廃止した。
+# Speaker から「介入不要」判断を外したため、その履歴に依存する一押しは行わない。
 _PROACTIVITY_PROFILES = {
     "controlled": {"silence_summarize": None, "cooldown": 40.0,
-                   "drift_confirmations": 2, "stall_breaker": False},  # 明確な問題時のみ
+                   "drift_confirmations": 2},  # 明確な問題時のみ
     "standard":   {"silence_summarize": 18.0, "cooldown": 25.0,
-                   "drift_confirmations": 2, "stall_breaker": False},
+                   "drift_confirmations": 2},
     "active":     {"silence_summarize": 8.0,  "cooldown": 15.0,
-                   "drift_confirmations": 1, "stall_breaker": True},
+                   "drift_confirmations": 1},
 }
 _PROACTIVITY_DEFAULT = "controlled"
 # 相槌判定: 相槌パターンに一致する発話ではPartnerを止めない

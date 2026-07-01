@@ -2,7 +2,7 @@
 
 ログ接頭辞の規約（Phase 3 R4）:
   # [state]   ... エージェントの状態遷移（RESPONDING/SPEAKING/INTERRUPTED/IDLE等）
-  # [trigger] ... ファシリテーターのトリガー理由（drift/retry/count/silence/stall/skip）
+  # [trigger] ... ファシリテーターのトリガー理由（drift/retry/count/silence/invite/skip）
   # [drift]   ... 並列ドリフト（脱線）検出の動作
   # [diag]    ... 定期的な状態ダンプ・スキップ理由などの診断
 """
@@ -385,14 +385,16 @@ def _select_normal_trigger_decision(
     silence_elapsed: float,
     silence_summarize: float | None,
     partner_present: bool,
-    stall_breaker: bool,
     now: float,
-    last_stall_at: float,
     last_intervention_at: float,
     cooldown: float,
     last_invited: str | None,
 ) -> _NormalTriggerDecision:
-    """通常の間で発火する介入を、優先順位順に1つだけ選ぶ."""
+    """通常の間で発火する介入を、優先順位順に1つだけ選ぶ（Controller例外時のfallback）.
+
+    注: stall（介入不要後の一押し）は Phase3 で廃止したため、このfallbackでも
+    扱わない。通常の採否は Controller（_controller_normal_decision）が担う。
+    """
     if agent.mode == "conversation":
         if agent.pending_count > 0 and silence_elapsed > _AGENT_CONV_SILENCE:
             return _NormalTriggerDecision(
@@ -411,8 +413,6 @@ def _select_normal_trigger_decision(
             and silence_elapsed > silence_thresh):
         return _NormalTriggerDecision(
             "silence", f"{silence_elapsed:.1f}>{silence_thresh:.1f}秒")
-    # Phase3: stall（介入不要後の一押し）は廃止。stall_breaker/last_stall_at は
-    # 後方互換のため引数に残すが判定には使わない。
     if (pending.invite is not None
             and silence_elapsed > _INVITE_SILENCE
             and now - last_intervention_at > cooldown):
@@ -430,14 +430,12 @@ def _build_candidates(
     now: float,
     silence_summarize: float | None = None,
     partner_present: bool = False,
-    stall_breaker: bool = False,
     last_invited: str | None = None,
 ) -> list[InterventionCandidate]:
     """保留中の介入要求を Controller 入力用の候補へ変換する（読み取り専用）.
 
     pending のキュー/deque は **pop しない**。あくまで現在の候補スナップショットを
-    作るだけで、従来の採否（_select_*_decision）には一切干渉しない（Phase1 shadow）。
-    fact 候補は legacy と同様に deque 先頭の1件だけを対象にする。
+    作るだけで、状態を変えない。fact 候補は deque 先頭の1件だけを対象にする。
     """
     cands: list[InterventionCandidate] = []
     mode = getattr(agent, "mode", "facilitator")
@@ -515,9 +513,6 @@ def _build_candidates(
             payload={"pause_required": float(silence_thresh)},
         ))
 
-    # Phase3: stall（介入不要後の沈黙ブレーカー）は廃止した。Speaker から
-    # 「介入不要」判断を外したため、その履歴に依存する一押しは行わない。
-
     if pending.invite:
         invite_payload = {}
         if pending.invite == last_invited:
@@ -547,7 +542,12 @@ def _candidate_brief(c: InterventionCandidate) -> dict:
 
 
 def _legacy_decision_brief(reason: str, detail: str = "") -> dict:
-    """shadow比較用に、同一スナップショットの従来判断を最小dict化する."""
+    """レビューログの ``legacy_decision`` 欄用に、採択された判断を最小dict化する.
+
+    注: フィールド名 ``legacy_decision`` は Phase1（shadow で従来判断と突合していた
+    頃）の名残。Phase2 以降はここに「実際に採択した Controller 判断」が入る。
+    後方互換のためキー名は据え置く。
+    """
     return {
         "reason": reason,
         "detail": detail,
@@ -555,11 +555,15 @@ def _legacy_decision_brief(reason: str, detail: str = "") -> dict:
     }
 
 
-class _ShadowControllerRunner:
-    """FacilitationController を shadow mode で並走させる（Phase1）.
+class _InterventionReviewRecorder:
+    """採否の経緯を ``intervention_review.jsonl`` に記録する（観測性）.
 
-    従来ロジックの採否は一切変えない。Controller が「今なら何を採るか／黙るか」
-    と抑制理由・latency だけを ``intervention_review.jsonl`` に記録する。
+    ``record()``  : 実際に dispatch へ使った Controller 判断をそのまま記録する
+                    （Phase2 以降の主経路。採択・抑制・latency が追える）。
+    ``evaluate()``: hold/echo/partner 待機などで dispatch しない局面向けに、
+                    現時点の候補で採否を再計算してログする（物理コンテキストは
+                    渡さない簡易評価）。
+
     採否（採択候補＋抑制集合）が前回から変化した時だけ書き出し、0.25秒ループでの
     ログ洪水を避ける。state が review ログ非対応（テストの FakeState 等）なら no-op。
     """
@@ -582,17 +586,15 @@ class _ShadowControllerRunner:
         legacy: dict | None,
         silence_summarize: float | None = None,
         partner_present: bool = False,
-        stall_breaker: bool = False,
         last_invited: str | None = None,
     ) -> None:
         add_review = getattr(state, "add_intervention_review", None)
         if not callable(add_review):
-            return  # review ログ非対応 → shadow を完全に no-op にする
+            return  # review ログ非対応 → 記録は完全に no-op にする
         candidates = _build_candidates(
             pending, agent, now=now,
             silence_summarize=silence_summarize,
             partner_present=partner_present,
-            stall_breaker=stall_breaker,
             last_invited=last_invited,
         )
         t0 = time.perf_counter()
@@ -627,7 +629,7 @@ class _ShadowControllerRunner:
         except Exception as exc:
             if not self._warned_write_failure:
                 self._warned_write_failure = True
-                print(f"# [diag] shadow review log failed: {exc}", flush=True)
+                print(f"# [diag] intervention review log failed: {exc}", flush=True)
 
     def record(
         self,
@@ -712,11 +714,10 @@ def _controller_barge_in_decision(
     cooldown: float,
     recent_interventions: list[InterventionLogEntry],
     silence_summarize: float | None,
-    stall_breaker: bool,
     last_invited: str | None,
     epoch: int,
 ) -> tuple[_BargeInDecision, FacilitationDecision | None, list[InterventionCandidate], float]:
-    """barge-in レーンの採否を Controller に委ねる（固定優先順位の置換, Phase2）.
+    """barge-in レーンの採否を Controller に委ねる（固定優先順位の置換）.
 
     既存checkerが作った候補(fact/drift/retry)を入力にし、Controller が
     「今どれを採るか／黙るか」を決める。戻り値は既存 dispatch がそのまま使える
@@ -726,7 +727,7 @@ def _controller_barge_in_decision(
     pending.drop_stale_facts(now=now)  # fast lane: 古い事実補正は破棄（鮮度維持）
     all_cands = _build_candidates(
         pending, agent, now=now, silence_summarize=silence_summarize,
-        partner_present=False, stall_breaker=stall_breaker, last_invited=last_invited)
+        partner_present=False, last_invited=last_invited)
     cands = [c for c in all_cands if c.kind in _BARGEIN_KINDS]
     if not cands:
         return _BargeInDecision("none"), None, [], 0.0
@@ -774,23 +775,21 @@ def _controller_normal_decision(
     silence_elapsed: float,
     silence_summarize: float | None,
     partner_present: bool,
-    stall_breaker: bool,
     last_intervention_at: float,
     cooldown: float,
     last_invited: str | None,
     recent_interventions: list[InterventionLogEntry],
     epoch: int,
 ) -> tuple[_NormalTriggerDecision, FacilitationDecision | None, list[InterventionCandidate], float]:
-    """通常トリガーレーンの採否を Controller に委ねる（固定優先順位の置換, Phase2）.
+    """通常トリガーレーンの採否を Controller に委ねる（固定優先順位の置換）.
 
-    フロア返却後に呼ばれるため partner/echo は通過済み。count/silence/stall/invite/
+    フロア返却後に呼ばれるため partner/echo は通過済み。count/silence/invite/
     conversation の候補から Controller が採否を決め、既存 dispatch 用の
     ``_NormalTriggerDecision`` に逆変換する。
     """
     all_cands = _build_candidates(
         pending, agent, now=now, silence_summarize=silence_summarize,
-        partner_present=partner_present, stall_breaker=stall_breaker,
-        last_invited=last_invited)
+        partner_present=partner_present, last_invited=last_invited)
     cands = [c for c in all_cands if c.kind in _NORMAL_KINDS]
     if not cands:
         return _NormalTriggerDecision("none"), None, [], 0.0
@@ -1285,23 +1284,22 @@ def _run_agent_worker(state: SessionState):
     _last_utt_time = state._last_utt_time
     _was_in_echo = state._was_in_echo
     _diag_tick = 0
-    _last_stall_at = 0.0  # 沈黙ブレーカーの最終発火時刻（ループ防止、Fix 10）
     _last_intervention_at = 0.0  # 直近の介入時刻（脱線介入のクールダウン用）
     _pending = _PendingInterventions()
     _last_fact_at = 0.0
     _last_invited: str | None = None    # 直近に声をかけた相手（連続回避）
     _last_agent_reconnect_at = 0.0
-    # --- 採否Controller（Phase2）: 固定優先順位に代わり最終採否を担当する ---
+    # --- 採否Controller: 固定優先順位に代わり最終採否を担当する ---
     # 物理タイミング（floor/barge-in）と fact fast lane は維持しつつ、
     # 「どの候補を今採るか／黙るか」を Controller が一元裁定する。
     _controller = FacilitationController()
-    # review ログ用に、採否の経緯（採択/抑制/latency）を引き続き記録する。
-    _shadow = _ShadowControllerRunner()
+    # 採否の経緯（採択/抑制/latency）を intervention_review.jsonl へ記録する。
+    _review = _InterventionReviewRecorder()
     _recent_interventions: collections.deque[InterventionLogEntry] = (
         collections.deque(maxlen=10))
 
-    def _note_legacy(at: float, kind: str, detail: str = "") -> None:
-        """実際に発火した従来介入を cooldown 用の直近履歴に記録する."""
+    def _note_intervention(at: float, kind: str, detail: str = "") -> None:
+        """実際に発火した介入を cooldown 用の直近履歴に記録する."""
         _recent_interventions.append(
             InterventionLogEntry(at=at, kind=kind, brief=detail))
 
@@ -1325,7 +1323,6 @@ def _run_agent_worker(state: SessionState):
         # 積極性プロファイル（S5）: 介入クールダウンと沈黙要約の閾値
         _cooldown = state.proactivity.get("cooldown", _INTERVENTION_COOLDOWN)
         _silence_summarize = state.proactivity.get("silence_summarize")
-        _stall_breaker = bool(state.proactivity.get("stall_breaker", False))
         _enabled = _intervention_enabled(state)
         with state.state_lock:
             _skip = {AGENT_SPEAKER, "パートナー"}
@@ -1408,7 +1405,6 @@ def _run_agent_worker(state: SessionState):
                         cooldown=_cooldown,
                         recent_interventions=list(_recent_interventions),
                         silence_summarize=_silence_summarize,
-                        stall_breaker=_stall_breaker,
                         last_invited=_last_invited,
                         epoch=state.agent_cursor,
                     )
@@ -1444,7 +1440,7 @@ def _run_agent_worker(state: SessionState):
                 else:
                     _legacy = _legacy_decision_brief(decision.reason)
                 if _ctrl_barge is not None:
-                    _shadow.record(
+                    _review.record(
                         state,
                         candidates=_barge_cands,
                         decision=_ctrl_barge,
@@ -1454,7 +1450,7 @@ def _run_agent_worker(state: SessionState):
                         latency_ms=_ctrl_latency_ms,
                     )
                 else:
-                    _shadow.evaluate(
+                    _review.evaluate(
                         state,
                         pending=_pending,
                         agent=agent,
@@ -1465,7 +1461,6 @@ def _run_agent_worker(state: SessionState):
                         legacy=_legacy,
                         silence_summarize=_silence_summarize,
                         partner_present=partner is not None,
-                        stall_breaker=_stall_breaker,
                         last_invited=_last_invited,
                     )
             if decision.reason == "hold":
@@ -1489,7 +1484,7 @@ def _run_agent_worker(state: SessionState):
                 _pending.facts.popleft()
                 _last_fact_at = time.monotonic()
                 _last_intervention_at = _last_fact_at
-                _note_legacy(_last_fact_at, "fact", correction)
+                _note_intervention(_last_fact_at, "fact", correction)
                 continue
             if decision.reason == "drift" and decision.drift_reason is not None:
                 timing = _intervention_timing_metadata(
@@ -1509,7 +1504,7 @@ def _run_agent_worker(state: SessionState):
                               drift_reason=decision.drift_reason)
                 _pending.clear_drift()
                 _last_intervention_at = time.monotonic()
-                _note_legacy(_last_intervention_at, "drift", decision.drift_reason)
+                _note_intervention(_last_intervention_at, "drift", decision.drift_reason)
                 continue
             if decision.reason == "retry":
                 pending_intervention = agent._pending_intervention or {}
@@ -1527,43 +1522,41 @@ def _run_agent_worker(state: SessionState):
                     state, "retry", "中断された介入を再送", timing=timing)
                 agent.trigger(topics=_bargein_topics)
                 _last_intervention_at = time.monotonic()
-                _note_legacy(_last_intervention_at, "retry", "中断された介入を再送")
+                _note_intervention(_last_intervention_at, "retry", "中断された介入を再送")
                 continue
         # エコーウィンドウ中はtriggerしない
         if agent is not None and agent.in_echo_window:
             _was_in_echo[0] = True
-            _shadow_now = time.monotonic()
-            _shadow.evaluate(
+            _review_now = time.monotonic()
+            _review.evaluate(
                 state,
                 pending=_pending,
                 agent=agent,
-                now=_shadow_now,
-                silence_elapsed=_shadow_now - _last_utt_time[0],
+                now=_review_now,
+                silence_elapsed=_review_now - _last_utt_time[0],
                 epoch=state.agent_cursor,
                 recent_interventions=list(_recent_interventions),
                 legacy=_legacy_decision_brief("hold", "echo_window"),
                 silence_summarize=_silence_summarize,
                 partner_present=partner is not None,
-                stall_breaker=_stall_breaker,
                 last_invited=_last_invited,
             )
             continue
         # Partnerが発話中はtriggerしない
         if partner is not None and (partner.ai_speaking or partner._responding):
             _was_in_echo[0] = True
-            _shadow_now = time.monotonic()
-            _shadow.evaluate(
+            _review_now = time.monotonic()
+            _review.evaluate(
                 state,
                 pending=_pending,
                 agent=agent,
-                now=_shadow_now,
-                silence_elapsed=_shadow_now - _last_utt_time[0],
+                now=_review_now,
+                silence_elapsed=_review_now - _last_utt_time[0],
                 epoch=state.agent_cursor,
                 recent_interventions=list(_recent_interventions),
                 legacy=_legacy_decision_brief("hold", "partner_busy"),
                 silence_summarize=_silence_summarize,
                 partner_present=partner is not None,
-                stall_breaker=_stall_breaker,
                 last_invited=_last_invited,
             )
             continue
@@ -1596,7 +1589,6 @@ def _run_agent_worker(state: SessionState):
                     silence_elapsed=_silence_elapsed,
                     silence_summarize=_silence_summarize,
                     partner_present=partner is not None,
-                    stall_breaker=_stall_breaker,
                     last_intervention_at=_last_intervention_at,
                     cooldown=_cooldown,
                     last_invited=_last_invited,
@@ -1609,8 +1601,8 @@ def _run_agent_worker(state: SessionState):
             normal_decision = _select_normal_trigger_decision(
                 pending=_pending, agent=agent, silence_elapsed=_silence_elapsed,
                 silence_summarize=_silence_summarize,
-                partner_present=partner is not None, stall_breaker=_stall_breaker,
-                now=time.monotonic(), last_stall_at=_last_stall_at,
+                partner_present=partner is not None,
+                now=time.monotonic(),
                 last_intervention_at=_last_intervention_at, cooldown=_cooldown,
                 last_invited=_last_invited)
             _ctrl_normal = None
@@ -1627,7 +1619,7 @@ def _run_agent_worker(state: SessionState):
             _normal_detail = f"{normal_decision.invite_target}さんへの連続声かけを抑制"
         _legacy_normal = _legacy_decision_brief(normal_decision.reason, _normal_detail)
         if _ctrl_normal is not None:
-            _shadow.record(
+            _review.record(
                 state,
                 candidates=_normal_cands,
                 decision=_ctrl_normal,
@@ -1637,7 +1629,7 @@ def _run_agent_worker(state: SessionState):
                 latency_ms=_ctrl_latency_ms,
             )
         else:
-            _shadow.evaluate(
+            _review.evaluate(
                 state,
                 pending=_pending,
                 agent=agent,
@@ -1648,13 +1640,12 @@ def _run_agent_worker(state: SessionState):
                 legacy=_legacy_normal,
                 silence_summarize=_silence_summarize,
                 partner_present=partner is not None,
-                stall_breaker=_stall_breaker,
                 last_invited=_last_invited,
             )
         if normal_decision.reason == "conversation":
             _log_intervention_event(state, "conversation", normal_decision.detail)
             agent.trigger()
-            _note_legacy(time.monotonic(), "conversation", normal_decision.detail)
+            _note_intervention(time.monotonic(), "conversation", normal_decision.detail)
         elif normal_decision.reason == "count":
             timing = _intervention_timing_metadata(
                 kind="count",
@@ -1667,7 +1658,7 @@ def _run_agent_worker(state: SessionState):
             _log_intervention_event(state, "count", normal_decision.detail, timing=timing)
             agent.trigger(topics=_topics)
             _last_intervention_at = time.monotonic()
-            _note_legacy(_last_intervention_at, "count", normal_decision.detail)
+            _note_intervention(_last_intervention_at, "count", normal_decision.detail)
         elif normal_decision.reason == "silence":
             timing = _intervention_timing_metadata(
                 kind="silence",
@@ -1681,7 +1672,7 @@ def _run_agent_worker(state: SessionState):
                 state, "silence", normal_decision.detail, timing=timing)
             agent.trigger(topics=_topics)
             _last_intervention_at = time.monotonic()
-            _note_legacy(_last_intervention_at, "silence", normal_decision.detail)
+            _note_intervention(_last_intervention_at, "silence", normal_decision.detail)
         elif normal_decision.reason == "invite":
             timing = _intervention_timing_metadata(
                 kind="invite",
@@ -1698,7 +1689,7 @@ def _run_agent_worker(state: SessionState):
             _last_intervention_at = time.monotonic()
             _last_invited = normal_decision.invite_target
             _pending.invite = None
-            _note_legacy(_last_intervention_at, "invite", normal_decision.detail)
+            _note_intervention(_last_intervention_at, "invite", normal_decision.detail)
         elif normal_decision.reason == "skip_invite":
             _pending.invite = None  # 同じ人を連続では誘わない
 

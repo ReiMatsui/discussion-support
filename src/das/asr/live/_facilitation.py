@@ -1,4 +1,4 @@
-"""介入採否の一元化（FacilitationController）— Phase 0/1.
+"""介入採否の一元化（FacilitationController）.
 
 設計: docs/design/intervention_controller_redesign.md
 
@@ -7,13 +7,12 @@
 既存の checker（drift/fact/participation）が生成した候補を受け取り、
 「どれを・今・言うか／黙るか」と urgency / deadline を裁定するだけ。
 
-Phase 1 では shadow mode で並走させる。Controller の判断は
-``intervention_review.jsonl`` にログするのみで、実際の発話採否は
-従来ロジック（``_select_*_decision``）のまま変えない。
+Phase2 以降、この Controller が実際の発話採否を駆動する（固定優先順位の
+``_select_*_decision`` を置換）。採否の経緯は ``intervention_review.jsonl`` に
+記録され、なぜ話したか／なぜ黙ったかを追える。
 
-Phase 1 の Controller は **決定的**（LLM呼び出しなし）に実装する。
-これにより shadow 並走がレイテンシ・コスト・挙動へ影響しない。
-LLM 裁定への置換は Phase 2 以降で行う。
+Controller は **決定的**（LLM呼び出しなし）に実装する。同期・低遅延で採否を返し、
+戻り値の ``deadline_ms`` で「正しいが遅い介入」を後段が破棄できるようにする。
 """
 from __future__ import annotations
 
@@ -30,15 +29,14 @@ from ._constants import (
     _INTERVENTION_PAUSE_FACT,
     _INTERVENTION_PAUSE_RETRY,
     _INVITE_SILENCE,
-    _STALL_COOLDOWN,
-    _STALL_SILENCE,
 )
 
-# 採否で扱う候補種別。drift/fact/invite/summarize に加え、現行の
-# 通常トリガー（count/silence/stall）と barge-in 再送（retry）、
-# conversation も Phase1 shadow の比較対象として受け付ける。
+# 採否で扱う候補種別。現行 checker が生成する fact/drift/retry/count/silence/
+# invite/conversation を受け付ける。summarize は設計（§3）上の将来kindで、
+# まだ候補生成器を持たない（policy 未定義なら _DEFAULT_POLICY にフォールバック）。
+# 注: stall（介入不要後のデッドエア一押し）は Phase3 で廃止した。
 Kind = Literal[
-    "fact", "drift", "retry", "count", "silence", "stall",
+    "fact", "drift", "retry", "count", "silence",
     "invite", "summarize", "conversation",
 ]
 
@@ -90,7 +88,7 @@ class FacilitationInput:
     """Controller の入力スナップショット（§3.1）.
 
     ロックを保持したまま LLM を呼ばないため、入力は確定済みスナップショット
-    として渡す（§8.5）。Phase1 は決定的なので並行性は単純だが、将来の
+    として渡す（§8.5）。Controller は決定的なので並行性は単純だが、将来の
     epoch ベース stale 判定に備えて ``snapshot_epoch`` を持つ。
     """
 
@@ -99,10 +97,8 @@ class FacilitationInput:
     silence_elapsed: float
     snapshot_epoch: int
     now: float
-    # 任意（将来フェーズ）。Phase1 では未使用。
-    silence_summarize: float | None = None
     cooldown: float = _INTERVENTION_COOLDOWN
-    # --- Phase2: 物理コンテキスト（floor / barge-in 層, §4） ---
+    # --- 物理コンテキスト（floor / barge-in 層, §4） ---
     # barge-in 層では partner 発話中・エコー残響中は誰も差し込まない。
     partner_busy: bool = False
     in_echo_window: bool = False
@@ -142,7 +138,7 @@ class FacilitationDecision:
 
 
 # 種別ごとの採否ポリシー（§3.3）。完全な単一 min_interval にはしない。
-#   priority    : 小さいほど優先（現行 fact>drift>retry / count>silence>stall>invite に整合）
+#   priority    : 小さいほど優先（fact>drift>retry / count>silence>invite に整合）
 #   pause       : 発話の切れ目として必要な沈黙秒（floor 判定, §4）
 #   cooldown    : 直前の同種介入からの最小間隔（しつこさ防止）
 #   deadline_ms : この時間内に発話開始できなければ stale 破棄（§3.5）
@@ -154,19 +150,19 @@ class _KindPolicy:
     cooldown: float
     deadline_ms: int
     urgency: Urgency
-    # "kind"  : 直前の「同種」介入からの間隔を見る（fact/count/stall/silence）
+    # "kind"  : 直前の「同種」介入からの間隔を見る（fact/count/silence）
     # "global": 直前の「あらゆる」介入からの間隔を見る（drift/invite。会話を頻繁に止めない）
     cooldown_scope: str = "kind"
 
 
+# 注: summarize（将来kind）は候補生成器が未実装のため policy を持たない。
+# 実装時にここへ追加する。それまでは _DEFAULT_POLICY にフォールバックする。
 _KIND_POLICY: dict[str, _KindPolicy] = {
     "fact":     _KindPolicy(0, _INTERVENTION_PAUSE_FACT, _FACTCHECK_COOLDOWN, 1500, "wait_for_pause"),
     "drift":    _KindPolicy(1, _INTERVENTION_PAUSE_DRIFT, _INTERVENTION_COOLDOWN, 2000, "wait_for_pause", "global"),
     "retry":    _KindPolicy(2, _INTERVENTION_PAUSE_RETRY, 0.0, 2000, "wait_for_pause"),
     "count":    _KindPolicy(3, _INTERVENTION_PAUSE_COUNT, 0.0, 2000, "wait_for_pause"),
     "silence":  _KindPolicy(4, 0.0, 0.0, 2000, "low"),
-    "summarize": _KindPolicy(5, _STALL_SILENCE, _STALL_COOLDOWN, 2000, "low"),
-    "stall":    _KindPolicy(5, _STALL_SILENCE, _STALL_COOLDOWN, 2000, "low"),
     "invite":   _KindPolicy(6, _INVITE_SILENCE, _INTERVENTION_COOLDOWN, 2000, "wait_for_pause", "global"),
     "conversation": _KindPolicy(7, _AGENT_CONV_SILENCE, 0.0, 2000, "low"),
 }
@@ -180,10 +176,10 @@ def _policy_for(kind: str) -> _KindPolicy:
 class FacilitationController:
     """採否を一元化する単一の裁定器（§3）.
 
-    Phase 1 では shadow mode 専用の **決定的** 実装。候補を一括で見て
-    「今どれを採るか／黙るか」「urgency」を返すだけ。抽出・fact検査・
-    文案生成はしない。timeout 概念は無い（同期・決定的）が、戻り値の
-    ``deadline_ms`` で「正しいが遅い介入」を後段が破棄できるようにする。
+    **決定的** 実装。候補を一括で見て「今どれを採るか／黙るか」「urgency」を
+    返すだけ。抽出・fact検査・文案生成はしない。timeout 概念は無い（同期・
+    決定的）が、戻り値の ``deadline_ms`` で「正しいが遅い介入」を後段が破棄
+    できるようにする。Phase2 以降、この採否が実際の発話を駆動する。
     """
 
     def __init__(self) -> None:
