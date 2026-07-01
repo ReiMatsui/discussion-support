@@ -858,6 +858,9 @@ def test_http_get_root_serves_spa():
         assert 'id="setup-panel"' in html
         assert 'id="start-session"' in html
         assert html.index('id="setup-panel"') < html.index('id="enroll-panel"') < html.index('id="agenda"')
+        assert 'id="enroll-script-text"' in html
+        assert "読み上げ例" in html
+        assert "別の例文" in html
         assert "/api/intervention" in html
         assert 'id="speaker-count-status"' in html
         assert 'id="intervention-enabled"' in html

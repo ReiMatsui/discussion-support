@@ -95,6 +95,11 @@ INDEX_HTML = """<!doctype html>
   .enroll-row { display: flex; gap: .35rem; }
   .enroll-row input { flex: 1; min-width: 0; border: 1px solid var(--line);
     border-radius: 6px; padding: .35rem .5rem; }
+  .enroll-script { background: #fff; border: 1px solid #fed7aa; border-radius: 7px;
+    padding: .55rem .65rem; margin: .5rem 0; }
+  .enroll-script-head { display: flex; align-items: center; gap: .4rem; margin-bottom: .35rem; }
+  .enroll-script-title { flex: 1; font-size: .76rem; color: var(--muted); font-weight: 600; }
+  .enroll-script-text { font-size: .86rem; line-height: 1.7; margin: 0; }
   .enroll-status { font-size: .8rem; color: var(--muted); margin-top: .4rem; min-height: 1.1em; }
   .enroll-status.rec { color: #b91c1c; font-weight: 600; }
   .roster-lock { display: flex; align-items: center; gap: .4rem; font-size: .8rem;
@@ -181,6 +186,13 @@ INDEX_HTML = """<!doctype html>
       <div class="enroll-row">
         <input id="enroll-name" placeholder="名前">
         <button class="btn" id="enroll-btn">20秒話して登録</button>
+      </div>
+      <div class="enroll-script">
+        <div class="enroll-script-head">
+          <span class="enroll-script-title">読み上げ例</span>
+          <button class="btn" id="enroll-script-next" type="button">別の例文</button>
+        </div>
+        <p class="enroll-script-text" id="enroll-script-text"></p>
       </div>
       <div id="enroll-status" class="enroll-status"></div>
       <label class="roster-lock">
@@ -462,6 +474,22 @@ function renderIntervention(config) {
 }
 
 let enrolling = false;
+let enrollScriptIndex = 0;
+const enrollScripts = [
+  "今日は、普段よく使う家電やアプリについて話します。朝起きたら天気を確認して、移動中は音楽を聞きます。最近便利だと思ったこと、少し困っていること、週末に試してみたいことを順番に話してみます。",
+  "昨日の夕食は、冷蔵庫に残っていた野菜を使って簡単に作りました。買い物に行く時間がなかったので、調味料を少し変えて味を整えました。次に作るなら、もう少し具材を増やして、温かいうちにゆっくり食べたいです。",
+  "近所を歩くと、朝と夕方で雰囲気がかなり変わります。通勤の人が多い時間は少し慌ただしいですが、休日の午後は店先を眺めながらのんびり歩けます。最近見つけた小さなお店にも、また寄ってみたいです。",
+];
+
+function renderEnrollScript() {
+  $("enroll-script-text").textContent = enrollScripts[enrollScriptIndex % enrollScripts.length];
+}
+
+function nextEnrollScript() {
+  enrollScriptIndex = (enrollScriptIndex + 1) % enrollScripts.length;
+  renderEnrollScript();
+}
+
 async function enrollPerson() {
   if (enrolling) return;
   const name = $("enroll-name").value.trim();
@@ -472,7 +500,7 @@ async function enrollPerson() {
   const secs = 20;
   for (let t = secs; t > 0; t--) {
     st.className = "enroll-status rec";
-    st.textContent = `● 録音中… ${esc(name)} さんに一人で話してもらってください（残り${t}秒）`;
+    st.textContent = `● 録音中… ${name} さんが読み上げ例を自然に読んでください（残り${t}秒）`;
     await new Promise((r) => setTimeout(r, 1000));
   }
   st.className = "enroll-status";
@@ -484,7 +512,7 @@ async function enrollPerson() {
     });
     const d = await res.json();
     if (res.ok) {
-      st.textContent = d.message || `✓ ${esc(name)} を登録しました。以後の新しい発話から反映されます`;
+      st.textContent = d.message || `✓ ${name} を登録しました。以後の新しい発話から反映されます`;
       $("enroll-name").value = "";
     }
     else { st.textContent = "登録失敗: " + (d.error || ""); }
@@ -621,6 +649,7 @@ $("reset").onclick = resetMeeting;
 $("agenda-set").onclick = setAgenda;
 $("agenda").addEventListener("keydown", (e) => { if (e.key === "Enter") setAgenda(); });
 $("enroll-btn").onclick = enrollPerson;
+$("enroll-script-next").onclick = nextEnrollScript;
 $("roster-lock").addEventListener("change", toggleRoster);
 $("speaker-count").addEventListener("change", setSpeakerCount);
 $("setup-speaker-count").addEventListener("change", setSpeakerCount);
@@ -630,6 +659,7 @@ $("proactivity").addEventListener("change", setIntervention);
 $("trigger-n").addEventListener("change", setIntervention);
 // 初期描画 + ライブ接続
 fetch("/api/state").then((r) => r.json()).then(render).catch(() => {});
+renderEnrollScript();
 connect();
 </script>
 </body>
