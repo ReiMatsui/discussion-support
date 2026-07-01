@@ -209,6 +209,49 @@ def test_trigger_with_fact_correction(agent):
     assert agent._responding is True
 
 
+def test_trigger_with_manual_request(agent):
+    """manual_request指定時、_pendingが空でも手動呼び出しコンテキスト付きで送信する."""
+    agent.trigger(manual_request={"request": "ここまで整理して", "source": "ui"})
+    text = agent.ws.last_create_text()
+    assert "[手動呼び出し]" in text
+    assert "依頼: ここまで整理して" in text
+    assert "1〜2文で短く" in text
+    assert agent._responding is True
+
+
+def test_trigger_manual_empty_request_uses_default_task(agent):
+    """依頼が空でも、デフォルトの整理依頼が入る."""
+    agent.trigger(manual_request={"request": "", "source": "ui"})
+    text = agent.ws.last_create_text()
+    assert "[手動呼び出し]" in text
+    assert "直近の議論を短く整理し、次に進める一言を述べる" in text
+
+
+def test_trigger_manual_with_fact_keeps_both_contexts(agent):
+    """fact と manual が同時でも、両方のコンテキストが壊れず入る."""
+    agent.trigger(
+        fact_correction={"claim": "c", "correction": "指標Xは分子を分母で割ります。",
+                         "reason": "式が逆"},
+        manual_request={"request": "整理して", "source": "ui"})
+    text = agent.ws.last_create_text()
+    assert "[事実補正]" in text
+    assert "[手動呼び出し]" in text
+
+
+def test_interrupted_manual_saves_retry_intent(agent):
+    """手動呼び出しは、transcript到着前に割り込まれても再送用の意図を残す."""
+    agent.trigger(manual_request={"request": "ここまで整理して", "source": "ui"})
+    agent.ai_speaking = True
+    agent._responding = False
+    agent._ai_text_buf = ""   # transcript未到着で割り込み
+
+    agent.interrupt()
+
+    pi = agent._pending_intervention
+    assert pi is not None
+    assert "ここまで整理して" in pi["delivered"]
+
+
 def test_interrupted_fact_correction_is_not_saved_for_retry(agent):
     """事実補正は、参加者に遮られたら再送せず流す."""
     agent.trigger(fact_correction={

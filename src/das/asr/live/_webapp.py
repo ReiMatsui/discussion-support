@@ -113,6 +113,14 @@ INDEX_HTML = """<!doctype html>
   .setting-note { font-size: .72rem; color: var(--muted); margin-top: .35rem; }
   .intervention-summary { font-size: .76rem; color: var(--muted); margin-top: .45rem;
     padding-top: .45rem; border-top: 1px solid var(--line); }
+  .manual-call-row { display: flex; gap: .4rem; margin-top: .5rem; }
+  .manual-call-row input { flex: 1; min-width: 0; font-size: .8rem;
+    border: 1px solid var(--line); border-radius: 6px; padding: .3rem .45rem;
+    background: var(--card); color: inherit; }
+  .manual-call-btn { font-size: .8rem; padding: .3rem .7rem; border-radius: 6px;
+    border: 1px solid var(--accent); background: var(--accent); color: #fff;
+    cursor: pointer; white-space: nowrap; }
+  .manual-call-btn:disabled { opacity: .5; cursor: not-allowed; }
   .u.bc { opacity: .5; font-size: .85em; }            /* 相槌は薄く小さく */
   .u.unsure { opacity: .75; }
   .u.unsure .who { font-style: italic; }              /* 未確定は話者名をイタリックに */
@@ -240,6 +248,12 @@ INDEX_HTML = """<!doctype html>
           <input id="trigger-n" type="number" min="1" max="50">
         </div>
         <div class="intervention-summary" id="intervention-summary">現在: 控えめ</div>
+        <div class="manual-call-row">
+          <input id="manual-call-text" type="text" maxlength="100"
+                 placeholder="例: ここまで整理して / 次に決めることを確認して">
+          <button id="manual-call-btn" class="manual-call-btn">呼ぶ</button>
+        </div>
+        <div class="intervention-summary" id="manual-call-status"></div>
       </div>
       <div class="panel" id="spk-panel" hidden>
         <h2>参加者の名前を登録</h2><div id="speakers"></div>
@@ -471,6 +485,38 @@ function renderIntervention(config) {
   const proText = proLabels[pro.value] || pro.value || "控えめ";
   const triggerText = trig.value ? ` / ${trig.value}発話` : "";
   summary.textContent = disabled ? "現在: オフ" : `現在: ${proText}${triggerText}`;
+  // 手動呼び出しは、モードが facilitate/converse でエージェントが有効、かつ介入オンの時だけ。
+  const callable = !disabled && !!(config && config.agent_active);
+  const callBtn = $("manual-call-btn");
+  const callText = $("manual-call-text");
+  if (callBtn) callBtn.disabled = !callable;
+  if (callText) callText.disabled = !callable;
+}
+
+async function callFacilitator() {
+  const input = $("manual-call-text");
+  const status = $("manual-call-status");
+  const btn = $("manual-call-btn");
+  if (!input || btn.disabled) return;
+  btn.disabled = true;
+  try {
+    const res = await fetch("/api/facilitator/call", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ request: input.value.trim() }),
+    });
+    const out = await res.json().catch(() => ({}));
+    if (res.ok && out.ok) {
+      if (status) status.textContent = "ファシリテーターに依頼しました";
+      input.value = "";
+    } else if (status) {
+      status.textContent = out.error || "呼び出しに失敗しました";
+    }
+  } catch (e) {
+    if (status) status.textContent = "呼び出しに失敗しました";
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 let enrolling = false;
@@ -657,6 +703,10 @@ $("start-session").onclick = startSession;
 $("intervention-enabled").addEventListener("change", setIntervention);
 $("proactivity").addEventListener("change", setIntervention);
 $("trigger-n").addEventListener("change", setIntervention);
+$("manual-call-btn").addEventListener("click", callFacilitator);
+$("manual-call-text").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); callFacilitator(); }
+});
 // 初期描画 + ライブ接続
 fetch("/api/state").then((r) => r.json()).then(render).catch(() => {});
 renderEnrollScript();

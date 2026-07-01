@@ -15,6 +15,7 @@ from collections.abc import Callable
 from types import SimpleNamespace
 
 from ._constants import (
+    _MANUAL_CALL_MAX_CHARS,
     _PROACTIVITY_DEFAULT,
     _PROACTIVITY_PROFILES,
     AGENT_SPEAKER,
@@ -104,6 +105,9 @@ class SessionState:
         self.invite_requests: queue.Queue[str] = queue.Queue()
         # 事実誤りの短い補正要求キュー。{"correction": str, ...} を積む。
         self.factcheck_requests: queue.Queue[dict] = queue.Queue()
+        # 手動呼び出しキュー（Phase1）。UI/音声から明示的にファシリテーターを呼ぶ。
+        # {"request": str, "source": "ui"|"voice", "created_at": monotonic} を積む。
+        self.manual_call_requests: queue.Queue[dict] = queue.Queue()
         # 認識途中経過（partial）。UIに「認識中」を見せるため（課題①）。
         self.partial_text = ""
         self.partial_speaker = ""
@@ -486,6 +490,8 @@ class SessionState:
                 "proactivity": self.proactivity_name,
                 "trigger_n": getattr(self.agent, "trigger_n", None),
                 "model": getattr(self.agent, "model", None),
+                # 手動呼び出しボタンの有効判定用（agent が有効=facilitate/converse）。
+                "agent_active": self.agent is not None and self.agent.enabled,
             },
             "intervention_events": list(self.intervention_events[-20:]),
             "agenda": self._current_agenda(),
@@ -607,7 +613,8 @@ class SessionState:
         self._last_intervention_event_id = None
         self._last_utt_time[0] = time.monotonic()
         self._was_in_echo[0] = False
-        for q in (self.drift_requests, self.invite_requests, self.factcheck_requests):
+        for q in (self.drift_requests, self.invite_requests, self.factcheck_requests,
+                  self.manual_call_requests):
             while True:
                 try:
                     q.get_nowait()
@@ -694,6 +701,29 @@ class SessionState:
                 self.agent.reset_meeting()
         self.rev += 1
         return {"ok": True, "enabled": self.intervention_enabled}
+
+    def queue_manual_facilitator_call(self, request: str = "",
+                                      source: str = "ui") -> dict:
+        """参加者からの手動呼び出しをキューに積む（Phase1）.
+
+        直接 agent.trigger() はしない。既存の _run_agent_worker + Controller 経路で
+        他の候補と同じく採否される。実際に採択された時に介入ログへ残す。
+        """
+        if not self.intervention_enabled:
+            return {"ok": False, "error": "介入がオフのため呼び出せません"}
+        agent = self.agent
+        if agent is None or getattr(agent, "mode", "off") == "off":
+            return {"ok": False, "error": "ファシリテーターが無効です"}
+        # 改行を空白へ正規化し、長すぎる依頼は切り詰める。
+        text = re.sub(r"\s+", " ", str(request or "")).strip()
+        if len(text) > _MANUAL_CALL_MAX_CHARS:
+            text = text[:_MANUAL_CALL_MAX_CHARS]
+        self.manual_call_requests.put({
+            "request": text,
+            "source": source,
+            "created_at": time.monotonic(),
+        })
+        return {"ok": True, "queued": True, "request": text}
 
     def set_diarization_max_speakers(self, value: int | None) -> dict:
         """UIから想定話者数ヒントを更新する.

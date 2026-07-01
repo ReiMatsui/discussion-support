@@ -27,8 +27,10 @@ from ._constants import (
     _INTERVENTION_PAUSE_COUNT,
     _INTERVENTION_PAUSE_DRIFT,
     _INTERVENTION_PAUSE_FACT,
+    _INTERVENTION_PAUSE_MANUAL,
     _INTERVENTION_PAUSE_RETRY,
     _INVITE_SILENCE,
+    _MANUAL_CALL_COOLDOWN,
 )
 
 # 採否で扱う候補種別。現行 checker が生成する fact/drift/retry/count/silence/
@@ -36,7 +38,7 @@ from ._constants import (
 # まだ候補生成器を持たない（policy 未定義なら _DEFAULT_POLICY にフォールバック）。
 # 注: stall（介入不要後のデッドエア一押し）は Phase3 で廃止した。
 Kind = Literal[
-    "fact", "drift", "retry", "count", "silence",
+    "fact", "manual", "drift", "retry", "count", "silence",
     "invite", "summarize", "conversation",
 ]
 
@@ -159,10 +161,13 @@ class _KindPolicy:
 # 実装時にここへ追加する。それまでは _DEFAULT_POLICY にフォールバックする。
 _KIND_POLICY: dict[str, _KindPolicy] = {
     "fact":     _KindPolicy(0, _INTERVENTION_PAUSE_FACT, _FACTCHECK_COOLDOWN, 1500, "wait_for_pause"),
-    "drift":    _KindPolicy(1, _INTERVENTION_PAUSE_DRIFT, _INTERVENTION_COOLDOWN, 2000, "wait_for_pause", "global"),
-    "retry":    _KindPolicy(2, _INTERVENTION_PAUSE_RETRY, 0.0, 2000, "wait_for_pause"),
-    "count":    _KindPolicy(3, _INTERVENTION_PAUSE_COUNT, 0.0, 2000, "wait_for_pause"),
-    "silence":  _KindPolicy(4, 0.0, 0.0, 2000, "low"),
+    # manual: ユーザーが明示的に呼んだので基本尊重。ただし直前に明確な fact 補正が
+    # あればそちらを優先。global cooldown は受けず（kind scope）、連打だけ抑える。
+    "manual":   _KindPolicy(1, _INTERVENTION_PAUSE_MANUAL, _MANUAL_CALL_COOLDOWN, 3000, "wait_for_pause"),
+    "drift":    _KindPolicy(2, _INTERVENTION_PAUSE_DRIFT, _INTERVENTION_COOLDOWN, 2000, "wait_for_pause", "global"),
+    "retry":    _KindPolicy(3, _INTERVENTION_PAUSE_RETRY, 0.0, 2000, "wait_for_pause"),
+    "count":    _KindPolicy(4, _INTERVENTION_PAUSE_COUNT, 0.0, 2000, "wait_for_pause"),
+    "silence":  _KindPolicy(5, 0.0, 0.0, 2000, "low"),
     "invite":   _KindPolicy(6, _INVITE_SILENCE, _INTERVENTION_COOLDOWN, 2000, "wait_for_pause", "global"),
     "conversation": _KindPolicy(7, _AGENT_CONV_SILENCE, 0.0, 2000, "low"),
 }
