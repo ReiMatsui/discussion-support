@@ -376,7 +376,7 @@ def test_barge_adapter_picks_fact_over_drift():
                        "confidence": "high"})
     pend.drift_reason = "脱線"
     pend.drift_count = 2
-    decision, ctrl, _cands = _barge(_FakeAgent(), pend, _FakeProactivityState(), now=now)
+    decision, ctrl, _cands, _latency = _barge(_FakeAgent(), pend, _FakeProactivityState(), now=now)
     assert decision.reason == "fact"
     assert decision.fact["correction"] == "訂正です。"
     assert ctrl.candidate_id.startswith("fact-")
@@ -387,14 +387,14 @@ def test_barge_adapter_holds_when_partner_busy():
     pend = _PendingInterventions()
     pend.facts.append({"correction": "訂正です。", "_queued_at": now,
                        "confidence": "high"})
-    decision, _ctrl, _cands = _barge(_FakeAgent(), pend, _FakeProactivityState(),
-                                     now=now, partner_busy=True)
+    decision, _ctrl, _cands, _latency = _barge(
+        _FakeAgent(), pend, _FakeProactivityState(), now=now, partner_busy=True)
     assert decision.reason == "hold"
 
 
 def test_barge_adapter_none_when_no_candidates():
-    decision, ctrl, cands = _barge(_FakeAgent(), _PendingInterventions(),
-                                   _FakeProactivityState())
+    decision, ctrl, cands, _latency = _barge(
+        _FakeAgent(), _PendingInterventions(), _FakeProactivityState())
     assert decision.reason == "none"
     assert ctrl is None and cands == []
 
@@ -412,14 +412,14 @@ def _normal(agent, pending, **kw):
 def test_normal_adapter_count_before_invite():
     agent = _FakeAgent(pending_count=10, trigger_n=10)
     pend = _PendingInterventions(invite="参加者B")
-    decision, _ctrl, _cands = _normal(agent, pend)
+    decision, _ctrl, _cands, _latency = _normal(agent, pend)
     assert decision.reason == "count"
 
 
 def test_normal_adapter_invite_fires_with_target():
     agent = _FakeAgent(pending_count=0)
     pend = _PendingInterventions(invite="参加者B")
-    decision, _ctrl, _cands = _normal(agent, pend)
+    decision, _ctrl, _cands, _latency = _normal(agent, pend)
     assert decision.reason == "invite"
     assert decision.invite_target == "参加者B"
 
@@ -427,7 +427,7 @@ def test_normal_adapter_invite_fires_with_target():
 def test_normal_adapter_skip_invite_for_same_person():
     agent = _FakeAgent(pending_count=0)
     pend = _PendingInterventions(invite="参加者B")
-    decision, _ctrl, _cands = _normal(agent, pend, last_invited="参加者B")
+    decision, _ctrl, _cands, _latency = _normal(agent, pend, last_invited="参加者B")
     assert decision.reason == "skip_invite"
     assert decision.invite_target == "参加者B"
 
@@ -437,6 +437,39 @@ def test_normal_adapter_invite_held_during_global_cooldown():
     now = time.monotonic()
     agent = _FakeAgent(pending_count=0)
     pend = _PendingInterventions(invite="参加者B")
-    decision, _ctrl, _cands = _normal(agent, pend, now=now,
-                                      last_intervention_at=now, cooldown=25.0)
+    decision, _ctrl, _cands, _latency = _normal(
+        agent, pend, now=now, last_intervention_at=now, cooldown=25.0)
     assert decision.reason == "none"
+
+
+def test_barge_adapter_discards_drift_during_global_cooldown():
+    """cooldown中のdriftは旧挙動どおり消費し、後で古い脱線介入を出さない."""
+    now = time.monotonic()
+    pend = _PendingInterventions(drift_reason="脱線", drift_count=3)
+    agent = _FakeAgent(pending_intervention={"delivered": "中断介入", "created_at": now})
+
+    decision, _ctrl, _cands, _latency = _barge(
+        agent, pend, _FakeProactivityState(), now=now,
+        last_intervention_at=now, cooldown=25.0)
+
+    assert decision.reason == "retry"
+    assert pend.drift_reason is None
+
+
+def test_shadow_record_logs_supplied_controller_decision_without_reevaluation():
+    runner = _ShadowControllerRunner()
+    state = _ReviewState()
+    now = time.monotonic()
+    cand = InterventionCandidate(id="fact-1", kind="fact", brief="訂正",
+                                 created_at=now, expires_at=fact_expires_at(now))
+    decision = FacilitationController().arbitrate(FacilitationInput(
+        candidates=(cand,), recent_interventions=(), silence_elapsed=0.0,
+        snapshot_epoch=9, now=now, in_echo_window=True))
+
+    runner.record(
+        state, candidates=[cand], decision=decision, silence_elapsed=0.0,
+        epoch=9, legacy={"reason": "hold", "detail": "echo_window"},
+        latency_ms=1.2)
+
+    assert state.reviews[0]["controller_decision"]["candidate_id"] is None
+    assert "エコーウィンドウ" in state.reviews[0]["controller_decision"]["suppressed"][0]["reason"]

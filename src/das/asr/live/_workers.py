@@ -647,6 +647,51 @@ class _ShadowControllerRunner:
                 self._warned_write_failure = True
                 print(f"# [diag] shadow review log failed: {exc}", flush=True)
 
+    def record(
+        self,
+        state: SessionState,
+        *,
+        candidates: list[InterventionCandidate],
+        decision: FacilitationDecision,
+        silence_elapsed: float,
+        epoch: int,
+        legacy: dict | None,
+        latency_ms: float = 0.0,
+    ) -> None:
+        """実際にdispatchへ使ったController判断をreviewログへ記録する.
+
+        Phase2では採否が実挙動を駆動するため、ログ用に再評価すると物理コンテキスト
+        （echo/partner/cooldown等）の差でズレる。adapterが返した decision をそのまま
+        記録する。
+        """
+        add_review = getattr(state, "add_intervention_review", None)
+        if not callable(add_review):
+            return
+        fingerprint = (
+            decision.candidate_id,
+            decision.reason,
+            tuple(sorted(s["candidate_id"] for s in decision.suppressed)),
+            tuple(sorted((c.id, c.kind, c.brief) for c in candidates)),
+            (legacy or {}).get("reason"),
+            (legacy or {}).get("detail"),
+        )
+        if fingerprint == self._last_fingerprint:
+            return
+        self._last_fingerprint = fingerprint
+        try:
+            add_review({
+                "candidates": [_candidate_brief(c) for c in candidates],
+                "legacy_decision": legacy,
+                "controller_decision": decision.as_dict(),
+                "silence_elapsed_sec": round(silence_elapsed, 3),
+                "latency_ms": round(latency_ms, 3),
+                "epoch": epoch,
+            })
+        except Exception as exc:
+            if not self._warned_write_failure:
+                self._warned_write_failure = True
+                print(f"# [diag] controller review log failed: {exc}", flush=True)
+
 
 # 物理レーン分割（§4）。barge-in は echo/partner ガード前に評価し、
 # 通常トリガーはフロア返却後に評価する。Controller はそれぞれのレーンの
@@ -655,6 +700,20 @@ _BARGEIN_KINDS = ("fact", "drift", "retry")
 _NORMAL_KINDS = ("count", "silence", "stall", "invite", "conversation")
 
 _STALL_DRIFT_REASON = "会話が止まっています。本題に戻す一言を簡潔に述べてください。"
+
+
+def _suppressed_for(
+    decision: FacilitationDecision,
+    *,
+    candidate_id: str,
+    reason_part: str,
+) -> bool:
+    """Controllerの抑制理由に特定候補/理由が含まれるかを調べる."""
+    return any(
+        s.get("candidate_id") == candidate_id
+        and reason_part in str(s.get("reason", ""))
+        for s in decision.suppressed
+    )
 
 
 def _controller_barge_in_decision(
@@ -675,7 +734,7 @@ def _controller_barge_in_decision(
     stall_breaker: bool,
     last_invited: str | None,
     epoch: int,
-) -> tuple[_BargeInDecision, FacilitationDecision | None, list[InterventionCandidate]]:
+) -> tuple[_BargeInDecision, FacilitationDecision | None, list[InterventionCandidate], float]:
     """barge-in レーンの採否を Controller に委ねる（固定優先順位の置換, Phase2）.
 
     既存checkerが作った候補(fact/drift/retry)を入力にし、Controller が
@@ -689,8 +748,9 @@ def _controller_barge_in_decision(
         partner_present=False, stall_breaker=stall_breaker, last_invited=last_invited)
     cands = [c for c in all_cands if c.kind in _BARGEIN_KINDS]
     if not cands:
-        return _BargeInDecision("none"), None, []
+        return _BargeInDecision("none"), None, [], 0.0
     required = int(state.proactivity.get("drift_confirmations", 1))
+    t0 = time.perf_counter()
     decision = controller.arbitrate(FacilitationInput(
         candidates=tuple(cands),
         recent_interventions=tuple(recent_interventions),
@@ -704,17 +764,24 @@ def _controller_barge_in_decision(
         required_drift_confirmations=required,
         fact_cooldown=_FACTCHECK_COOLDOWN,
     ))
+    latency_ms = (time.perf_counter() - t0) * 1000
+    if _suppressed_for(
+        decision,
+        candidate_id="drift",
+        reason_part="直前の介入から間隔不足",
+    ):
+        pending.clear_drift()
     if decision.candidate_id is None:
         # 候補はあるが今は採らない → 保持して次の機会を待つ（hold）。
-        return _BargeInDecision("hold"), decision, cands
+        return _BargeInDecision("hold"), decision, cands, latency_ms
     chosen = next(c for c in cands if c.id == decision.candidate_id)
     if chosen.kind == "fact":
         return (_BargeInDecision("fact", fact=chosen.payload.get("fact")),
-                decision, cands)
+                decision, cands, latency_ms)
     if chosen.kind == "drift":
         return (_BargeInDecision("drift", drift_reason=chosen.brief),
-                decision, cands)
-    return _BargeInDecision("retry"), decision, cands
+                decision, cands, latency_ms)
+    return _BargeInDecision("retry"), decision, cands, latency_ms
 
 
 def _controller_normal_decision(
@@ -732,7 +799,7 @@ def _controller_normal_decision(
     last_invited: str | None,
     recent_interventions: list[InterventionLogEntry],
     epoch: int,
-) -> tuple[_NormalTriggerDecision, FacilitationDecision | None, list[InterventionCandidate]]:
+) -> tuple[_NormalTriggerDecision, FacilitationDecision | None, list[InterventionCandidate], float]:
     """通常トリガーレーンの採否を Controller に委ねる（固定優先順位の置換, Phase2）.
 
     フロア返却後に呼ばれるため partner/echo は通過済み。count/silence/stall/invite/
@@ -745,7 +812,8 @@ def _controller_normal_decision(
         last_invited=last_invited)
     cands = [c for c in all_cands if c.kind in _NORMAL_KINDS]
     if not cands:
-        return _NormalTriggerDecision("none"), None, []
+        return _NormalTriggerDecision("none"), None, [], 0.0
+    t0 = time.perf_counter()
     decision = controller.arbitrate(FacilitationInput(
         candidates=tuple(cands),
         recent_interventions=tuple(recent_interventions),
@@ -758,34 +826,35 @@ def _controller_normal_decision(
         last_intervention_at=last_intervention_at,
         required_drift_confirmations=0,
     ))
+    latency_ms = (time.perf_counter() - t0) * 1000
     if decision.candidate_id is None:
         # 連続声かけ抑制（同じ人を続けて誘わない）→ skip_invite で invite を消費。
         for s in decision.suppressed:
             if (s["candidate_id"].startswith("invite-")
                     and "直前と同じ" in s["reason"]):
                 return (_NormalTriggerDecision(
-                    "skip_invite", invite_target=pending.invite), decision, cands)
-        return _NormalTriggerDecision("none"), decision, cands
+                    "skip_invite", invite_target=pending.invite), decision, cands, latency_ms)
+        return _NormalTriggerDecision("none"), decision, cands, latency_ms
     chosen = next(c for c in cands if c.id == decision.candidate_id)
     if chosen.kind == "conversation":
         return (_NormalTriggerDecision("conversation", f"沈黙{silence_elapsed:.1f}秒"),
-                decision, cands)
+                decision, cands, latency_ms)
     if chosen.kind == "count":
         return (_NormalTriggerDecision(
-            "count", f"{agent.pending_count}>={agent.trigger_n}発話"), decision, cands)
+            "count", f"{agent.pending_count}>={agent.trigger_n}発話"), decision, cands, latency_ms)
     if chosen.kind == "silence":
         thresh = float(chosen.payload.get("pause_required", 0.0))
         return (_NormalTriggerDecision(
-            "silence", f"{silence_elapsed:.1f}>{thresh:.1f}秒"), decision, cands)
+            "silence", f"{silence_elapsed:.1f}>{thresh:.1f}秒"), decision, cands, latency_ms)
     if chosen.kind == "stall":
         return (_NormalTriggerDecision(
             "stall", f"介入不要後の沈黙{silence_elapsed:.1f}秒",
-            drift_reason=_STALL_DRIFT_REASON), decision, cands)
+            drift_reason=_STALL_DRIFT_REASON), decision, cands, latency_ms)
     if chosen.kind == "invite":
         return (_NormalTriggerDecision(
             "invite", f"{chosen.target_speaker}さんに声かけ",
-            invite_target=chosen.target_speaker), decision, cands)
-    return _NormalTriggerDecision("none"), decision, cands
+            invite_target=chosen.target_speaker), decision, cands, latency_ms)
+    return _NormalTriggerDecision("none"), decision, cands, latency_ms
 
 
 def _run_agenda_detector(state: SessionState, oai_key: str, oai_model: str):
@@ -1348,23 +1417,25 @@ def _run_agent_worker(state: SessionState):
                 with state.topics_lock:
                     _bargein_topics = list(state.topics) if state.topics else None
             try:
-                decision, _ctrl_barge, _barge_cands = _controller_barge_in_decision(
-                    _controller,
-                    pending=_pending,
-                    agent=agent,
-                    state=state,
-                    now=_now,
-                    last_fact_at=_last_fact_at,
-                    last_intervention_at=_last_intervention_at,
-                    silence_elapsed=_silence_elapsed,
-                    partner_busy=_partner_busy,
-                    in_echo_window=bool(agent.in_echo_window),
-                    cooldown=_cooldown,
-                    recent_interventions=list(_recent_interventions),
-                    silence_summarize=_silence_summarize,
-                    stall_breaker=_stall_breaker,
-                    last_invited=_last_invited,
-                    epoch=state.agent_cursor,
+                decision, _ctrl_barge, _barge_cands, _ctrl_latency_ms = (
+                    _controller_barge_in_decision(
+                        _controller,
+                        pending=_pending,
+                        agent=agent,
+                        state=state,
+                        now=_now,
+                        last_fact_at=_last_fact_at,
+                        last_intervention_at=_last_intervention_at,
+                        silence_elapsed=_silence_elapsed,
+                        partner_busy=_partner_busy,
+                        in_echo_window=bool(agent.in_echo_window),
+                        cooldown=_cooldown,
+                        recent_interventions=list(_recent_interventions),
+                        silence_summarize=_silence_summarize,
+                        stall_breaker=_stall_breaker,
+                        last_invited=_last_invited,
+                        epoch=state.agent_cursor,
+                    )
                 )
             except Exception as exc:
                 # 採否Controllerの想定外失敗時は、実績のある従来選択にfallback。
@@ -1377,6 +1448,8 @@ def _run_agent_worker(state: SessionState):
                     in_echo_window=bool(agent.in_echo_window), cooldown=_cooldown,
                     diag_tick=_diag_tick)
                 _ctrl_barge = None
+                _barge_cands = []
+                _ctrl_latency_ms = 0.0
             # 古い判断の破棄（§8.5）: 裁定後に新しい発話で世代がずれたら採らない。
             if (decision.reason not in ("none", "hold")
                     and _ctrl_barge is not None
@@ -1394,20 +1467,31 @@ def _run_agent_worker(state: SessionState):
                         "retry", "中断された介入を再送")
                 else:
                     _legacy = _legacy_decision_brief(decision.reason)
-                _shadow.evaluate(
-                    state,
-                    pending=_pending,
-                    agent=agent,
-                    now=_now,
-                    silence_elapsed=_silence_elapsed,
-                    epoch=state.agent_cursor,
-                    recent_interventions=list(_recent_interventions),
-                    legacy=_legacy,
-                    silence_summarize=_silence_summarize,
-                    partner_present=partner is not None,
-                    stall_breaker=_stall_breaker,
-                    last_invited=_last_invited,
-                )
+                if _ctrl_barge is not None:
+                    _shadow.record(
+                        state,
+                        candidates=_barge_cands,
+                        decision=_ctrl_barge,
+                        silence_elapsed=_silence_elapsed,
+                        epoch=state.agent_cursor,
+                        legacy=_legacy,
+                        latency_ms=_ctrl_latency_ms,
+                    )
+                else:
+                    _shadow.evaluate(
+                        state,
+                        pending=_pending,
+                        agent=agent,
+                        now=_now,
+                        silence_elapsed=_silence_elapsed,
+                        epoch=state.agent_cursor,
+                        recent_interventions=list(_recent_interventions),
+                        legacy=_legacy,
+                        silence_summarize=_silence_summarize,
+                        partner_present=partner is not None,
+                        stall_breaker=_stall_breaker,
+                        last_invited=_last_invited,
+                    )
             if decision.reason == "hold":
                 continue
             if decision.reason == "fact" and decision.fact is not None:
@@ -1527,20 +1611,22 @@ def _run_agent_worker(state: SessionState):
         # （中断された介入のリトライは上のガードバイパス節に集約済み）
         _silence_elapsed = time.monotonic() - _last_utt_time[0]
         try:
-            normal_decision, _ctrl_normal, _normal_cands = _controller_normal_decision(
-                _controller,
-                pending=_pending,
-                agent=agent,
-                now=time.monotonic(),
-                silence_elapsed=_silence_elapsed,
-                silence_summarize=_silence_summarize,
-                partner_present=partner is not None,
-                stall_breaker=_stall_breaker,
-                last_intervention_at=_last_intervention_at,
-                cooldown=_cooldown,
-                last_invited=_last_invited,
-                recent_interventions=list(_recent_interventions),
-                epoch=state.agent_cursor,
+            normal_decision, _ctrl_normal, _normal_cands, _ctrl_latency_ms = (
+                _controller_normal_decision(
+                    _controller,
+                    pending=_pending,
+                    agent=agent,
+                    now=time.monotonic(),
+                    silence_elapsed=_silence_elapsed,
+                    silence_summarize=_silence_summarize,
+                    partner_present=partner is not None,
+                    stall_breaker=_stall_breaker,
+                    last_intervention_at=_last_intervention_at,
+                    cooldown=_cooldown,
+                    last_invited=_last_invited,
+                    recent_interventions=list(_recent_interventions),
+                    epoch=state.agent_cursor,
+                )
             )
         except Exception as exc:
             print(f"# [diag] controller normal fallback: {exc}", flush=True)
@@ -1552,6 +1638,8 @@ def _run_agent_worker(state: SessionState):
                 last_intervention_at=_last_intervention_at, cooldown=_cooldown,
                 last_invited=_last_invited)
             _ctrl_normal = None
+            _normal_cands = []
+            _ctrl_latency_ms = 0.0
         # 古い判断の破棄（§8.5）。
         if (normal_decision.reason not in ("none", "skip_invite")
                 and _ctrl_normal is not None
@@ -1561,20 +1649,32 @@ def _run_agent_worker(state: SessionState):
         _normal_detail = normal_decision.detail
         if normal_decision.reason == "skip_invite":
             _normal_detail = f"{normal_decision.invite_target}さんへの連続声かけを抑制"
-        _shadow.evaluate(
-            state,
-            pending=_pending,
-            agent=agent,
-            now=time.monotonic(),
-            silence_elapsed=_silence_elapsed,
-            epoch=state.agent_cursor,
-            recent_interventions=list(_recent_interventions),
-            legacy=_legacy_decision_brief(normal_decision.reason, _normal_detail),
-            silence_summarize=_silence_summarize,
-            partner_present=partner is not None,
-            stall_breaker=_stall_breaker,
-            last_invited=_last_invited,
-        )
+        _legacy_normal = _legacy_decision_brief(normal_decision.reason, _normal_detail)
+        if _ctrl_normal is not None:
+            _shadow.record(
+                state,
+                candidates=_normal_cands,
+                decision=_ctrl_normal,
+                silence_elapsed=_silence_elapsed,
+                epoch=state.agent_cursor,
+                legacy=_legacy_normal,
+                latency_ms=_ctrl_latency_ms,
+            )
+        else:
+            _shadow.evaluate(
+                state,
+                pending=_pending,
+                agent=agent,
+                now=time.monotonic(),
+                silence_elapsed=_silence_elapsed,
+                epoch=state.agent_cursor,
+                recent_interventions=list(_recent_interventions),
+                legacy=_legacy_normal,
+                silence_summarize=_silence_summarize,
+                partner_present=partner is not None,
+                stall_breaker=_stall_breaker,
+                last_invited=_last_invited,
+            )
         if normal_decision.reason == "conversation":
             _log_intervention_event(state, "conversation", normal_decision.detail)
             agent.trigger()
