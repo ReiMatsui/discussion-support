@@ -391,6 +391,26 @@ def test_speak_start_latency_measured_from_trigger_to_first_audio(agent):
     assert agent._speak_trigger_at == 0.0  # 計測後はリセット（次trigger待ち）
 
 
+def test_speak_latency_stamp_precedes_response_create(agent):
+    """response.create 直後に音声が返っても、trigger→発話開始遅延を取り逃がさない."""
+    import json
+
+    original_send = agent.ws.send
+
+    def _send_and_echo_first_audio(raw: str) -> None:
+        original_send(raw)
+        if json.loads(raw).get("type") == "response.create":
+            agent._handle({"type": "response.output_item.added", "item": {"id": "it1"}})
+            agent._handle({"type": "response.output_audio.delta", "delta": make_chunk()})
+
+    agent.ws.send = _send_and_echo_first_audio
+    agent.feed("人間", "ここまでの論点を整理したいです")
+    agent.trigger()
+
+    assert agent._last_speak_latency_ms is not None
+    assert agent._speak_trigger_at == 0.0
+
+
 def test_speak_latency_not_recomputed_without_new_trigger(agent):
     """新しい trigger が無ければ、後続の音声で遅延を再計算しない."""
     import time

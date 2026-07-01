@@ -459,10 +459,15 @@ class RealtimeAgent(_RealtimeBase):
                     "content": [{"type": "input_text", "text": conv}],
                 },
             }))
+            # 発話開始遅延の計測開始。response.create 直前に刻むことで、
+            # 受信スレッドが即座に最初の音声を処理しても取り逃がさない。
+            self._last_speak_latency_ms = None
+            self._speak_trigger_at = time.monotonic()
             self.ws.send(json.dumps({"type": "response.create"}))
         except Exception as e:
             # 送信失敗: 確保を解放し、状態は一切クリアせず保持して次回再試行する。
             self._responding = False
+            self._speak_trigger_at = 0.0
             print(f"# AI Agent 送信エラー（内容を保持して再試行）: {e}", flush=True)
             return
         # --- 送信成功（_responding は確保済みのまま維持） ---
@@ -474,8 +479,6 @@ class RealtimeAgent(_RealtimeBase):
             # 消費した介入をクリア。送信中に新しい介入が入っていたら残す。
             if include_pi and self._pending_intervention is pi:
                 self._pending_intervention = None
-        # 発話開始遅延の計測開始（最初の音声で確定する, §3.5）。
-        self._speak_trigger_at = time.monotonic()
         self._log_state("→RESPONDING (trigger送信)")
 
     def interrupt(self):
