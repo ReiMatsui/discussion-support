@@ -452,10 +452,11 @@ class VoiceProfiles:
         key = prev if prev is not None else "#" + sp
         # 閉じた名簿（名簿を確定, auto=False）: 許すのは「登録済みのアクティブな名前付き
         # プロファイルへの継続」だけ。未知/匿名(#ラベル・人物N)は新規参加者を作らず未確定に
-        # する。確信ある一致・AI声紋・登録者への証拠つき継続は上流で既に return 済み。
+        # する。重なり発話は声紋を信用できないので、登録者継続もさせない。
+        # 確信ある一致・AI声紋・登録者への証拠つき継続は上流で既に return 済み。
         if not self.auto:
             active = self._active_human()
-            if key not in active or self.ANON.match(str(key)):
+            if kind == "重なりスキップ" or key not in active or self.ANON.match(str(key)):
                 key = UNSURE_SPEAKER
                 kind = "未確定"
         self.sp_map[sp] = key

@@ -136,6 +136,14 @@ def test_closed_roster_unknown_does_not_inherit_registered_label():
     assert vp.classify(_LONG, "2", count=True, chars=60) == UNSURE_SPEAKER
 
 
+def test_closed_roster_overlapped_speech_does_not_inherit_registered_label():
+    """重なり発話は声紋を信用できないため、閉じた名簿では直前登録者を継がず未確定."""
+    vp = _closed_roster_tracker(_unit(1, 0, 0, 0))
+    vp.sp_map = {"2": "A"}
+
+    assert vp.classify(_LONG, "2", overlapped=True, count=True, chars=60) == UNSURE_SPEAKER
+
+
 def test_max_speakers_turns_extra_new_voice_unsure():
     """参加人数上限に達した後の新しい声は、新参加者ではなく未確定にする."""
     vp = _tracker(_unit(0, 1, 0))
