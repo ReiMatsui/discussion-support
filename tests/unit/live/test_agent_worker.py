@@ -586,6 +586,34 @@ def test_manual_call_ignored_when_intervention_disabled():
     assert agent.trigger_calls == []
 
 
+def test_pending_manual_call_cleared_when_intervention_disabled():
+    """worker内に保持された手動呼び出しも、介入オフで破棄する."""
+    agent = FakeAgent()
+    partner = FakePartner()
+    partner.ai_speaking = True
+    state = FakeState(agent, partner)
+    state.manual_call_requests.put({"request": "整理して", "source": "ui"})
+
+    t = threading.Thread(target=_run_agent_worker, args=(state,), daemon=True)
+    t.start()
+    try:
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline and not state.manual_call_requests.empty():
+            time.sleep(0.05)
+        assert state.manual_call_requests.empty(), "workerが手動呼び出しを保持している前提"
+
+        state.intervention_enabled = False
+        partner.ai_speaking = False
+        time.sleep(0.4)
+        state.intervention_enabled = True
+        time.sleep(0.6)
+    finally:
+        state.stop.set()
+        t.join(timeout=2.0)
+
+    assert agent.trigger_calls == []
+
+
 def test_fact_request_triggers_before_drift():
     """高確信の事実補正は、会話を壊さない短い補足として優先的に発火する."""
     agent = FakeAgent()

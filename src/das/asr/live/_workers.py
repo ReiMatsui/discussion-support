@@ -281,6 +281,16 @@ class _PendingInterventions:
     def clear_manual(self) -> None:
         self.manual_call = None
 
+    def clear_all(self) -> None:
+        """介入オフ/モードオフ時に、worker内で保持した候補も破棄する."""
+        self.drift_reason = None
+        self.drift_count = 0
+        self.last_drift_request_at = 0.0
+        self.last_drift_request_wall_at = None
+        self.facts.clear()
+        self.invite = None
+        self.manual_call = None
+
     def drop_stale_facts(self, *, now: float) -> None:
         """会話タイミングを外した古い事実補正を破棄する."""
         while self.facts:
@@ -1391,6 +1401,8 @@ def _run_agent_worker(state: SessionState):
         _diag_tick += 1
         partner = state.partner  # 動的参照: 実行中のパートナー接続/切断に追従（F3）
         if agent is None or not agent._connected or not agent.enabled:
+            if agent is None or not agent.enabled:
+                _pending.clear_all()
             if agent is not None and agent.enabled and not agent._connected:
                 now = time.monotonic()
                 if now - _last_agent_reconnect_at >= 5.0:
@@ -1439,6 +1451,7 @@ def _run_agent_worker(state: SessionState):
                             "人間", utt,
                             request_response=is_last)
         if not _enabled:
+            _pending.clear_all()
             for q in (state.drift_requests, state.invite_requests,
                       state.factcheck_requests, state.manual_call_requests):
                 while True:
