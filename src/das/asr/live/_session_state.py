@@ -246,9 +246,37 @@ class SessionState:
 
     def _anonymous_label_for(self, key: str) -> str:
         if key not in self.anonymous_labels:
-            suffix = self._anonymous_suffix(len(self.anonymous_labels))
-            self.anonymous_labels[key] = f"参加者{suffix}"
+            # 「累積数」ではなく「未使用の最小文字」を割り振る。幻の話者キー
+            # （AI回り込み・重なり由来の一時キー）が統合で消えれば、その文字は次の
+            # 新規話者が再利用でき、連番の飛び・len ベースの重複が構造的に消える。
+            used = set(self.anonymous_labels.values())
+            i = 0
+            while True:
+                label = f"参加者{self._anonymous_suffix(i)}"
+                if label not in used:
+                    self.anonymous_labels[key] = label
+                    break
+                i += 1
         return self.anonymous_labels[key]
+
+    def _displays_real_name(self, key: str) -> bool:
+        """key が実名（話者N/人物N でも #/@diar 匿名キーでもない名前）で表示されるか."""
+        name = self.names.get(key)
+        if name and not self._is_system_anonymous_name(name):
+            return True
+        return not (self._is_anonymous_speaker_key(key)
+                    or self._is_system_anonymous_name(key))
+
+    def set_display_name(self, key: str, name: str) -> None:
+        """表示名を設定する。実名なら匿名ラベルの文字を解放する（リネームの共通経路）.
+
+        実名が付いたキーは以後その名前で表示されるため文字は不要。解放すれば後続の
+        新規参加者が若い文字を再利用できる（連番の飛びの解消）。
+        """
+        with self.state_lock:
+            self.names[key] = name
+            if not self._is_system_anonymous_name(name):
+                self.anonymous_labels.pop(key, None)
 
     def _max_human_speakers(self) -> int | None:
         value = getattr(self.args, "diarization_max_speakers", None)
@@ -394,7 +422,14 @@ class SessionState:
             if old in self.colors:
                 self.colors.setdefault(new, self.colors.pop(old))
             if old in self.anonymous_labels:
-                self.anonymous_labels.setdefault(new, self.anonymous_labels.pop(old))
+                if self._displays_real_name(new):
+                    # 実名に統合された → old の文字を解放（引き継がない）。後続の
+                    # 新規参加者がその文字を再利用でき、飛びを防ぐ。
+                    self.anonymous_labels.pop(old, None)
+                else:
+                    # 匿名キー同士の統合（#label→人物N など）は従来どおり文字を引き継ぐ。
+                    self.anonymous_labels.setdefault(
+                        new, self.anonymous_labels.pop(old))
 
     def add_sys(self, ms, text: str):
         """システムイベントを議事録のタイムラインに残す."""

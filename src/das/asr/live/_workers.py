@@ -2042,8 +2042,7 @@ def _run_stdin_commands(state: SessionState):
                 state.save()
                 _print_line(f"# {name} の声を登録しました（過去の発言も置換、次回の会議から自動表示）")
             else:
-                with state.state_lock:
-                    state.names["#" + label] = name
+                state.set_display_name("#" + label, name)
                 state.save()
                 _print_line(f"# 話者{label} → {name}（過去の発言も置換済み）")
         elif line.strip():

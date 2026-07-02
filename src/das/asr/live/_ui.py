@@ -234,8 +234,7 @@ class _UIHandler:
                         s.save()
                         _print_line(f"# {name} の声を登録しました（UIから）")
                     else:
-                        with s.state_lock:
-                            s.names["#" + label] = name
+                        s.set_display_name("#" + label, name)
                         s.save()
                         _print_line(f"# 話者{label} → {name}（UIから）")
                     self._json(200, {"ok": True, "name": name})

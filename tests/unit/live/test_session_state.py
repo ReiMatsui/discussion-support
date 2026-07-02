@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime
+from types import SimpleNamespace
 
 from das.asr.live._session_state import SessionState
 
@@ -35,6 +36,63 @@ def test_retired_echo_texts_respect_ttl():
     assert s.recent_retired_echo_texts(now=now) == ["まず、今日の目的を確認しましょう"]
     # TTL を過ぎたら対象外
     assert s.recent_retired_echo_texts(now=now + 11.0) == []
+
+
+def test_anonymous_label_reused_after_merge_no_skip():
+    """幻の話者が統合で消えたら、その文字を次の新規話者が再利用する（飛びの解消）."""
+    s = _make_state()
+    assert s.disp_name("#1") == "参加者A"
+    assert s.disp_name("#2") == "参加者B"   # ファシリテーターの声などの幻
+    assert s.disp_name("#3") == "参加者C"
+    s.rekey("#2", "#1")                      # 幻 #2 を #1 に統合 → B が解放される
+    assert s.disp_name("#4") == "参加者B"    # 参加者D に飛ばず B を再利用
+
+
+def test_anonymous_labels_no_collision_after_merge():
+    """統合後、既存キーの表示と新規キーの表示が衝突しない（重複の回帰）."""
+    s = _make_state()
+    for k in ("#1", "#2", "#3"):
+        s.disp_name(k)
+    s.rekey("#2", "#1")
+    assert {s.disp_name("#3"), s.disp_name("#4")} == {"参加者C", "参加者B"}
+
+
+def test_real_name_releases_letter():
+    """実名を付けたキーの文字は解放され、新規キーが再利用する（表示は実名のまま）."""
+    s = _make_state()
+    assert s.disp_name("#1") == "参加者A"
+    assert s.disp_name("#2") == "参加者B"
+    s.set_display_name("#1", "松井")
+    assert s.disp_name("#1") == "松井"       # 表示は実名のまま
+    assert s.disp_name("#3") == "参加者A"    # 解放された A を再利用
+
+
+def test_system_anonymous_name_does_not_release_letter():
+    """話者N/人物N などのシステム匿名名では文字を解放しない（実名のみ解放）."""
+    s = _make_state()
+    assert s.disp_name("#1") == "参加者A"
+    s.set_display_name("#1", "人物3")        # システム匿名名
+    assert "#1" in s.anonymous_labels        # 解放されない
+    assert s.disp_name("#2") == "参加者B"    # A は使用中のまま
+
+
+def test_merge_into_anonymous_keeps_carryover():
+    """統合先に文字が無い匿名キーへの統合は、従来どおり文字を引き継ぐ（setdefault経路）."""
+    s = _make_state()
+    assert s.disp_name("#1") == "参加者A"
+    s.rekey("#1", "#9")                      # #9 は未表示（ラベル無し）
+    assert s.disp_name("#9") == "参加者A"    # #1 の A を引き継ぐ
+
+
+def test_constrain_after_label_release_with_max_speakers():
+    """max_speakers 指定下でも、統合で文字が解放された後の判定が正しい."""
+    s = _make_state()
+    s.args = SimpleNamespace(diarization_max_speakers=2)
+    assert s.disp_name("#1") == "参加者A"
+    assert s.disp_name("#2") == "参加者B"    # 幻
+    s.rekey("#2", "#1")                      # 幻を統合 → B 解放
+    assert s.constrain_human_speaker_key("#3") == "#3"   # 上限2以内で通る
+    assert s.disp_name("#3") == "参加者B"    # 解放された B を再利用
 
 
 def test_reset_drains_summarize_requests():
