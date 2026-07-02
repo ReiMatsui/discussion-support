@@ -25,6 +25,26 @@ def test_seed_topic_adds_when_empty():
     assert s.topics[0]["speaker"] == "議題"
 
 
+def test_retired_echo_texts_respect_ttl():
+    """退役エコーテキストは TTL(10s) 内だけ照合対象に含まれる（P2-4）."""
+    import time
+    s = _make_state()
+    s.add_retired_echo_texts(["まず、今日の目的を確認しましょう", ""])
+    now = time.monotonic()
+    # 空文字は除外され、1件だけ保持
+    assert s.recent_retired_echo_texts(now=now) == ["まず、今日の目的を確認しましょう"]
+    # TTL を過ぎたら対象外
+    assert s.recent_retired_echo_texts(now=now + 11.0) == []
+
+
+def test_reset_drains_summarize_requests():
+    """会議リセットで整理介入の要求キューも drain される（C3）."""
+    s = _make_state()
+    s.summarize_requests.put({"focus": "論点の整理"})
+    s.reset_for_new_meeting()
+    assert s.summarize_requests.empty()
+
+
 def test_delivery_event_includes_timing(tmp_path):
     """delivery イベントに speak_start_latency_ms などの timing を残せる（Phase4観測）."""
     import json

@@ -659,7 +659,7 @@ def test_http_enroll_from_buffer():
     """/api/enroll が直近のPCMバッファからその人を声紋登録する."""
     s = _make_state()
     s.tracker = _FakeTracker()
-    s.pcm_buf = bytearray(b"\x01\x00" * (16000 * 3))   # 3秒ぶん
+    s.pcm_buf = bytearray(b"\x10\x27" * (16000 * 3))   # 3秒ぶん（有声: 振幅≈0.3）
     httpd, port = _serve(s)
     try:
         req = urllib.request.Request(
@@ -693,6 +693,60 @@ def test_http_enroll_rejects_too_short():
             raise AssertionError("拒否されるはず")
         except urllib.error.HTTPError as e:
             assert e.code == 400
+        assert not s.tracker.enrolled
+    finally:
+        httpd.shutdown()
+
+
+class _BusyAgent:
+    """AI発話中/エコー窓中を模す最小フェイク（P2-5 の enroll 拒否判定用）."""
+
+    def __init__(self, *, ai_speaking=False, in_echo_window=False) -> None:
+        self.ai_speaking = ai_speaking
+        self.in_echo_window = in_echo_window
+
+
+def test_http_enroll_rejects_while_ai_speaking():
+    """AI発話中の事前登録は、回り込んだAI音声で声紋を汚すため拒否する（P2-5）."""
+    s = _make_state()
+    s.tracker = _FakeTracker()
+    s.agent = _BusyAgent(ai_speaking=True)
+    s.pcm_buf = bytearray(b"\x10\x27" * (16000 * 3))   # 十分な長さ・有声
+    httpd, port = _serve(s)
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/enroll",
+            data=json.dumps({"name": "黒田", "seconds": 3}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            urllib.request.urlopen(req)
+            raise AssertionError("拒否されるはず")
+        except urllib.error.HTTPError as e:
+            assert e.code == 400
+            assert "AIの発話が終わってから" in json.loads(e.read())["error"]
+        assert not s.tracker.enrolled
+    finally:
+        httpd.shutdown()
+
+
+def test_http_enroll_rejects_mostly_silent():
+    """長さは足りても、無音を除いた実効音声長が下限未満なら拒否する（P2-5）."""
+    s = _make_state()
+    s.tracker = _FakeTracker()
+    # 3秒あるがほぼ無音（振幅≈0.00003）→ 実効長がほぼ0
+    s.pcm_buf = bytearray(b"\x01\x00" * (16000 * 3))
+    httpd, port = _serve(s)
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/enroll",
+            data=json.dumps({"name": "黒田", "seconds": 3}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            urllib.request.urlopen(req)
+            raise AssertionError("拒否されるはず")
+        except urllib.error.HTTPError as e:
+            assert e.code == 400
+            assert "声が短すぎます" in json.loads(e.read())["error"]
         assert not s.tracker.enrolled
     finally:
         httpd.shutdown()

@@ -69,8 +69,20 @@ class _RealtimeBase:
     def _on_playback_terminator(self, epoch: int):
         """終端マーカー取り出し時、最新応答の終端のみ ai_speaking を倒す（Bug 6）."""
         if epoch >= self._play_epoch:
-            self.ai_speaking = False
-            self._last_speech_end = time.monotonic()
+            self._end_speech()
+
+    def _end_speech(self) -> None:
+        """AI発話の終了を確定し、終了フック（on_speech_end）があれば通知する.
+
+        自然終了（終端マーカー）と割り込み終了の共通処理。P2-1 のエコー区間記録が
+        このフックでAI再生区間を閉じる。
+        """
+        self.ai_speaking = False
+        self._last_speech_end = time.monotonic()
+        cb = getattr(self, "on_speech_end", None)
+        if cb:
+            with contextlib.suppress(Exception):
+                cb()
 
     def _best_similarity(self, text: str) -> float:
         return _best_text_similarity(text, list(self._recent_ai_texts),

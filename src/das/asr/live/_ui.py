@@ -4,18 +4,40 @@ from __future__ import annotations
 import json
 import sys
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ._session_state import SessionState
 
-from ._constants import CLEAR_LINE, SR
+from ._constants import _ENROLL_MIN_VOICED_SEC, CLEAR_LINE, SR
 
 
 def _print_line(text: str):
     """ターミナルの現在行をクリアして1行出力."""
     sys.stdout.write(CLEAR_LINE + text + "\n")
     sys.stdout.flush()
+
+
+def _voiced_seconds(wav: Any, *, frame_sec: float = 0.02,
+                    rms_thresh: float = 0.01) -> float:
+    """無音を除いた実効音声長（秒）を返す（P2-5 の事前登録品質ゲート用）.
+
+    20msフレームごとのRMSが閾値を超えたフレームだけを「有声」として数える。
+    末尾N秒を無検査で平均する登録が、間や無音で低品質な声紋になるのを防ぐ。
+    """
+    import numpy as np
+
+    if wav is None or len(wav) == 0:
+        return 0.0
+    frame = int(SR * frame_sec)
+    if frame <= 0:
+        return float(len(wav) / SR)
+    n = (len(wav) // frame) * frame
+    if n == 0:
+        return 0.0
+    frames = np.asarray(wav[:n], dtype=np.float32).reshape(-1, frame)
+    rms = np.sqrt((frames ** 2).mean(axis=1))
+    return float(int((rms > rms_thresh).sum()) * frame_sec)
 
 
 class _UIHandler:
@@ -255,6 +277,17 @@ class _UIHandler:
                     if s.tracker is None:
                         self._json(400, {"error": "声紋照合が無効です（--no-vp 指定中など）"})
                         return
+                    # P2-5: AI発話中/エコー窓中の登録は、回り込んだAI音声を混ぜて
+                    # 声紋を汚すため拒否する。
+                    _ai_busy = (
+                        (s.agent is not None
+                         and (s.agent.ai_speaking or s.agent.in_echo_window))
+                        or (s.partner is not None
+                            and (s.partner.ai_speaking or s.partner.in_echo_window))
+                    )
+                    if _ai_busy:
+                        self._json(400, {"error": "AIの発話が終わってからもう一度お願いします"})
+                        return
                     nbytes = max(int(seconds * SR * 2), 0)
                     with s.buf_lock:
                         seg = bytes(s.pcm_buf[-nbytes:]) if nbytes else bytes(s.pcm_buf)
@@ -262,6 +295,12 @@ class _UIHandler:
                         self._json(400, {"error": "登録中は、その人が1人で5秒ほど話してください"})
                         return
                     wav = np.frombuffer(seg, dtype="<i2").astype(np.float32) / 32768.0
+                    # P2-5: 無音を除いた実効音声長が下限未満なら reject（末尾N秒を
+                    # 無検査で平均すると、間や無音だけで低品質な声紋ができるため）。
+                    if _voiced_seconds(wav) < _ENROLL_MIN_VOICED_SEC:
+                        self._json(400, {"error": "声が短すぎます。その人が1人で"
+                                         "5秒ほど続けて話してから登録してください"})
+                        return
                     if not s.tracker.enroll_from_audio(name, wav):
                         self._json(400, {"error": "声紋の計算に失敗しました"})
                         return
@@ -309,7 +348,7 @@ class _UIHandler:
                 else:
                     self.send_error(404)
 
-            def _json(self, code, data):
+            def _json(self, code: int, data: dict) -> None:
                 self.send_response(code)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()

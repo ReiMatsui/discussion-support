@@ -276,7 +276,7 @@ def test_interrupt_saves_pending_intervention(agent):
     agent.ai_speaking = True
     agent._ai_text_buf = "重要な指摘です"
     agent._current_item_id = "item-1"
-    agent._played_bytes = 4800
+    agent._played_bytes = 48000   # 1.0秒相当（十分に再生された = 途切れた発話の再開）
     agent.interrupt()
 
     pi = agent._pending_intervention
@@ -356,6 +356,7 @@ def test_interrupt_increments_attempts(agent):
     agent._pending_intervention = {"delivered": "前回", "created_at": 0.0, "attempts": 1}
     agent.ai_speaking = True
     agent._ai_text_buf = "再度の指摘"
+    agent._played_bytes = 48000   # 十分に再生された（途切れた発話の再開扱い）
     agent.interrupt()
     assert agent._pending_intervention["attempts"] == 2
 
@@ -365,7 +366,57 @@ def test_interrupt_discards_after_max_retries(agent):
     agent._pending_intervention = {"delivered": "x", "created_at": 0.0, "attempts": 2}
     agent.ai_speaking = True
     agent._ai_text_buf = "3回目"
+    agent._played_bytes = 48000   # 十分に再生された（再試行上限の分岐を通す）
     agent.interrupt()
+    assert agent._pending_intervention is None
+
+
+def test_interrupt_discards_barely_played_delivered(agent):
+    """再生率が極端に低い delivered は再開扱いにせず破棄する（P2-3a）.
+
+    音声がほとんど再生されていない＝未再生transcript。再送すると聞いていない
+    内容を蒸し返すため、リトライ候補にしない。
+    """
+    agent.ai_speaking = True
+    agent._ai_text_buf = "まだほとんど再生されていない長めの発言内容です"
+    agent._played_bytes = 480   # 0.01秒相当 = ほぼ無音
+
+    agent.interrupt()
+
+    assert agent._pending_intervention is None
+
+
+def test_retry_note_only_on_retry_trigger(agent):
+    """中断内容の再開注記は is_retry の trigger だけに含める（P2-3b, 1発話2意図の回避）."""
+    import time
+    agent._pending_intervention = {
+        "delivered": "中断された指摘", "created_at": time.monotonic(), "attempts": 1}
+
+    # 異種トリガー（drift）には中断注記を混ぜない
+    agent.trigger(drift_reason="雑談に逸脱")
+    text = agent.ws.last_create_text()
+    assert "中断された指摘" not in text
+    assert agent._pending_intervention is not None   # 消費されず保持
+
+    # retry トリガーでだけ中断内容を再開する
+    agent._responding = False
+    agent.trigger(is_retry=True)
+    assert "中断された指摘" in agent.ws.last_create_text()
+
+
+def test_pending_intervention_dropped_after_max_feeds(agent):
+    """中断介入の保存後、会話が一定数進んだら蒸し返さず破棄する（P2-3c）."""
+    agent.ai_speaking = True
+    agent._ai_text_buf = "重要な指摘です"
+    agent._played_bytes = 48000
+    agent.interrupt()
+    assert agent._pending_intervention is not None
+
+    for i in range(agent._INTERVENTION_MAX_FEEDS):
+        agent.feed("人間", f"発話{i}")
+        assert agent._pending_intervention is not None   # 上限までは保持
+    agent.feed("人間", "上限を超える発話")
+
     assert agent._pending_intervention is None
 
 

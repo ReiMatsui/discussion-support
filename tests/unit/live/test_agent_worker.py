@@ -33,6 +33,7 @@ class FakeAgent:
         self.feeds: list[tuple[str, str]] = []
         self.trigger_calls: list[dict] = []
         self.connect_calls = 0
+        self.interrupts = 0
 
     @property
     def pending_count(self) -> int:
@@ -43,18 +44,21 @@ class FakeAgent:
 
     def trigger(self, *, topics=None, drift_reason=None, invite_target=None,
                 fact_correction=None, manual_request=None,
-                retry_intervention=None) -> None:
+                summary_focus=None, retry_intervention=None,
+                is_retry=False) -> None:
         self.trigger_calls.append({"topics": topics, "drift_reason": drift_reason,
                                    "invite_target": invite_target,
                                    "fact_correction": fact_correction,
                                    "manual_request": manual_request,
-                                   "retry_intervention": retry_intervention})
+                                   "summary_focus": summary_focus,
+                                   "retry_intervention": retry_intervention,
+                                   "is_retry": is_retry})
         # 実エージェントの挙動を模倣: トリガーで介入と保留発話を消費
         self._pending_intervention = None
         self._pending.clear()
 
-    def interrupt(self) -> None:  # pragma: no cover
-        pass
+    def interrupt(self) -> None:
+        self.interrupts += 1
 
     def connect(self) -> None:
         self.connect_calls += 1
@@ -98,6 +102,7 @@ class FakeState:
         self.invite_requests: queue.Queue[str] = queue.Queue()
         self.factcheck_requests: queue.Queue[dict] = queue.Queue()
         self.manual_call_requests: queue.Queue[dict] = queue.Queue()
+        self.summarize_requests: queue.Queue[dict] = queue.Queue()
         self.fac_events: queue.Queue = queue.Queue()
         self.proactivity = {"silence_summarize": 18.0, "cooldown": 25.0}
         self.intervention_enabled = True
@@ -659,7 +664,7 @@ def test_unconfirmed_drift_does_not_starve_other_interventions():
     """確認待ちの脱線候補が hold でも、通常レーンの介入は飢餓しない（C1回帰）.
 
     drift_confirmations=2 で単発検出の drift が保留のまま残っても、
-    発話数トリガー（count）は自身の pause を満たせば発火するべき。
+    価値判定済みの整理介入（summarize）は自身の pause を満たせば発火するべき。
     """
     agent = FakeAgent()
     agent._pending = [{"speaker": "人間", "text": str(i), "_count": True}
@@ -668,12 +673,13 @@ def test_unconfirmed_drift_does_not_starve_other_interventions():
     state.proactivity = {"silence_summarize": None, "cooldown": 40.0,
                          "drift_confirmations": 2}
     state.drift_requests.put("地元の雑談")   # 単発 → 確認待ちで採択されない
+    state.summarize_requests.put({"focus": "論点の整理"})
 
     _run_worker_briefly(state, until=lambda: bool(agent.trigger_calls))
 
-    assert agent.trigger_calls, "確認待ちdriftの保留中も count は発火するべき"
+    assert agent.trigger_calls, "確認待ちdriftの保留中も summarize は発火するべき"
     assert state.intervention_events
-    assert state.intervention_events[0]["reason"] == "count"
+    assert state.intervention_events[0]["reason"] == "summarize"
 
 
 def test_stale_pending_drift_is_dropped_after_ttl():
@@ -711,20 +717,22 @@ def test_drift_candidate_carries_expiry():
     assert drift.expires_at == 100.0 + _DRIFT_PENDING_TTL
 
 
-def test_count_trigger_records_intervention_reason():
-    """発話数トリガーの理由をUI用ログに残す."""
+def test_summarize_trigger_records_intervention_reason():
+    """整理介入（価値判定済み summarize）の理由・焦点をUI用ログに残す（C3）."""
     agent = FakeAgent()
     agent._pending = [{"speaker": "人間", "text": str(i), "_count": True}
                       for i in range(agent.trigger_n)]
     state = FakeState(agent, None)
+    state.summarize_requests.put({"focus": "論点の整理"})
 
     _run_worker_briefly(state, until=lambda: bool(agent.trigger_calls))
 
     assert agent.trigger_calls
+    assert agent.trigger_calls[0]["summary_focus"] == "論点の整理"
     assert state.intervention_events
-    assert state.intervention_events[0]["reason"] == "count"
-    assert state.intervention_events[0]["metadata"]["timing"]["kind"] == "count"
-    assert state.intervention_events[0]["metadata"]["timing"]["policy"] == "turn_count_pause"
+    assert state.intervention_events[0]["reason"] == "summarize"
+    assert state.intervention_events[0]["metadata"]["timing"]["kind"] == "summarize"
+    assert state.intervention_events[0]["metadata"]["timing"]["policy"] == "structuring_value"
 
 
 def test_drift_request_held_until_agent_free():
@@ -912,3 +920,132 @@ def test_event_worker_speech_start_interrupts_partner():
     state.fac_events.put(("speech_start", None))
     _run_event_worker_briefly(state, lambda t: None, until=lambda: p.interrupts > 0)
     assert p.interrupts == 1
+
+
+# ---------------------------------------------------------------------------
+# 整理介入の価値判定チェッカー（C3）: count の無条件介入を置換
+# ---------------------------------------------------------------------------
+
+def _run_structuring_briefly(state, *, until, timeout=3.5):
+    from das.asr.live._workers import _run_structuring_checker
+    t = threading.Thread(target=_run_structuring_checker,
+                         args=(state, "key", "model"), daemon=True)
+    t.start()
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline and not until():
+        time.sleep(0.05)
+    state.stop.set()
+    t.join(timeout=2.0)
+
+
+def _at_threshold_state():
+    agent = FakeAgent()
+    agent._pending = [{"speaker": "人間", "text": str(i)}
+                      for i in range(agent.trigger_n)]
+    state = FakeState(agent, None)
+    state.records = [{"speaker": "A", "text": "本題の議論"}]
+    return state
+
+
+def test_structuring_checker_skips_when_no_value(monkeypatch):
+    """pending_count が閾値に達しても、価値なし判定なら summarize を積まない."""
+    import das.asr.live._bootstrap as bs
+    monkeypatch.setattr(bs, "check_summary_value",
+                        lambda *a, **k: {"intervene": False, "focus": ""})
+    state = _at_threshold_state()
+
+    _run_structuring_briefly(state, until=lambda: False, timeout=2.5)
+
+    assert state.summarize_requests.empty()
+
+
+def test_structuring_checker_enqueues_when_valuable(monkeypatch):
+    """価値あり判定なら focus 付きで summarize_requests に積む."""
+    import das.asr.live._bootstrap as bs
+    monkeypatch.setattr(bs, "check_summary_value",
+                        lambda *a, **k: {"intervene": True, "focus": "論点整理"})
+    state = _at_threshold_state()
+
+    _run_structuring_briefly(
+        state, until=lambda: not state.summarize_requests.empty())
+
+    req = state.summarize_requests.get_nowait()
+    assert req["focus"] == "論点整理"
+
+
+def test_structuring_checker_does_not_rejudge_same_count(monkeypatch):
+    """同じ pending_count では LLM 判定を繰り返さない（_last_judged_count）."""
+    import das.asr.live._bootstrap as bs
+    calls: list = []
+
+    def _fake(*a, **k):
+        calls.append(1)
+        return {"intervene": False, "focus": ""}
+
+    monkeypatch.setattr(bs, "check_summary_value", _fake)
+    state = _at_threshold_state()
+
+    _run_structuring_briefly(state, until=lambda: False, timeout=3.0)
+
+    assert len(calls) == 1
+
+
+def test_structuring_checker_rejudges_after_pending_reset(monkeypatch):
+    """介入後に蓄積が消費（trigger/reset）されたら、次の閾値到達で再判定する.
+
+    _last_judged_count が高水位のまま残ると介入が一度きりになる回帰を防ぐ。
+    """
+    import das.asr.live._bootstrap as bs
+    calls: list = []
+
+    def _fake(*a, **k):
+        calls.append(1)
+        return {"intervene": False, "focus": ""}
+
+    monkeypatch.setattr(bs, "check_summary_value", _fake)
+    agent = FakeAgent()
+    agent._pending = [{"speaker": "人間", "text": str(i)}
+                      for i in range(agent.trigger_n)]
+    state = FakeState(agent, None)
+    state.records = [{"speaker": "A", "text": "議論"}]
+
+    def _cycle_once():
+        if len(calls) >= 1 and agent._pending:
+            agent._pending.clear()   # trigger 相当: 蓄積を消費
+        elif len(calls) >= 1 and not agent._pending:
+            # 蓄積を閾値まで戻す（新しい発話が進んだ状況）
+            agent._pending = [{"text": str(i)} for i in range(agent.trigger_n)]
+        return len(calls) >= 2
+
+    # チェッカーは1秒tickなので、並列実行の負荷でも取りこぼさないよう余裕を持たせる。
+    _run_structuring_briefly(state, until=_cycle_once, timeout=10.0)
+
+    assert len(calls) >= 2   # リセットを跨いで再判定できる
+
+
+# ---------------------------------------------------------------------------
+# 未確定話者の割り込み（C1）: 声紋が確定しない発話でもAIを止められる
+# ---------------------------------------------------------------------------
+
+def test_unconfirmed_speaker_interrupts_ai():
+    """speaker='?'（未確定）の長い発話でも、AI発話中なら interrupt される."""
+    agent = FakeAgent()
+    agent.ai_speaking = True
+    state = FakeState(agent, None)
+    state.records = [{"speaker": "?", "text": "ちょっと待ってほしいのですが"}]
+
+    _run_worker_briefly(state, until=lambda: agent.interrupts > 0)
+
+    assert agent.interrupts == 1
+
+
+def test_unconfirmed_speaker_not_fed_to_agent():
+    """未確定話者の発話は割り込み判定には使うが、agent.feed には流さない."""
+    agent = FakeAgent()
+    agent.ai_speaking = True
+    state = FakeState(agent, None)
+    state.records = [{"speaker": "?", "text": "ちょっと待ってほしいのですが"}]
+
+    _run_worker_briefly(state, until=lambda: agent.interrupts > 0)
+
+    assert agent.feeds == []

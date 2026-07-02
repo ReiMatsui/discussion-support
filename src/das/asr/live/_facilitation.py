@@ -33,13 +33,13 @@ from ._constants import (
     _MANUAL_CALL_COOLDOWN,
 )
 
-# 採否で扱う候補種別。現行 checker が生成する fact/drift/retry/count/silence/
-# invite/conversation を受け付ける。summarize は設計（§3）上の将来kindで、
-# まだ候補生成器を持たない（policy 未定義なら _DEFAULT_POLICY にフォールバック）。
+# 採否で扱う候補種別。現行 checker が生成する fact/drift/retry/summarize/silence/
+# invite/conversation を受け付ける。summarize は「価値判定つき整理介入」(C3) で、
+# count（無条件の N発話介入）を置き換えた。
 # 注: stall（介入不要後のデッドエア一押し）は Phase3 で廃止した。
 Kind = Literal[
-    "fact", "manual", "drift", "retry", "count", "silence",
-    "invite", "summarize", "conversation",
+    "fact", "manual", "drift", "retry", "summarize", "silence",
+    "invite", "conversation",
 ]
 
 InterruptPolicy = Literal["allow_barge_in", "wait_for_pause", "never_barge_in"]
@@ -173,8 +173,6 @@ class _KindPolicy:
     cooldown_scope: str = "kind"
 
 
-# 注: summarize（将来kind）は候補生成器が未実装のため policy を持たない。
-# 実装時にここへ追加する。それまでは _DEFAULT_POLICY にフォールバックする。
 _KIND_POLICY: dict[str, _KindPolicy] = {
     "fact":     _KindPolicy(0, _INTERVENTION_PAUSE_FACT, _FACTCHECK_COOLDOWN, 1500, "wait_for_pause"),
     # manual: ユーザーが明示的に呼んだので基本尊重。ただし直前に明確な fact 補正が
@@ -182,7 +180,10 @@ _KIND_POLICY: dict[str, _KindPolicy] = {
     "manual":   _KindPolicy(1, _INTERVENTION_PAUSE_MANUAL, _MANUAL_CALL_COOLDOWN, 3000, "wait_for_pause"),
     "drift":    _KindPolicy(2, _INTERVENTION_PAUSE_DRIFT, _INTERVENTION_COOLDOWN, 2000, "wait_for_pause", "global"),
     "retry":    _KindPolicy(3, _INTERVENTION_PAUSE_RETRY, 0.0, 2000, "wait_for_pause"),
-    "count":    _KindPolicy(4, _INTERVENTION_PAUSE_COUNT, 0.0, 2000, "wait_for_pause"),
+    # summarize: 価値判定つき整理介入（C3, count を置換）。上流でLLMが「今、整理が
+    # 価値を足す」と判定済み。同種連発を防ぐ kind cooldown 30s に加え、他介入直後も
+    # 抑えるため global scope にして「仕切りすぎ」の構造要因を断つ。
+    "summarize": _KindPolicy(4, _INTERVENTION_PAUSE_COUNT, 30.0, 2000, "wait_for_pause", "global"),
     "silence":  _KindPolicy(5, 0.0, 0.0, 2000, "low"),
     "invite":   _KindPolicy(6, _INVITE_SILENCE, _INTERVENTION_COOLDOWN, 2000, "wait_for_pause", "global"),
     "conversation": _KindPolicy(7, _AGENT_CONV_SILENCE, 0.0, 2000, "low"),
