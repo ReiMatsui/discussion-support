@@ -45,6 +45,7 @@ from ._constants import (
     _INVITE_WARMUP,
     _MANUAL_CALL_MAX_CHARS,
     _MANUAL_CALL_TTL,
+    _TRIAGE_BACKLOG_MAX,
     _TRIAGE_CONTEXT_WINDOW,
     _TRIAGE_MAX_RETRIES,
     _TRIAGE_MIN_CHARS,
@@ -949,18 +950,24 @@ def _run_triage_worker(state: SessionState, oai_key: str,
     分類に一本化する。結果は ``record["triage"]`` に格納され、fact checker が
     消費する。ファシリテーターへの依頼を検出したら手動呼び出しキューに積む
     （UIボタンと同じ経路）。
+
+    復帰時の誤発火防止と遅延の有界化:
+      - 介入オフ / conversation モード中は、未処理分を LLM を呼ばずに一括で
+        負注釈（``skipped=intervention_off``）してカーソルを最新まで進める。
+        こうしないと、復帰時に溜まった過去発話を順に分類し、数分前の呼びかけを
+        「今」の manual_call として誤発火させてしまう（TTL が無効化される）。
+      - 1 tick で処理するのは最大 ``_TRIAGE_BACKLOG_MAX`` 件。これを超える古い
+        バックログは分類せず ``skipped=backlog`` で飛ばし、最新発話の呼びかけ
+        遅延を有界に保つ。
     """
     from das.asr.live._bootstrap import classify_utterance as _classify
 
     _retry_counts: dict[int, int] = {}
+    _backlog_warned = False
     while not state.stop.is_set():
         time.sleep(0.25)
         agent = state.agent
         if not oai_key or agent is None or not agent.enabled:
-            continue
-        if not _intervention_enabled(state):
-            continue
-        if agent.mode == "conversation":
             continue
         with state.state_lock:
             epoch = state.meeting_epoch
@@ -970,68 +977,116 @@ def _run_triage_worker(state: SessionState, oai_key: str,
                 and r.get("speaker") != AGENT_SPEAKER
             ])
         n = len(talk_rs)
-        idx = state.triage_cursor
-        if idx >= n:
+        cursor = state.triage_cursor
+        if cursor >= n:
             continue
-        r = talk_rs[idx]
-        text = str(r.get("text") or "").strip()
-        # 相槌・未確定は intervention_records が除外済み。ここで残る機械的
-        # ゲートは「極端に短い発話」のみ（LLM を呼ぶ価値がない, コスト0）。
-        if len(text) < _TRIAGE_MIN_CHARS:
-            annotation = {"factual_claim": False, "facilitator_request": ""}
-        else:
-            context = talk_rs[max(0, idx - _TRIAGE_CONTEXT_WINDOW):idx]
-            utts = [
-                {"speaker": intervention_speaker_name(state, c), "text": c["text"]}
-                for c in context
-            ]
-            utts.append({
-                "speaker": intervention_speaker_name(state, r),
-                "text": text,
-            })
-            result = _classify(utts, oai_key, oai_model)
-            if result.get("retryable_error"):
-                tries = _retry_counts.get(idx, 0) + 1
-                _retry_counts[idx] = tries
-                if tries <= _TRIAGE_MAX_RETRIES:
-                    print(f"# [triage] retry: LLM分類の一時失敗 "
-                          f"{tries}/{_TRIAGE_MAX_RETRIES}", flush=True)
-                    continue
-                print("# [triage] skip: LLM分類の失敗が続いたため対象発話をスキップ",
-                      flush=True)
-                annotation = {"factual_claim": False, "facilitator_request": ""}
-            else:
-                annotation = {
-                    "factual_claim": bool(result.get("factual_claim")),
-                    "facilitator_request": str(
-                        result.get("facilitator_request") or ""
-                    ).strip()[:_MANUAL_CALL_MAX_CHARS],
-                }
-        _retry_counts.pop(idx, None)
-        # 注釈書き込み・cursor 書き戻し（副作用）の直前で epoch 確認（H2）。
-        with state.state_lock:
-            if state.meeting_epoch != epoch:
-                continue
-            r["triage"] = annotation
-            state.triage_cursor = idx + 1
-        request = str(annotation.get("facilitator_request") or "")
-        # facilitate モードのみ音声呼びかけを扱う。converse（パートナー有り）では
-        # 通常応答に任せ、専用経路は使わない（二重応答の回避, 設計 Phase2）。
-        if request and state.partner is None:
-            # キュー投入（副作用）の直前でも epoch 確認（H2）。
+
+        # 介入オフ / conversation モード: LLM を呼ばず未処理分を一括で負注釈し、
+        # カーソルを n まで進める。復帰時に溜まった過去発話を再分類して古い
+        # 呼びかけを誤発火させないため（問題1）。キューには何も積まない。
+        if not _intervention_enabled(state) or agent.mode == "conversation":
             with state.state_lock:
                 if state.meeting_epoch != epoch:
                     continue
-            state.manual_call_requests.put({
-                "request": request,
-                "source": "voice",
-                "created_at": time.monotonic(),
-                "created_wall_at": datetime.datetime.now()
-                .isoformat(timespec="seconds"),
-            })
-            print(f"# [voice] ファシリテーター呼びかけ検出: {request}", flush=True)
-            _log_voice_call_diag(state, text=text, request=request)
-            _set_manual_status(state, "queued", source="voice", request=request)
+                for c in talk_rs[cursor:n]:
+                    c["triage"] = {"factual_claim": False,
+                                   "facilitator_request": "",
+                                   "skipped": "intervention_off"}
+                state.triage_cursor = n
+            continue
+
+        # バックログ上限を超える古い分は分類せずスキップ（遅延を有界化, 問題2）。
+        backlog = n - cursor
+        if backlog > _TRIAGE_BACKLOG_MAX:
+            drop = backlog - _TRIAGE_BACKLOG_MAX
+            with state.state_lock:
+                if state.meeting_epoch != epoch:
+                    continue
+                for c in talk_rs[cursor:cursor + drop]:
+                    c["triage"] = {"factual_claim": False,
+                                   "facilitator_request": "",
+                                   "skipped": "backlog"}
+                cursor += drop
+                state.triage_cursor = cursor
+            if not _backlog_warned:
+                print(f"# [triage] backlog {backlog}件: 古い{drop}件を分類せず"
+                      f"スキップ（遅延を有界化, 上限{_TRIAGE_BACKLOG_MAX}）",
+                      flush=True)
+                _backlog_warned = True
+        else:
+            _backlog_warned = False
+
+        # 残りを連続処理（tick あたり最大 _TRIAGE_BACKLOG_MAX 件）。
+        processed = 0
+        while processed < _TRIAGE_BACKLOG_MAX and cursor < n:
+            if state.stop.is_set():
+                return
+            idx = cursor
+            r = talk_rs[idx]
+            text = str(r.get("text") or "").strip()
+            # 相槌・未確定は intervention_records が除外済み。ここで残る機械的
+            # ゲートは「極端に短い発話」のみ（LLM を呼ぶ価値がない, コスト0）。
+            if len(text) < _TRIAGE_MIN_CHARS:
+                annotation = {"factual_claim": False, "facilitator_request": ""}
+            else:
+                context = talk_rs[max(0, idx - _TRIAGE_CONTEXT_WINDOW):idx]
+                utts = [
+                    {"speaker": intervention_speaker_name(state, c),
+                     "text": c["text"]}
+                    for c in context
+                ]
+                utts.append({
+                    "speaker": intervention_speaker_name(state, r),
+                    "text": text,
+                })
+                result = _classify(utts, oai_key, oai_model)
+                if result.get("retryable_error"):
+                    tries = _retry_counts.get(idx, 0) + 1
+                    _retry_counts[idx] = tries
+                    if tries <= _TRIAGE_MAX_RETRIES:
+                        print(f"# [triage] retry: LLM分類の一時失敗 "
+                              f"{tries}/{_TRIAGE_MAX_RETRIES}", flush=True)
+                        break  # 同一発話を次tickで再試行（カーソルは進めない）
+                    print("# [triage] skip: LLM分類の失敗が続いたため対象発話を"
+                          "スキップ", flush=True)
+                    annotation = {"factual_claim": False,
+                                  "facilitator_request": ""}
+                else:
+                    annotation = {
+                        "factual_claim": bool(result.get("factual_claim")),
+                        "facilitator_request": str(
+                            result.get("facilitator_request") or ""
+                        ).strip()[:_MANUAL_CALL_MAX_CHARS],
+                    }
+            _retry_counts.pop(idx, None)
+            # 注釈書き込み・cursor 書き戻し（副作用）の直前で epoch 確認（H2）。
+            with state.state_lock:
+                if state.meeting_epoch != epoch:
+                    break
+                r["triage"] = annotation
+                state.triage_cursor = idx + 1
+            cursor = idx + 1
+            processed += 1
+            request = str(annotation.get("facilitator_request") or "")
+            # facilitate モードのみ音声呼びかけを扱う。converse（パートナー有り）
+            # では通常応答に任せ、専用経路は使わない（二重応答の回避, Phase2）。
+            if request and state.partner is None:
+                # キュー投入（副作用）の直前でも epoch 確認（H2）。
+                with state.state_lock:
+                    if state.meeting_epoch != epoch:
+                        break
+                state.manual_call_requests.put({
+                    "request": request,
+                    "source": "voice",
+                    "created_at": time.monotonic(),
+                    "created_wall_at": datetime.datetime.now()
+                    .isoformat(timespec="seconds"),
+                })
+                print(f"# [voice] ファシリテーター呼びかけ検出: {request}",
+                      flush=True)
+                _log_voice_call_diag(state, text=text, request=request)
+                _set_manual_status(state, "queued", source="voice",
+                                   request=request)
 
 
 def _run_fact_checker(state: SessionState, oai_key: str, oai_model: str):

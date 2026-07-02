@@ -408,6 +408,104 @@ def test_triage_worker_retries_retryable_failure_before_advancing(monkeypatch):
     assert state.triage_cursor == 1
 
 
+def test_triage_worker_off_bulk_skips_then_resumes(monkeypatch):
+    """介入オフ中の発話は LLM を呼ばず skipped=intervention_off で一括負注釈し、
+    カーソルを最新まで進める。再有効化後は新規発話だけが通常分類され、オフ中に
+    溜まった過去発話の呼びかけを誤発火させない（問題1）."""
+    import das.asr.live._bootstrap as bootstrap
+
+    calls: list = []
+    monkeypatch.setattr(bootstrap, "classify_utterance",
+                        lambda utts, *_a: calls.append(utts) or
+                        {"factual_claim": False, "facilitator_request": ""})
+    state = _make_state(with_agent=True)
+    state.intervention_enabled = False
+    state.records = [
+        {"speaker": "話者1", "text": "AIさん、ここまで整理して", "ms": 0, "end_ms": 1000},
+        {"speaker": "話者2", "text": "そうですね、お願いします", "ms": 1000, "end_ms": 2000},
+    ]
+
+    _run_triage_briefly(state, until=lambda: state.triage_cursor >= 2, timeout=2.0)
+
+    # オフ中は分類されず、負注釈でカーソルが進む。呼びかけも積まれない。
+    assert calls == []
+    assert all(r["triage"]["skipped"] == "intervention_off" for r in state.records)
+    assert state.triage_cursor == 2
+    assert state.manual_call_requests.empty()
+
+    # 再有効化: 新規発話だけが通常分類される（古い2件は再分類しない）。
+    state.stop.clear()  # 前段の _run_triage_briefly が立てた stop を戻す
+    state.intervention_enabled = True
+    state.records.append(
+        {"speaker": "話者1", "text": "新しい論点を出します", "ms": 2000, "end_ms": 3000})
+
+    _run_triage_briefly(state, until=lambda: state.triage_cursor >= 3, timeout=2.0)
+
+    assert len(calls) == 1
+    assert calls[0][-1]["text"] == "新しい論点を出します"
+    assert "skipped" not in state.records[2]["triage"]
+
+
+def test_triage_worker_conversation_mode_bulk_skips(monkeypatch):
+    """conversation モードでも未処理分を skipped で負注釈しカーソルを進める."""
+    import das.asr.live._bootstrap as bootstrap
+
+    calls: list = []
+    monkeypatch.setattr(bootstrap, "classify_utterance",
+                        lambda *a, **k: calls.append(1) or
+                        {"factual_claim": False, "facilitator_request": ""})
+    state = _make_state(with_agent=True)
+    state.agent.mode = "conversation"
+    state.records = [
+        {"speaker": "話者1", "text": "AIさん、ここまで整理して", "ms": 0, "end_ms": 1000},
+    ]
+
+    _run_triage_briefly(state, until=lambda: state.triage_cursor >= 1, timeout=2.0)
+
+    assert calls == []
+    assert state.records[0]["triage"]["skipped"] == "intervention_off"
+    assert state.triage_cursor == 1
+    assert state.manual_call_requests.empty()
+
+
+def test_triage_worker_backlog_skips_old_and_processes_recent(monkeypatch):
+    """バックログが上限超過なら古い分を skipped=backlog で分類せず飛ばし、直近分を
+    連続処理して最新発話の呼びかけを発火する（問題2, 遅延の有界化）.
+
+    内側ループは各件の間で sleep しないため、この catch-up は 1 tick で
+    ``_TRIAGE_BACKLOG_MAX`` 件をまとめて処理する（1件/tick の上限を撤廃）."""
+    import das.asr.live._bootstrap as bootstrap
+    import das.asr.live._workers as workers
+
+    monkeypatch.setattr(workers, "_TRIAGE_BACKLOG_MAX", 3)
+    classified: list = []
+
+    def _fake_classify(utts, *_a):
+        target = utts[-1]["text"]
+        classified.append(target)
+        req = "AIさん整理して" if target.endswith("9番です") else ""
+        return {"factual_claim": False, "facilitator_request": req}
+
+    monkeypatch.setattr(bootstrap, "classify_utterance", _fake_classify)
+    state = _make_state(with_agent=True)
+    state.records = [
+        {"speaker": "話者1", "text": f"これは発話{i}番です",
+         "ms": i * 1000, "end_ms": i * 1000 + 500}
+        for i in range(10)
+    ]
+
+    _run_triage_briefly(state, until=lambda: state.triage_cursor >= 10, timeout=5.0)
+
+    assert state.triage_cursor == 10
+    # 古い 10-3=7 件は分類されず skipped=backlog、直近3件だけ分類される。
+    assert classified == ["これは発話7番です", "これは発話8番です", "これは発話9番です"]
+    assert all(state.records[i]["triage"].get("skipped") == "backlog"
+               for i in range(7))
+    assert all("skipped" not in state.records[i]["triage"] for i in range(7, 10))
+    # 最新発話の呼びかけは発火する。
+    assert not state.manual_call_requests.empty()
+
+
 def test_check_fact_correction_accepts_high_confidence(monkeypatch):
     import das.asr.live._bootstrap as bootstrap
     monkeypatch.setattr(bootstrap, "_post_chat_json",
