@@ -20,7 +20,7 @@ from statistics import fmean, pstdev
 from pydantic import BaseModel, Field
 
 from das.agents.base import BaseAgent
-from das.eval.conditions import InterventionLogEntry
+from das.eval.conditions import InterventionLogEntry, relation_label
 from das.eval.persona import PersonaSpec
 from das.llm import OpenAIClient
 from das.types import Utterance
@@ -85,8 +85,8 @@ def _format_info_log_for_persona(
             lines.append("  (項目なし)")
             continue
         for item in entry.items:
-            tag = "[支持]" if item.get("relation") == "support" else "[反論]"
-            lines.append(f"  {tag} {item.get('source_text', '')}")
+            tag = relation_label(str(item.get("relation") or ""))
+            lines.append(f"  [{tag}] {item.get('source_text', '')}")
     return "\n".join(lines)
 
 
@@ -115,6 +115,10 @@ class JudgeAgent(BaseAgent):
         condition_name: str,
         info_log: list[InterventionLogEntry] | None,
     ) -> list[dict]:
+        # NOTE (レビュー C-1): judge の入力から条件識別情報を排除する (盲検化)。
+        # condition_name は JudgeReport のメタデータとしてのみ保持し、
+        # プロンプトには一切埋め込まない。None 条件でも「条件」という語や
+        # 期待スコアを示唆する文言を出さず、提示なしと同じ中立表現に揃える。
         system = self._system_prompt.format(
             name=persona.name,
             stance_description=_STANCE_DESCRIPTION.get(persona.stance, persona.stance),
@@ -125,10 +129,9 @@ class JudgeAgent(BaseAgent):
         info_block = (
             _format_info_log_for_persona(info_log, persona.name)
             if info_log is not None
-            else "(情報提供なし条件)"
+            else "(あなた向けの参考情報は提示されませんでした)"
         )
         user = (
-            f"## 条件\n{condition_name}\n\n"
             f"## 議論ログ\n{_format_transcript(transcript)}\n\n"
             f"## あなたが提示された参考情報\n{info_block}\n\n"
             f"## 出力\nJSON で各スコアと rationale:"
