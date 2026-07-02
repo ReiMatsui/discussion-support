@@ -72,6 +72,7 @@ from ._speaker_policy import (
     intervention_records,
     intervention_speaker_name,
     reliable_human_records,
+    triage_records,
 )
 from ._ui import _print_line
 
@@ -971,7 +972,12 @@ def _run_triage_worker(state: SessionState, oai_key: str,
             continue
         with state.state_lock:
             epoch = state.meeting_epoch
-            talk_rs = intervention_records([
+            # 呼びかけ検出は話者同一性に依存しないため、未確定話者も含む
+            # triage_records でフィルタする（修正5）。triage_cursor はこの
+            # フィルタ後リストへのインデックスで、fact_cursor(intervention_records
+            # ベース) とはリストが異なるが、fact checker は record の triage キーを
+            # 直接読むため整合する（インデックスは共有しない）。
+            talk_rs = triage_records([
                 r for r in state.records
                 if "speaker" in r and r.get("text")
                 and r.get("speaker") != AGENT_SPEAKER

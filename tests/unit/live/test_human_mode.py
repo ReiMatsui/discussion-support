@@ -506,6 +506,66 @@ def test_triage_worker_backlog_skips_old_and_processes_recent(monkeypatch):
     assert not state.manual_call_requests.empty()
 
 
+def test_triage_worker_picks_up_unconfirmed_speaker_call(monkeypatch):
+    """未確定話者(?)の呼びかけも triage が拾い manual_call(source=voice) に積む（修正5）.
+
+    声紋未登録の参加者が何度AIを呼んでも無視される問題を解消する。"""
+    import das.asr.live._bootstrap as bootstrap
+
+    monkeypatch.setattr(bootstrap, "classify_utterance",
+                        lambda *a, **k: {"factual_claim": False,
+                                         "facilitator_request": "ここまで整理して"})
+    state = _make_state(with_agent=True)
+    state.records = [
+        {"speaker": "?", "text": "AIさん、ここまで整理して", "ms": 0, "end_ms": 1000},
+    ]
+
+    _run_triage_briefly(
+        state, until=lambda: not state.manual_call_requests.empty(), timeout=2.0)
+
+    req = state.manual_call_requests.get_nowait()
+    assert req["source"] == "voice"
+    assert req["request"] == "ここまで整理して"
+
+
+def test_triage_worker_unconfirmed_factual_claim_not_fact_checked(monkeypatch):
+    """未確定話者の事実断定は triage で factual_claim=True が付いても、fact checker は
+    intervention_records を使うため check_fact を呼ばない（帰属不明の断定に訂正を
+    打たない, 修正5）."""
+    import das.asr.live._bootstrap as bootstrap
+    from das.asr.live._workers import _run_fact_checker
+
+    monkeypatch.setattr(bootstrap, "classify_utterance",
+                        lambda *a, **k: {"factual_claim": True,
+                                         "facilitator_request": ""})
+    fact_calls: list = []
+    monkeypatch.setattr(bootstrap, "check_fact_correction",
+                        lambda *a, **k: fact_calls.append(1) or
+                        {"should_correct": False})
+    state = _make_state(with_agent=True)
+    state.records = [
+        {"speaker": "?", "text": "国Bの首都は都市Aです", "ms": 0, "end_ms": 1000},
+    ]
+
+    # triage 注釈が付くまで triage worker を動かす（factual_claim=True が付く）。
+    _run_triage_briefly(
+        state, until=lambda: state.records[0].get("triage") is not None, timeout=2.0)
+    assert state.records[0]["triage"]["factual_claim"] is True
+
+    # fact checker を動かしても、未確定話者は intervention_records から外れるため
+    # 候補にならず check_fact は呼ばれない。fact_cursor も進まない。
+    state.stop.clear()
+    th = threading.Thread(target=_run_fact_checker,
+                          args=(state, "key", "gpt-5-mini"), daemon=True)
+    th.start()
+    time.sleep(1.0)
+    state.stop.set()
+    th.join(timeout=2)
+
+    assert fact_calls == []
+    assert state.fact_cursor == 0
+
+
 def test_check_fact_correction_accepts_high_confidence(monkeypatch):
     import das.asr.live._bootstrap as bootstrap
     monkeypatch.setattr(bootstrap, "_post_chat_json",

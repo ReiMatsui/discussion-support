@@ -23,6 +23,23 @@ def is_intervention_signal(record: dict[str, Any]) -> bool:
     return not _BACKCHANNEL_RE.match(text)
 
 
+def is_triage_signal(record: dict[str, Any]) -> bool:
+    """triage（呼びかけ検出）の対象にしてよい発話かを返す.
+
+    ``is_intervention_signal`` から**未確定話者の除外だけを外した**判定。
+    ファシリテーターへの呼びかけ検出は話者の同一性に依存しない操作なので、
+    声紋未登録の未確定話者の発話も分類対象に含める。fact / drift / invite の
+    ように「誰が言ったか」が効く用途は、従来どおり ``is_intervention_signal``
+    側で未確定を除外して制限される。
+    """
+    text = str(record.get("text") or "").strip()
+    if not text:
+        return False
+    if record.get("bc"):
+        return False
+    return not _BACKCHANNEL_RE.match(text)
+
+
 def is_reliable_human_speaker(record: dict[str, Any]) -> bool:
     """AIが個人として扱ってよい話者かを返す.
 
@@ -50,3 +67,8 @@ def reliable_human_records(records: list[dict[str, Any]]) -> list[dict[str, Any]
 
 def intervention_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [r for r in records if is_intervention_signal(r)]
+
+
+def triage_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """triage（呼びかけ検出）用フィルタ。未確定話者も含める（``is_triage_signal``）."""
+    return [r for r in records if is_triage_signal(r)]
