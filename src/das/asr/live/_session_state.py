@@ -832,8 +832,18 @@ class SessionState:
     def show_partial(self, sp, text: str):
         # UI向けに途中経過(partial)を保持（認識中であることが分かるように, 課題①）
         t = text.strip()
+        prev = self.partial_text
         self.partial_text = t
         self.partial_speaker = self.disp_name(self.key_for_label(sp)) if t else ""
+        # M6: 長い発話の途中では STT 確定レコードが来ず「喋っている最中に沈黙が
+        # 伸びる」ため、pause 判定を満たした介入が発話に被さり得る。partial の受信
+        # でも沈黙タイマーを更新し、発話中を「沈黙」と誤認しないようにする。
+        # 「変化した場合のみ」更新するのは、同一 partial の再送で沈黙が永久に 0 に
+        # 張り付くのを防ぐため。
+        # 既知のトレードオフ: エコーウィンドウ中の AI 自身の声の partial でもタイマー
+        # が更新され得るが、フロア判定を保守側（介入を待つ側）に倒すだけなので許容。
+        if t and t != prev:
+            self._last_utt_time[0] = time.monotonic()
         if not t:
             sys.stdout.write(CLEAR_LINE)
         else:

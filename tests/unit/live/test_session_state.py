@@ -61,3 +61,30 @@ def test_seed_topic_does_not_override_existing():
     s.topics.append({"topic": "既存論点", "speaker": "話者1"})
     s.seed_topic("議題テーマ")
     assert [t["topic"] for t in s.topics] == ["既存論点"]
+
+
+# --- M6: partial 受信で沈黙タイマーを更新 ---------------------------------
+
+def test_show_partial_updates_silence_timer_on_new_text():
+    """非空の新しい partial を受けたら沈黙タイマーを更新する（発話中を沈黙と誤認しない）."""
+    s = _make_state()
+    s._last_utt_time[0] = 0.0
+    s.show_partial("#1", "この論点はもう少し")
+    assert s._last_utt_time[0] > 0.0
+
+
+def test_show_partial_does_not_update_on_repeated_text():
+    """同一 partial の再送では更新しない（沈黙が永久に 0 に張り付くのを防ぐ）."""
+    s = _make_state()
+    s.show_partial("#1", "同じ文字列")
+    s._last_utt_time[0] = 0.0            # 変化検出のため一旦戻す
+    s.show_partial("#1", "同じ文字列")   # 同一 partial の再送
+    assert s._last_utt_time[0] == 0.0
+
+
+def test_show_partial_empty_does_not_update():
+    """空（strip 後空）の partial では更新しない."""
+    s = _make_state()
+    s._last_utt_time[0] = 0.0
+    s.show_partial("#1", "   ")
+    assert s._last_utt_time[0] == 0.0
