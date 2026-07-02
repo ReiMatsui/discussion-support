@@ -157,156 +157,222 @@ def test_check_participation_empty_is_no_invite():
 # 事実誤りの短い補正
 # ---------------------------------------------------------------------------
 
-def test_fact_candidate_gate_is_only_a_thin_exclusion_filter():
-    """明確な誤りかどうかはLLMに任せ、ローカルでは不要発話だけを落とす."""
-    from das.asr.live._workers import _looks_like_fact_claim
+def test_classify_utterance_parses(monkeypatch):
+    """triage分類のLLM応答（fact候補/呼びかけ依頼）を構造化して返す."""
+    import das.asr.live._bootstrap as bootstrap
+    monkeypatch.setattr(bootstrap, "_post_chat_json",
+                        lambda *a, **k: {"factual_claim": True,
+                                         "facilitator_request": "ここまでの整理"})
+    r = bootstrap.classify_utterance(
+        [{"speaker": "参加者A", "text": "AIさん、ここまで整理して"}], "key", "m")
+    assert r == {"factual_claim": True, "facilitator_request": "ここまでの整理"}
 
-    positives = [
-        "指標Xの計算式は分母を分子で割る感じです",
-        "なんか、量Aの2乗を量Bで割ると、どうのこうのみたいな",
-        "量Bを量Aの2乗で割るんですよね",
-        "指標Yの式は量Aを量Bで割るんですよね",
-        "この用語の定義は、対象者が申請できる制度という意味です",
-        "制度Xの上限は70%です",
-        "事物Aの高さは200メートルです",
-        "指標Y、いや、事物Aの高さは200メートルです",
-        "都市Aは国Bの首都です",
-        "都市Aは国Bの首都ではありません",
-        "国Bの首都は都市Aです",
-        "人物Aは組織BのCEOです",
-        "人物Aは国B人です",
-        "人物Aは国B出身です",
-        "人物Aは大会Bを2勝しました",
-        "作品Aの作者は人物Bです",
-        "対象Aは世界で2番目に高い山です",
-        "対象Aは世界で2番目に深い場所です",
-        "対象Aは国内で3番目に大きい湖です",
-        "対象Aは世界で2番目に人口が多いです",
-        "人物Aはランキング1位です",
-        "人物AはリーグCでトップ10です",
-        "対象Aは世界一大きい島です",
-        "対象Aを世界一高い山です",
-        "対象Aは日本一長い川です",
-        "対象Aは国内一広い湖です",
-        "時代Aの次は時代Bです",
-        "国Aは地域Bに属しています",
-        "x = y / z",
-        "単位はメートルです",
-        "2乗が出てきました",
-        "さっきは6回ほどかかりました",
-        "最初の10個の発話ぐらいから",
-        "まず対象Aを1個置きます",
-    ]
-    negatives = [
-        "平均について話しましょう",
-        "123cmだとどれくらいですか",
-        "対象Aは、123cmだとどれぐらいですか",
-        "計算方法の話です",
-        "米よりパンのほうが好きです",
-        "いいとは思いますけど",
-        "090-8165-1145 にかけてもいい？",
-        "お酒はどこで飲むの、2回目のデート",
-        "都市Aはきれいです",
-        "人物Aはいい人です",
-        "1つ目の論点を確認しましょう",
-        "優先順位を決めましょう",
-        "ランキングについて話しましょう",
-        "対象Aは上位かもしれません",
-        "式典は普通にやりました",
-        "理解率は通常50%前後ですよ。25%は最低ラインです。それ以上下げるのはお客様の失礼です。",
+
+def test_classify_utterance_marks_parse_failure_retryable(monkeypatch):
+    import das.asr.live._bootstrap as bootstrap
+    monkeypatch.setattr(bootstrap, "_post_chat_json", lambda *a, **k: None)
+    r = bootstrap.classify_utterance(
+        [{"speaker": "参加者A", "text": "国Bの首都は都市Aです"}], "key", "m")
+    assert r["retryable_error"] is True
+    assert r["factual_claim"] is False
+
+
+def test_classify_utterance_without_key_is_negative():
+    import das.asr.live._bootstrap as bootstrap
+    r = bootstrap.classify_utterance(
+        [{"speaker": "参加者A", "text": "国Bの首都は都市Aです"}], "", "m")
+    assert r == {"factual_claim": False, "facilitator_request": ""}
+
+
+def _run_triage_briefly(state, *, until, timeout=3.0):
+    from das.asr.live._workers import _run_triage_worker
+    th = threading.Thread(target=_run_triage_worker,
+                          args=(state, "key", "gpt-5-mini"), daemon=True)
+    th.start()
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline and not until():
+        time.sleep(0.05)
+    state.stop.set()
+    th.join(timeout=2)
+
+
+def test_triage_worker_annotates_records_and_advances_cursor(monkeypatch):
+    """確定発話ごとに1回だけLLM分類し、record に triage 注釈を付ける."""
+    import das.asr.live._bootstrap as bootstrap
+
+    calls = []
+
+    def _fake_classify(utts, *_args):
+        calls.append(utts)
+        return {"factual_claim": utts[-1]["text"].endswith("です"),
+                "facilitator_request": ""}
+
+    monkeypatch.setattr(bootstrap, "classify_utterance", _fake_classify)
+    state = _make_state(with_agent=True)
+    state.records = [
+        {"speaker": "話者1", "text": "計算方法の話です", "ms": 0, "end_ms": 1000},
+        {"speaker": "話者2", "text": "米よりパンのほうが好き", "ms": 1000, "end_ms": 2000},
     ]
 
-    assert [_looks_like_fact_claim(t) for t in positives] == [True] * len(positives)
-    assert [_looks_like_fact_claim(t) for t in negatives] == [False] * len(negatives)
+    _run_triage_briefly(state, until=lambda: state.triage_cursor >= 2)
+
+    assert state.triage_cursor == 2
+    assert state.records[0]["triage"] == {"factual_claim": True,
+                                          "facilitator_request": ""}
+    assert state.records[1]["triage"] == {"factual_claim": False,
+                                          "facilitator_request": ""}
+    assert len(calls) == 2
 
 
-def test_fact_candidate_gate_does_not_require_fact_pattern_keywords():
-    """事実アンカーがある断定発話だけをLLMに渡す."""
-    from das.asr.live._workers import _looks_like_fact_claim
+def test_triage_worker_passes_recent_context_before_target(monkeypatch):
+    """指示語・省略の補完のため、直前の発話を参照文脈として渡す."""
+    import das.asr.live._bootstrap as bootstrap
 
-    positives = [
-        "事物Aの高さは200メートルです",
-        "対象Aを世界一高い山です",
-        "時代Aの次は時代Bです",
-        "国Aは地域Bに属しています",
-        "対象Aは世界で2番目に人口が多いです",
-        "人物Aは大会Bのランキング1位です",
-    ]
-    negatives = [
-        "これは未知カテゴリの断定文です",
-        "完全に意識を失った。",
-        "これで準備は整った。",
-        "では、私はこれで。",
-        "理解率は通常50%前後ですよ。25%は最低ラインです。",
-    ]
-
-    assert [_looks_like_fact_claim(t) for t in positives] == [True] * len(positives)
-    assert [_looks_like_fact_claim(t) for t in negatives] == [False] * len(negatives)
-
-
-def test_fact_candidate_gate_ignores_low_value_utterances():
-    """相槌・質問・曖昧・好み・会話運営だけを事前除外する."""
-    from das.asr.live._workers import _looks_like_fact_claim
-
-    texts = [
-        "ランキングについて話しましょう",
-        "優先順位を決めましょう",
-        "1つ目の論点を確認しましょう",
-        "トップになるにはどうすればいいですか",
-        "対象Aは上位かもしれません",
-        "順位は何位ですか",
-        "計算方法の話です",
-        "都市Aはきれいです",
-        "人物Aはいい人です",
-        "跳ね返った弾丸が私を背後から襲い、コンクリートの壁では本来絨毯はめり込むはずだ。",
-        "そう、弾丸は何にでも跳弾できるように設計したんだ。",
-        "手の中に極小の銃を持ってんだ。ビビ弾以下の弾だが凶悪だぜ。",
-        "その弾丸は奴をめがけて襲いかかる。",
-        "お釣りだ、受け取っとけ。",
-        "理解率は通常50%前後ですよ。25%は最低ラインです。それ以上下げるのはお客様の失礼です。",
+    calls = []
+    monkeypatch.setattr(bootstrap, "classify_utterance",
+                        lambda utts, *_a: calls.append(utts) or
+                        {"factual_claim": False, "facilitator_request": ""})
+    state = _make_state(with_agent=True)
+    state.records = [
+        {"speaker": "話者1", "text": "富士山の話をしましょう", "ms": 0, "end_ms": 1000},
+        {"speaker": "話者2", "text": "高さは3000メートルです", "ms": 1000, "end_ms": 2000},
     ]
 
-    for text in texts:
-        assert not _looks_like_fact_claim(text), text
+    _run_triage_briefly(state, until=lambda: state.triage_cursor >= 2)
 
-
-def test_fact_prefilter_accepts_stable_containment_claims():
-    from das.asr.live._workers import _looks_like_fact_claim
-    positives = [
-        "コーヒーにはカフェインが含まれていません。",
-        "コーヒーには通常カフェインが含まれます。",
-        "緑茶にはカフェインが含まれていません。",
-        "砂糖はタンパク質です。",
-        "牛乳にはアルコールが含まれています。",
+    assert calls[1] == [
+        {"speaker": "参加者A", "text": "富士山の話をしましょう"},
+        {"speaker": "参加者B", "text": "高さは3000メートルです"},
     ]
-    assert [_looks_like_fact_claim(t) for t in positives] == [True] * len(positives)
 
 
-def test_fact_prefilter_accepts_plain_assertions_without_anchor():
-    """強い事実アンカーが無くても、断定文なら LLM へ通す（除外中心の前段）."""
-    from das.asr.live._workers import _looks_like_fact_claim
-    positives = [
-        "砂糖はタンパク質です。",              # XはYです（分類）
-        "砂糖はタンパク質ではありません。",     # XはYではありません
-        "牛乳は飲み物です。",                 # 分類
-        "地震はプレートの境界で発生します。",   # で発生
+def test_triage_worker_local_gate_skips_very_short_utterances(monkeypatch):
+    """極端に短い発話はLLMを呼ばず負の注釈を付ける（コスト0のゲート）.
+
+    相槌・未確定は intervention_records が除外するため triage には届かない。
+    """
+    import das.asr.live._bootstrap as bootstrap
+
+    calls = []
+    monkeypatch.setattr(bootstrap, "classify_utterance",
+                        lambda *a, **k: calls.append(1) or
+                        {"factual_claim": False, "facilitator_request": ""})
+    state = _make_state(with_agent=True)
+    state.records = [
+        {"speaker": "話者1", "text": "5だ", "ms": 0, "end_ms": 500},
+        {"speaker": "話者2", "text": "多分", "ms": 500, "end_ms": 900},
     ]
-    assert [_looks_like_fact_claim(t) for t in positives] == [True] * len(positives)
+
+    _run_triage_briefly(state, until=lambda: state.triage_cursor >= 2)
+
+    assert calls == []
+    assert state.triage_cursor == 2
+    assert state.records[0]["triage"]["factual_claim"] is False
+    assert state.records[1]["triage"]["factual_claim"] is False
 
 
-def test_fact_prefilter_still_excludes_low_value_assertions():
-    """断定ゲートを広げても、質問・評価・指示語主語・メタは落とし続ける（過剰介入抑制）."""
-    from das.asr.live._workers import _looks_like_fact_claim
-    negatives = [
-        "コーヒーにはカフェインが含まれていますか？",  # 質問
-        "たぶんカフェイン入ってた気がします。",        # 曖昧
-        "コーヒーは美味しいです。",                   # 好み/評価
-        "これは良さそうです。",                       # 評価
-        "コーヒーについて話しましょう。",             # メタ
-        "これは未知カテゴリの断定文です",             # 指示語主語（外部照合に不向き）
-        "理解率は通常50%前後ですよ。25%は最低ラインです。それ以上下げるのはお客様の失礼です。",
+def test_triage_worker_enqueues_facilitator_request(monkeypatch):
+    """呼びかけ依頼を検出したら手動呼び出しキュー（source=voice）に積む."""
+    import das.asr.live._bootstrap as bootstrap
+
+    monkeypatch.setattr(bootstrap, "classify_utterance",
+                        lambda *a, **k: {"factual_claim": False,
+                                         "facilitator_request": "ここまでの整理"})
+    state = _make_state(with_agent=True)
+    state.records = [
+        {"speaker": "話者1", "text": "AIさん、ここまで整理して", "ms": 0, "end_ms": 1000},
     ]
-    assert [_looks_like_fact_claim(t) for t in negatives] == [False] * len(negatives)
+
+    _run_triage_briefly(
+        state, until=lambda: not state.manual_call_requests.empty())
+
+    got = state.manual_call_requests.get_nowait()
+    assert got["request"] == "ここまでの整理"
+    assert got["source"] == "voice"
+
+
+def test_triage_worker_topic_mention_does_not_enqueue(monkeypatch):
+    """AIを話題として言及しただけ（依頼なし）では呼び出しキューに積まない."""
+    import das.asr.live._bootstrap as bootstrap
+
+    monkeypatch.setattr(bootstrap, "classify_utterance",
+                        lambda *a, **k: {"factual_claim": False,
+                                         "facilitator_request": ""})
+    state = _make_state(with_agent=True)
+    state.records = [
+        {"speaker": "話者1", "text": "AIの導入について話しましょう", "ms": 0, "end_ms": 1000},
+    ]
+
+    _run_triage_briefly(state, until=lambda: state.triage_cursor >= 1)
+
+    assert state.manual_call_requests.empty()
+    assert state.triage_cursor == 1
+
+
+def test_triage_worker_disabled_in_conversation_mode(monkeypatch):
+    """conversation モードでは分類しない（fact/呼びかけ経路ごと停止, 二重応答回避）."""
+    import das.asr.live._bootstrap as bootstrap
+
+    calls = []
+    monkeypatch.setattr(bootstrap, "classify_utterance",
+                        lambda *a, **k: calls.append(1) or
+                        {"factual_claim": False, "facilitator_request": ""})
+    state = _make_state(with_agent=True)
+    state.agent.mode = "conversation"
+    state.records = [
+        {"speaker": "話者1", "text": "AIさん、ここまで整理して", "ms": 0, "end_ms": 1000},
+    ]
+
+    _run_triage_briefly(state, until=lambda: False, timeout=1.0)
+
+    assert calls == []
+    assert state.manual_call_requests.empty()
+
+
+def test_triage_worker_skips_when_intervention_disabled(monkeypatch):
+    """介入オフでは分類も呼びかけ検出もしない."""
+    import das.asr.live._bootstrap as bootstrap
+
+    calls = []
+    monkeypatch.setattr(bootstrap, "classify_utterance",
+                        lambda *a, **k: calls.append(1) or
+                        {"factual_claim": False, "facilitator_request": ""})
+    state = _make_state(with_agent=True)
+    state.intervention_enabled = False
+    state.records = [
+        {"speaker": "話者1", "text": "AIさん、ここまで整理して", "ms": 0, "end_ms": 1000},
+    ]
+
+    _run_triage_briefly(state, until=lambda: False, timeout=1.0)
+
+    assert calls == []
+    assert state.manual_call_requests.empty()
+
+
+def test_triage_worker_retries_retryable_failure_before_advancing(monkeypatch):
+    """LLM/API一時失敗では同じ発話を再試行し、成功したら注釈を付ける."""
+    import das.asr.live._bootstrap as bootstrap
+
+    calls = []
+
+    def _fake_classify(utts, *_args):
+        calls.append(utts)
+        if len(calls) == 1:
+            return {"factual_claim": False, "facilitator_request": "",
+                    "retryable_error": True}
+        return {"factual_claim": True, "facilitator_request": ""}
+
+    monkeypatch.setattr(bootstrap, "classify_utterance", _fake_classify)
+    state = _make_state(with_agent=True)
+    state.records = [
+        {"speaker": "話者1", "text": "国Bの首都は都市Aです", "ms": 0, "end_ms": 1000},
+    ]
+
+    _run_triage_briefly(state, until=lambda: state.triage_cursor >= 1)
+
+    assert len(calls) >= 2
+    assert state.records[0]["triage"]["factual_claim"] is True
+    assert state.triage_cursor == 1
 
 
 def test_check_fact_correction_accepts_high_confidence(monkeypatch):
@@ -399,8 +465,10 @@ def test_fact_checker_enqueues_clear_formula_correction(monkeypatch):
     monkeypatch.setattr(bootstrap, "check_fact_correction", _fake_fact)
     state = _make_state(with_agent=True)
     state.records = [
-        {"speaker": "話者1", "text": "計算方法の話です", "ms": 0, "end_ms": 1000},
-        {"speaker": "話者2", "text": "指標Xの計算式は分母を分子で割る感じです", "ms": 1000, "end_ms": 2000},
+        {"speaker": "話者1", "text": "計算方法の話です", "ms": 0, "end_ms": 1000,
+         "triage": {"factual_claim": False, "facilitator_request": ""}},
+        {"speaker": "話者2", "text": "指標Xの計算式は分母を分子で割る感じです",
+         "ms": 1000, "end_ms": 2000, "triage": {"factual_claim": True, "facilitator_request": ""}},
     ]
 
     th = threading.Thread(target=_run_fact_checker,
@@ -438,11 +506,16 @@ def test_fact_checker_passes_recent_context_before_target(monkeypatch):
     monkeypatch.setattr(bootstrap, "check_fact_correction", _fake_fact)
     state = _make_state(with_agent=True)
     state.records = [
-        {"speaker": "話者1", "text": "平均について話しましょう", "ms": 0, "end_ms": 1000},
-        {"speaker": "話者1", "text": "計算方法の話です", "ms": 1000, "end_ms": 2000},
-        {"speaker": "話者1", "text": "優先順位を決めましょう", "ms": 2000, "end_ms": 3000},
-        {"speaker": "話者1", "text": "ランキングについて話しましょう", "ms": 3000, "end_ms": 4000},
-        {"speaker": "話者1", "text": "対象の値は100です", "ms": 4000, "end_ms": 5000},
+        {"speaker": "話者1", "text": "平均について話しましょう", "ms": 0, "end_ms": 1000,
+         "triage": {"factual_claim": False, "facilitator_request": ""}},
+        {"speaker": "話者1", "text": "計算方法の話です", "ms": 1000, "end_ms": 2000,
+         "triage": {"factual_claim": False, "facilitator_request": ""}},
+        {"speaker": "話者1", "text": "優先順位を決めましょう", "ms": 2000, "end_ms": 3000,
+         "triage": {"factual_claim": False, "facilitator_request": ""}},
+        {"speaker": "話者1", "text": "ランキングについて話しましょう", "ms": 3000,
+         "end_ms": 4000, "triage": {"factual_claim": False, "facilitator_request": ""}},
+        {"speaker": "話者1", "text": "対象の値は100です", "ms": 4000, "end_ms": 5000,
+         "triage": {"factual_claim": True, "facilitator_request": ""}},
     ]
 
     th = threading.Thread(target=_run_fact_checker,
@@ -484,7 +557,8 @@ def test_fact_checker_retries_retryable_failure_before_advancing(monkeypatch):
     monkeypatch.setattr(bootstrap, "check_fact_correction", _fake_fact)
     state = _make_state(with_agent=True)
     state.records = [
-        {"speaker": "話者1", "text": "対象の値は100です", "ms": 0, "end_ms": 1000},
+        {"speaker": "話者1", "text": "対象の値は100です", "ms": 0, "end_ms": 1000,
+         "triage": {"factual_claim": True, "facilitator_request": ""}},
     ]
 
     th = threading.Thread(target=_run_fact_checker,
@@ -508,7 +582,7 @@ def test_fact_checker_retries_retryable_failure_before_advancing(monkeypatch):
 
 
 def test_fact_checker_ignores_plain_opinion(monkeypatch):
-    """好みや単なる意見ではLLM判定すら呼ばない."""
+    """triage が fact候補でないと判定した発話ではLLM判定すら呼ばない."""
     import das.asr.live._bootstrap as bootstrap
     from das.asr.live._workers import _run_fact_checker
 
@@ -517,7 +591,8 @@ def test_fact_checker_ignores_plain_opinion(monkeypatch):
                         lambda *a, **k: calls.append(1) or {"should_correct": False})
     state = _make_state(with_agent=True)
     state.records = [
-        {"speaker": "話者1", "text": "米よりパンのほうが好きです", "ms": 0, "end_ms": 1000},
+        {"speaker": "話者1", "text": "米よりパンのほうが好きです", "ms": 0, "end_ms": 1000,
+         "triage": {"factual_claim": False, "facilitator_request": ""}},
     ]
 
     th = threading.Thread(target=_run_fact_checker,
@@ -529,6 +604,30 @@ def test_fact_checker_ignores_plain_opinion(monkeypatch):
 
     assert calls == []
     assert state.factcheck_requests.empty()
+
+
+def test_fact_checker_waits_for_unclassified_records(monkeypatch):
+    """triage 注釈がまだ無い発話は消費せず、分類を待つ（カーソルを進めない）."""
+    import das.asr.live._bootstrap as bootstrap
+    from das.asr.live._workers import _run_fact_checker
+
+    calls = []
+    monkeypatch.setattr(bootstrap, "check_fact_correction",
+                        lambda *a, **k: calls.append(1) or {"should_correct": False})
+    state = _make_state(with_agent=True)
+    state.records = [
+        {"speaker": "話者1", "text": "国Bの首都は都市Aです", "ms": 0, "end_ms": 1000},
+    ]
+
+    th = threading.Thread(target=_run_fact_checker,
+                          args=(state, "key", "gpt-5-mini"), daemon=True)
+    th.start()
+    time.sleep(1.0)
+    state.stop.set()
+    th.join(timeout=2)
+
+    assert calls == []
+    assert state.fact_cursor == 0
 
 
 def test_participation_checker_enqueues_invite(monkeypatch):

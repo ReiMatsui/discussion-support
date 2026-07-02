@@ -71,6 +71,9 @@ def populated_store() -> NetworkXGraphStore:
 
 
 def test_render_html_writes_file(populated_store: NetworkXGraphStore, tmp_path: Path) -> None:
+    # render_html は pyvis (viz extra) を遅延 import する。未インストール環境では
+    # このテストをスキップする (render.py の設計意図に合わせる)。
+    pytest.importorskip("pyvis")
     out = render_html(populated_store, tmp_path / "graph.html")
     assert out.exists()
     html = out.read_text(encoding="utf-8")
@@ -88,12 +91,14 @@ def test_render_html_writes_file(populated_store: NetworkXGraphStore, tmp_path: 
 def test_render_html_creates_parent_directory(
     populated_store: NetworkXGraphStore, tmp_path: Path
 ) -> None:
+    pytest.importorskip("pyvis")
     deep = tmp_path / "a" / "b" / "graph.html"
     out = render_html(populated_store, deep)
     assert out.exists()
 
 
 def test_render_html_with_empty_store(tmp_path: Path) -> None:
+    pytest.importorskip("pyvis")
     store = NetworkXGraphStore()
     out = render_html(store, tmp_path / "empty.html")
     assert out.exists()

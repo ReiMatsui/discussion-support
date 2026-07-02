@@ -19,9 +19,11 @@ from typing import Any
 import click
 
 from das.asr.live._constants import (
+    _BACKCHANNEL_RE,
     _DRIFT_CHECK_INTERVAL,
     _DRIFT_CHECK_WINDOW,
     _DRIFT_WARMUP,
+    _FACTCHECK_MIN_CHARS,
     _INVITE_QUIET_RATIO,
     _INVITE_WARMUP,
     AGENT_SPEAKER,
@@ -33,9 +35,9 @@ from das.asr.live._participation import (
     quietest_participation_share,
 )
 from das.asr.live._speaker_policy import is_intervention_signal, reliable_human_records
-from das.asr.live._workers import _looks_like_fact_claim
 
 CheckFact = Callable[[list[dict], str, str], dict]
+ClassifyUtterance = Callable[[list[dict[str, str]], str, str], dict[str, object]]
 CheckDrift = Callable[[list[dict], list[dict], str, str], dict]
 CheckParticipation = Callable[[list[dict], list[dict], str, str], dict]
 
@@ -550,20 +552,29 @@ def _run_fact_check(
     turn: dict,
     opts: ReplayOptions,
     check_fact: CheckFact,
+    classify: ClassifyUtterance,
 ) -> dict | None:
     if "fact" not in opts.checks:
         return None
     if not is_intervention_signal(turn):
         return None
-    if not _looks_like_fact_claim(turn["text"]):
+    # 機械的に安全なゲートのみローカルで処理。意味判定（事実断定か）は
+    # live と同じ LLM 分類（classify_utterance）に委ねる（H6）。
+    text = str(turn["text"]).strip()
+    if len(text) < _FACTCHECK_MIN_CHARS or _BACKCHANNEL_RE.match(text):
         return None
     if opts.no_api:
-        return _event(turn, "fact_candidate", "LLM事実判定の対象")
+        return _event(turn, "fact_candidate", "LLM分類の対象（--no-apiのため未判定）")
     prior = [
         r for r in records[:-1]
         if is_intervention_signal(r)
     ][-3:]
     utts = _utterance_window([*prior, turn], 4)
+    triage = classify(utts, opts.api_key, opts.model)
+    if triage.get("retryable_error"):
+        return _event(turn, "fact_retryable_error", "LLM分類の一時失敗")
+    if not triage.get("factual_claim"):
+        return None
     result = check_fact(utts, opts.api_key, opts.model)
     if result.get("retryable_error"):
         return _event(turn, "fact_retryable_error", "LLM事実判定の一時失敗")
@@ -652,11 +663,13 @@ def run_replay(
     check_fact: CheckFact | None = None,
     check_drift: CheckDrift | None = None,
     check_participation: CheckParticipation | None = None,
+    classify: ClassifyUtterance | None = None,
 ) -> list[dict]:
     """Replay turns and return intervention candidate events."""
     from das.asr.live import _bootstrap
 
     check_fact = check_fact or _bootstrap.check_fact_correction
+    classify = classify or _bootstrap.classify_utterance
     check_drift = check_drift or _bootstrap.check_drift
     check_participation = check_participation or _bootstrap.check_participation
 
@@ -665,7 +678,7 @@ def run_replay(
     last_fact_event_at = -10_000
     for turn in turns:
         records.append(turn)
-        fact_event = _run_fact_check(records, turn, opts, check_fact)
+        fact_event = _run_fact_check(records, turn, opts, check_fact, classify)
         if fact_event:
             if fact_event["type"] == "fact_candidate":
                 events.append(fact_event)

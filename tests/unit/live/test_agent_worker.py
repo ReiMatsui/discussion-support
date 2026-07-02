@@ -9,14 +9,13 @@ import queue
 import threading
 import time
 
+from das.asr.live._constants import _DRIFT_PENDING_TTL
 from das.asr.live._workers import (
-    _detect_facilitator_call,
-    _detect_facilitator_call_ex,
+    _build_candidates,
     _log_intervention_event,
+    _log_voice_call_diag,
     _PendingInterventions,
     _run_agent_worker,
-    _select_barge_in_decision,
-    _select_normal_trigger_decision,
 )
 
 
@@ -121,81 +120,6 @@ class FakeState:
         self.manual_statuses.append({"status": status, **kw})
 
 
-def test_bargein_decision_prefers_fact_before_retry():
-    """事実補正は、中断介入の再送より先に差し込む."""
-    agent = FakeAgent()
-    agent._pending_intervention = {"delivered": "前の介入"}
-    state = FakeState(agent, None)
-    pending = _PendingInterventions()
-    pending.facts.append({"correction": "事実補正です。", "_queued_at": time.monotonic()})
-
-    decision = _select_barge_in_decision(
-        pending=pending,
-        agent=agent,
-        state=state,
-        now=time.monotonic(),
-        last_fact_at=0.0,
-        last_intervention_at=0.0,
-        silence_elapsed=10.0,
-        partner_busy=False,
-        in_echo_window=False,
-        cooldown=0.0,
-        diag_tick=1,
-    )
-
-    assert decision.reason == "fact"
-    assert decision.fact["correction"] == "事実補正です。"
-
-
-def test_bargein_decision_holds_fact_until_short_silence():
-    """事実補正でも、参加者の発話が切れる短い間を待つ."""
-    agent = FakeAgent()
-    state = FakeState(agent, None)
-    pending = _PendingInterventions()
-    pending.facts.append({"correction": "事実補正です。", "_queued_at": time.monotonic()})
-
-    decision = _select_barge_in_decision(
-        pending=pending,
-        agent=agent,
-        state=state,
-        now=time.monotonic(),
-        last_fact_at=0.0,
-        last_intervention_at=0.0,
-        silence_elapsed=0.1,
-        partner_busy=False,
-        in_echo_window=False,
-        cooldown=0.0,
-        diag_tick=1,
-    )
-
-    assert decision.reason == "hold"
-    assert pending.facts
-
-
-def test_fact_can_fire_before_slower_interventions():
-    """事実補正は鮮度を優先し、他の介入より短い間で発火できる."""
-    agent = FakeAgent()
-    state = FakeState(agent, None)
-    pending = _PendingInterventions()
-    pending.facts.append({"correction": "事実補正です。", "_queued_at": time.monotonic()})
-
-    decision = _select_barge_in_decision(
-        pending=pending,
-        agent=agent,
-        state=state,
-        now=time.monotonic(),
-        last_fact_at=0.0,
-        last_intervention_at=0.0,
-        silence_elapsed=1.0,
-        partner_busy=False,
-        in_echo_window=False,
-        cooldown=0.0,
-        diag_tick=1,
-    )
-
-    assert decision.reason == "fact"
-
-
 def test_log_intervention_event_includes_review_context():
     agent = FakeAgent()
     state = FakeState(agent, None)
@@ -217,120 +141,6 @@ def test_log_intervention_event_includes_review_context():
     assert [u["text"] for u in event["metadata"]["recent_utterances"]] == [
         "発話1", "発話2", "発話3", "発話4", "発話5",
     ]
-
-
-def test_bargein_decision_skips_cooldown_drift_then_retries():
-    """クールダウン中の脱線は捨て、保留介入の再送は同じ巡回で許可する."""
-    agent = FakeAgent()
-    agent._pending_intervention = {"delivered": "前の介入"}
-    state = FakeState(agent, None)
-    pending = _PendingInterventions(drift_reason="脱線", drift_count=1)
-    now = time.monotonic()
-
-    decision = _select_barge_in_decision(
-        pending=pending,
-        agent=agent,
-        state=state,
-        now=now,
-        last_fact_at=0.0,
-        last_intervention_at=now,
-        silence_elapsed=10.0,
-        partner_busy=False,
-        in_echo_window=False,
-        cooldown=100.0,
-        diag_tick=1,
-    )
-
-    assert decision.reason == "retry"
-    assert pending.drift_reason is None
-
-
-def test_drift_waits_longer_than_fact_pause():
-    """脱線介入は、短い相槌程度の間では入らず少し長めに待つ."""
-    agent = FakeAgent()
-    state = FakeState(agent, None)
-    pending = _PendingInterventions(drift_reason="脱線", drift_count=1)
-
-    decision = _select_barge_in_decision(
-        pending=pending,
-        agent=agent,
-        state=state,
-        now=time.monotonic(),
-        last_fact_at=0.0,
-        last_intervention_at=0.0,
-        silence_elapsed=1.0,
-        partner_busy=False,
-        in_echo_window=False,
-        cooldown=0.0,
-        diag_tick=1,
-    )
-
-    assert decision.reason == "hold"
-
-
-def test_normal_trigger_decision_prefers_count_before_invite():
-    """通常介入では、十分な発話があれば声かけより整理介入を優先する."""
-    agent = FakeAgent()
-    agent._pending = [{"speaker": "人間", "text": str(i), "_count": True}
-                      for i in range(agent.trigger_n)]
-    pending = _PendingInterventions(invite="参加者B")
-
-    decision = _select_normal_trigger_decision(
-        pending=pending,
-        agent=agent,
-        silence_elapsed=100.0,
-        silence_summarize=18.0,
-        partner_present=False,
-        now=time.monotonic(),
-        last_intervention_at=0.0,
-        cooldown=0.0,
-        last_invited=None,
-    )
-
-    assert decision.reason == "count"
-
-
-def test_count_trigger_waits_for_short_pause():
-    """発話数が十分でも、直後には割り込まず短い間を待つ."""
-    agent = FakeAgent()
-    agent._pending = [{"speaker": "人間", "text": str(i), "_count": True}
-                      for i in range(agent.trigger_n)]
-    pending = _PendingInterventions()
-
-    decision = _select_normal_trigger_decision(
-        pending=pending,
-        agent=agent,
-        silence_elapsed=0.1,
-        silence_summarize=18.0,
-        partner_present=False,
-        now=time.monotonic(),
-        last_intervention_at=0.0,
-        cooldown=0.0,
-        last_invited=None,
-    )
-
-    assert decision.reason == "none"
-
-
-def test_normal_trigger_decision_respects_controlled_silence():
-    """controlledでは、沈黙だけで通常の要約介入を選ばない."""
-    agent = FakeAgent()
-    agent._pending = [{"speaker": "人間", "text": "x", "_count": True}]
-    pending = _PendingInterventions()
-
-    decision = _select_normal_trigger_decision(
-        pending=pending,
-        agent=agent,
-        silence_elapsed=100.0,
-        silence_summarize=None,
-        partner_present=False,
-        now=time.monotonic(),
-        last_intervention_at=0.0,
-        cooldown=0.0,
-        last_invited=None,
-    )
-
-    assert decision.reason == "none"
 
 
 def _run_worker_briefly(state, *, until, timeout=3.0) -> None:
@@ -679,50 +489,6 @@ def test_pending_manual_call_cleared_when_intervention_disabled():
 # Phase2: 音声での明示的なファシリテーター呼びかけ検出
 # ---------------------------------------------------------------------------
 
-def test_detect_facilitator_call_accepts_explicit_calls():
-    """明示呼称＋依頼表現がある発話は、依頼文を返す."""
-    cases = {
-        "ファシリテーター、ここまで整理して": "ここまで整理して",
-        "進行役さん、次に決めることを確認して": "次に決めることを確認して",
-        "AI、Aさんにも意見を聞いて": "Aさんにも意見を聞いて",
-        "ファシリテーター、話を戻して": "話を戻して",
-        "AIさん、今の論点をまとめて": "今の論点をまとめて",
-        "ファシリテーター ここまで整理して": "ここまで整理して",
-        "AIさん今の論点をまとめて": "今の論点をまとめて",
-        # STTの句読点なし
-        "ファシリテーター ここまでまとめて": "ここまでまとめて",
-        "進行役さん次どうしましょう": "次どうしましょう",
-        "AIさん Aさんに振って": "Aさんに振って",
-        # 全角/カナ表記
-        "ＡＩ、まとめて": "まとめて",
-        "エーアイ 整理して": "整理して",
-    }
-    for text, expected in cases.items():
-        assert _detect_facilitator_call(text) == expected, text
-
-
-def test_detect_facilitator_call_rejects_meta_and_mentions():
-    """呼びかけでない言及・メタ話題・質問・依頼なしは None（誤爆防止）."""
-    negatives = [
-        "AIについて話しましょう",
-        "ファシリテーター機能って便利ですね",
-        "進行役は誰がやりますか",
-        "整理すると、AIの話ですね",
-        "これはAI導入の論点です",
-        "ファシリテーターさん",        # 呼びかけのみ・依頼なし
-        "AI、便利だね",               # 呼びかけ+依頼なし
-        "AIは便利です",
-        "AI、次郎さんの件です",        # 「次」を含む人名で誤爆しない
-        "ファシリテーター機能を確認しましょう",
-        "AIの次世代モデルについて話しましょう",  # 「次」を含む話題化で誤爆しない
-        "進行役の役割を確認しましょう",
-        "ファシリテーター機能を整理しましょう",
-        "AIさんですね",               # 呼称のみ・依頼なし
-    ]
-    for text in negatives:
-        assert _detect_facilitator_call(text) is None, text
-
-
 def test_candidate_brief_includes_manual_tracking_fields():
     """review ログの manual 候補には source/request/queued_at が載る（観測性）."""
     from das.asr.live._workers import _build_candidates, _candidate_brief
@@ -743,23 +509,19 @@ def test_candidate_brief_includes_manual_tracking_fields():
     assert "source" not in other and "request" not in other
 
 
-def test_detect_facilitator_call_ex_reports_ignore_reason():
-    """呼称ありで落とした発話は理由付き、呼称なしは理由なし（観測用）."""
-    assert _detect_facilitator_call_ex("AIの次世代モデルについて話しましょう") == (
-        None, "meta_topic")
-    assert _detect_facilitator_call_ex("AIさんですね") == (None, "no_request")
-    assert _detect_facilitator_call_ex("ファシリテーター、ここまで整理して") == (
-        "ここまで整理して", None)
-    # 呼称すら無い通常発話は診断も不要
-    assert _detect_facilitator_call_ex("今日は天気がいいですね") == (None, None)
-
-
 def test_voice_call_queues_manual_and_triggers():
-    """人間発話の呼びかけが manual(source=voice) として拾われ trigger まで届く."""
+    """triage が積んだ manual(source=voice) が trigger まで届く.
+
+    呼びかけの検出自体は _run_triage_worker（LLM分類）の責務
+    （tests/unit/live/test_human_mode.py 側で検証）。ここでは voice 由来の
+    manual 要求が agent worker 経由で発火することを確認する。
+    """
     agent = FakeAgent()
     state = FakeState(agent, None)
-    state.records = [{"speaker": "#1", "ms": 0, "end_ms": 500,
-                      "text": "ファシリテーター、ここまで整理して"}]
+    state.manual_call_requests.put({
+        "request": "ここまで整理して", "source": "voice",
+        "created_at": time.monotonic(),
+    })
 
     _run_worker_briefly(state, until=lambda: bool(agent.trigger_calls))
 
@@ -772,90 +534,17 @@ def test_voice_call_queues_manual_and_triggers():
     assert state.intervention_events[0]["metadata"]["timing"]["source"] == "voice"
 
 
-def test_voice_meta_mention_does_not_trigger():
-    """『AIについて話しましょう』のような言及では発火しない."""
+def test_voice_call_diag_helper_writes_event():
+    """音声呼びかけの検出 diag が jsonl に残る（不発/誤爆の事後検証用）."""
     agent = FakeAgent()
     state = FakeState(agent, None)
-    state.records = [{"speaker": "#1", "ms": 0, "end_ms": 500,
-                      "text": "AIについて話しましょう"}]
 
-    _run_worker_briefly(state, until=lambda: False, timeout=1.0)
-
-    assert agent.trigger_calls == []
-    assert state.manual_call_requests.empty()
-
-
-def test_voice_call_diag_logged_on_detection():
-    """音声呼びかけの検出は diag として jsonl に残る（不発/誤爆の事後検証用）."""
-    agent = FakeAgent()
-    state = FakeState(agent, None)
-    state.records = [{"speaker": "#1", "ms": 0, "end_ms": 500,
-                      "text": "ファシリテーター、ここまで整理して"}]
-
-    _run_worker_briefly(state, until=lambda: bool(state.written_events))
+    _log_voice_call_diag(state, text="AIさん、ここまで整理して",
+                         request="ここまでの整理")
 
     diags = [e for e in state.written_events if e["type"] == "voice_call_diag"]
     assert diags and diags[0]["detected"] is True
-    assert diags[0]["request"] == "ここまで整理して"
-    assert diags[0]["ignored_reason"] is None
-    # UIステータスも queued（source=voice）へ
-    assert any(s["status"] == "queued" and s.get("source") == "voice"
-               for s in state.manual_statuses)
-
-
-def test_voice_call_diag_logged_on_ignored_vocative():
-    """呼称ありでも誤爆防止で落とした発話は、理由付き diag で追える."""
-    agent = FakeAgent()
-    state = FakeState(agent, None)
-    state.records = [{"speaker": "#1", "ms": 0, "end_ms": 500,
-                      "text": "AIさんですね"}]
-
-    _run_worker_briefly(state, until=lambda: bool(state.written_events))
-
-    assert state.manual_call_requests.empty()
-    diags = [e for e in state.written_events if e["type"] == "voice_call_diag"]
-    assert diags and diags[0]["detected"] is False
-    assert diags[0]["ignored_reason"] == "no_request"
-
-
-def test_voice_normal_utterance_writes_no_diag():
-    """呼称の無い通常発話では diag を書かない（ログ洪水防止）."""
-    agent = FakeAgent()
-    state = FakeState(agent, None)
-    state.records = [{"speaker": "#1", "ms": 0, "end_ms": 500,
-                      "text": "今日は費用の話をしましょう"}]
-
-    _run_worker_briefly(state, until=lambda: False, timeout=1.0)
-
-    assert [e for e in state.written_events
-            if e["type"] == "voice_call_diag"] == []
-
-
-def test_voice_call_disabled_in_conversation_mode():
-    """conversation モードでは専用の音声呼びかけ検出をしない（二重応答回避）."""
-    agent = FakeAgent(mode="conversation")
-    state = FakeState(agent, None)
-    state.records = [{"speaker": "#1", "ms": 0, "end_ms": 500,
-                      "text": "ファシリテーター、ここまで整理して"}]
-
-    _run_worker_briefly(state, until=lambda: False, timeout=1.0)
-
-    assert state.manual_call_requests.empty()   # 呼びかけを拾っていない
-    assert all(c["manual_request"] is None for c in agent.trigger_calls)
-
-
-def test_voice_call_not_detected_when_intervention_disabled():
-    """介入オフでは呼びかけを拾わない."""
-    agent = FakeAgent()
-    state = FakeState(agent, None)
-    state.intervention_enabled = False
-    state.records = [{"speaker": "#1", "ms": 0, "end_ms": 500,
-                      "text": "ファシリテーター、ここまで整理して"}]
-
-    _run_worker_briefly(state, until=lambda: False, timeout=1.0)
-
-    assert agent.trigger_calls == []
-    assert state.manual_call_requests.empty()
+    assert diags[0]["request"] == "ここまでの整理"
 
 
 def test_fact_request_triggers_before_drift():
@@ -961,6 +650,62 @@ def test_single_drift_request_is_held_until_confirmed():
 
     assert agent.trigger_calls == []
     assert state.intervention_events == []
+
+
+def test_unconfirmed_drift_does_not_starve_other_interventions():
+    """確認待ちの脱線候補が hold でも、通常レーンの介入は飢餓しない（C1回帰）.
+
+    drift_confirmations=2 で単発検出の drift が保留のまま残っても、
+    発話数トリガー（count）は自身の pause を満たせば発火するべき。
+    """
+    agent = FakeAgent()
+    agent._pending = [{"speaker": "人間", "text": str(i), "_count": True}
+                      for i in range(agent.trigger_n)]
+    state = FakeState(agent, None)
+    state.proactivity = {"silence_summarize": None, "cooldown": 40.0,
+                         "drift_confirmations": 2}
+    state.drift_requests.put("地元の雑談")   # 単発 → 確認待ちで採択されない
+
+    _run_worker_briefly(state, until=lambda: bool(agent.trigger_calls))
+
+    assert agent.trigger_calls, "確認待ちdriftの保留中も count は発火するべき"
+    assert state.intervention_events
+    assert state.intervention_events[0]["reason"] == "count"
+
+
+def test_stale_pending_drift_is_dropped_after_ttl():
+    """確認待ちのまま古くなった脱線候補は TTL で破棄される（C1回帰）."""
+    now = time.monotonic()
+    pending = _PendingInterventions(drift_reason="地元の雑談", drift_count=1)
+    pending.last_drift_request_at = now - (_DRIFT_PENDING_TTL + 1.0)
+
+    pending.drop_stale_drift(now=now)
+
+    assert pending.drift_reason is None
+    assert pending.drift_count == 0
+
+
+def test_fresh_pending_drift_is_kept():
+    """寿命内の脱線候補は破棄されない."""
+    now = time.monotonic()
+    pending = _PendingInterventions(drift_reason="地元の雑談", drift_count=1)
+    pending.last_drift_request_at = now - 5.0
+
+    pending.drop_stale_drift(now=now)
+
+    assert pending.drift_reason == "地元の雑談"
+
+
+def test_drift_candidate_carries_expiry():
+    """drift 候補にも expires_at が付き、Controller の期限切れ判定に乗る."""
+    agent = FakeAgent()
+    pending = _PendingInterventions(drift_reason="地元の雑談", drift_count=1)
+    pending.last_drift_request_at = 100.0
+
+    cands = _build_candidates(pending, agent, now=105.0)
+
+    drift = next(c for c in cands if c.kind == "drift")
+    assert drift.expires_at == 100.0 + _DRIFT_PENDING_TTL
 
 
 def test_count_trigger_records_intervention_reason():

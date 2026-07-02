@@ -51,8 +51,14 @@ def test_no_interventions_yields_zero() -> None:
     assert stats.overall_rate == 0.0
 
 
-def test_l1_intervention_cited_in_next_utterance_by_addressee() -> None:
-    """L1 で提示した文書が、次の addressed_to 発話で再現されると引用済とカウント。"""
+def test_l1_intervention_cited_in_next_utterance_by_recipient() -> None:
+    """L1 で提示した文書が、実受信者 (persona_name) の次発話で再現されると引用済。
+
+    レビュー C-2: 照合対象は「実際に情報が注入された話者」= persona_name であり、
+    グラフ上の宛先 addressed_to (直前の発話者) ではない。ここでは persona_name="A"
+    (次に話す=情報を受け取った人) と addressed_to="B" (直前の発話者) を意図的に
+    食い違わせ、citation が persona_name 側を追うことを固定する。
+    """
 
     transcript = _utts(
         ["A", "B", "A"],
@@ -66,7 +72,8 @@ def test_l1_intervention_cited_in_next_utterance_by_addressee() -> None:
         {
             "kind": "l1",
             "turn_id": 2,
-            "addressed_to": "A",
+            "persona_name": "A",  # 実際に情報を受け取り次に話す人
+            "addressed_to": "B",  # グラフ上の宛先 (直前の発話者) — 照合には使わない
             "items": [
                 {
                     "source_text": "X 大学では紙容器導入後 2 年目にコストが解消された",
@@ -91,7 +98,7 @@ def test_l1_not_cited_returns_zero_rate() -> None:
         {
             "kind": "l1",
             "turn_id": 2,
-            "addressed_to": "A",
+            "persona_name": "A",
             "items": [
                 {"source_text": "X 大学のコスト構造分析", "source_kind": "document"}
             ],
@@ -127,7 +134,7 @@ def test_by_kind_breakdown() -> None:
         {
             "kind": "l1",
             "turn_id": 2,
-            "addressed_to": "A",
+            "persona_name": "A",
             "items": [
                 {
                     "source_text": "X 大学の事例における 2 年目の費用構造",
@@ -138,7 +145,7 @@ def test_by_kind_breakdown() -> None:
         {
             "kind": "l1",
             "turn_id": 3,
-            "addressed_to": "B",
+            "persona_name": "B",
             "items": [
                 {
                     "source_text": "シンガポールの環境局による報告書",
@@ -195,7 +202,7 @@ def test_aggregate_combines_runs() -> None:
             {
                 "kind": "l1",
                 "turn_id": 1,
-                "addressed_to": "A",
+                "persona_name": "A",
                 "items": [
                     {"source_text": "提示テキストの再現", "source_kind": "document"}
                 ],
@@ -208,7 +215,7 @@ def test_aggregate_combines_runs() -> None:
             {
                 "kind": "l1",
                 "turn_id": 1,
-                "addressed_to": "B",
+                "persona_name": "B",
                 "items": [{"source_text": "z", "source_kind": "web"}],
             }
         ],

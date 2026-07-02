@@ -105,6 +105,55 @@ async def test_judge_includes_info_log_for_persona() -> None:
     assert "ターン 2" not in user_msg
 
 
+async def test_judge_prompt_is_blind_to_condition_name() -> None:
+    """レビュー C-1: judge 入力に条件識別情報を一切埋め込まない (盲検化)。"""
+
+    llm = _fake_llm()
+    captured = AsyncMock(return_value=_scores())
+    llm.chat_structured = captured  # type: ignore[method-assign]
+
+    judge = JudgeAgent(llm=llm)
+    persona = build_persona(name="A")
+    transcript = [Utterance(turn_id=1, speaker="A", text="主張")]
+    await judge.evaluate_for(
+        persona, "topic", transcript, condition_name="full_proposal"
+    )
+    joined = "\n".join(m["content"] for m in captured.await_args.args[0])
+    assert "full_proposal" not in joined
+    assert "## 条件" not in joined
+
+    # None 条件でも「条件」という語で条件を示唆しない
+    await judge.evaluate_for(
+        persona, "topic", transcript, condition_name="none", info_log=None
+    )
+    joined_none = "\n".join(m["content"] for m in captured.await_args.args[0])
+    assert "情報提供なし条件" not in joined_none
+    assert "none" not in joined_none
+
+
+async def test_judge_info_log_unlabeled_item_is_neutral() -> None:
+    """レビュー H-3: relation 未指定 (FlatRAG 等) の提示は中立の [参考] にする。"""
+
+    llm = _fake_llm()
+    captured = AsyncMock(return_value=_scores())
+    llm.chat_structured = captured  # type: ignore[method-assign]
+
+    judge = JudgeAgent(llm=llm)
+    persona = build_persona(name="A")
+    info_log = [
+        InterventionLogEntry(
+            turn_id=1,
+            persona_name="A",
+            timestamp="2026-05-01T00:00:00Z",
+            items=[{"relation": "", "source_text": "関係ラベルなしの提示"}],
+        )
+    ]
+    await judge.evaluate_for(persona, "topic", [], "flat_rag", info_log=info_log)
+    user_msg = captured.await_args.args[0][1]["content"]
+    assert "[参考] 関係ラベルなしの提示" in user_msg
+    assert "[反論]" not in user_msg
+
+
 async def test_judge_evaluate_session_iterates_personas() -> None:
     llm = _fake_llm()
     llm.chat_structured = AsyncMock(  # type: ignore[method-assign]

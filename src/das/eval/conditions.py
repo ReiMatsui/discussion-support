@@ -34,6 +34,21 @@ from das.runtime import Orchestrator
 from das.types import Utterance
 
 
+def relation_label(relation: str) -> str:
+    """関係ラベルを日本語タグへ変換する (提示整形・judge 整形で共用)。
+
+    ``support`` / ``attack`` 以外 (ラベルなし = FlatRAG / graphless の提示など) は
+    中立の「参考」にする。以前は二値分岐で、ラベルなしを一律「反論」と表示して
+    いたため、統制条件の操作的定義を評価段階で破壊していた (レビュー H-3)。
+    """
+
+    if relation == "support":
+        return "支持"
+    if relation == "attack":
+        return "反論"
+    return "参考"
+
+
 @dataclass(frozen=True)
 class InterventionLogEntry:
     """1 介入分の記録 (§4.3 介入の透明性)。
@@ -524,8 +539,7 @@ class ConditionFullProposal:
     def _format_l1_self(decision: InterventionDecision) -> str:
         lines = ["[あなたの先ほどの発言に対する関連情報]"]
         for it in decision.items:
-            tag = "支持" if it.relation == "support" else "反論"
-            lines.append(f"- [{tag}] {it.source_text}")
+            lines.append(f"- [{relation_label(it.relation)}] {it.source_text}")
         return "\n".join(lines)
 
     @staticmethod
@@ -533,8 +547,7 @@ class ConditionFullProposal:
         speaker = decision.addressed_to or "直前の発言者"
         lines = [f"[{speaker}さんの先ほどの発言に対する関連情報]"]
         for it in decision.items:
-            tag = "支持" if it.relation == "support" else "反論"
-            lines.append(f"- [{tag}] {it.source_text}")
+            lines.append(f"- [{relation_label(it.relation)}] {it.source_text}")
         return "\n".join(lines)
 
 
@@ -547,5 +560,6 @@ __all__ = [
     "FlatRAGItem",
     "InfoItem",
     "InterventionLogEntry",
+    "relation_label",
     "write_intervention_log",
 ]

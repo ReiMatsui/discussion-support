@@ -45,6 +45,21 @@ Kind = Literal[
 InterruptPolicy = Literal["allow_barge_in", "wait_for_pause", "never_barge_in"]
 Urgency = Literal["barge_in", "wait_for_pause", "low"]
 
+# 抑制理由の機械可読コード。worker 側の後処理（drift破棄・invite消費など）は
+# このコードだけで分岐する。表示文（reason）は UI/ログ専用で、文言変更が
+# 挙動に影響してはならない（H4: 文字列プロトコルの禁止）。
+SuppressionCode = Literal[
+    "expired",                      # expires_at を過ぎた（鮮度喪失）
+    "partner_busy",                 # パートナー発話中
+    "echo_window",                  # エコーウィンドウ中
+    "awaiting_drift_confirmation",  # 脱線の確認回数待ち
+    "cooldown_global",              # 直前のあらゆる介入から間隔不足
+    "cooldown_kind",                # 直前の同種介入から間隔不足
+    "awaiting_pause",               # 発話の切れ目（pause）待ち
+    "same_as_last_invited",         # 直前と同じ相手への連続声かけ
+    "lower_priority",               # 採択可能だが他候補を優先
+]
+
 
 @dataclass(frozen=True)
 class InterventionCandidate:
@@ -124,7 +139,8 @@ class FacilitationDecision:
     urgency: Urgency
     valid_for_epoch: int
     deadline_ms: int
-    suppressed: tuple[dict, ...]   # [{"candidate_id":..., "reason":...}]
+    # [{"candidate_id":..., "code": SuppressionCode, "reason": 表示文}]
+    suppressed: tuple[dict, ...]
     reason: str
 
     def as_dict(self) -> dict:
@@ -174,7 +190,11 @@ _KIND_POLICY: dict[str, _KindPolicy] = {
 _DEFAULT_POLICY = _KindPolicy(9, 1.0, _INTERVENTION_COOLDOWN, 2000, "low")
 
 
-def _policy_for(kind: str) -> _KindPolicy:
+def policy_for(kind: str) -> _KindPolicy:
+    """種別ごとの採否ポリシー（pause/cooldown/優先度）の唯一の出所（M8）.
+
+    dispatch 側のタイミングログもこの表を参照し、pause 値の重複管理をしない。
+    """
     return _KIND_POLICY.get(kind, _DEFAULT_POLICY)
 
 
@@ -198,11 +218,12 @@ class FacilitationController:
 
         eligible: list[tuple[int, InterventionCandidate]] = []
         for cand in inp.candidates:
-            ok, reason = self._eligible(cand, inp)
+            ok, code, reason = self._eligible(cand, inp)
             if ok:
-                eligible.append((_policy_for(cand.kind).priority, cand))
+                eligible.append((policy_for(cand.kind).priority, cand))
             else:
-                suppressed.append({"candidate_id": cand.id, "reason": reason})
+                suppressed.append(
+                    {"candidate_id": cand.id, "code": code, "reason": reason})
 
         if not eligible:
             why = "候補なし" if not inp.candidates else "全候補を抑制（クールダウン/間待ち/期限切れ）"
@@ -216,9 +237,10 @@ class FacilitationController:
         _, chosen = eligible[0]
         for _, other in eligible[1:]:
             suppressed.append({"candidate_id": other.id,
+                               "code": "lower_priority",
                                "reason": f"優先度が低い（採択={chosen.kind}）"})
 
-        policy = _policy_for(chosen.kind)
+        policy = policy_for(chosen.kind)
         urgency = self._urgency(chosen, policy, inp)
         return FacilitationDecision(
             decision_id=decision_id, candidate_id=chosen.id, urgency=urgency,
@@ -228,8 +250,11 @@ class FacilitationController:
 
     # ------------------------------------------------------------------
     def _eligible(self, cand: InterventionCandidate,
-                  inp: FacilitationInput) -> tuple[bool, str]:
-        """候補が「今」採れるか。採れない理由（抑制理由）も返す.
+                  inp: FacilitationInput) -> tuple[bool, str, str]:
+        """候補が「今」採れるか。``(ok, code, 表示文)`` を返す.
+
+        code は機械可読な :data:`SuppressionCode`。worker の後処理はこのコード
+        だけで分岐し、表示文はログ/UI専用とする（文言の推敲が挙動を変えない）。
 
         判定順序は legacy のフロア条件に揃える（§4）:
           期限切れ → 物理フロア(発話中/エコー) → 脱線確認 → クールダウン →
@@ -237,28 +262,30 @@ class FacilitationController:
         連続声かけ(same_as_last_invited)は最後に見る。これにより「間やクールダウンが
         満たされて初めて『同じ人だから今回は見送る(skip_invite)』」を再現できる。
         """
-        policy = _policy_for(cand.kind)
+        policy = policy_for(cand.kind)
         # 期限切れ（§3.1 expires_at）= 古い判断の破棄（§8.5）
         if cand.expires_at and inp.now > cand.expires_at:
-            return False, "期限切れ（鮮度を失った）"
+            return False, "expired", "期限切れ（鮮度を失った）"
         # 物理フロア（§4）: barge-in 許可種別以外は、発話中・エコー残響中は待つ。
         if cand.interrupt_policy != "allow_barge_in":
             if inp.partner_busy:
-                return False, "パートナー発話中で待機"
+                return False, "partner_busy", "パートナー発話中で待機"
             if inp.in_echo_window:
-                return False, "エコーウィンドウ中で待機"
+                return False, "echo_window", "エコーウィンドウ中で待機"
         # 脱線の確認待ち（連続検出で初めて採る）
         if (cand.kind == "drift" and inp.required_drift_confirmations > 0
                 and int(cand.payload.get("drift_count", 0))
                 < inp.required_drift_confirmations):
-            return False, (f"脱線判定の確認待ち "
-                           f"({int(cand.payload.get('drift_count', 0))}/"
-                           f"{inp.required_drift_confirmations})")
+            return False, "awaiting_drift_confirmation", (
+                f"脱線判定の確認待ち "
+                f"({int(cand.payload.get('drift_count', 0))}/"
+                f"{inp.required_drift_confirmations})")
         # クールダウン（§3.3）。kind別 / global を共通engineで扱う。
         if policy.cooldown_scope == "global":
             if (inp.last_intervention_at
                     and inp.now - inp.last_intervention_at < inp.cooldown):
-                return False, f"直前の介入から間隔不足（cooldown {inp.cooldown:.0f}s）"
+                return False, "cooldown_global", (
+                    f"直前の介入から間隔不足（cooldown {inp.cooldown:.0f}s）")
         else:
             cd = policy.cooldown
             if cand.kind == "fact" and inp.fact_cooldown is not None:
@@ -266,16 +293,18 @@ class FacilitationController:
             if cd > 0:
                 last = self._last_same_kind(cand.kind, inp.recent_interventions)
                 if last is not None and inp.now - last < cd:
-                    return False, f"直前に同種介入済み（cooldown {cd:.0f}s）"
+                    return False, "cooldown_kind", (
+                        f"直前に同種介入済み（cooldown {cd:.0f}s）")
         # floor / 間待ち（§4）。barge-in許可種別は pause を無視できる。
         pause_required = float(cand.payload.get("pause_required", policy.pause))
         if (cand.interrupt_policy != "allow_barge_in"
                 and inp.silence_elapsed < pause_required):
-            return False, f"発話の切れ目待ち（必要 {pause_required:.1f}s）"
+            return False, "awaiting_pause", (
+                f"発話の切れ目待ち（必要 {pause_required:.1f}s）")
         # 連続声かけ（間・クールダウンを満たした上で、同じ人なら今回は見送る）
         if cand.payload.get("same_as_last_invited"):
-            return False, "直前と同じ参加者への連続声かけ"
-        return True, ""
+            return False, "same_as_last_invited", "直前と同じ参加者への連続声かけ"
+        return True, "", ""
 
     @staticmethod
     def _last_same_kind(kind: str,

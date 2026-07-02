@@ -336,6 +336,10 @@ def test_intervention_review_run_summary_adds_normalized_metrics():
     assert summary["flagged_per_10_turns"] == 0.5
 
 
+def _classify_all_facts(_utts, _key, _model):
+    return {"factual_claim": True, "facilitator_request": ""}
+
+
 def test_run_replay_fact_candidate_without_api():
     turns = [
         {"turn_id": 1, "speaker": "A", "text": "指標Xの計算式は分母を分子で割る感じです", "ms": 0, "end_ms": 1000},
@@ -347,27 +351,30 @@ def test_run_replay_fact_candidate_without_api():
     assert events[0]["turn_id"] == 1
 
 
-def test_run_replay_fact_candidate_ignores_creative_expression_advice():
+def test_run_replay_fact_skips_when_classify_rejects():
+    """LLM分類が fact候補でないと判定した発話（創作表現・評価など）は事実判定に回さない."""
     turns = [
-        {
-            "turn_id": 1,
-            "speaker": "A",
-            "text": "跳ね返った弾丸が私を背後から襲い、コンクリートの壁では本来絨毯はめり込むはずだ。",
-            "ms": 0,
-        },
-        {"turn_id": 2, "speaker": "A", "text": "その弾丸は奴をめがけて襲いかかる。", "ms": 1000},
-        {"turn_id": 3, "speaker": "B", "text": "手の中に極小の銃を持ってんだ。ビビ弾以下の弾だが凶悪だぜ。", "ms": 2000},
-        {
-            "turn_id": 4,
-            "speaker": "A",
-            "text": "理解率は通常50%前後ですよ。25%は最低ラインです。それ以上下げるのはお客様の失礼です。",
-            "ms": 3000,
-        },
+        {"turn_id": 1, "speaker": "A", "text": "その弾丸は奴をめがけて襲いかかる。", "ms": 0},
     ]
+    fact_calls = []
 
-    events = run_replay(turns, ReplayOptions(no_api=True, checks={"fact"}))
+    def fake_fact(utts, _key, _model):
+        fact_calls.append(utts)
+        return {"should_correct": True, "confidence": "high",
+                "claim": "x", "correction": "y", "reason": "z"}
+
+    def fake_classify(_utts, _key, _model):
+        return {"factual_claim": False, "facilitator_request": ""}
+
+    events = run_replay(
+        turns,
+        ReplayOptions(api_key="key", checks={"fact"}),
+        check_fact=fake_fact,
+        classify=fake_classify,
+    )
 
     assert events == []
+    assert fact_calls == []
 
 
 def test_run_replay_fact_with_mock_checker():
@@ -389,6 +396,7 @@ def test_run_replay_fact_with_mock_checker():
         turns,
         ReplayOptions(api_key="key", checks={"fact"}),
         check_fact=fake_fact,
+        classify=_classify_all_facts,
     )
 
     assert events == [{
@@ -418,6 +426,7 @@ def test_run_replay_fact_checks_target_with_recent_context():
         turns,
         ReplayOptions(api_key="key", checks={"fact"}),
         check_fact=fake_fact,
+        classify=_classify_all_facts,
     )
 
     assert calls == [
@@ -441,6 +450,7 @@ def test_run_replay_fact_retryable_error_is_visible():
         turns,
         ReplayOptions(api_key="key", checks={"fact"}),
         check_fact=fake_fact,
+        classify=_classify_all_facts,
     )
 
     assert events == [{
