@@ -189,11 +189,14 @@ class VoiceProfiles:
         self._active_keys: set[str] = set()
 
     def reset_session(self) -> None:
-        """会議リセット時に、人間話者の割り当て・蓄積をクリアする（課題③）.
+        """会議リセット時に、セッション由来の割り当て・蓄積をクリアする（課題③）.
 
         新しい会議を素の状態から始められるように、Sonioxラベルの割り当て・
-        未確定プール・人物別履歴をクリアし、照合対象（アクティブ）も外す。
-        ただし AI声紋(__AI__/__PARTNER__)はエコー除去に使うため維持する。
+        未確定プール・人物別履歴をクリアする。ただし照合対象（アクティブ）は、
+        ユーザーが有効化した実名プロファイルを次の会議へ引き継ぐ（同じ参加者で
+        会議を続けるのが通常のため、リセットのたびに全員が未確定へ落ちるのを防ぐ）。
+        セッション限りの匿名「人物N」だけを非活性化する。
+        AI声紋(__AI__/__PARTNER__)はエコー除去に使うため維持する。
         voices.json（永続化ファイル）は変更しない（永続化は別機能）。
         """
         with self._lock:
@@ -203,9 +206,11 @@ class VoiceProfiles:
             self.n_anon = 0
             self.own_sims.clear()
             self.last = None
-            # 人間話者は照合対象から外す。AI声紋(__..__)だけ残す。
+            # AI声紋(__..__)と実名プロファイルは残し、匿名「人物N」だけ落とす。
+            # ANON は「人物N」のみをカバーする（#ラベルは _active_keys に入らない）。
             self._active_keys = {k for k in self._active_keys
-                                 if k.startswith("__") and k.endswith("__")}
+                                 if (k.startswith("__") and k.endswith("__"))
+                                 or not self.ANON.match(k)}
 
     def _active_human(self) -> dict:
         """照合対象の人間プロファイル（AI声紋 __..__ は除く）."""

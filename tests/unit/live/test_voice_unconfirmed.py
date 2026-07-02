@@ -144,6 +144,32 @@ def test_closed_roster_overlapped_speech_does_not_inherit_registered_label():
     assert vp.classify(_LONG, "2", overlapped=True, count=True, chars=60) == UNSURE_SPEAKER
 
 
+def test_reset_keeps_activated_named_profiles():
+    """リセット後も、有効化済みの実名プロファイルは照合対象に残る（課題C2）.
+
+    匿名「人物N」はセッション限りなので落とし、AI声紋は維持する。
+    """
+    vp = _tracker(_unit(1, 0, 0))
+    vp.profiles = {"松井": _unit(1, 0, 0), "人物1": _unit(0, 1, 0)}
+    vp._active_keys = {"松井", "人物1", "__AI__"}
+    vp.n_anon = 1
+
+    vp.reset_session()
+
+    assert "松井" in vp._active_human()      # 実名は次の会議へ引き継ぐ
+    assert "人物1" not in vp._active_keys     # 匿名 人物N は非活性化
+    assert "__AI__" in vp._active_keys        # AI声紋はエコー除去用に維持
+
+
+def test_reset_keeps_named_profile_matchable_closed_roster():
+    """リセット後、その実名話者の声は closed roster(auto=False) でも実名に一致する."""
+    vp = _closed_roster_tracker(_unit(1, 0, 0, 0))   # まさにAの声
+
+    vp.reset_session()
+
+    assert vp.classify(_LONG, "7", count=True, chars=60) == "A"
+
+
 def test_max_speakers_turns_extra_new_voice_unsure():
     """参加人数上限に達した後の新しい声は、新参加者ではなく未確定にする."""
     vp = _tracker(_unit(0, 1, 0))
