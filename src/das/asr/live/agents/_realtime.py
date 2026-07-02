@@ -353,6 +353,7 @@ class RealtimeAgent(_RealtimeBase):
                 invite_target: str | None = None,
                 fact_correction: dict | None = None,
                 manual_request: dict | None = None,
+                summary_focus: str | None = None,
                 retry_intervention: bool | None = None):
         """蓄積した発話をRealtimeAPIに送信し応答を要求.
 
@@ -442,6 +443,14 @@ class RealtimeAgent(_RealtimeBase):
                 "会議を乗っ取らず、必要な確認・整理・声かけだけを行ってください。"
             )
             conv = f"{manual_note}\n\n{conv}" if conv else manual_note
+        # --- 整理介入コンテキスト（C3: 価値判定つき summarize） ---
+        if summary_focus:
+            summary_note = (
+                "[整理の要請]\n"
+                f"議論の整理が求められています。焦点: {summary_focus}\n"
+                "直近の流れを踏まえ、一言で短く整理してください。"
+            )
+            conv = f"{summary_note}\n\n{conv}" if conv else summary_note
         # --- 保存された介入内容をコンテキストに追加 ---
         # 注: 有効な介入は送信成功までクリアしない（Bug 2）。
         #     期限切れの介入のみ、送信成否に関わらずここで破棄する。

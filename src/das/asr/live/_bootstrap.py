@@ -14,6 +14,7 @@ import re
 import threading
 import time
 from dataclasses import dataclass
+from typing import Any
 
 from das.asr.live._assemblyai_diarization import AssemblyAIStreamingDiarizationProvider
 from das.asr.live._constants import (
@@ -21,6 +22,7 @@ from das.asr.live._constants import (
     _DRIFT_PROMPT,
     _FACTCHECK_PROMPT,
     _PARTICIPATION_PROMPT,
+    _SUMMARY_VALUE_PROMPT,
     _TOPIC_PROMPT,
     _TRIAGE_PROMPT,
     OPENAI_API,
@@ -44,6 +46,7 @@ from das.asr.live._workers import (
     _run_participation_checker,
     _run_sender,
     _run_stdin_commands,
+    _run_structuring_checker,
     _run_topic_worker,
     _run_triage_worker,
 )
@@ -207,6 +210,16 @@ _TRIAGE_SCHEMA = {
         "facilitator_request": {"type": "string"},
     },
     "required": ["factual_claim", "facilitator_request"],
+    "additionalProperties": False,
+}
+
+_SUMMARY_VALUE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "intervene": {"type": "boolean"},
+        "focus": {"type": "string"},
+    },
+    "required": ["intervene", "focus"],
     "additionalProperties": False,
 }
 
@@ -413,6 +426,35 @@ def classify_utterance(utterances: list[dict[str, str]], api_key: str,
     return {
         "factual_claim": bool(result.get("factual_claim")),
         "facilitator_request": str(result.get("facilitator_request") or "").strip(),
+    }
+
+
+def check_summary_value(utterances: list[dict[str, Any]],
+                        topics: list[dict[str, Any]],
+                        api_key: str, model: str) -> dict[str, Any]:
+    """今、短い整理・要約の介入が議論に価値を足すかを判定する（C3）.
+
+    「10発話たまったら無条件に介入」の代わりに、系のどこかに「今は黙るべき」の
+    判断を置くための価値判定。直近発話と論点一覧を見て intervene を返す。
+    迷ったら false（過剰介入の回避）。
+
+    Returns:
+        {"intervene": bool, "focus": str}。API/解析失敗時は intervene=False。
+    """
+    if not utterances or not api_key:
+        return {"intervene": False, "focus": ""}
+    utt_text = "\n".join(f"- {u['speaker']}: {u['text']}" for u in utterances)
+    topic_text = "\n".join(f"- {t['topic']}" for t in topics) or "（まだなし）"
+    prompt = _SUMMARY_VALUE_PROMPT.format(topics=topic_text, utterances=utt_text)
+    params = _build_chat_params(
+        model, prompt, max_out=400, temperature=0.0,
+        schema_name="summary_value", schema=_SUMMARY_VALUE_SCHEMA)
+    result = _post_chat_json(params, api_key, timeout=15, label="structuring")
+    if not isinstance(result, dict):
+        return {"intervene": False, "focus": ""}
+    return {
+        "intervene": bool(result.get("intervene")),
+        "focus": str(result.get("focus") or "").strip(),
     }
 
 
@@ -710,6 +752,10 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
                 threading.Thread(target=_run_participation_checker,
                                 args=(state, _oai_key, _oai_model), daemon=True).start()
                 print("# 参加度の声かけ: 有効（発話量の偏りを監視）", flush=True)
+                # --- 整理介入の価値判定（count の無条件介入を置換, C3） ---
+                threading.Thread(target=_run_structuring_checker,
+                                args=(state, _oai_key, _oai_model), daemon=True).start()
+                print("# 整理介入: 有効（N発話到達時にLLMで価値判定）", flush=True)
                 # --- 議題未指定なら冒頭アジェンダ自動検出（S3） ---
                 if not _explicit_agenda:
                     threading.Thread(target=_run_agenda_detector,

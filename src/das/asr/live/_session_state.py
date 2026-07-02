@@ -13,6 +13,7 @@ import threading
 import time
 from collections.abc import Callable
 from types import SimpleNamespace
+from typing import Any
 
 from ._constants import (
     _MANUAL_CALL_MAX_CHARS,
@@ -114,6 +115,10 @@ class SessionState:
         # 手動呼び出しキュー（Phase1）。UI/音声から明示的にファシリテーターを呼ぶ。
         # {"request": str, "source": "ui"|"voice", "created_at": monotonic} を積む。
         self.manual_call_requests: queue.Queue[dict] = queue.Queue()
+        # 整理介入（summarize）の要求キュー（C3）。_run_structuring_checker が
+        # 「今、整理が価値を足す」とLLM判定したときだけ {"focus": str} を積む。
+        # _run_agent_worker が裁定して trigger する（count の無条件介入を置換）。
+        self.summarize_requests: queue.Queue[dict[str, Any]] = queue.Queue()
         # 直近の手動呼び出しの進行状況（UX観測用, UI表示）。
         # {"status": queued|waiting|dispatched|delivered|expired|cancelled,
         #  "detail", "source", "request", "at", "wait_sec"} または None。
@@ -636,7 +641,7 @@ class SessionState:
         self._last_utt_time[0] = time.monotonic()
         self._was_in_echo[0] = False
         for q in (self.drift_requests, self.invite_requests, self.factcheck_requests,
-                  self.manual_call_requests):
+                  self.manual_call_requests, self.summarize_requests):
             while True:
                 try:
                     q.get_nowait()

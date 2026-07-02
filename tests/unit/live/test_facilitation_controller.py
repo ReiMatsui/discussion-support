@@ -54,9 +54,10 @@ def _manual(now, *, request="ここまで整理して", expires_at=0.0):
         payload={"request": request, "source": "ui"})
 
 
-def _count(now):
-    return InterventionCandidate(id="count", kind="count", brief="10発話が蓄積",
-                                 created_at=now)
+def _summarize(now, *, focus="論点の整理"):
+    return InterventionCandidate(id="summarize", kind="summarize", brief=focus,
+                                 created_at=now, retryable=True,
+                                 payload={"focus": focus})
 
 
 # ---------------------------------------------------------------------------
@@ -140,13 +141,13 @@ def test_confidence_score_mapping():
 # manual（手動呼び出し）の採否
 # ---------------------------------------------------------------------------
 
-def test_manual_preferred_over_count_and_invite():
+def test_manual_preferred_over_summarize_and_invite():
     now = time.monotonic()
     c = FacilitationController()
-    d = c.arbitrate(_inp([_count(now), _manual(now)], now=now))
+    d = c.arbitrate(_inp([_summarize(now), _manual(now)], now=now))
     assert d.candidate_id == "manual"
     assert d.deadline_ms == 3000
-    assert any(s["candidate_id"] == "count" for s in d.suppressed)
+    assert any(s["candidate_id"] == "summarize" for s in d.suppressed)
 
 
 def test_fact_preferred_over_manual():
@@ -233,12 +234,22 @@ def test_build_candidates_does_not_mutate_pending():
     assert pend.invite == "参加者B"
 
 
-def test_build_candidates_count_when_threshold_reached():
+def test_build_candidates_summarize_from_pending():
+    """summarize 候補は pending.summarize（価値判定済み）からのみ生成される（C3）."""
     now = time.monotonic()
     pend = _PendingInterventions()
-    agent = _FakeAgent(pending_count=10, trigger_n=10)
-    cands = _build_candidates(pend, agent, now=now)
-    assert any(c.kind == "count" for c in cands)
+    pend.summarize = {"focus": "論点の整理", "created_at": now}
+    cands = _build_candidates(pend, _FakeAgent(pending_count=10, trigger_n=10), now=now)
+    summarize = [c for c in cands if c.kind == "summarize"]
+    assert summarize and summarize[0].payload["focus"] == "論点の整理"
+
+
+def test_build_candidates_no_summarize_without_pending():
+    """pending.summarize が無ければ、pending_count が閾値超でも summarize は出ない."""
+    now = time.monotonic()
+    pend = _PendingInterventions()
+    cands = _build_candidates(pend, _FakeAgent(pending_count=10, trigger_n=10), now=now)
+    assert all(c.kind != "summarize" for c in cands)
 
 
 def test_build_candidates_includes_conversation_and_silence():
@@ -345,11 +356,11 @@ def test_review_recorder_logs_decision_and_dedupes():
     pend.last_drift_request_at = now
     runner.evaluate(state, pending=pend, agent=agent, now=now,
                     silence_elapsed=5.0, epoch=1, recent_interventions=[],
-                    legacy={"reason": "count", "detail": "10発話"})
+                    legacy={"reason": "summarize", "detail": "論点の整理"})
     assert len(state.reviews) == 2
     rec = state.reviews[1]
     assert rec["controller_decision"]["candidate_id"] == "drift"
-    assert rec["legacy_decision"]["reason"] == "count"
+    assert rec["legacy_decision"]["reason"] == "summarize"
     assert "latency_ms" in rec
     assert rec["candidates"][0]["kind"] == "drift"
 
@@ -521,11 +532,13 @@ def _normal(agent, pending, **kw):
                                        agent=agent, **defaults)
 
 
-def test_normal_adapter_count_before_invite():
+def test_normal_adapter_summarize_before_invite():
     agent = _FakeAgent(pending_count=10, trigger_n=10)
-    pend = _PendingInterventions(invite="参加者B")
+    pend = _PendingInterventions(invite="参加者B",
+                                 summarize={"focus": "論点の整理"})
     decision, _ctrl, _cands, _latency = _normal(agent, pend)
-    assert decision.reason == "count"
+    assert decision.reason == "summarize"
+    assert decision.summary_focus == "論点の整理"
 
 
 def test_normal_adapter_invite_fires_with_target():

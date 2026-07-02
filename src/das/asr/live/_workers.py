@@ -2,7 +2,7 @@
 
 ログ接頭辞の規約（Phase 3 R4）:
   # [state]   ... エージェントの状態遷移（RESPONDING/SPEAKING/INTERRUPTED/IDLE等）
-  # [trigger] ... ファシリテーターのトリガー理由（drift/retry/count/silence/invite/skip）
+  # [trigger] ... ファシリテーターのトリガー理由（drift/retry/summarize/silence/invite/skip）
   # [drift]   ... 並列ドリフト（脱線）検出の動作
   # [diag]    ... 定期的な状態ダンプ・スキップ理由などの診断
 """
@@ -16,7 +16,7 @@ import re
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -46,6 +46,7 @@ from ._constants import (
     _MANUAL_CALL_MAX_CHARS,
     _MANUAL_CALL_TTL,
     _PARTIAL_FLOOR_MAX_AGE,
+    _STRUCTURING_WINDOW,
     _TRIAGE_BACKLOG_MAX,
     _TRIAGE_CONTEXT_WINDOW,
     _TRIAGE_MAX_RETRIES,
@@ -191,6 +192,7 @@ class _PendingInterventions:
         default_factory=lambda: collections.deque(maxlen=5))
     invite: str | None = None
     manual_call: dict | None = None
+    summarize: dict[str, Any] | None = None
 
     def drain(self, state: SessionState, *, now: float) -> None:
         """各監視ワーカーのキューを回収し、保留状態に反映する."""
@@ -228,6 +230,15 @@ class _PendingInterventions:
                     self.manual_call.setdefault("created_at", now)
                 except queue.Empty:
                     break
+        summarize_q = getattr(state, "summarize_requests", None)
+        if summarize_q is not None:
+            while True:
+                try:
+                    # 最新の整理要求だけを保持する（採択されるまで drain で維持）。
+                    self.summarize = summarize_q.get_nowait()
+                    self.summarize.setdefault("created_at", now)
+                except queue.Empty:
+                    break
 
     def drop_stale_manual(self, *, now: float) -> dict | None:
         """会話タイミングを外した古い手動呼び出しを破棄する（TTL）.
@@ -257,6 +268,7 @@ class _PendingInterventions:
         self.facts.clear()
         self.invite = None
         self.manual_call = None
+        self.summarize = None
 
     def drop_stale_facts(self, *, now: float) -> None:
         """会話タイミングを外した古い事実補正を破棄する."""
@@ -302,6 +314,7 @@ class _NormalTriggerDecision:
     detail: str = ""
     invite_target: str | None = None
     drift_reason: str | None = None
+    summary_focus: str | None = None
 
 
 def _intervention_timing_metadata(
@@ -401,15 +414,18 @@ def _build_candidates(
             retryable=True,
         ))
 
-    if (mode != "conversation"
-            and getattr(agent, "pending_count", 0) >= getattr(agent, "trigger_n", 0)
-            and getattr(agent, "trigger_n", 0) > 0):
+    if mode != "conversation" and pending.summarize:
+        s = pending.summarize
+        focus = str(s.get("focus") or "").strip()
+        created = float(s.get("created_at", now))
         cands.append(InterventionCandidate(
-            id="count",
-            kind="count",
-            brief=f"{agent.pending_count}発話が蓄積",
-            created_at=now,
+            id="summarize",
+            kind="summarize",
+            brief=focus or "議論の整理",
+            created_at=created,
             interrupt_policy="wait_for_pause",
+            retryable=True,
+            payload={"focus": focus},
         ))
 
     if mode == "conversation" and getattr(agent, "pending_count", 0) > 0:
@@ -617,7 +633,7 @@ class _InterventionReviewRecorder:
 # 候補集合から「採否」だけを決める（固定優先順位の置換, Phase2）。
 _BARGEIN_KINDS = ("fact", "manual", "drift", "retry")
 # Phase3: stall は廃止（Speaker から「介入不要」判断を外したため）。
-_NORMAL_KINDS = ("count", "silence", "invite", "conversation")
+_NORMAL_KINDS = ("summarize", "silence", "invite", "conversation")
 
 
 def _suppressed_for(
@@ -786,9 +802,10 @@ def _controller_normal_decision(
     if chosen.kind == "conversation":
         return (_NormalTriggerDecision("conversation", f"沈黙{silence_elapsed:.1f}秒"),
                 decision, cands, latency_ms)
-    if chosen.kind == "count":
+    if chosen.kind == "summarize":
         return (_NormalTriggerDecision(
-            "count", f"{agent.pending_count}>={agent.trigger_n}発話"), decision, cands, latency_ms)
+            "summarize", chosen.brief, summary_focus=str(chosen.payload.get("focus", ""))),
+            decision, cands, latency_ms)
     if chosen.kind == "silence":
         thresh = float(chosen.payload.get("pause_required", 0.0))
         return (_NormalTriggerDecision(
@@ -1284,6 +1301,64 @@ def _run_participation_checker(state: SessionState, oai_key: str, oai_model: str
             print("# [invite] → 声かけ要求をキューに投入", flush=True)
 
 
+def _run_structuring_checker(state: SessionState, oai_key: str,
+                             oai_model: str) -> None:
+    """整理介入の価値判定チェッカー（C3, count の無条件介入を置換）.
+
+    「N発話たまったら無条件に介入」をやめ、pending_count が trigger_n に達し、
+    かつ前回判定時から発話が進んでいる時だけ、LLMに「今、短い整理の介入が議論に
+    価値を足すか」を判定させる。intervene=true のときだけ state.summarize_requests
+    に focus を積む。実際の発話タイミングは _run_agent_worker が裁定する。
+
+    「なぜ黙ったか」の追跡は本研究の核なので、false 判定もログに1行残す。
+    """
+    from das.asr.live._bootstrap import check_summary_value as _check
+
+    _last_judged_count = 0
+    while not state.stop.is_set():
+        time.sleep(1)
+        agent = state.agent
+        if not oai_key or agent is None or not agent.enabled:
+            continue
+        if not _intervention_enabled(state):
+            continue
+        if agent.mode == "conversation":
+            continue
+        pending_count = getattr(agent, "pending_count", 0)
+        trigger_n = getattr(agent, "trigger_n", 0)
+        if trigger_n <= 0 or pending_count < trigger_n:
+            continue
+        # 同じ蓄積量での再判定の連打を防ぐ（発話が進んだ時だけ判定する）。
+        if pending_count <= _last_judged_count:
+            continue
+        _last_judged_count = pending_count
+        with state.state_lock:
+            epoch = state.meeting_epoch
+            talk_rs = intervention_records([
+                r for r in state.records
+                if "speaker" in r and r.get("text")
+                and r.get("speaker") != AGENT_SPEAKER
+            ])
+        with state.topics_lock:
+            topics = list(state.topics) if state.topics else []
+        window = talk_rs[-_STRUCTURING_WINDOW:]
+        utts = [{"speaker": intervention_speaker_name(state, r), "text": r["text"]}
+                for r in window]
+        result = _check(utts, topics, oai_key, oai_model)
+        if not result.get("intervene"):
+            # 「なぜ黙ったか」を追跡できるよう、見送りも1行残す。
+            print("# [structuring] skip: 介入価値なし", flush=True)
+            continue
+        focus = str(result.get("focus") or "").strip()
+        # キュー投入（副作用）の直前で epoch 再確認（H2）: リセット跨ぎを破棄。
+        with state.state_lock:
+            if state.meeting_epoch != epoch:
+                continue
+        _print_line(f"# 🧭 整理介入の価値あり: {focus or '（焦点なし）'}")
+        state.summarize_requests.put({"focus": focus})
+        print("# [structuring] → 整理介入の要求をキューに投入", flush=True)
+
+
 def _on_agent_text_factory(state: SessionState):
     """ファシリテーター発言コールバックを生成."""
     def _on_agent_text(text: str):
@@ -1539,7 +1614,8 @@ def _run_agent_worker(state: SessionState):
                 _set_manual_status(state, "cancelled", detail="介入オフのため破棄")
             _pending.clear_all()
             for q in (state.drift_requests, state.invite_requests,
-                      state.factcheck_requests, state.manual_call_requests):
+                      state.factcheck_requests, state.manual_call_requests,
+                      state.summarize_requests):
                 while True:
                     try:
                         q.get_nowait()
@@ -1841,19 +1917,22 @@ def _run_agent_worker(state: SessionState):
             _log_intervention_event(state, "conversation", normal_decision.detail)
             agent.trigger()
             _note_intervention(time.monotonic(), "conversation", normal_decision.detail)
-        elif normal_decision.reason == "count":
+        elif normal_decision.reason == "summarize":
             timing = _intervention_timing_metadata(
-                kind="count",
+                kind="summarize",
                 now=time.monotonic(),
                 silence_elapsed=_silence_elapsed,
-                pause_required=policy_for("count").pause,
-                policy="turn_count_pause",
+                pause_required=policy_for("summarize").pause,
+                policy="structuring_value",
             )
-            print(f"# [trigger] count: {normal_decision.detail}", flush=True)
-            _log_intervention_event(state, "count", normal_decision.detail, timing=timing)
-            agent.trigger(topics=_topics)
+            print(f"# [trigger] summarize: {normal_decision.detail}", flush=True)
+            _log_intervention_event(
+                state, "summarize", normal_decision.detail, timing=timing)
+            agent.trigger(topics=_topics,
+                          summary_focus=normal_decision.summary_focus)
             _last_intervention_at = time.monotonic()
-            _note_intervention(_last_intervention_at, "count", normal_decision.detail)
+            _pending.summarize = None   # 採択したら消費（drainで再取得しない）
+            _note_intervention(_last_intervention_at, "summarize", normal_decision.detail)
         elif normal_decision.reason == "silence":
             timing = _intervention_timing_metadata(
                 kind="silence",

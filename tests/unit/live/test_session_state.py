@@ -25,6 +25,14 @@ def test_seed_topic_adds_when_empty():
     assert s.topics[0]["speaker"] == "議題"
 
 
+def test_reset_drains_summarize_requests():
+    """会議リセットで整理介入の要求キューも drain される（C3）."""
+    s = _make_state()
+    s.summarize_requests.put({"focus": "論点の整理"})
+    s.reset_for_new_meeting()
+    assert s.summarize_requests.empty()
+
+
 def test_delivery_event_includes_timing(tmp_path):
     """delivery イベントに speak_start_latency_ms などの timing を残せる（Phase4観測）."""
     import json
