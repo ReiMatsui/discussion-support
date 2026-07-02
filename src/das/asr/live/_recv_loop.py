@@ -78,6 +78,36 @@ class RecvLoop:
         partner = s.partner
         # 相槌（「はい」等）は声紋の人物確定に使わず、UIでも薄く折りたためるよう印を付ける
         _is_backchannel = bool(_BACKCHANNEL_RE.match(self.cur_text.strip()))
+        # --- テキスト類似度エコー判定（安全網, F2で前倒し） ---
+        # 声紋トラッカーの副作用（文字数蓄積・自動登録）より前に評価する。エコーと
+        # 判定したら classify を呼ばずに破棄し、漏れ込んだAI音声で匿名話者が蓄積・
+        # 自動登録されるのを防ぐ（D2）。判定に必要なのは cur_text と agent/partner
+        # だけで、声紋判定への依存はない。
+        for _src_name, _src in [("agent", agent), ("partner", partner)]:
+            if _src is None:
+                continue
+            if _src_name == "agent" and not _src.in_echo_window:
+                continue
+            sim = _src._best_similarity(self.cur_text)
+            if sim > 0.35:
+                if self.args.vp_debug:
+                    _print_line(f"# テキスト安全網エコー除去({_src_name})"
+                                f" sim={sim:.2f}"
+                                f" ({self.cur_text.strip()[:40]}...)")
+                # 破棄した発話も echo_drop として diag に1行残す（「記録が無いのに
+                # 登録通知だけある」状態を後から追えるようにする）。
+                with contextlib.suppress(OSError), \
+                        open(s.diag_path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps({
+                        "ms": self.cur_ms, "end": self.cur_end,
+                        "type": "echo_drop", "src": _src_name,
+                        "sim": round(sim, 3),
+                        "text": self.cur_text.strip()[:40],
+                    }, ensure_ascii=False, default=str) + "\n")
+                self.cur_text = ""
+                self.cur_ms = None
+                self.cur_end = None
+                return
         if tracker is not None:
             if self.cur_ms is not None and self.cur_end is not None and self.cur_end > self.cur_ms:
                 with s.buf_lock:
@@ -94,11 +124,22 @@ class RecvLoop:
                 d = None
                 rec_extra: dict[str, object] = {}
             else:
-                # 登録は声ごとの累積文字数で判定するので、この発話の文字数を渡す
+                # 登録は声ごとの累積文字数で判定するので、この発話の文字数を渡す。
+                # F2: エコー窓中（AIが発話中/直後）は count=False で蓄積・自動登録を
+                # 抑止する。室内音響でAI声紋照合(AI_THRESH)が外れた漏れ込みが「新規
+                # 話者の蓄積」に化けるのを塞ぐ。話者判定自体は従来どおり行う。正当な
+                # 人間発話の登録がエコー窓ぶん遅れるのは許容（登録は累積制のため軽微）。
+                _ai_active = (
+                    (agent is not None
+                     and (agent.ai_speaking or agent.in_echo_window))
+                    or (partner is not None
+                        and (partner.ai_speaking or partner.in_echo_window))
+                )
                 sp_id = tracker.classify(
                     wav, self.cur_speaker,
                     overlapped=self.overlaps_other(self.cur_ms, self.cur_end, label),
-                    count=not _is_backchannel, chars=len(self.cur_text.strip()))
+                    count=(not _is_backchannel) and not _ai_active,
+                    chars=len(self.cur_text.strip()))
                 d = tracker.last
                 rec_extra: dict[str, object] = {}
             # --- 声紋ベースのAIエコー除去 ---
@@ -176,22 +217,6 @@ class RecvLoop:
                 rec_extra["speaker_source"] = "stt_fallback"
                 rec_extra["speaker_confidence"] = 0.0
                 rec_extra["speaker_reason"] = "diarization_no_confident_overlap_stt_fallback"
-        # --- テキスト類似度エコー判定（安全網） ---
-        for _src_name, _src in [("agent", agent), ("partner", partner)]:
-            if _src is None:
-                continue
-            if _src_name == "agent" and not _src.in_echo_window:
-                continue
-            sim = _src._best_similarity(self.cur_text)
-            if sim > 0.35:
-                if self.args.vp_debug:
-                    _print_line(f"# テキスト安全網エコー除去({_src_name})"
-                                f" sim={sim:.2f}: sp={sp_id}"
-                                f" ({self.cur_text.strip()[:40]}...)")
-                self.cur_text = ""
-                self.cur_ms = None
-                self.cur_end = None
-                return
         if self.cur_ms is not None and self.cur_end is not None:
             self.recent_segs.append((self.cur_ms, self.cur_end, label))
             del self.recent_segs[:-12]
