@@ -627,6 +627,8 @@ def test_detect_facilitator_call_accepts_explicit_calls():
         "AI、Aさんにも意見を聞いて": "Aさんにも意見を聞いて",
         "ファシリテーター、話を戻して": "話を戻して",
         "AIさん、今の論点をまとめて": "今の論点をまとめて",
+        "ファシリテーター ここまで整理して": "ここまで整理して",
+        "AIさん今の論点をまとめて": "今の論点をまとめて",
     }
     for text, expected in cases.items():
         assert _detect_facilitator_call(text) == expected, text
@@ -643,6 +645,8 @@ def test_detect_facilitator_call_rejects_meta_and_mentions():
         "ファシリテーターさん",        # 呼びかけのみ・依頼なし
         "AI、便利だね",               # 呼びかけ+依頼なし
         "AIは便利です",
+        "AI、次郎さんの件です",        # 「次」を含む人名で誤爆しない
+        "ファシリテーター機能を確認しましょう",
     ]
     for text in negatives:
         assert _detect_facilitator_call(text) is None, text

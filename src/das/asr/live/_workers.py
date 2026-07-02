@@ -170,13 +170,17 @@ def _looks_like_fact_claim(text: str) -> bool:
 # 明示呼称（ファシリテーターへの呼びかけ）。冒頭でこれらが「呼びかけ」として
 # 使われている時だけ手動呼び出しの候補にする（話題としての言及は除外）。
 _FACIL_NAMES = r"(?:ファシリテーター|進行役|エーアイ|ＡＩ|AI)"
-# 呼びかけ判定: 冒頭の 称呼 の直後が「さん」または読点/空白（＝呼びかけの区切り）。
-# 「AIについて」「ファシリテーター機能」「進行役は」のような話題化は境界が無く弾かれる。
+# 呼びかけ判定: 冒頭の称呼を拾う。STTは句読点を落とすことがあるため、
+# 呼称直後の「さん」/読点/空白は任意にし、後段の依頼表現で誤爆を抑える。
 _CALL_VOCATIVE_RE = re.compile(
-    rf"^\s*{_FACIL_NAMES}(?:さん[、,，\s]*|[、,，]\s*)")
+    rf"^\s*{_FACIL_NAMES}(?:さん)?(?:[、,，\s]*)")
 # 依頼表現（保守的）。呼びかけの後にこれが無ければメタ言及・質問として発火しない。
 _CALL_REQUEST_RE = re.compile(
-    r"(まとめ|整理|確認|次|聞いて|振って|戻して|助けて)")
+    r"(まとめ|整理|確認|聞いて|振って|戻して|助けて|"
+    r"次(?:に|は|を|どう|何|の|へ|決め|進め|回|[、,，\s]|$))")
+# 呼称直後にこれらが来る場合は、呼びかけではなく話題化として扱う。
+_CALL_META_PREFIX_RE = re.compile(
+    r"^(?:について|機能|導入|は|が|を|の|も|って|とは|では)")
 
 
 def _detect_facilitator_call(text: str) -> str | None:
@@ -192,7 +196,9 @@ def _detect_facilitator_call(text: str) -> str | None:
     m = _CALL_VOCATIVE_RE.match(s)
     if m is None:
         return None  # 冒頭の明示的な呼びかけが無い（話題化・別位置の言及）
-    rest = s[m.end():].strip(" 　、,，。.！!？?")
+    rest = re.sub(r"\s+", " ", s[m.end():]).strip(" 　、,，。.！!？?")
+    if _CALL_META_PREFIX_RE.match(rest):
+        return None  # 呼びかけではなく「AIについて」「進行役は」等の話題化
     if not _CALL_REQUEST_RE.search(rest):
         return None  # 依頼表現が無い（メタ話題・質問など）
     return rest[:_MANUAL_CALL_MAX_CHARS]
