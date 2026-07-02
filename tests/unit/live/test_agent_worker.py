@@ -9,7 +9,9 @@ import queue
 import threading
 import time
 
+from das.asr.live._constants import _DRIFT_PENDING_TTL
 from das.asr.live._workers import (
+    _build_candidates,
     _detect_facilitator_call,
     _detect_facilitator_call_ex,
     _log_intervention_event,
@@ -961,6 +963,62 @@ def test_single_drift_request_is_held_until_confirmed():
 
     assert agent.trigger_calls == []
     assert state.intervention_events == []
+
+
+def test_unconfirmed_drift_does_not_starve_other_interventions():
+    """確認待ちの脱線候補が hold でも、通常レーンの介入は飢餓しない（C1回帰）.
+
+    drift_confirmations=2 で単発検出の drift が保留のまま残っても、
+    発話数トリガー（count）は自身の pause を満たせば発火するべき。
+    """
+    agent = FakeAgent()
+    agent._pending = [{"speaker": "人間", "text": str(i), "_count": True}
+                      for i in range(agent.trigger_n)]
+    state = FakeState(agent, None)
+    state.proactivity = {"silence_summarize": None, "cooldown": 40.0,
+                         "drift_confirmations": 2}
+    state.drift_requests.put("地元の雑談")   # 単発 → 確認待ちで採択されない
+
+    _run_worker_briefly(state, until=lambda: bool(agent.trigger_calls))
+
+    assert agent.trigger_calls, "確認待ちdriftの保留中も count は発火するべき"
+    assert state.intervention_events
+    assert state.intervention_events[0]["reason"] == "count"
+
+
+def test_stale_pending_drift_is_dropped_after_ttl():
+    """確認待ちのまま古くなった脱線候補は TTL で破棄される（C1回帰）."""
+    now = time.monotonic()
+    pending = _PendingInterventions(drift_reason="地元の雑談", drift_count=1)
+    pending.last_drift_request_at = now - (_DRIFT_PENDING_TTL + 1.0)
+
+    pending.drop_stale_drift(now=now)
+
+    assert pending.drift_reason is None
+    assert pending.drift_count == 0
+
+
+def test_fresh_pending_drift_is_kept():
+    """寿命内の脱線候補は破棄されない."""
+    now = time.monotonic()
+    pending = _PendingInterventions(drift_reason="地元の雑談", drift_count=1)
+    pending.last_drift_request_at = now - 5.0
+
+    pending.drop_stale_drift(now=now)
+
+    assert pending.drift_reason == "地元の雑談"
+
+
+def test_drift_candidate_carries_expiry():
+    """drift 候補にも expires_at が付き、Controller の期限切れ判定に乗る."""
+    agent = FakeAgent()
+    pending = _PendingInterventions(drift_reason="地元の雑談", drift_count=1)
+    pending.last_drift_request_at = 100.0
+
+    cands = _build_candidates(pending, agent, now=105.0)
+
+    drift = next(c for c in cands if c.kind == "drift")
+    assert drift.expires_at == 100.0 + _DRIFT_PENDING_TTL
 
 
 def test_count_trigger_records_intervention_reason():

@@ -33,6 +33,7 @@ from ._constants import (
     _BACKCHANNEL_RE,
     _DRIFT_CHECK_INTERVAL,
     _DRIFT_CHECK_WINDOW,
+    _DRIFT_PENDING_TTL,
     _DRIFT_WARMUP,
     _FACTCHECK_CHECK_SEC,
     _FACTCHECK_COOLDOWN,
@@ -384,6 +385,21 @@ class _PendingInterventions:
             print(f"# [trigger] skip: 古い事実補正を破棄 {stale.get('correction', '')}",
                   flush=True)
 
+    def drop_stale_drift(self, *, now: float) -> None:
+        """確認待ちのまま古くなった脱線候補を破棄する（TTL）.
+
+        drift は確認回数（drift_confirmations）に達するまで採択されない。
+        1回だけ検出されて会話が自然に本題へ戻った場合、候補が無期限に残ると
+        全介入レーンの飢餓を招くため、寿命を過ぎたら忘れる。
+        """
+        if self.drift_reason is None:
+            return
+        age = now - self.last_drift_request_at
+        if age > _DRIFT_PENDING_TTL:
+            print(f"# [trigger] skip: 古い脱線候補を破棄（{age:.0f}秒経過）",
+                  flush=True)
+            self.clear_drift()
+
     def clear_drift(self) -> None:
         self.drift_reason = None
         self.drift_count = 0
@@ -618,11 +634,13 @@ def _build_candidates(
         ))
 
     if pending.drift_reason:
+        drift_created = float(pending.last_drift_request_at or now)
         cands.append(InterventionCandidate(
             id="drift",
             kind="drift",
             brief=str(pending.drift_reason),
-            created_at=float(pending.last_drift_request_at or now),
+            created_at=drift_created,
+            expires_at=drift_created + _DRIFT_PENDING_TTL,
             interrupt_policy="wait_for_pause",
             retryable=True,
             payload={"drift_count": pending.drift_count},
@@ -898,6 +916,7 @@ def _controller_barge_in_decision(
     Controller の eligibility が判定する（§4）。
     """
     pending.drop_stale_facts(now=now)  # fast lane: 古い事実補正は破棄（鮮度維持）
+    pending.drop_stale_drift(now=now)  # 確認待ちのまま古い脱線候補は破棄（TTL）
     expired_manual = pending.drop_stale_manual(now=now)  # 古い手動呼び出しは破棄（TTL）
     if expired_manual is not None:
         # 「呼んだのに反応しなかった」を後から追えるよう trigger ログに残す。
@@ -1707,8 +1726,10 @@ def _run_agent_worker(state: SessionState):
                         partner_present=partner is not None,
                         last_invited=_last_invited,
                     )
-            if decision.reason == "hold":
-                continue
+            # hold は「barge-in レーンに今すぐ話せる候補が無い」だけを意味する。
+            # continue で通常レーン（count/silence/invite）ごと止めると、確認待ち
+            # の drift 候補1件で他の介入が無期限に飢餓する（C1）。none と同様に
+            # フォールスルーし、通常レーンは自身の pause/cooldown で判断させる。
             if decision.reason == "fact" and decision.fact is not None:
                 correction = str(decision.fact.get("correction") or "").strip()
                 timing = _intervention_timing_metadata(
