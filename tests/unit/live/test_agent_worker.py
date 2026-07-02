@@ -33,6 +33,7 @@ class FakeAgent:
         self.feeds: list[tuple[str, str]] = []
         self.trigger_calls: list[dict] = []
         self.connect_calls = 0
+        self.interrupts = 0
 
     @property
     def pending_count(self) -> int:
@@ -53,8 +54,8 @@ class FakeAgent:
         self._pending_intervention = None
         self._pending.clear()
 
-    def interrupt(self) -> None:  # pragma: no cover
-        pass
+    def interrupt(self) -> None:
+        self.interrupts += 1
 
     def connect(self) -> None:
         self.connect_calls += 1
@@ -912,3 +913,31 @@ def test_event_worker_speech_start_interrupts_partner():
     state.fac_events.put(("speech_start", None))
     _run_event_worker_briefly(state, lambda t: None, until=lambda: p.interrupts > 0)
     assert p.interrupts == 1
+
+
+# ---------------------------------------------------------------------------
+# 未確定話者の割り込み（C1）: 声紋が確定しない発話でもAIを止められる
+# ---------------------------------------------------------------------------
+
+def test_unconfirmed_speaker_interrupts_ai():
+    """speaker='?'（未確定）の長い発話でも、AI発話中なら interrupt される."""
+    agent = FakeAgent()
+    agent.ai_speaking = True
+    state = FakeState(agent, None)
+    state.records = [{"speaker": "?", "text": "ちょっと待ってほしいのですが"}]
+
+    _run_worker_briefly(state, until=lambda: agent.interrupts > 0)
+
+    assert agent.interrupts == 1
+
+
+def test_unconfirmed_speaker_not_fed_to_agent():
+    """未確定話者の発話は割り込み判定には使うが、agent.feed には流さない."""
+    agent = FakeAgent()
+    agent.ai_speaking = True
+    state = FakeState(agent, None)
+    state.records = [{"speaker": "?", "text": "ちょっと待ってほしいのですが"}]
+
+    _run_worker_briefly(state, until=lambda: agent.interrupts > 0)
+
+    assert agent.feeds == []

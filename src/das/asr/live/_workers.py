@@ -1492,8 +1492,10 @@ def _run_agent_worker(state: SessionState):
                        and r.get("speaker") not in _skip]
         n = len(talk_rs)
         if n > state.agent_cursor:
-            new_records = intervention_records(talk_rs[state.agent_cursor:])
-            new_texts = [r.get("text", "") for r in new_records]
+            # raw スライス（話者未確定も含む）: 割り込み判定はこちらを使う。
+            # 「遮る場面ほど帰属が壊れ、止まらない」問題への対処（C1）。
+            _raw_new = talk_rs[state.agent_cursor:]
+            new_records = intervention_records(_raw_new)
             # 発話供給（副作用）の直前で epoch 確認（H2）。リセットを跨いだら、
             # 古い会議の発話を新しい agent に流さないようこのtickを破棄する。
             with state.state_lock:
@@ -1513,12 +1515,15 @@ def _run_agent_worker(state: SessionState):
                     continue
                 state.agent_cursor = n
             # --- 自動割り込み ---
+            # 発話の存在は話者未確定でも確実なので raw スライスで判定する。
+            # 8文字超の相槌は稀なので backchannel 除外は不要。
+            _raw_texts = [str(r.get("text", "")) for r in _raw_new]
             _human_spoke = any(len(t.strip()) > _INTERRUPT_MIN_CHARS
-                               for t in new_texts)
+                               for t in _raw_texts)
             if _human_spoke and agent.ai_speaking:
                 agent.interrupt()
             if partner is not None and (partner.ai_speaking or partner._responding):
-                _real_utterances = [t.strip() for t in new_texts
+                _real_utterances = [t.strip() for t in _raw_texts
                                     if t.strip()
                                     and not _BACKCHANNEL_RE.match(t.strip())]
                 if _real_utterances:
