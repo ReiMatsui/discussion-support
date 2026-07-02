@@ -16,6 +16,7 @@ import contextlib
 from ._constants import _BACKCHANNEL_RE, RESET, UNSURE_SPEAKER, fmt_ts
 from ._diarization import TimeSegment
 from ._ui import _print_line
+from ._voice_profiles import _best_text_similarity
 
 _VOICEPRINT_RELIABLE_KINDS = {"声紋一致", "補正", "自動登録", "合流"}
 _UNKNOWN_STT_SPEAKERS = {"", "none", "null", "unknown", "uu", UNSURE_SPEAKER}
@@ -110,6 +111,28 @@ class RecvLoop:
                     f.write(json.dumps({
                         "ms": self.cur_ms, "end": self.cur_end,
                         "type": "echo_drop", "src": _src_name,
+                        "sim": round(sim, 3),
+                        "text": self.cur_text.strip()[:40],
+                    }, ensure_ascii=False, default=str) + "\n")
+                self.cur_text = ""
+                self.cur_ms = None
+                self.cur_end = None
+                return
+        # パートナー切断直後もエコー参照を短時間保持する（P2-4）。partner が None に
+        # なってもテキスト安全網が効くよう、TTL 内の退役テキストとも照合する。
+        _retired = s.recent_retired_echo_texts()
+        if _retired:
+            sim = _best_text_similarity(self.cur_text.strip(), _retired)
+            if sim > 0.35:
+                if self.args.vp_debug:
+                    _print_line(f"# テキスト安全網エコー除去(retired)"
+                                f" sim={sim:.2f}"
+                                f" ({self.cur_text.strip()[:40]}...)")
+                with contextlib.suppress(OSError), \
+                        open(s.diag_path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps({
+                        "ms": self.cur_ms, "end": self.cur_end,
+                        "type": "echo_drop", "src": "retired",
                         "sim": round(sim, 3),
                         "text": self.cur_text.strip()[:40],
                     }, ensure_ascii=False, default=str) + "\n")

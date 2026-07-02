@@ -1516,6 +1516,10 @@ def _detach_partner(state: SessionState):
     p = state.partner
     if p is None:
         return
+    # 切断でテキストエコー防御が即消えるのを防ぐ（P2-4）。直前の応答テキストを
+    # TTL 内だけ退役エコー参照に残す。声紋 __PARTNER__ は tracker 側に残るため対応不要。
+    with contextlib.suppress(Exception):
+        state.add_retired_echo_texts(list(getattr(p, "_recent_ai_texts", [])))
     state.partner = None  # 先にNoneにして利用側(動的参照)を即座に切り離す
     with contextlib.suppress(Exception):
         p.close()

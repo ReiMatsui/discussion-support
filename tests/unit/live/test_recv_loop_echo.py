@@ -138,6 +138,40 @@ def test_normal_utterance_outside_echo_window_counts_normally(tmp_path):
     assert state.records[0]["text"] == "これは普通の発言です"
 
 
+def test_retired_echo_texts_drop_after_partner_detach(tmp_path):
+    """partner 切断後も、TTL内の退役テキストと類似の発話はエコー破棄する（P2-4）."""
+    tracker = _RecordingTracker()
+    state = _make_state(tmp_path, tracker=tracker)
+    state.agent = None
+    state.partner = None
+    state.add_retired_echo_texts(["まず、今日の目的を確認しましょう"])
+    loop = _loop_with(state, text="まず、今日の目的を確認しましょう")
+
+    loop.flush()  # type: ignore[no-untyped-call]
+
+    assert tracker.calls == []      # classify を呼ばず破棄（蓄積・登録が起きない）
+    assert state.records == []
+    with open(state.diag_path, encoding="utf-8") as f:
+        drops = [json.loads(x) for x in f.read().splitlines()
+                 if x.strip() and json.loads(x).get("type") == "echo_drop"]
+    assert drops and drops[0]["src"] == "retired"
+
+
+def test_retired_echo_texts_do_not_drop_dissimilar(tmp_path):
+    """退役テキストと似ていない通常発話は、切断後も従来どおり処理される（P2-4）."""
+    tracker = _RecordingTracker()
+    state = _make_state(tmp_path, tracker=tracker)
+    state.agent = None
+    state.partner = None
+    state.add_retired_echo_texts(["まず、今日の目的を確認しましょう"])
+    loop = _loop_with(state, text="週末は釣りに行ってきました")
+
+    loop.flush()  # type: ignore[no-untyped-call]
+
+    assert len(tracker.calls) == 1
+    assert len(state.records) == 1
+
+
 def _record_agent_interval(state, start_ms, end_ms):
     """AI再生区間を [start_ms, end_ms] で記録する（マイクmsタイムライン）."""
     state.asr_pcm_total_bytes = start_ms * 32

@@ -177,6 +177,12 @@ class SessionState:
         self._ai_speech_intervals: collections.deque[tuple[int, int, str]] = (
             collections.deque(maxlen=64))
         self._ai_speech_open: dict[str, int] = {}
+        # パートナー切断後もエコー参照を短時間保持する（P2-4）。detach で partner が
+        # None になるとテキストエコー防御が即消えるため、退役直前の応答テキストを
+        # TTL 内だけ照合対象に残す。
+        self._RETIRED_ECHO_TTL = 10.0
+        self.retired_echo_texts: collections.deque[tuple[float, str]] = (
+            collections.deque(maxlen=32))
 
         # 制御
         self.stop = threading.Event()
@@ -553,6 +559,7 @@ class SessionState:
         with self._ai_speech_lock:
             self._ai_speech_intervals.clear()
             self._ai_speech_open.clear()
+            self.retired_echo_texts.clear()
         try:
             self.pcm_file = open(self.wav_path, "wb")  # noqa: SIM115
             self.pcm_file.write(b"RIFF" + struct.pack("<I", 0) + b"WAVEfmt " +
@@ -622,6 +629,22 @@ class SessionState:
                 return
             end = max(self.current_asr_ms(), start)
             self._ai_speech_intervals.append((start, end, source))
+
+    def add_retired_echo_texts(self, texts) -> None:
+        """切断される発話元（partner等）の直近応答テキストをエコー参照に退避する（P2-4）."""
+        now = time.monotonic()
+        with self._ai_speech_lock:
+            for t in texts:
+                s = str(t).strip()
+                if s:
+                    self.retired_echo_texts.append((now, s))
+
+    def recent_retired_echo_texts(self, *, now: float | None = None) -> list[str]:
+        """TTL 内の退役エコーテキストを返す（テキスト安全網の照合対象用）."""
+        cur = time.monotonic() if now is None else now
+        with self._ai_speech_lock:
+            return [t for (ts, t) in self.retired_echo_texts
+                    if cur - ts < self._RETIRED_ECHO_TTL]
 
     def has_ai_speech_intervals(self) -> bool:
         """区間ベース判定に使える記録があるか（無ければ壁時計にフォールバック）."""
