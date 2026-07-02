@@ -30,8 +30,8 @@ class _RecordingTracker:
         self.calls: list[dict] = []
         self._ret = ret
 
-    def classify(self, wav, speaker, *, overlapped, count, chars):
-        self.calls.append({"count": count, "chars": chars})
+    def classify(self, wav, speaker, *, overlapped, count, chars, enroll=True):
+        self.calls.append({"count": count, "chars": chars, "enroll": enroll})
         return self._ret
 
 
@@ -106,19 +106,20 @@ def test_echo_drop_is_logged_to_diag(tmp_path):
     assert "まず" in drops[0]["text"]
 
 
-def test_ai_active_suppresses_registration_count(tmp_path):
-    """安全網に引っかからない(sim低)漏れ込みでも、AI発話中は count=False で蓄積・
-    自動登録を抑止する（話者判定自体は行う, D2）."""
+def test_ai_active_suppresses_registration_enroll(tmp_path):
+    """安全網に引っかからない(sim低)漏れ込みでも、AI発話中は enroll=False で蓄積・
+    自動登録を抑止する（照合・話者判定自体は count=True で行う, D2/P2-2）."""
     tracker = _RecordingTracker()
     state = _make_state(tmp_path, tracker=tracker)
-    # in_echo_window=False で安全網はスキップ、ai_speaking=True で count 抑止
+    # in_echo_window=False で安全網はスキップ、ai_speaking=True で enroll 抑止
     state.agent = _EchoAgent(in_echo=False, ai_speaking=True, sim=0.0)  # type: ignore[assignment]
     loop = _loop_with(state, text="室内に漏れ込んだ声です")
 
     loop.flush()  # type: ignore[no-untyped-call]
 
     assert len(tracker.calls) == 1
-    assert tracker.calls[0]["count"] is False
+    assert tracker.calls[0]["count"] is True     # 照合・補正は行う（P2-2）
+    assert tracker.calls[0]["enroll"] is False   # 蓄積・登録だけ止める
 
 
 def test_normal_utterance_outside_echo_window_counts_normally(tmp_path):
@@ -132,6 +133,7 @@ def test_normal_utterance_outside_echo_window_counts_normally(tmp_path):
 
     assert len(tracker.calls) == 1
     assert tracker.calls[0]["count"] is True
+    assert tracker.calls[0]["enroll"] is True
     assert len(state.records) == 1
     assert state.records[0]["text"] == "これは普通の発言です"
 
@@ -170,7 +172,8 @@ def test_late_overlap_suppresses_count_even_when_window_passed(tmp_path):
     loop.flush()  # type: ignore[no-untyped-call]
 
     assert len(tracker.calls) == 1
-    assert tracker.calls[0]["count"] is False
+    assert tracker.calls[0]["count"] is True     # 照合は行う
+    assert tracker.calls[0]["enroll"] is False   # 蓄積・登録は止める
 
 
 def test_non_overlapping_utterance_counts_despite_recorded_intervals(tmp_path):
@@ -185,4 +188,5 @@ def test_non_overlapping_utterance_counts_despite_recorded_intervals(tmp_path):
 
     assert len(tracker.calls) == 1
     assert tracker.calls[0]["count"] is True
+    assert tracker.calls[0]["enroll"] is True
     assert len(state.records) == 1

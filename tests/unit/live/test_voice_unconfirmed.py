@@ -144,6 +144,34 @@ def test_closed_roster_overlapped_speech_does_not_inherit_registered_label():
     assert vp.classify(_LONG, "2", overlapped=True, count=True, chars=60) == UNSURE_SPEAKER
 
 
+def test_enroll_false_still_matches_but_does_not_accumulate():
+    """enroll=False（エコー窓中）でも声紋一致で実名を返すが、蓄積はしない（P2-2）."""
+    vp = _tracker(_unit(1, 0, 0))      # まさに松井の声
+    assert vp.classify(_LONG, "2", count=True, enroll=False, chars=60) == "松井"
+    # 蓄積用バッファ（label_embs）にはこの発話を溜めない
+    assert vp.label_embs.get("2", []) == []
+
+
+def test_enroll_false_does_not_autoenroll_new_person():
+    """enroll=False の未知の声は、count=True で照合はするが人物Nを新規登録しない（P2-2）."""
+    vp = _tracker(_unit(0, 1, 0))      # 松井と全く違う未知の声
+    vp.n_anon = 0
+    for _ in range(4):
+        got = vp.classify(_LONG, "2", count=True, enroll=False, chars=60)
+        assert got != "人物1"          # 蓄積が進まないので自動登録されない
+    assert "人物1" not in vp.profiles
+    assert vp.n_anon == 0
+
+
+def test_enroll_true_still_accumulates_and_registers():
+    """enroll=True（通常）は従来どおり蓄積して人物Nを自動登録する（回帰）."""
+    vp = _tracker(_unit(0, 1, 0))
+    vp.n_anon = 0
+    assert vp.classify(_LONG, "2", count=True, enroll=True, chars=20) == "#2"
+    assert vp.classify(_LONG, "2", count=True, enroll=True, chars=20) == "#2"
+    assert vp.classify(_LONG, "2", count=True, enroll=True, chars=20) == "人物1"
+
+
 def test_reset_keeps_activated_named_profiles():
     """リセット後も、有効化済みの実名プロファイルは照合対象に残る（課題C2）.
 

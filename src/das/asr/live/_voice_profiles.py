@@ -356,21 +356,24 @@ class VoiceProfiles:
         return emb / np.linalg.norm(emb)
 
     def classify(self, wav: np.ndarray, sp, overlapped: bool = False,
-                 count: bool = True, chars: int = 0) -> str:
+                 count: bool = True, chars: int = 0, enroll: bool = True) -> str:
         """発話を人物キーに割り当てる（経路はクラスドキュメント参照）.
 
         overlapped=True の発話は声が混ざっていて声紋がデタラメになるため、
         声での判定をスキップして直前の対応を維持する。
-        count=False（相槌など）の発話は声紋の蓄積・人物登録に使わず、
-        既存の割り当てに追従するだけにする（課題④）。
+        count=False（相槌など）の発話は声紋の照合そのものをスキップし、既存の
+        割り当てに追従するだけにする（課題④）。
+        enroll=False（エコー窓中の人間発話など）は照合・補正は行うが、声紋の蓄積・
+        人物登録には使わない。エコー窓直後に集中する返答が声紋補正なしのラベル追従に
+        落ちるのを防ぎつつ、漏れ込んだAI音声で匿名話者が育つのは防ぐ（P2-2）。
         chars はその発話の文字数。新規人物の自動登録は、声ごとにこの文字数を
         累積し、一貫したクラスタが閾値を超えた時点で確定する（発話数では数えない）。
         """
         with self._lock:
-            return self._classify(wav, sp, overlapped, count, chars)
+            return self._classify(wav, sp, overlapped, count, chars, enroll)
 
     def _classify(self, wav: np.ndarray, sp, overlapped: bool,
-                  count: bool = True, chars: int = 0) -> str:
+                  count: bool = True, chars: int = 0, enroll: bool = True) -> str:
         sp = str(sp)
         prev = self.sp_map.get(sp)
         kind, info = "相槌追従", {}
@@ -382,8 +385,10 @@ class VoiceProfiles:
                 kind = "声紋計算不可"
             else:
                 self._update_room_stats(sp, emb)   # 部屋の同一/別人分布を実測(表示・診断用)
-                self.label_embs.setdefault(sp, []).append(emb)
-                del self.label_embs[sp][:-10]    # 手動登録用に直近10発話だけ保持
+                if enroll:
+                    # 手動登録用の直近サンプル。エコー窓中(enroll=False)は溜めない。
+                    self.label_embs.setdefault(sp, []).append(emb)
+                    del self.label_embs[sp][:-10]    # 直近10発話だけ保持
                 th, cs = self.thresh, self.consist
                 active = self._active_human()
                 info = {"n_prof": len(active), "n_all": len(self.profiles)}   # 診断ログ用
@@ -422,8 +427,8 @@ class VoiceProfiles:
                         prev = None
                 # 登録: 発話数ではなく「声ごとのクリーンな発声の累積文字数」で確定する。
                 # 長い発話は窓分割して複数サンプル化（連続発話でも登録が進み、内部一貫性も確認）。
-                kind = "蓄積中" if (self.auto and chars > 0) else "未確定"
-                if self.auto and chars > 0:
+                kind = "蓄積中" if (enroll and self.auto and chars > 0) else "未確定"
+                if enroll and self.auto and chars > 0:
                     ecs = cs + self.enroll_consist_bonus
                     samples = self._segment_samples(wav, emb, chars)
                     target = self._enroll_accumulate(samples, sp, prev, ecs)

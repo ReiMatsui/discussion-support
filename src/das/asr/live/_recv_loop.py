@@ -151,10 +151,14 @@ class RecvLoop:
                     or (partner is not None
                         and (partner.ai_speaking or partner.in_echo_window))
                 )
+                # count: 相槌は照合ごとスキップ。enroll: エコー窓中は照合・補正は
+                # するが蓄積・登録はしない（P2-2）。エコー窓直後の人間の返答が声紋
+                # 補正なしのラベル追従に落ちるのを防ぐ。
                 sp_id = tracker.classify(
                     wav, self.cur_speaker,
                     overlapped=self.overlaps_other(self.cur_ms, self.cur_end, label),
-                    count=(not _is_backchannel) and not _ai_active,
+                    count=not _is_backchannel,
+                    enroll=(not _is_backchannel) and not _ai_active,
                     chars=len(self.cur_text.strip()))
                 d = tracker.last
                 rec_extra: dict[str, object] = {}
