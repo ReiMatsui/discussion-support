@@ -135,6 +135,7 @@ def test_api_snapshot_exposes_intervention_settings():
         "trigger_n": 10,
         "model": "gpt-realtime-2",
         "agent_active": True,
+        "manual_call": None,
     }
     assert snap["intervention_events"] == [{
         "time": snap["intervention_events"][0]["time"],
@@ -909,6 +910,59 @@ def test_http_facilitator_call_queues():
         httpd.shutdown()
 
 
+def test_queue_manual_call_sets_status_and_snapshot():
+    """受付時に manual_call ステータスが queued になり、snapshot で見える."""
+    s = _make_state()
+    s.agent = _FakeAgent(mode="facilitator")
+
+    s.queue_manual_facilitator_call("ここまで整理して")
+
+    mc = s.api_snapshot()["intervention"]["manual_call"]
+    assert mc["status"] == "queued"
+    assert mc["source"] == "ui"
+    assert mc["request"] == "ここまで整理して"
+    assert mc["at"]
+    # キューの payload には wall time も残る（ログ突合用）
+    item = s.manual_call_requests.get_nowait()
+    assert "created_wall_at" in item
+
+
+def test_set_manual_call_status_dedupes_rev():
+    """同じ表示内容の更新では rev を上げない（SSE洪水防止）."""
+    s = _make_state()
+    s.set_manual_call_status("waiting", detail="発話の切れ目待ち", wait_sec=3.2)
+    rev = s.rev
+    s.set_manual_call_status("waiting", detail="発話の切れ目待ち", wait_sec=3.4)
+    assert s.rev == rev            # 丸め後の表示が同じ → 変化なし
+    s.set_manual_call_status("waiting", detail="発話の切れ目待ち", wait_sec=4.6)
+    assert s.rev == rev + 1        # 秒が進んだら更新
+
+
+def test_manual_call_delivered_after_dispatch():
+    """manual_call の trigger 後に届いた発話で「発話済み」になる."""
+    s = _make_state()
+    s.agent = _FakeAgent(mode="facilitator")
+    s.queue_manual_facilitator_call("ここまで整理して")
+    s.add_intervention_event("manual_call", "ここまで整理して")
+    s.set_manual_call_status("dispatched")
+
+    s.add_facilitator_delivery_event("ここまでの論点は2つです。")
+
+    assert s.manual_call_status["status"] == "delivered"
+
+
+def test_delivery_after_other_trigger_keeps_manual_status():
+    """manual 以外の介入（drift等）の発話では manual ステータスを変えない."""
+    s = _make_state()
+    s.agent = _FakeAgent(mode="facilitator")
+    s.queue_manual_facilitator_call("ここまで整理して")
+    s.add_intervention_event("drift", "話題ずれ")
+
+    s.add_facilitator_delivery_event("本題に戻りましょう。")
+
+    assert s.manual_call_status["status"] == "queued"
+
+
 def test_http_facilitator_call_trims_and_limits():
     """改行は空白に正規化し、長すぎる依頼は切り詰める."""
     s = _make_state()
@@ -983,6 +1037,8 @@ def test_http_get_root_serves_spa():
         assert 'id="intervention-summary"' in html
         assert 'id="manual-call-text"' in html      # 手動呼び出し入力
         assert 'id="manual-call-btn"' in html        # 呼ぶボタン
+        assert "renderManualCallStatus" in html      # 進行状況の表示
+        assert "受付済み" in html                     # 状態ラベル
         assert "/api/facilitator/call" in html       # 手動呼び出しAPI
         assert 'id="event-panel"' in html
         assert "話者未確定" in html

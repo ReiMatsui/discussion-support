@@ -108,6 +108,10 @@ class SessionState:
         # 手動呼び出しキュー（Phase1）。UI/音声から明示的にファシリテーターを呼ぶ。
         # {"request": str, "source": "ui"|"voice", "created_at": monotonic} を積む。
         self.manual_call_requests: queue.Queue[dict] = queue.Queue()
+        # 直近の手動呼び出しの進行状況（UX観測用, UI表示）。
+        # {"status": queued|waiting|dispatched|delivered|expired|cancelled,
+        #  "detail", "source", "request", "at", "wait_sec"} または None。
+        self.manual_call_status: dict | None = None
         # 認識途中経過（partial）。UIに「認識中」を見せるため（課題①）。
         self.partial_text = ""
         self.partial_speaker = ""
@@ -122,6 +126,7 @@ class SessionState:
         self.intervention_events: list[dict] = []
         self._intervention_event_seq = 0
         self._last_intervention_event_id: str | None = None
+        self._last_intervention_event_reason: str | None = None
         # UIからの停止フック（F1）。run_sessionが「stopを立ててwsを閉じる」関数を設定する。
         self.request_stop: Callable[[], None] | None = None
         # 変更リビジョン（F2）。save()ごとに+1。SSEはこの変化を見て差分配信する。
@@ -492,6 +497,8 @@ class SessionState:
                 "model": getattr(self.agent, "model", None),
                 # 手動呼び出しボタンの有効判定用（agent が有効=facilitate/converse）。
                 "agent_active": self.agent is not None and self.agent.enabled,
+                # 直近の手動呼び出しの進行状況（受付済み/待機中/発話済み/失敗）。
+                "manual_call": self.manual_call_status,
             },
             "intervention_events": list(self.intervention_events[-20:]),
             "agenda": self._current_agenda(),
@@ -611,6 +618,8 @@ class SessionState:
         self.intervention_events = []
         self._intervention_event_seq = 0
         self._last_intervention_event_id = None
+        self._last_intervention_event_reason = None
+        self.manual_call_status = None
         self._last_utt_time[0] = time.monotonic()
         self._was_in_echo[0] = False
         for q in (self.drift_requests, self.invite_requests, self.factcheck_requests,
@@ -661,6 +670,7 @@ class SessionState:
         self._intervention_event_seq += 1
         event_id = f"int-{self._intervention_event_seq:04d}"
         self._last_intervention_event_id = event_id
+        self._last_intervention_event_reason = reason
         event = {
             "time": now.strftime("%H:%M:%S"),
             "reason": reason,
@@ -722,8 +732,35 @@ class SessionState:
             "request": text,
             "source": source,
             "created_at": time.monotonic(),
+            "created_wall_at": datetime.datetime.now().isoformat(timespec="seconds"),
         })
+        # UIステータス: 受付済み（連打時は最新の依頼で上書き）。
+        self.set_manual_call_status("queued", source=source, request=text)
         return {"ok": True, "queued": True, "request": text}
+
+    def set_manual_call_status(self, status: str, *, detail: str = "",
+                               source: str | None = None,
+                               request: str | None = None,
+                               wait_sec: float | None = None) -> None:
+        """手動呼び出しの進行状況（受付済み/待機中/発話済み/失敗）を更新する.
+
+        UI表示・観測用の軽量ステータス。ワーカーの0.25秒ループから呼ばれても
+        SSEが洪水しないよう、表示内容が変わる時だけ rev を上げる。
+        """
+        prev = self.manual_call_status or {}
+        wait_rounded = round(wait_sec, 0) if wait_sec is not None else None
+        if (prev.get("status") == status and prev.get("detail") == detail
+                and prev.get("wait_sec") == wait_rounded):
+            return
+        self.manual_call_status = {
+            "status": status,
+            "detail": detail,
+            "source": source if source is not None else prev.get("source"),
+            "request": request if request is not None else prev.get("request"),
+            "at": datetime.datetime.now().strftime("%H:%M:%S"),
+            "wait_sec": wait_rounded,
+        }
+        self.rev += 1
 
     def set_diarization_max_speakers(self, value: int | None) -> dict:
         """UIから想定話者数ヒントを更新する.
@@ -1072,6 +1109,10 @@ class SessionState:
         if timing:
             event["timing"] = timing
         self.write_intervention_event(event)
+        # 手動呼び出しの発話が実際に届いたら「発話済み」へ（UX観測）。
+        if (self._last_intervention_event_reason == "manual_call"
+                and (self.manual_call_status or {}).get("status") == "dispatched"):
+            self.set_manual_call_status("delivered")
 
     def save(self, live: bool = True):
         self.rev += 1  # 変更を通知（SSEの差分配信用, F2）

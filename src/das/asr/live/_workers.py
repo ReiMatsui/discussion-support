@@ -183,25 +183,56 @@ _CALL_META_PREFIX_RE = re.compile(
     r"^(?:について|機能|導入|は|が|を|の|も|って|とは|では)")
 
 
-def _detect_facilitator_call(text: str) -> str | None:
+def _detect_facilitator_call_ex(text: str) -> tuple[str | None, str | None]:
     """音声での明示的なファシリテーター呼びかけを保守的に検出する（Phase2）.
 
-    冒頭の明示呼称（ファシリテーター/進行役/AI/AIさん…）＋依頼表現がある時だけ
-    依頼文を返す。呼びかけでなければ None。話題としての言及・質問・メタ発話は
-    誤爆させない（呼称の直後に「さん」か読点が無いものは弾く）。
+    戻り値は ``(依頼文, 無視理由)``。検出時は ``(依頼文, None)``。
+    呼称すら無い通常発話は ``(None, None)``（診断も不要）。呼称はあるが
+    誤爆防止で落とした場合だけ理由を返す（観測用）:
+
+    - ``"meta_topic"``     : 「AIについて」「進行役は」等の話題化
+    - ``"no_request"``     : 呼称のみで依頼表現が無い（メタ話題・質問など）
     """
     s = (text or "").strip()
     if not s:
-        return None
+        return None, None
     m = _CALL_VOCATIVE_RE.match(s)
     if m is None:
-        return None  # 冒頭の明示的な呼びかけが無い（話題化・別位置の言及）
+        return None, None  # 冒頭の明示的な呼びかけが無い（話題化・別位置の言及）
     rest = re.sub(r"\s+", " ", s[m.end():]).strip(" 　、,，。.！!？?")
     if _CALL_META_PREFIX_RE.match(rest):
-        return None  # 呼びかけではなく「AIについて」「進行役は」等の話題化
+        return None, "meta_topic"  # 呼びかけではなく「AIについて」等の話題化
     if not _CALL_REQUEST_RE.search(rest):
-        return None  # 依頼表現が無い（メタ話題・質問など）
-    return rest[:_MANUAL_CALL_MAX_CHARS]
+        return None, "no_request"  # 依頼表現が無い（メタ話題・質問など）
+    return rest[:_MANUAL_CALL_MAX_CHARS], None
+
+
+def _detect_facilitator_call(text: str) -> str | None:
+    """呼びかけ検出（互換ラッパー）。依頼文または None を返す."""
+    return _detect_facilitator_call_ex(text)[0]
+
+
+def _log_voice_call_diag(state: SessionState, *, text: str,
+                         request: str | None, reason: str | None) -> None:
+    """音声呼びかけの検出/不発を ``.interventions.jsonl`` に診断として残す.
+
+    呼称にマッチした発話だけが対象なので低頻度（ログ洪水にならない）。
+    replay 等の既存ローダーは type=trigger/delivery しか読まないため無害。
+    state が未対応（テストの FakeState 等）なら no-op。
+    """
+    write = getattr(state, "write_intervention_event", None)
+    if not callable(write):
+        return
+    with contextlib.suppress(Exception):
+        write({
+            "type": "voice_call_diag",
+            "time": datetime.datetime.now().strftime("%H:%M:%S"),
+            "created_at": datetime.datetime.now().isoformat(timespec="seconds"),
+            "detected": request is not None,
+            "text": text[:80],
+            "request": request,
+            "ignored_reason": reason,
+        })
 
 
 def _intervention_event_metadata(
@@ -256,6 +287,14 @@ def _intervention_enabled(state: SessionState) -> bool:
     return bool(getattr(state, "intervention_enabled", True))
 
 
+def _set_manual_status(state: SessionState, status: str, **kw) -> None:
+    """手動呼び出しのUIステータスを更新する（state 未対応なら no-op）."""
+    setter = getattr(state, "set_manual_call_status", None)
+    if callable(setter):
+        with contextlib.suppress(Exception):
+            setter(status, **kw)
+
+
 @dataclass
 class _PendingInterventions:
     """agent_worker が一元調停する未処理介入要求."""
@@ -306,15 +345,21 @@ class _PendingInterventions:
                 except queue.Empty:
                     break
 
-    def drop_stale_manual(self, *, now: float) -> None:
-        """会話タイミングを外した古い手動呼び出しを破棄する（TTL）."""
+    def drop_stale_manual(self, *, now: float) -> dict | None:
+        """会話タイミングを外した古い手動呼び出しを破棄する（TTL）.
+
+        破棄した場合はその payload を返す（expired の観測ログ用）。
+        """
         if self.manual_call is None:
-            return
+            return None
         age = now - float(self.manual_call.get("created_at", now))
         if age > _MANUAL_CALL_TTL:
             print(f"# [trigger] skip: 古い手動呼び出しを破棄（{age:.0f}秒経過）",
                   flush=True)
+            dropped = self.manual_call
             self.manual_call = None
+            return dropped
+        return None
 
     def clear_manual(self) -> None:
         self.manual_call = None
@@ -647,13 +692,19 @@ def _build_candidates(
 
 def _candidate_brief(c: InterventionCandidate) -> dict:
     """レビューログ用の候補サマリ（読みやすい最小限の dict）."""
-    return {
+    brief = {
         "id": c.id,
         "kind": c.kind,
         "brief": c.brief[:60],
         "confidence": round(c.confidence, 3),
         "target_speaker": c.target_speaker,
     }
+    if c.kind == "manual":
+        # manual だけ追跡フィールドを足す（ui/voice の不発検証用）。既存形式は不変。
+        brief["source"] = str(c.payload.get("source") or "ui")
+        brief["request"] = str(c.payload.get("request") or "")
+        brief["queued_at"] = c.created_at
+    return brief
 
 
 def _legacy_decision_brief(reason: str, detail: str = "") -> dict:
@@ -847,7 +898,21 @@ def _controller_barge_in_decision(
     Controller の eligibility が判定する（§4）。
     """
     pending.drop_stale_facts(now=now)  # fast lane: 古い事実補正は破棄（鮮度維持）
-    pending.drop_stale_manual(now=now)  # 古い手動呼び出しは破棄（TTL）
+    expired_manual = pending.drop_stale_manual(now=now)  # 古い手動呼び出しは破棄（TTL）
+    if expired_manual is not None:
+        # 「呼んだのに反応しなかった」を後から追えるよう trigger ログに残す。
+        request = str(expired_manual.get("request") or "").strip()
+        _log_intervention_event(
+            state, "manual_call_expired", request or "直近の議論整理",
+            timing={"kind": "manual",
+                    "source": str(expired_manual.get("source") or "ui"),
+                    "request": request,
+                    "queued_at": float(expired_manual.get("created_at", now)),
+                    "candidate_wait_sec": round(
+                        now - float(expired_manual.get("created_at", now)), 3),
+                    "outcome": "expired"})
+        _set_manual_status(state, "expired",
+                           detail=f"{_MANUAL_CALL_TTL:.0f}秒以内に間が取れず破棄")
     all_cands = _build_candidates(
         pending, agent, now=now, silence_summarize=silence_summarize,
         partner_present=False, last_invited=last_invited)
@@ -870,6 +935,14 @@ def _controller_barge_in_decision(
         fact_cooldown=_FACTCHECK_COOLDOWN,
     ))
     latency_ms = (time.perf_counter() - t0) * 1000
+    if pending.manual_call is not None and decision.candidate_id != "manual":
+        # 手動呼び出しが保留された理由をUIステータスへ（待機中の可視化）。
+        held_reason = next(
+            (str(s.get("reason", "")) for s in decision.suppressed
+             if s.get("candidate_id") == "manual"), "")
+        _set_manual_status(
+            state, "waiting", detail=held_reason,
+            wait_sec=now - float(pending.manual_call.get("created_at", now)))
     if _suppressed_for(
         decision,
         candidate_id="drift",
@@ -1477,15 +1550,28 @@ def _run_agent_worker(state: SessionState):
                     text = r.get("text", "")
                     agent.feed(intervention_speaker_name(state, r), text)
                     if _voice_call_on:
-                        request = _detect_facilitator_call(text)
+                        request, _ignored = _detect_facilitator_call_ex(text)
                         if request is not None:
                             state.manual_call_requests.put({
                                 "request": request,
                                 "source": "voice",
                                 "created_at": time.monotonic(),
+                                "created_wall_at": datetime.datetime.now()
+                                .isoformat(timespec="seconds"),
                             })
                             print("# [voice] ファシリテーター呼びかけ検出: "
                                   f"{request or '直近の議論整理'}", flush=True)
+                            _log_voice_call_diag(state, text=text,
+                                                 request=request, reason=None)
+                            _set_manual_status(state, "queued",
+                                               source="voice", request=request)
+                        elif _ignored is not None:
+                            # 呼称はあるが誤爆防止で無視した発話（不発の事後検証用）。
+                            # 呼称マッチ時のみなので低頻度。
+                            print("# [voice] 呼びかけ様発話を無視 "
+                                  f"({_ignored}): {text[:40]}", flush=True)
+                            _log_voice_call_diag(state, text=text,
+                                                 request=None, reason=_ignored)
             state.agent_cursor = n
             # --- 自動割り込み ---
             _human_spoke = any(len(t.strip()) > _INTERRUPT_MIN_CHARS
@@ -1504,6 +1590,9 @@ def _run_agent_worker(state: SessionState):
                             "人間", utt,
                             request_response=is_last)
         if not _enabled:
+            if (_pending.manual_call is not None
+                    or not state.manual_call_requests.empty()):
+                _set_manual_status(state, "cancelled", detail="介入オフのため破棄")
             _pending.clear_all()
             for q in (state.drift_requests, state.invite_requests,
                       state.factcheck_requests, state.manual_call_requests):
@@ -1645,20 +1734,26 @@ def _run_agent_worker(state: SessionState):
                 manual = decision.manual
                 request = str(manual.get("request") or "").strip()
                 detail = request or "直近の議論整理"
+                _queued_payload = _pending.manual_call or {}
+                _queued_at = float(_queued_payload.get("created_at", _now))
                 timing = _intervention_timing_metadata(
                     kind="manual",
                     now=_now,
                     silence_elapsed=_silence_elapsed,
                     pause_required=_INTERVENTION_PAUSE_MANUAL,
-                    queued_at=float(_pending.manual_call.get("created_at", _now))
-                    if _pending.manual_call else _now,
+                    queued_at=_queued_at,
+                    queued_wall_at=str(
+                        _queued_payload.get("created_wall_at") or ""),
                     policy="manual_call_pause",
                 )
                 print(f"# [trigger] manual_call: {detail}", flush=True)
                 _log_intervention_event(
                     state, "manual_call", detail,
                     timing={**timing, "source": manual.get("source", "ui"),
-                            "request": request})
+                            "request": request, "queued_at": _queued_at,
+                            "outcome": "selected"})
+                _set_manual_status(state, "dispatched", detail=detail,
+                                   wait_sec=_now - _queued_at)
                 agent.trigger(topics=_bargein_topics, manual_request=manual)
                 _pending.clear_manual()
                 _last_intervention_at = time.monotonic()

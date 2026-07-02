@@ -491,6 +491,39 @@ function renderIntervention(config) {
   const callText = $("manual-call-text");
   if (callBtn) callBtn.disabled = !callable;
   if (callText) callText.disabled = !callable;
+  renderManualCallStatus(config && config.manual_call);
+}
+
+let manualCallLocalUntil = 0;  // fetch失敗などローカル表示を優先する期限
+
+function manualCallStatusText(mc) {
+  const src = mc.source === "voice" ? "音声" : "UI";
+  const req = mc.request ? `「${mc.request}」` : "";
+  switch (mc.status) {
+    case "queued":
+      return `受付済み（${src}）${req} — 発話の間を待っています`;
+    case "waiting": {
+      const wait = mc.wait_sec != null ? `・${Math.round(mc.wait_sec)}秒経過` : "";
+      const why = mc.detail ? `: ${mc.detail}` : "";
+      return `待機中${wait}${why}`;
+    }
+    case "dispatched":
+      return "まもなく発話します…";
+    case "delivered":
+      return `発話済み（${mc.at || ""}）`;
+    case "expired":
+      return `応答できませんでした（${mc.detail || "タイミングが合わず期限切れ"}）`;
+    case "cancelled":
+      return `呼び出しを破棄しました（${mc.detail || "介入オフ"}）`;
+    default:
+      return "";
+  }
+}
+
+function renderManualCallStatus(mc) {
+  const status = $("manual-call-status");
+  if (!status || Date.now() < manualCallLocalUntil) return;
+  status.textContent = mc ? manualCallStatusText(mc) : "";
 }
 
 async function callFacilitator() {
@@ -507,13 +540,18 @@ async function callFacilitator() {
     });
     const out = await res.json().catch(() => ({}));
     if (res.ok && out.ok) {
-      if (status) status.textContent = "ファシリテーターに依頼しました";
+      // 以後の進行状況（受付済み→待機中→発話済み/失敗）はSSEのスナップショットが更新する。
+      if (status) status.textContent = "受付済み — 発話の間を待っています";
       input.value = "";
     } else if (status) {
       status.textContent = out.error || "呼び出しに失敗しました";
+      manualCallLocalUntil = Date.now() + 5000;  // エラー表示を少しの間保持
     }
   } catch (e) {
-    if (status) status.textContent = "呼び出しに失敗しました";
+    if (status) {
+      status.textContent = "呼び出しに失敗しました";
+      manualCallLocalUntil = Date.now() + 5000;
+    }
   } finally {
     btn.disabled = false;
   }

@@ -11,6 +11,7 @@ import time
 
 from das.asr.live._workers import (
     _detect_facilitator_call,
+    _detect_facilitator_call_ex,
     _log_intervention_event,
     _PendingInterventions,
     _run_agent_worker,
@@ -99,6 +100,8 @@ class FakeState:
         self.proactivity = {"silence_summarize": 18.0, "cooldown": 25.0}
         self.intervention_enabled = True
         self.intervention_events: list[dict] = []
+        self.written_events: list[dict] = []       # write_intervention_event の記録
+        self.manual_statuses: list[dict] = []      # set_manual_call_status の記録
 
     def disp_name(self, k):  # pragma: no cover
         return str(k)
@@ -110,6 +113,12 @@ class FakeState:
             "detail": detail,
             "metadata": metadata or {},
         })
+
+    def write_intervention_event(self, event: dict) -> None:
+        self.written_events.append(event)
+
+    def set_manual_call_status(self, status: str, **kw) -> None:
+        self.manual_statuses.append({"status": status, **kw})
 
 
 def test_bargein_decision_prefers_fact_before_retry():
@@ -505,6 +514,15 @@ def test_manual_call_triggers_with_request():
     assert agent.trigger_calls[0]["manual_request"]["request"] == "ここまで整理して"
     event = state.intervention_events[0]
     assert event["reason"] == "manual_call"
+    # 観測性: source / request / 待ち時間 / 採択結果がログから追える
+    timing = event["metadata"]["timing"]
+    assert timing["source"] == "ui"
+    assert timing["request"] == "ここまで整理して"
+    assert timing["outcome"] == "selected"
+    assert "candidate_wait_sec" in timing
+    assert "queued_at" in timing
+    # UIステータス: 発話直前に dispatched へ更新される
+    assert any(s["status"] == "dispatched" for s in state.manual_statuses)
     assert event["detail"] == "ここまで整理して"
     assert event["metadata"]["timing"]["kind"] == "manual"
     assert event["metadata"]["timing"]["policy"] == "manual_call_pause"
@@ -574,6 +592,48 @@ def test_manual_call_dropped_after_ttl():
     _run_worker_briefly(state, until=lambda: False, timeout=1.0)
 
     assert agent.trigger_calls == []
+    # 観測性: 「呼んだのに反応しなかった」が trigger ログから追える
+    expired = [e for e in state.intervention_events
+               if e["reason"] == "manual_call_expired"]
+    assert expired, "期限切れの手動呼び出しはログに残すべき"
+    timing = expired[0]["metadata"]["timing"]
+    assert timing["source"] == "ui"
+    assert timing["request"] == "整理して"
+    assert timing["outcome"] == "expired"
+    assert timing["candidate_wait_sec"] > 30
+    # UIステータスも expired へ
+    assert any(s["status"] == "expired" for s in state.manual_statuses)
+
+
+def test_manual_call_status_waiting_while_partner_busy():
+    """パートナー発話中に保留された手動呼び出しは「待機中」として見える."""
+    agent = FakeAgent()
+    partner = FakePartner()
+    partner.ai_speaking = True
+    state = FakeState(agent, partner)
+    state.manual_call_requests.put({"request": "整理して", "source": "ui"})
+
+    _run_worker_briefly(
+        state,
+        until=lambda: any(s["status"] == "waiting" for s in state.manual_statuses),
+        timeout=2.0)
+
+    waiting = [s for s in state.manual_statuses if s["status"] == "waiting"]
+    assert waiting, "保留中は waiting ステータスを更新するべき"
+    assert waiting[0].get("wait_sec") is not None
+
+
+def test_manual_call_status_cancelled_when_disabled():
+    """介入オフで破棄された手動呼び出しは cancelled として見える."""
+    agent = FakeAgent()
+    state = FakeState(agent, None)
+    state.intervention_enabled = False
+    state.manual_call_requests.put({"request": "整理して", "source": "ui"})
+
+    _run_worker_briefly(state, until=lambda: False, timeout=1.0)
+
+    assert agent.trigger_calls == []
+    assert any(s["status"] == "cancelled" for s in state.manual_statuses)
 
 
 def test_manual_call_ignored_when_intervention_disabled():
@@ -629,6 +689,13 @@ def test_detect_facilitator_call_accepts_explicit_calls():
         "AIさん、今の論点をまとめて": "今の論点をまとめて",
         "ファシリテーター ここまで整理して": "ここまで整理して",
         "AIさん今の論点をまとめて": "今の論点をまとめて",
+        # STTの句読点なし
+        "ファシリテーター ここまでまとめて": "ここまでまとめて",
+        "進行役さん次どうしましょう": "次どうしましょう",
+        "AIさん Aさんに振って": "Aさんに振って",
+        # 全角/カナ表記
+        "ＡＩ、まとめて": "まとめて",
+        "エーアイ 整理して": "整理して",
     }
     for text, expected in cases.items():
         assert _detect_facilitator_call(text) == expected, text
@@ -647,9 +714,44 @@ def test_detect_facilitator_call_rejects_meta_and_mentions():
         "AIは便利です",
         "AI、次郎さんの件です",        # 「次」を含む人名で誤爆しない
         "ファシリテーター機能を確認しましょう",
+        "AIの次世代モデルについて話しましょう",  # 「次」を含む話題化で誤爆しない
+        "進行役の役割を確認しましょう",
+        "ファシリテーター機能を整理しましょう",
+        "AIさんですね",               # 呼称のみ・依頼なし
     ]
     for text in negatives:
         assert _detect_facilitator_call(text) is None, text
+
+
+def test_candidate_brief_includes_manual_tracking_fields():
+    """review ログの manual 候補には source/request/queued_at が載る（観測性）."""
+    from das.asr.live._workers import _build_candidates, _candidate_brief
+
+    agent = FakeAgent()
+    pending = _PendingInterventions()
+    now = time.monotonic()
+    pending.manual_call = {"request": "ここまで整理して", "source": "voice",
+                           "created_at": now}
+    pending.drift_reason = "話題ずれ"
+    cands = _build_candidates(pending, agent, now=now)
+    brief = _candidate_brief(next(c for c in cands if c.kind == "manual"))
+    assert brief["source"] == "voice"
+    assert brief["request"] == "ここまで整理して"
+    assert brief["queued_at"] == now
+    # 既存フィールドは不変
+    other = _candidate_brief(next(c for c in cands if c.kind != "manual"))
+    assert "source" not in other and "request" not in other
+
+
+def test_detect_facilitator_call_ex_reports_ignore_reason():
+    """呼称ありで落とした発話は理由付き、呼称なしは理由なし（観測用）."""
+    assert _detect_facilitator_call_ex("AIの次世代モデルについて話しましょう") == (
+        None, "meta_topic")
+    assert _detect_facilitator_call_ex("AIさんですね") == (None, "no_request")
+    assert _detect_facilitator_call_ex("ファシリテーター、ここまで整理して") == (
+        "ここまで整理して", None)
+    # 呼称すら無い通常発話は診断も不要
+    assert _detect_facilitator_call_ex("今日は天気がいいですね") == (None, None)
 
 
 def test_voice_call_queues_manual_and_triggers():
@@ -681,6 +783,52 @@ def test_voice_meta_mention_does_not_trigger():
 
     assert agent.trigger_calls == []
     assert state.manual_call_requests.empty()
+
+
+def test_voice_call_diag_logged_on_detection():
+    """音声呼びかけの検出は diag として jsonl に残る（不発/誤爆の事後検証用）."""
+    agent = FakeAgent()
+    state = FakeState(agent, None)
+    state.records = [{"speaker": "#1", "ms": 0, "end_ms": 500,
+                      "text": "ファシリテーター、ここまで整理して"}]
+
+    _run_worker_briefly(state, until=lambda: bool(state.written_events))
+
+    diags = [e for e in state.written_events if e["type"] == "voice_call_diag"]
+    assert diags and diags[0]["detected"] is True
+    assert diags[0]["request"] == "ここまで整理して"
+    assert diags[0]["ignored_reason"] is None
+    # UIステータスも queued（source=voice）へ
+    assert any(s["status"] == "queued" and s.get("source") == "voice"
+               for s in state.manual_statuses)
+
+
+def test_voice_call_diag_logged_on_ignored_vocative():
+    """呼称ありでも誤爆防止で落とした発話は、理由付き diag で追える."""
+    agent = FakeAgent()
+    state = FakeState(agent, None)
+    state.records = [{"speaker": "#1", "ms": 0, "end_ms": 500,
+                      "text": "AIさんですね"}]
+
+    _run_worker_briefly(state, until=lambda: bool(state.written_events))
+
+    assert state.manual_call_requests.empty()
+    diags = [e for e in state.written_events if e["type"] == "voice_call_diag"]
+    assert diags and diags[0]["detected"] is False
+    assert diags[0]["ignored_reason"] == "no_request"
+
+
+def test_voice_normal_utterance_writes_no_diag():
+    """呼称の無い通常発話では diag を書かない（ログ洪水防止）."""
+    agent = FakeAgent()
+    state = FakeState(agent, None)
+    state.records = [{"speaker": "#1", "ms": 0, "end_ms": 500,
+                      "text": "今日は費用の話をしましょう"}]
+
+    _run_worker_briefly(state, until=lambda: False, timeout=1.0)
+
+    assert [e for e in state.written_events
+            if e["type"] == "voice_call_diag"] == []
 
 
 def test_voice_call_disabled_in_conversation_mode():
