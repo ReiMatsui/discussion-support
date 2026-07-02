@@ -1838,7 +1838,7 @@ def _run_agent_worker(state: SessionState):
                       flush=True)
                 _log_intervention_event(
                     state, "retry", "中断された介入を再送", timing=timing)
-                agent.trigger(topics=_bargein_topics)
+                agent.trigger(topics=_bargein_topics, is_retry=True)
                 _last_intervention_at = time.monotonic()
                 _note_intervention(_last_intervention_at, "retry", "中断された介入を再送")
                 continue

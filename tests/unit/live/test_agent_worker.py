@@ -44,13 +44,15 @@ class FakeAgent:
 
     def trigger(self, *, topics=None, drift_reason=None, invite_target=None,
                 fact_correction=None, manual_request=None,
-                summary_focus=None, retry_intervention=None) -> None:
+                summary_focus=None, retry_intervention=None,
+                is_retry=False) -> None:
         self.trigger_calls.append({"topics": topics, "drift_reason": drift_reason,
                                    "invite_target": invite_target,
                                    "fact_correction": fact_correction,
                                    "manual_request": manual_request,
                                    "summary_focus": summary_focus,
-                                   "retry_intervention": retry_intervention})
+                                   "retry_intervention": retry_intervention,
+                                   "is_retry": is_retry})
         # 実エージェントの挙動を模倣: トリガーで介入と保留発話を消費
         self._pending_intervention = None
         self._pending.clear()
@@ -1015,7 +1017,8 @@ def test_structuring_checker_rejudges_after_pending_reset(monkeypatch):
             agent._pending = [{"text": str(i)} for i in range(agent.trigger_n)]
         return len(calls) >= 2
 
-    _run_structuring_briefly(state, until=_cycle_once, timeout=4.0)
+    # チェッカーは1秒tickなので、並列実行の負荷でも取りこぼさないよう余裕を持たせる。
+    _run_structuring_briefly(state, until=_cycle_once, timeout=10.0)
 
     assert len(calls) >= 2   # リセットを跨いで再判定できる
 

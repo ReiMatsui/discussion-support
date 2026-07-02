@@ -106,6 +106,11 @@ class RealtimeAgent(_RealtimeBase):
         self._active_intervention_fallback = ""          # transcript前割り込み用の介入意図
         self._INTERVENTION_TTL = 60.0                   # 保存した介入の有効期限（秒）
         self._INTERVENTION_MAX_RETRIES = 2              # 再試行上限
+        # P2-3: リトライを「本当に途切れた発話の再開」に限定する
+        self._pending_intervention_feeds = 0            # pi 保存後に feed した発話数
+        self._INTERVENTION_MAX_FEEDS = 4                # これを超えたら pi を破棄（蒸し返し防止）
+        self._INTERVENTION_MIN_PLAYED_RATIO = 0.1       # 再生率がこれ未満なら再開扱いにしない
+        self._AI_SPEAK_CHARS_PER_SEC = 6.0              # 日本語のおおよその発話速度（再生率推定用）
 
     AI_VOICE_KEY = "__AI__"             # VoiceProfiles内のAI声紋キー（セッション限り）
     _LABEL = "AI Agent"                  # ログ用ラベル（基底クラス用）
@@ -309,6 +314,14 @@ class RealtimeAgent(_RealtimeBase):
         with self._state_lock:
             self._pending.append({"speaker": speaker, "text": text,
                                   "_count": trigger_count})
+            # P2-3(c): 中断介入の保存後に会話が進んだら蒸し返さない。feed 数を数え、
+            # 上限を超えたら pi を破棄する（TTL 60s と併用）。
+            if self._pending_intervention is not None:
+                self._pending_intervention_feeds += 1
+                if self._pending_intervention_feeds > self._INTERVENTION_MAX_FEEDS:
+                    self._pending_intervention = None
+                    print("# AI Agent: 中断された介入を破棄（会話が進んだため, P2-3c）",
+                          flush=True)
 
     @staticmethod
     def _format_utterance_context(pending: list[dict]) -> str:
@@ -355,7 +368,8 @@ class RealtimeAgent(_RealtimeBase):
                 fact_correction: dict | None = None,
                 manual_request: dict | None = None,
                 summary_focus: str | None = None,
-                retry_intervention: bool | None = None):
+                retry_intervention: bool | None = None,
+                is_retry: bool = False):
         """蓄積した発話をRealtimeAPIに送信し応答を要求.
 
         topics: 現在の論点一覧（_topic_workerが抽出したもの）。
@@ -460,7 +474,17 @@ class RealtimeAgent(_RealtimeBase):
         include_pi = False
         if pi is not None:
             age = time.monotonic() - pi["created_at"]
-            if age < self._INTERVENTION_TTL:
+            if age >= self._INTERVENTION_TTL:
+                # 期限切れは即破棄（種別問わずクリーンアップ）。送信処理中に新しい
+                # 介入が入った場合は上書きしないよう compare-and-clear する。
+                with self._state_lock:
+                    if self._pending_intervention is pi:
+                        self._pending_intervention = None
+                print(f"# AI Agent: 中断された介入を期限切れで破棄（{age:.0f}秒経過）",
+                      flush=True)
+            elif is_retry:
+                # P2-3(b): 中断内容の再開は reason=retry の trigger だけに含める。
+                # fact/drift 等の異種トリガーに混ぜると「1発話2意図」になるため。
                 retry_note = (f"[システム注記: あなたは先ほど以下の発言を試みましたが、"
                               f"参加者の発言と重なり中断されました。"
                               f"まだ重要であれば、簡潔に再度伝えてください]\n"
@@ -468,14 +492,6 @@ class RealtimeAgent(_RealtimeBase):
                 conv = f"{conv}\n\n{retry_note}" if conv else retry_note
                 include_pi = True
                 print("# AI Agent: 中断された介入を再試行コンテキストに追加", flush=True)
-            else:
-                # 期限切れは即破棄。ただし送信処理中に新しい介入が入った場合は
-                # 上書きしないよう compare-and-clear する。
-                with self._state_lock:
-                    if self._pending_intervention is pi:
-                        self._pending_intervention = None
-                print(f"# AI Agent: 中断された介入を期限切れで破棄（{age:.0f}秒経過）",
-                      flush=True)
         if not conv:
             self._responding = False  # 送るものがない → 確保を解放（Bug 4）
             return  # 期限切れで破棄された場合など、送るものがない
@@ -539,7 +555,17 @@ class RealtimeAgent(_RealtimeBase):
         if delivered and (not self._recent_ai_texts
                           or self._recent_ai_texts[-1] != delivered):
             self._recent_ai_texts.append(delivered)
-        retry_text = delivered or self._active_intervention_fallback.strip()
+        # P2-3(a): 実際の再生率が極端に低い delivered は「途切れた発話の再開」ではなく
+        # 「ほぼ聞こえていない未再生transcript」。これを再送すると聞いていない内容を
+        # 蒸し返すので、再開扱いにしない（フォールバック意図の再送には委ねない）。
+        _barely_played = False
+        if delivered:
+            est_sec = len(delivered) / self._AI_SPEAK_CHARS_PER_SEC
+            played_sec = self._played_bytes / (24000 * 2)   # 24kHz 16bit
+            _barely_played = (est_sec > 0
+                              and played_sec / est_sec < self._INTERVENTION_MIN_PLAYED_RATIO)
+        retry_text = "" if _barely_played else (
+            delivered or self._active_intervention_fallback.strip())
         if retry_text:
             with self._state_lock:
                 if not self._active_intervention_retryable:
@@ -554,6 +580,7 @@ class RealtimeAgent(_RealtimeBase):
                             "created_at": time.monotonic(),
                             "attempts": attempts,
                         }
+                        self._pending_intervention_feeds = 0   # (c) feed カウンタを起点に戻す
                         if delivered:
                             _msg = f"# AI Agent: 介入内容を保存（試行{attempts}回目、次の機会で再試行）"
                         else:
@@ -562,6 +589,11 @@ class RealtimeAgent(_RealtimeBase):
                         self._pending_intervention = None
                         _msg = "# AI Agent: 介入内容を破棄（再試行上限に達した）"
             print(_msg, flush=True)
+        elif _barely_played:
+            with self._state_lock:
+                self._pending_intervention = None
+            print("# AI Agent: 中断された介入を破棄（ほぼ再生されず＝未再生transcript, P2-3a）",
+                  flush=True)
         # --- Graceful yield: キュー内の音声を少しだけ残して自然に終了 ---
         # 24kHz 16bit PCM = 48000 bytes/sec → 300ms ≒ 14400 bytes
         _yield_keep_bytes = 14400
