@@ -22,6 +22,7 @@ from das.asr.live._constants import (
     _FACTCHECK_PROMPT,
     _PARTICIPATION_PROMPT,
     _TOPIC_PROMPT,
+    _TRIAGE_PROMPT,
     OPENAI_API,
 )
 from das.asr.live._diarization import SpeakerResolver
@@ -44,6 +45,7 @@ from das.asr.live._workers import (
     _run_sender,
     _run_stdin_commands,
     _run_topic_worker,
+    _run_triage_worker,
 )
 from das.asr.live.agents._partner import ConversationPartner
 from das.asr.live.agents._realtime import RealtimeAgent
@@ -195,6 +197,16 @@ _FACT_SCHEMA = {
         "reason": {"type": "string"},
     },
     "required": ["should_correct", "confidence", "claim", "correction", "reason"],
+    "additionalProperties": False,
+}
+
+_TRIAGE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "factual_claim": {"type": "boolean"},
+        "facilitator_request": {"type": "string"},
+    },
+    "required": ["factual_claim", "facilitator_request"],
     "additionalProperties": False,
 }
 
@@ -370,6 +382,38 @@ def check_participation(participation: list[dict], utterances: list[dict],
     if not isinstance(result, dict):
         return {"invite": False}
     return result
+
+
+def classify_utterance(utterances: list[dict[str, str]], api_key: str,
+                       model: str) -> dict[str, object]:
+    """確定発話1件を表層分類する（fact候補か / ファシリテーターへの依頼か）.
+
+    判定対象は ``utterances`` の最後の1件で、前の要素は参照文脈（指示語・
+    省略の補完用）。fact prefilter の正規表現群と音声呼びかけの regex 検出を
+    置き換える、発話ごと1回だけの軽量 LLM 分類（H6/M2）。
+
+    Returns:
+        {"factual_claim": bool, "facilitator_request": str}
+        API/解析の一時失敗時は {"retryable_error": True} を含む。
+    """
+    if not utterances or not api_key:
+        return {"factual_claim": False, "facilitator_request": ""}
+    lines = []
+    for i, u in enumerate(utterances):
+        label = "判定対象" if i == len(utterances) - 1 else "参照"
+        lines.append(f"- [{label}] {u['speaker']}: {u['text']}")
+    prompt = _TRIAGE_PROMPT.format(utterances="\n".join(lines))
+    params = _build_chat_params(
+        model, prompt, max_out=300, temperature=0.0,
+        schema_name="utterance_triage", schema=_TRIAGE_SCHEMA)
+    result = _post_chat_json(params, api_key, timeout=10, label="triage")
+    if not isinstance(result, dict):
+        return {"factual_claim": False, "facilitator_request": "",
+                "retryable_error": True}
+    return {
+        "factual_claim": bool(result.get("factual_claim")),
+        "facilitator_request": str(result.get("facilitator_request") or "").strip(),
+    }
 
 
 def check_fact_correction(utterances: list[dict], api_key: str, model: str) -> dict:
@@ -655,6 +699,10 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
                 threading.Thread(target=_run_drift_checker,
                                 args=(state, _oai_key, _oai_model), daemon=True).start()
                 print("# 脱線検出: 有効（3発話ごとに並列チェック）", flush=True)
+                threading.Thread(target=_run_triage_worker,
+                                args=(state, _oai_key, _oai_model), daemon=True).start()
+                print("# 発話分類: 有効（fact候補・ファシリテーター呼びかけをLLMで判定）",
+                      flush=True)
                 threading.Thread(target=_run_fact_checker,
                                 args=(state, _oai_key, _oai_model), daemon=True).start()
                 print("# 事実誤り補正: 有効（高確信の定義・式だけ短く補足）", flush=True)

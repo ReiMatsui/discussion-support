@@ -37,7 +37,6 @@ from ._constants import (
     _FACTCHECK_CHECK_SEC,
     _FACTCHECK_COOLDOWN,
     _FACTCHECK_MAX_RETRIES,
-    _FACTCHECK_MIN_CHARS,
     _FACTCHECK_PENDING_TTL,
     _INTERRUPT_MIN_CHARS,
     _INTERVENTION_COOLDOWN,
@@ -46,6 +45,9 @@ from ._constants import (
     _INVITE_WARMUP,
     _MANUAL_CALL_MAX_CHARS,
     _MANUAL_CALL_TTL,
+    _TRIAGE_CONTEXT_WINDOW,
+    _TRIAGE_MAX_RETRIES,
+    _TRIAGE_MIN_CHARS,
     AGENT_SPEAKER,
     SR,
 )
@@ -72,146 +74,12 @@ from ._speaker_policy import (
 )
 from ._ui import _print_line
 
-_FACT_PHONE_NUMBER_RE = re.compile(r"\b0\d{1,3}-\d{2,4}-\d{3,4}\b")
-_FACT_QUESTION_RE = re.compile(
-    r"(ですか|でしょうか|ますか|かな|かね|なの|だっけ|でしたっけ|"
-    r"何|どれ|どこ|誰|いつ|いくつ|いくら|\?|？)"
-)
-_FACT_UNCERTAIN_RE = re.compile(
-    r"(たぶん|多分|おそらく|多分だけど|うろ覚え|曖昧|わからない|分からない|"
-    r"知らない|覚えてない|忘れた|気がする|かもしれない|かも|らしい)"
-)
-_FACT_PREFERENCE_RE = re.compile(
-    r"(好き|嫌い|好み|苦手|うれしい|嬉しい|楽しい|面白い|つまらない|"
-    r"良い|いい|悪い|きれい|綺麗|かわいい|かっこいい|おいしい|美味しい|"
-    # 評価・主観（「XはYです」を通す前に、評価文を確実に落とすため強化）
-    r"良さそう|よさそう|良さげ|よさげ|悪そう|わるそう|うまそう|まずそう|"
-    r"微妙|最悪|素晴らしい|すばらしい|失礼|最低ライン)"
-)
-_FACT_META_TALK_RE = re.compile(
-    r"(話しましょう|確認しましょう|決めましょう|考えましょう|進めましょう|"
-    r"について話|の話です|という話|話題|論点|議題|雑談)"
-)
-_FACT_CREATIVE_EXPRESSION_RE = re.compile(
-    r"(奴|襲い|跳弾|跳ね返った弾丸|二丁拳銃|拳銃|銃|弾丸|弾切れ|"
-    r"極小の銃|ビビ弾|凶悪だぜ|踊れ|見抜いていた|お釣りだ|"
-    r"受け取っとけ|間合い)"
-)
-_FACT_STRONG_ANCHOR_RE = re.compile(
-    r"([=＋+\-*/÷]|cm|m|km|kg|g|メートル|キロ|円|ドル|回|個|勝|日付|"
-    r"計算式|数式|の式|式は|値|定義|単位|制度|上限|下限|分子|分母|2乗|二乗|"
-    r"首都|所属|出身|作者|CEO|国|地域|地方|都道府県|東北|関東|中部|"
-    r"山|湖|川|島|時代|順序|ランキング|順位|トップ|番目)"
-)
-# 含有・成分関係（食品成分など安定した一般事実。question/uncertain 等の
-# negative filter を通過したものだけがここに来る）。
-_FACT_CONTAINMENT_RE = re.compile(r"(含まれ|含む|含有|成分|主成分)")
-# 「XはYです / XはYではありません / XはYに属します / XはYで発生しました」等の
-# 断定文。負のフィルタ（好み・質問・曖昧・メタ・創作）を先に通したうえで拾う。
-_FACT_ASSERTION_RE = re.compile(
-    r".+は.+?(です|である|ではありません|ではない|じゃありません|"
-    r"に属し|に分類され|で発生し)"
-)
-# 指示語主語（これ/それ/あれは…）は外部照合に向かない自己言及・曖昧断定なので、
-# 断定ゲートからは除外する（強アンカー・含有ゲートには影響しない）。
-_FACT_DEICTIC_SUBJECT_RE = re.compile(
-    r"^[\s、。]*(これ|それ|あれ|こちら|そちら|あちら)(は|が|も)"
-)
-
-
-def _looks_like_fact_claim(text: str) -> bool:
-    """LLMに渡す前の候補フィルタ（「明らかに判定不要なものを落とす」中心）。
-
-    明確な誤りかどうかの最終判断は LLM（confidence==high のみ採用）に任せる。
-    前段は会議を止めないため、相槌・質問・曖昧表現・好み/評価・創作表現・メタ発話・
-    電話番号を確実に落とす。そのうえで、明確な事実断定らしいもの（強い事実アンカー・
-    含有/成分・断定文）は広めに LLM へ通す。「強いアンカー必須」ではなく
-    「明確な除外に該当しなければ、断定文なら通す」方針。
-    """
-    s = (text or "").strip()
-    if len(s) < _FACTCHECK_MIN_CHARS:
-        return False
-    if _BACKCHANNEL_RE.match(s):
-        return False
-    uncertain_only = re.fullmatch(
-        r"[\s、。,.!?！？]*(たぶん|多分|なんでしたっけ|何でしたっけ|"
-        r"わからない|分からない|知らない|覚えてない|忘れた)[\s、。,.!?！？]*",
-        s,
-    )
-    if uncertain_only:
-        return False
-    # --- 明確に判定不要なものを落とす（negative filters） ---
-    if _FACT_PHONE_NUMBER_RE.search(s):
-        return False
-    if _FACT_QUESTION_RE.search(s):
-        return False
-    if _FACT_UNCERTAIN_RE.search(s):
-        return False
-    if _FACT_PREFERENCE_RE.search(s):
-        return False
-    if _FACT_CREATIVE_EXPRESSION_RE.search(s):
-        return False
-    if _FACT_META_TALK_RE.search(s):
-        return False
-    # --- 事実断定らしいものを通す（positive gates。最終判断はLLM） ---
-    if _FACT_STRONG_ANCHOR_RE.search(s):
-        return True
-    if _FACT_CONTAINMENT_RE.search(s):
-        return True
-    return bool(_FACT_ASSERTION_RE.search(s)
-                and not _FACT_DEICTIC_SUBJECT_RE.match(s))
-
-
-# 明示呼称（ファシリテーターへの呼びかけ）。冒頭でこれらが「呼びかけ」として
-# 使われている時だけ手動呼び出しの候補にする（話題としての言及は除外）。
-_FACIL_NAMES = r"(?:ファシリテーター|進行役|エーアイ|ＡＩ|AI)"
-# 呼びかけ判定: 冒頭の称呼を拾う。STTは句読点を落とすことがあるため、
-# 呼称直後の「さん」/読点/空白は任意にし、後段の依頼表現で誤爆を抑える。
-_CALL_VOCATIVE_RE = re.compile(
-    rf"^\s*{_FACIL_NAMES}(?:さん)?(?:[、,，\s]*)")
-# 依頼表現（保守的）。呼びかけの後にこれが無ければメタ言及・質問として発火しない。
-_CALL_REQUEST_RE = re.compile(
-    r"(まとめ|整理|確認|聞いて|振って|戻して|助けて|"
-    r"次(?:に|は|を|どう|何|の|へ|決め|進め|回|[、,，\s]|$))")
-# 呼称直後にこれらが来る場合は、呼びかけではなく話題化として扱う。
-_CALL_META_PREFIX_RE = re.compile(
-    r"^(?:について|機能|導入|は|が|を|の|も|って|とは|では)")
-
-
-def _detect_facilitator_call_ex(text: str) -> tuple[str | None, str | None]:
-    """音声での明示的なファシリテーター呼びかけを保守的に検出する（Phase2）.
-
-    戻り値は ``(依頼文, 無視理由)``。検出時は ``(依頼文, None)``。
-    呼称すら無い通常発話は ``(None, None)``（診断も不要）。呼称はあるが
-    誤爆防止で落とした場合だけ理由を返す（観測用）:
-
-    - ``"meta_topic"``     : 「AIについて」「進行役は」等の話題化
-    - ``"no_request"``     : 呼称のみで依頼表現が無い（メタ話題・質問など）
-    """
-    s = (text or "").strip()
-    if not s:
-        return None, None
-    m = _CALL_VOCATIVE_RE.match(s)
-    if m is None:
-        return None, None  # 冒頭の明示的な呼びかけが無い（話題化・別位置の言及）
-    rest = re.sub(r"\s+", " ", s[m.end():]).strip(" 　、,，。.！!？?")
-    if _CALL_META_PREFIX_RE.match(rest):
-        return None, "meta_topic"  # 呼びかけではなく「AIについて」等の話題化
-    if not _CALL_REQUEST_RE.search(rest):
-        return None, "no_request"  # 依頼表現が無い（メタ話題・質問など）
-    return rest[:_MANUAL_CALL_MAX_CHARS], None
-
-
-def _detect_facilitator_call(text: str) -> str | None:
-    """呼びかけ検出（互換ラッパー）。依頼文または None を返す."""
-    return _detect_facilitator_call_ex(text)[0]
-
 
 def _log_voice_call_diag(state: SessionState, *, text: str,
-                         request: str | None, reason: str | None) -> None:
-    """音声呼びかけの検出/不発を ``.interventions.jsonl`` に診断として残す.
+                         request: str | None, reason: str | None = None) -> None:
+    """音声呼びかけの検出を ``.interventions.jsonl`` に診断として残す.
 
-    呼称にマッチした発話だけが対象なので低頻度（ログ洪水にならない）。
+    triage 分類が依頼を検出した発話だけが対象なので低頻度（ログ洪水にならない）。
     replay 等の既存ローダーは type=trigger/delivery しか読まないため無害。
     state が未対応（テストの FakeState 等）なら no-op。
     """
@@ -1056,11 +924,99 @@ def _run_drift_checker(state: SessionState, oai_key: str, oai_model: str):
             print("# [drift] → 介入要求をキューに投入", flush=True)
 
 
+def _run_triage_worker(state: SessionState, oai_key: str,
+                       oai_model: str) -> None:
+    """確定発話ごとに1回だけ表層分類し、record に ``triage`` 注釈を付ける（H6/M2）.
+
+    fact prefilter の正規表現群と音声呼びかけの regex 検出を置き換える。
+    ローカルで判定するのは機械的に安全なゲート（最小文字数・相槌）だけで、
+    意味判定（事実断定か / ファシリテーターへの依頼か）は文脈付きの軽量 LLM
+    分類に一本化する。結果は ``record["triage"]`` に格納され、fact checker が
+    消費する。ファシリテーターへの依頼を検出したら手動呼び出しキューに積む
+    （UIボタンと同じ経路）。
+    """
+    from das.asr.live._bootstrap import classify_utterance as _classify
+
+    _retry_counts: dict[int, int] = {}
+    while not state.stop.is_set():
+        time.sleep(0.25)
+        agent = state.agent
+        if not oai_key or agent is None or not agent.enabled:
+            continue
+        if not _intervention_enabled(state):
+            continue
+        if agent.mode == "conversation":
+            continue
+        with state.state_lock:
+            talk_rs = intervention_records([
+                r for r in state.records
+                if "speaker" in r and r.get("text")
+                and r.get("speaker") != AGENT_SPEAKER
+            ])
+        n = len(talk_rs)
+        idx = state.triage_cursor
+        if idx >= n:
+            continue
+        r = talk_rs[idx]
+        text = str(r.get("text") or "").strip()
+        # 相槌・未確定は intervention_records が除外済み。ここで残る機械的
+        # ゲートは「極端に短い発話」のみ（LLM を呼ぶ価値がない, コスト0）。
+        if len(text) < _TRIAGE_MIN_CHARS:
+            annotation = {"factual_claim": False, "facilitator_request": ""}
+        else:
+            context = talk_rs[max(0, idx - _TRIAGE_CONTEXT_WINDOW):idx]
+            utts = [
+                {"speaker": intervention_speaker_name(state, c), "text": c["text"]}
+                for c in context
+            ]
+            utts.append({
+                "speaker": intervention_speaker_name(state, r),
+                "text": text,
+            })
+            result = _classify(utts, oai_key, oai_model)
+            if result.get("retryable_error"):
+                tries = _retry_counts.get(idx, 0) + 1
+                _retry_counts[idx] = tries
+                if tries <= _TRIAGE_MAX_RETRIES:
+                    print(f"# [triage] retry: LLM分類の一時失敗 "
+                          f"{tries}/{_TRIAGE_MAX_RETRIES}", flush=True)
+                    continue
+                print("# [triage] skip: LLM分類の失敗が続いたため対象発話をスキップ",
+                      flush=True)
+                annotation = {"factual_claim": False, "facilitator_request": ""}
+            else:
+                annotation = {
+                    "factual_claim": bool(result.get("factual_claim")),
+                    "facilitator_request": str(
+                        result.get("facilitator_request") or ""
+                    ).strip()[:_MANUAL_CALL_MAX_CHARS],
+                }
+        _retry_counts.pop(idx, None)
+        with state.state_lock:
+            r["triage"] = annotation
+        state.triage_cursor = idx + 1
+        request = str(annotation.get("facilitator_request") or "")
+        # facilitate モードのみ音声呼びかけを扱う。converse（パートナー有り）では
+        # 通常応答に任せ、専用経路は使わない（二重応答の回避, 設計 Phase2）。
+        if request and state.partner is None:
+            state.manual_call_requests.put({
+                "request": request,
+                "source": "voice",
+                "created_at": time.monotonic(),
+                "created_wall_at": datetime.datetime.now()
+                .isoformat(timespec="seconds"),
+            })
+            print(f"# [voice] ファシリテーター呼びかけ検出: {request}", flush=True)
+            _log_voice_call_diag(state, text=text, request=request)
+            _set_manual_status(state, "queued", source="voice", request=request)
+
+
 def _run_fact_checker(state: SessionState, oai_key: str, oai_model: str):
     """明確な事実誤りだけを短く補正する要求を積む.
 
-    脱線や発話量とは別ルートにする。ローカルでは会議を妨げやすい
-    低価値候補を保守的に落とし、明確な誤りかどうかはLLMに任せる。
+    脱線や発話量とは別ルートにする。候補の選別は triage 注釈
+    （``record["triage"]["factual_claim"]``, _run_triage_worker が付与）に従い、
+    明確な誤りかどうかは文脈付きの LLM 判定に任せる。
     採用するのは high confidence の訂正だけ。
     """
     from das.asr.live._bootstrap import check_fact_correction as _check_fact
@@ -1090,12 +1046,15 @@ def _run_fact_checker(state: SessionState, oai_key: str, oai_model: str):
         candidate = None
         while next_idx < n:
             r = talk_rs[next_idx]
-            if _looks_like_fact_claim(str(r.get("text") or "")):
+            triage = r.get("triage")
+            if triage is None:
+                break  # triage 分類待ち。分類済みの位置までで止まり、次tickで再開
+            if triage.get("factual_claim"):
                 candidate = r
                 break
             next_idx += 1
         if candidate is None:
-            state.fact_cursor = n
+            state.fact_cursor = next_idx
             continue
         now = time.monotonic()
         if now - _last_check < _FACTCHECK_CHECK_SEC:
@@ -1421,36 +1380,11 @@ def _run_agent_worker(state: SessionState):
             if new_records:
                 _last_utt_time[0] = time.monotonic()
             if _enabled:
-                # facilitate モードのみ音声呼びかけを検出する。conversation（AIが
-                # 直接会話）/converse（パートナー有り）では通常応答に任せ、専用検出は
-                # 無効にして二重応答を避ける（設計 Phase2）。
-                _voice_call_on = agent.mode != "conversation" and partner is None
+                # 音声呼びかけの検出は _run_triage_worker（LLM分類）が担う。
+                # ここでは発話をエージェントに供給するだけ。
                 for r in new_records:
-                    text = r.get("text", "")
-                    agent.feed(intervention_speaker_name(state, r), text)
-                    if _voice_call_on:
-                        request, _ignored = _detect_facilitator_call_ex(text)
-                        if request is not None:
-                            state.manual_call_requests.put({
-                                "request": request,
-                                "source": "voice",
-                                "created_at": time.monotonic(),
-                                "created_wall_at": datetime.datetime.now()
-                                .isoformat(timespec="seconds"),
-                            })
-                            print("# [voice] ファシリテーター呼びかけ検出: "
-                                  f"{request or '直近の議論整理'}", flush=True)
-                            _log_voice_call_diag(state, text=text,
-                                                 request=request, reason=None)
-                            _set_manual_status(state, "queued",
-                                               source="voice", request=request)
-                        elif _ignored is not None:
-                            # 呼称はあるが誤爆防止で無視した発話（不発の事後検証用）。
-                            # 呼称マッチ時のみなので低頻度。
-                            print("# [voice] 呼びかけ様発話を無視 "
-                                  f"({_ignored}): {text[:40]}", flush=True)
-                            _log_voice_call_diag(state, text=text,
-                                                 request=None, reason=_ignored)
+                    agent.feed(intervention_speaker_name(state, r),
+                               r.get("text", ""))
             state.agent_cursor = n
             # --- 自動割り込み ---
             _human_spoke = any(len(t.strip()) > _INTERRUPT_MIN_CHARS
