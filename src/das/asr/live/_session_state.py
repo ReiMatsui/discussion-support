@@ -121,6 +121,8 @@ class SessionState:
         # 認識途中経過（partial）。UIに「認識中」を見せるため（課題①）。
         self.partial_text = ""
         self.partial_speaker = ""
+        # partial が最後に変化した時刻（F3: フロア占有判定の stale ガード用）。
+        self._last_partial_change = 0.0
         # ファシリテーター発言の副作用イベント（議事録追加・パートナー反応）。
         # agentの受信スレッドはここに積むだけにして、専用ワーカーが処理する。
         # 受信スレッドが partner の WebSocket 送信やファイルI/Oでブロックするのを防ぐ。
@@ -843,7 +845,9 @@ class SessionState:
         # 既知のトレードオフ: エコーウィンドウ中の AI 自身の声の partial でもタイマー
         # が更新され得るが、フロア判定を保守側（介入を待つ側）に倒すだけなので許容。
         if t and t != prev:
-            self._last_utt_time[0] = time.monotonic()
+            _now = time.monotonic()
+            self._last_utt_time[0] = _now
+            self._last_partial_change = _now   # F3: フロア占有の鮮度判定に使う
         if not t:
             sys.stdout.write(CLEAR_LINE)
         else:

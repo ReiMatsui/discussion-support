@@ -88,3 +88,51 @@ def test_show_partial_empty_does_not_update():
     s._last_utt_time[0] = 0.0
     s.show_partial("#1", "   ")
     assert s._last_utt_time[0] == 0.0
+
+
+def test_show_partial_records_change_time():
+    """F3: partial が変化したら変化時刻(_last_partial_change)を記録する."""
+    s = _make_state()
+    s._last_partial_change = 0.0
+    s.show_partial("#1", "喋っている途中")
+    assert s._last_partial_change > 0.0
+
+
+# --- F3: アクティブな partial をフロア占有として扱う ----------------------
+
+def test_effective_silence_is_zero_while_active_partial():
+    """partial 非空かつ直近更新中は「フロア占有」= 沈黙 0 を返す."""
+    import time as _t
+
+    from das.asr.live._workers import _effective_silence
+    s = _make_state()
+    last = [0.0]                # 実際には大きな沈黙が経過している状態
+    now = _t.monotonic()
+    s.partial_text = "まだ喋っている途中で"
+    s._last_partial_change = now
+    assert _effective_silence(s, now, last) == 0.0
+
+
+def test_effective_silence_normal_when_no_partial():
+    """partial が空なら従来どおり now - last_utt_time を返す."""
+    import time as _t
+
+    from das.asr.live._workers import _effective_silence
+    s = _make_state()
+    last = [0.0]
+    now = _t.monotonic()
+    s.partial_text = ""
+    assert _effective_silence(s, now, last) == now - last[0]
+
+
+def test_effective_silence_ignores_stale_partial():
+    """partial が10秒以上変化していなければ stale として無視し、通常の沈黙を返す."""
+    import time as _t
+
+    from das.asr.live._workers import _effective_silence
+    s = _make_state()
+    last = [0.0]
+    now = _t.monotonic()
+    s.partial_text = "クリアされずに固着した partial"
+    s._last_partial_change = now - 11.0  # 10秒超前
+    assert _effective_silence(s, now, last) == now - last[0]

@@ -45,6 +45,7 @@ from ._constants import (
     _INVITE_WARMUP,
     _MANUAL_CALL_MAX_CHARS,
     _MANUAL_CALL_TTL,
+    _PARTIAL_FLOOR_MAX_AGE,
     _TRIAGE_BACKLOG_MAX,
     _TRIAGE_CONTEXT_WINDOW,
     _TRIAGE_MAX_RETRIES,
@@ -75,6 +76,24 @@ from ._speaker_policy import (
     triage_records,
 )
 from ._ui import _print_line
+
+
+def _effective_silence(state: SessionState, now: float,
+                       last_utt_time: list[float]) -> float:
+    """フロア判定用の沈黙経過秒（F3）.
+
+    誰かの発話が今まさに転写されている（``partial_text`` が非空でかつ直近に更新
+    されている）間は「フロアは埋まっている」とみなして沈黙 0 を返す。人間が発話の
+    途中で置く1秒程度の自然な間を「フロアが空いた」と誤認して介入が発話に被さるのを
+    防ぐ。partial が ``_PARTIAL_FLOOR_MAX_AGE`` 秒以上変化していなければ stale として
+    無視する（partial がクリアされずに固着した場合の保険）。
+    """
+    with state.state_lock:
+        partial = state.partial_text
+        changed = state._last_partial_change
+    if partial and (now - changed) < _PARTIAL_FLOOR_MAX_AGE:
+        return 0.0
+    return now - last_utt_time[0]
 
 
 def _log_voice_call_diag(state: SessionState, *, text: str,
@@ -1541,7 +1560,8 @@ def _run_agent_worker(state: SessionState):
         # trigger()の呼び出しはこの _run_agent_worker に一元化されている（R2）。
         if not agent._responding and not agent.ai_speaking:
             _now = time.monotonic()
-            _silence_elapsed = _now - _last_utt_time[0]
+            # F3: アクティブな partial 中はフロア占有として沈黙 0 に倒す。
+            _silence_elapsed = _effective_silence(state, _now, _last_utt_time)
             _partner_busy = bool(partner is not None
                                  and (partner.ai_speaking or partner._responding))
             _bargein_topics = None
@@ -1754,7 +1774,8 @@ def _run_agent_worker(state: SessionState):
                 _topics = list(state.topics) if state.topics else None
         # --- モード別トリガー判定 ---
         # （中断された介入のリトライは上のガードバイパス節に集約済み）
-        _silence_elapsed = time.monotonic() - _last_utt_time[0]
+        # F3: アクティブな partial 中はフロア占有として沈黙 0 に倒す。
+        _silence_elapsed = _effective_silence(state, time.monotonic(), _last_utt_time)
         try:
             normal_decision, _ctrl_normal, _normal_cands, _ctrl_latency_ms = (
                 _controller_normal_decision(

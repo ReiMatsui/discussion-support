@@ -89,6 +89,8 @@ class FakeState:
         self._last_utt_time = [time.monotonic()]
         self._was_in_echo = [False]
         self.meeting_epoch = 0
+        self.partial_text = ""
+        self._last_partial_change = 0.0
         self.agent_cursor = 0
         self.drift_cursor = 0
         self.fact_cursor = 0
