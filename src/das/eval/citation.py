@@ -141,14 +141,18 @@ def compute_citation_stats(
 
     interventions は ``InterventionLogEntry`` を ``asdict`` した形を想定:
     - ``turn_id``: 介入が発火したターン (= 介入直後のターンが「次発話」)
-    - ``addressed_to``: L1 のときの宛先発話者名
+    - ``persona_name``: L1 のとき **実際に情報が注入された話者** (= 次話者)
     - ``items``: list of dict with ``source_text`` and ``source_kind``
     - ``kind``: "l1" / "l2" / "skip"
 
     ロジック:
-      L1 のとき: 介入の turn_id を T、addressed_to を S とすると、
-                  S が次に話すターン T' (T < T') の発話を target にする。
+      L1 のとき: 介入の turn_id を T、**実受信者** ``persona_name`` を R とすると、
+                  R が次に話すターン T' (T < T') の発話を target にする。
                   各 item の source_text を target に対して引用判定。
+                  (レビュー C-2: 以前は ``addressed_to`` = 直前の発話者を照合して
+                  いたため、full_proposal では情報を受け取っていない話者を見て
+                  条件間で測定対象が食い違っていた。実受信者 ``persona_name`` に
+                  統一することで全条件が「受け取った直後の発話」を照合する。)
       L2 のとき: 介入後の **次の任意の発話**を target にする (全員向けなので)。
       skip のとき: スキップ。
 
@@ -191,9 +195,9 @@ def compute_citation_stats(
         target_text: str | None = None
         target_turn: int | None = None
         if kind == "l1":
-            addressed = entry.get("addressed_to")
-            if addressed and addressed in speaker_turns:
-                future = [t for t in speaker_turns[addressed] if t > trigger_turn]
+            recipient = entry.get("persona_name")
+            if recipient and recipient in speaker_turns:
+                future = [t for t in speaker_turns[recipient] if t > trigger_turn]
                 if future:
                     target_turn = future[0]
                     target_text = by_turn[target_turn].text
@@ -286,9 +290,9 @@ async def compute_citation_stats_with_embeddings(
         trigger_turn = int(entry.get("turn_id", 0))
         target_turn: int | None = None
         if kind == "l1":
-            addressed = entry.get("addressed_to")
-            if addressed and addressed in speaker_turns:
-                future = [t for t in speaker_turns[addressed] if t > trigger_turn]
+            recipient = entry.get("persona_name")
+            if recipient and recipient in speaker_turns:
+                future = [t for t in speaker_turns[recipient] if t > trigger_turn]
                 if future:
                     target_turn = future[0]
         else:

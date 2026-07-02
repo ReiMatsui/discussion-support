@@ -642,6 +642,10 @@ async def _run_single(
             {
                 "kind": e.kind,
                 "turn_id": e.turn_id,
+                # レビュー C-2: 照合は「実際に情報が注入された話者」= persona_name
+                # (次話者) の直後の発話を基準にする。addressed_to (グラフ上の宛先=
+                # 直前の発話者) は参考として残すが citation 判定には使わない。
+                "persona_name": e.persona_name,
                 "addressed_to": e.addressed_to,
                 "items": [
                     {
