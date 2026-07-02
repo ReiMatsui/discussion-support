@@ -1356,6 +1356,9 @@ def _run_structuring_checker(state: SessionState, oai_key: str,
         pending_count = getattr(agent, "pending_count", 0)
         trigger_n = getattr(agent, "trigger_n", 0)
         if trigger_n <= 0 or pending_count < trigger_n:
+            # 蓄積が閾値未満 = trigger/リセットで消費された。次に閾値へ達したとき
+            # 再判定できるよう高水位マークを戻す（さもないと介入は一度きりになる）。
+            _last_judged_count = 0
             continue
         # 同じ蓄積量での再判定の連打を防ぐ（発話が進んだ時だけ判定する）。
         if pending_count <= _last_judged_count:

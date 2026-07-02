@@ -988,6 +988,38 @@ def test_structuring_checker_does_not_rejudge_same_count(monkeypatch):
     assert len(calls) == 1
 
 
+def test_structuring_checker_rejudges_after_pending_reset(monkeypatch):
+    """介入後に蓄積が消費（trigger/reset）されたら、次の閾値到達で再判定する.
+
+    _last_judged_count が高水位のまま残ると介入が一度きりになる回帰を防ぐ。
+    """
+    import das.asr.live._bootstrap as bs
+    calls: list = []
+
+    def _fake(*a, **k):
+        calls.append(1)
+        return {"intervene": False, "focus": ""}
+
+    monkeypatch.setattr(bs, "check_summary_value", _fake)
+    agent = FakeAgent()
+    agent._pending = [{"speaker": "人間", "text": str(i)}
+                      for i in range(agent.trigger_n)]
+    state = FakeState(agent, None)
+    state.records = [{"speaker": "A", "text": "議論"}]
+
+    def _cycle_once():
+        if len(calls) >= 1 and agent._pending:
+            agent._pending.clear()   # trigger 相当: 蓄積を消費
+        elif len(calls) >= 1 and not agent._pending:
+            # 蓄積を閾値まで戻す（新しい発話が進んだ状況）
+            agent._pending = [{"text": str(i)} for i in range(agent.trigger_n)]
+        return len(calls) >= 2
+
+    _run_structuring_briefly(state, until=_cycle_once, timeout=4.0)
+
+    assert len(calls) >= 2   # リセットを跨いで再判定できる
+
+
 # ---------------------------------------------------------------------------
 # 未確定話者の割り込み（C1）: 声紋が確定しない発話でもAIを止められる
 # ---------------------------------------------------------------------------
