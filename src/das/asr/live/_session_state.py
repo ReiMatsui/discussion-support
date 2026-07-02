@@ -70,6 +70,11 @@ class SessionState:
         self.colors: dict[str, str] = {}
         self.records: list[dict] = []
         self.state_lock = threading.Lock()
+        # 会議世代カウンタ（H2）。reset_for_new_meeting が state_lock 内で +1 する。
+        # 各 worker はスナップショット取得時に epoch を読み、副作用（feed/キュー投入/
+        # カーソル書き戻し）の直前に一致を再確認する。リセットを跨いだ古い計算結果を
+        # 新会議に書き込んで「カーソルが発話数を超える永久待機」に陥るのを防ぐ。
+        self.meeting_epoch = 0
 
         # 声紋
         self.tracker: VoiceProfiles | None = tracker
@@ -599,6 +604,10 @@ class SessionState:
 
         # 状態クリア（課題③: 話者ラベリングもリセット。永続化は別機能）
         with self.state_lock:
+            # 世代を進める（H2）。以降 worker がこの epoch 不一致を見て、リセットを
+            # 跨いだ古い計算結果の書き戻しを破棄する。records クリアと同一 lock 内で
+            # 行うことで、worker から見て「records が空 ⇔ epoch が新しい」を一貫させる。
+            self.meeting_epoch += 1
             self.records = []
             self.names = {}
             self.colors = {}

@@ -830,6 +830,7 @@ def _run_topic_worker(state: SessionState, oai_key: str, oai_model: str):
         if not _intervention_enabled(state):
             continue
         with state.state_lock:
+            epoch = state.meeting_epoch
             talk_rs = intervention_records([
                 r for r in state.records if "speaker" in r and r.get("text")
             ])
@@ -842,6 +843,11 @@ def _run_topic_worker(state: SessionState, oai_key: str, oai_model: str):
         with state.topics_lock:
             existing = [t["topic"] for t in state.topics]
         new_topics = _extract_topics(utts, existing, oai_key, oai_model)
+        # 副作用の直前で epoch を再確認（H2）: リセットを跨いだら結果を破棄。
+        with state.state_lock:
+            if state.meeting_epoch != epoch:
+                continue
+            state.topic_cursor = n
         if new_topics:
             ms = window[-1].get("ms")
             with state.topics_lock:
@@ -854,7 +860,6 @@ def _run_topic_worker(state: SessionState, oai_key: str, oai_model: str):
             for t in new_topics:
                 if isinstance(t, dict) and "topic" in t:
                     _print_line(f"# 💡論点: {t['topic']}（{t.get('speaker', '?')}）")
-        state.topic_cursor = n
 
 
 def _run_drift_checker(state: SessionState, oai_key: str, oai_model: str):
@@ -894,6 +899,7 @@ def _run_drift_checker(state: SessionState, oai_key: str, oai_model: str):
             continue
         # ファシリテーター以外の全発話をカウント＆チェック対象にする
         with state.state_lock:
+            epoch = state.meeting_epoch
             talk_rs = intervention_records([
                 r for r in state.records
                 if "speaker" in r and r.get("text")
@@ -911,13 +917,22 @@ def _run_drift_checker(state: SessionState, oai_key: str, oai_model: str):
         window = talk_rs[max(0, n - _DRIFT_CHECK_WINDOW):]
         utts = [{"speaker": intervention_speaker_name(state, r), "text": r["text"]}
                 for r in window]
-        state.drift_cursor = n
+        # cursor 書き戻し（副作用）の直前で epoch 確認（H2）: リセット跨ぎを破棄。
+        with state.state_lock:
+            if state.meeting_epoch != epoch:
+                continue
+            state.drift_cursor = n
         print(f"# [drift] チェック実行: {len(utts)}発話, "
               f"cursor={n}, topics={len(topics)}件", flush=True)
         # 脱線判定
         result = _check_drift(utts, topics, oai_key, oai_model)
         if result.get("drift"):
             reason = result.get("reason", "")
+            # キュー投入（副作用）の直前でも epoch を確認し、リセット後の
+            # 新会議に古い脱線要求が混ざらないようにする（H2）。
+            with state.state_lock:
+                if state.meeting_epoch != epoch:
+                    continue
             _print_line(f"# 🔀 脱線検出: {reason}")
             # R2: trigger()は呼ばず、要求をキューに積む。agent_workerが裁定する。
             state.drift_requests.put(reason)
@@ -948,6 +963,7 @@ def _run_triage_worker(state: SessionState, oai_key: str,
         if agent.mode == "conversation":
             continue
         with state.state_lock:
+            epoch = state.meeting_epoch
             talk_rs = intervention_records([
                 r for r in state.records
                 if "speaker" in r and r.get("text")
@@ -992,13 +1008,20 @@ def _run_triage_worker(state: SessionState, oai_key: str,
                     ).strip()[:_MANUAL_CALL_MAX_CHARS],
                 }
         _retry_counts.pop(idx, None)
+        # 注釈書き込み・cursor 書き戻し（副作用）の直前で epoch 確認（H2）。
         with state.state_lock:
+            if state.meeting_epoch != epoch:
+                continue
             r["triage"] = annotation
-        state.triage_cursor = idx + 1
+            state.triage_cursor = idx + 1
         request = str(annotation.get("facilitator_request") or "")
         # facilitate モードのみ音声呼びかけを扱う。converse（パートナー有り）では
         # 通常応答に任せ、専用経路は使わない（二重応答の回避, 設計 Phase2）。
         if request and state.partner is None:
+            # キュー投入（副作用）の直前でも epoch 確認（H2）。
+            with state.state_lock:
+                if state.meeting_epoch != epoch:
+                    continue
             state.manual_call_requests.put({
                 "request": request,
                 "source": "voice",
@@ -1034,6 +1057,7 @@ def _run_fact_checker(state: SessionState, oai_key: str, oai_model: str):
         if agent.mode == "conversation":
             continue
         with state.state_lock:
+            epoch = state.meeting_epoch
             talk_rs = intervention_records([
                 r for r in state.records
                 if "speaker" in r and r.get("text")
@@ -1054,7 +1078,10 @@ def _run_fact_checker(state: SessionState, oai_key: str, oai_model: str):
                 break
             next_idx += 1
         if candidate is None:
-            state.fact_cursor = next_idx
+            # cursor 書き戻し（副作用）の直前で epoch 確認（H2）。
+            with state.state_lock:
+                if state.meeting_epoch == epoch:
+                    state.fact_cursor = next_idx
             continue
         now = time.monotonic()
         if now - _last_check < _FACTCHECK_CHECK_SEC:
@@ -1078,7 +1105,11 @@ def _run_fact_checker(state: SessionState, oai_key: str, oai_model: str):
                       flush=True)
                 continue
             print("# [fact] skip: LLM判定の失敗が続いたため対象発話をスキップ", flush=True)
-        state.fact_cursor = next_idx + 1
+        # cursor 書き戻し（副作用）の直前で epoch 確認（H2）: リセット跨ぎを破棄。
+        with state.state_lock:
+            if state.meeting_epoch != epoch:
+                continue
+            state.fact_cursor = next_idx + 1
         _retry_counts.pop(next_idx, None)
         if result.get("should_correct"):
             correction = str(result.get("correction") or "").strip()
@@ -1090,6 +1121,10 @@ def _run_fact_checker(state: SessionState, oai_key: str, oai_model: str):
                 if any(c == norm for _, c in _recent_corrections):
                     print("# [fact] skip: 重複する補正", flush=True)
                     continue
+                # キュー投入（副作用）の直前でも epoch 確認（H2）。
+                with state.state_lock:
+                    if state.meeting_epoch != epoch:
+                        continue
                 _recent_corrections.append((now, norm))
                 result["_queued_at"] = time.monotonic()
                 _print_line(f"# ✅ 事実補正候補: {correction}")
@@ -1369,6 +1404,7 @@ def _run_agent_worker(state: SessionState):
         _silence_summarize = state.proactivity.get("silence_summarize")
         _enabled = _intervention_enabled(state)
         with state.state_lock:
+            meeting_epoch = state.meeting_epoch
             _skip = {AGENT_SPEAKER, "パートナー"}
             talk_rs = [r for r in state.records
                        if "speaker" in r and r.get("text")
@@ -1377,6 +1413,11 @@ def _run_agent_worker(state: SessionState):
         if n > state.agent_cursor:
             new_records = intervention_records(talk_rs[state.agent_cursor:])
             new_texts = [r.get("text", "") for r in new_records]
+            # 発話供給（副作用）の直前で epoch 確認（H2）。リセットを跨いだら、
+            # 古い会議の発話を新しい agent に流さないようこのtickを破棄する。
+            with state.state_lock:
+                if state.meeting_epoch != meeting_epoch:
+                    continue
             if new_records:
                 _last_utt_time[0] = time.monotonic()
             if _enabled:
@@ -1385,7 +1426,11 @@ def _run_agent_worker(state: SessionState):
                 for r in new_records:
                     agent.feed(intervention_speaker_name(state, r),
                                r.get("text", ""))
-            state.agent_cursor = n
+            # cursor 書き戻しは epoch 再確認と同一 lock で atomic に行う（H2）。
+            with state.state_lock:
+                if state.meeting_epoch != meeting_epoch:
+                    continue
+                state.agent_cursor = n
             # --- 自動割り込み ---
             _human_spoke = any(len(t.strip()) > _INTERRUPT_MIN_CHARS
                                for t in new_texts)

@@ -454,6 +454,7 @@ def test_reset_for_new_meeting():
     assert result["ok"] is True
     assert s.records == []                 # 議事録クリア
     assert s.topics == []                  # 論点クリア
+    assert s.meeting_epoch == 1            # 世代が進む（H2: worker のリセット競合ガード）
     assert s.agent_cursor == 0 and s.drift_cursor == 0 and s.fact_cursor == 0
     assert s.drift_requests.empty()        # キューもクリア
     assert s.factcheck_requests.empty()

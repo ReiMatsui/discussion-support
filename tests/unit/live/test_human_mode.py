@@ -224,6 +224,39 @@ def test_triage_worker_annotates_records_and_advances_cursor(monkeypatch):
     assert len(calls) == 2
 
 
+def test_triage_worker_discards_and_recovers_on_midflight_reset(monkeypatch):
+    """分類中に会議リセット(meeting_epoch進行)が起きたらその結果を破棄し、
+    以降の発話は正しく処理される (H2). リセット競合でカーソルが暴走せず、
+    triage が止まって fact/呼びかけが連鎖停止するのを防ぐ。"""
+    import das.asr.live._bootstrap as bootstrap
+
+    calls: list = []
+
+    def _fake_classify(utts, *_args):
+        calls.append(utts)
+        if len(calls) == 1:
+            # スナップショット取得後・注釈書き戻し前にリセットが起きた状況を模す
+            state.meeting_epoch += 1
+        return {"factual_claim": False, "facilitator_request": ""}
+
+    monkeypatch.setattr(bootstrap, "classify_utterance", _fake_classify)
+    state = _make_state(with_agent=True)
+    state.records = [
+        {"speaker": "話者1", "text": "計算方法の話です", "ms": 0, "end_ms": 1000},
+    ]
+
+    _run_triage_briefly(
+        state, until=lambda: state.records[0].get("triage") is not None
+    )
+
+    # 1回目の結果は epoch 不一致で破棄され、カーソルは進まない。
+    # 2回目（epoch 安定後）で注釈が付きカーソルが進む。
+    assert state.records[0]["triage"] == {"factual_claim": False,
+                                          "facilitator_request": ""}
+    assert state.triage_cursor == 1
+    assert len(calls) == 2
+
+
 def test_triage_worker_passes_recent_context_before_target(monkeypatch):
     """指示語・省略の補完のため、直前の発話を参照文脈として渡す."""
     import das.asr.live._bootstrap as bootstrap
