@@ -49,7 +49,8 @@ REPLAY_INDEX_HTML = """<!doctype html>
 <title>リプレイ検証</title>
 <style>
   :root { --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --ink:#1f2937;
-    --muted:#6b7280; --fact:#0e7490; --drift:#b45309; --invite:#6d28d9; }
+    --muted:#6b7280; --fact:#0e7490; --drift:#b45309; --invite:#6d28d9;
+    --manual:#15803d; }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink);
     font-family: -apple-system, "Hiragino Sans", "Segoe UI", sans-serif; line-height: 1.55; }
@@ -78,6 +79,9 @@ REPLAY_INDEX_HTML = """<!doctype html>
   .review-item .status { color:var(--muted); font-size:.76rem; }
   .review-item .delivery { margin-top:.25rem; font-weight:600; }
   .review-item .context { color:var(--muted); font-size:.76rem; margin-top:.35rem; }
+  .review-item .manual-info { color:var(--manual); font-size:.76rem; margin-top:.25rem; }
+  .review-item.voice-hit .kind { color:var(--manual); }
+  .review-item.voice-miss .kind { color:var(--muted); }
   .chips { display:flex; flex-wrap:wrap; gap:.35rem; margin-bottom:.7rem; }
   .chip { border:1px solid var(--line); border-radius:999px; padding:.18rem .55rem; font-size:.78rem; background:#fff; }
   .empty { color:var(--muted); text-align:center; padding:1rem; }
@@ -102,6 +106,10 @@ REPLAY_INDEX_HTML = """<!doctype html>
         <h2>保存済み介入</h2>
         <div id="review"></div>
       </div>
+      <div class="review">
+        <h2>音声呼びかけ診断</h2>
+        <div id="voice-diag"></div>
+      </div>
     </aside>
   </div>
 </div>
@@ -125,6 +133,7 @@ const statusLabel = (s) => ({
   delivered: "発話済み",
   missing_delivery: "発話未確認",
   orphan_delivery: "発火理由なし",
+  expired_manual_call: "期限切れ（不発）",
 }[s] || s);
 const flagLabel = (s) => ({
   missing_delivery: "発話なし",
@@ -132,7 +141,24 @@ const flagLabel = (s) => ({
   no_recent_context: "文脈なし",
   drift_without_topic: "議題なし脱線",
   long_delivery: "長い介入",
+  manual_call_expired: "呼び出し不発",
 }[s] || s);
+const reasonLabel = (s) => ({
+  manual_call: "手動呼び出し",
+  manual_call_expired: "呼び出し不発",
+}[s] || s);
+const ignoredLabel = (s) => ({
+  meta_topic: "話題化のため無視",
+  no_request: "依頼表現なしのため無視",
+}[s] || s);
+const manualInfo = (m) => {
+  if (!m) return "";
+  const parts = [m.source === "voice" ? "音声" : "UI"];
+  if (m.request) parts.push(`依頼「${m.request}」`);
+  if (m.candidate_wait_sec != null) parts.push(`待ち${m.candidate_wait_sec}秒`);
+  if (m.outcome) parts.push(m.outcome === "selected" ? "採択" : m.outcome);
+  return `<div class="manual-info">${esc(parts.join(" / "))}</div>`;
+};
 fetch("/api/replay").then((r) => r.json()).then((data) => {
   const events = data.events || [];
   const review = data.intervention_review || [];
@@ -159,10 +185,15 @@ fetch("/api/replay").then((r) => r.json()).then((data) => {
         <span class="chip">発話済み: ${esc(reviewSummary.status_counts?.delivered ?? 0)}</span>
         <span class="chip">要確認: ${esc(reviewSummary.flagged_count ?? 0)}</span>
         <span class="chip">10発話あたり: ${esc(reviewSummary.interventions_per_10_turns ?? "-")}</span>
+        ${reviewSummary.manual_call_total ? `<span class="chip">呼び出し: ${
+          esc(reviewSummary.manual_call_total)}（発話済み${
+          esc(reviewSummary.manual_call_delivered ?? 0)} / 不発${
+          esc(reviewSummary.manual_call_expired ?? 0)}）</span>` : ""}
       </div>` + review.map((r) => `<div class="review-item">
-        <div><span class="kind">${esc(r.reason || "delivery")}</span>
+        <div><span class="kind">${esc(reasonLabel(r.reason || "delivery"))}</span>
           <span class="status">${esc(statusLabel(r.status))}</span></div>
         ${r.detail ? `<div class="detail">${esc(r.detail)}</div>` : ""}
+        ${manualInfo(r.manual)}
         ${r.delivery_text ? `<div class="delivery">${esc(r.delivery_text)}</div>` : ""}
         ${r.quality_flags?.length ? `<div class="chips">${
           r.quality_flags.map((f) => `<span class="chip">${esc(flagLabel(f))}</span>`).join("")
@@ -174,6 +205,21 @@ fetch("/api/replay").then((r) => r.json()).then((data) => {
         }</div>` : ""}
       </div>`).join("")
     : `<div class="empty">保存済み介入ログはありません</div>`;
+  const diags = data.voice_call_diag || [];
+  const detectedCount = diags.filter((d) => d.detected).length;
+  document.getElementById("voice-diag").innerHTML = diags.length
+    ? `<div class="chips">
+        <span class="chip">検出: ${detectedCount}</span>
+        <span class="chip">無視: ${diags.length - detectedCount}</span>
+      </div>` + diags.slice(-20).reverse().map((d) => `<div
+        class="review-item ${d.detected ? "voice-hit" : "voice-miss"}">
+        <div><span class="kind">${d.detected ? "検出" : "無視"}</span>
+          <span class="status">${esc(d.time || "")}${
+            d.detected ? "" : ` / ${esc(ignoredLabel(d.ignored_reason))}`}</span></div>
+        ${d.request ? `<div class="detail">依頼: ${esc(d.request)}</div>` : ""}
+        <div class="quote">${esc(d.text)}</div>
+      </div>`).join("")
+    : `<div class="empty">音声呼びかけの記録はありません</div>`;
   document.getElementById("turns").innerHTML = data.turns.length
     ? data.turns.map((t) => `<div class="turn ${hitTurns.has(t.turn_id) ? "hit" : ""}">
         <span class="ts">${esc(ts(t.ms))}</span><span class="speaker">${esc(t.speaker)}</span>${esc(t.text)}
@@ -266,6 +312,9 @@ def _intervention_quality_flags(
         flags.append("missing_delivery")
     if status == "orphan_delivery":
         flags.append("orphan_delivery")
+    if status == "expired_manual_call":
+        # 参加者が呼んだのに応答できなかった不発（要確認としてカウント）。
+        flags.append("manual_call_expired")
     if not metadata.get("recent_utterances"):
         flags.append("no_recent_context")
     if reason == "drift" and not metadata.get("topics"):
@@ -312,11 +361,24 @@ def intervention_review_items(interventions: list[dict[str, Any]]) -> list[dict[
         reason = str(trigger.get("reason") or "")
         delivery_text = str(delivery.get("text", "") if delivery else "")
         status = "delivered" if delivery else "missing_delivery"
+        if reason == "manual_call_expired":
+            # TTL切れで破棄された呼び出し。delivery は元々無いので
+            # missing_delivery ではなく専用 status で「不発」と分かるようにする。
+            status = "expired_manual_call"
         trigger_to_delivery_sec = _event_time_delta_sec(
             trigger.get("created_at"),
             delivery.get("created_at") if delivery else None,
         )
-        items.append({
+        manual: dict[str, Any] | None = None
+        if reason in ("manual_call", "manual_call_expired"):
+            # UIカード用に timing から手動呼び出しの追跡情報を抜き出す。
+            manual = {
+                "source": timing.get("source"),
+                "request": timing.get("request"),
+                "outcome": timing.get("outcome"),
+                "candidate_wait_sec": timing.get("candidate_wait_sec"),
+            }
+        item = {
             "event_id": event_id,
             "status": status,
             "reason": reason,
@@ -336,7 +398,11 @@ def intervention_review_items(interventions: list[dict[str, Any]]) -> list[dict[
             ),
             "trigger": trigger,
             "delivery": delivery,
-        })
+        }
+        if manual is not None:
+            # manual call だけの追加フィールド（他 kind の既存形式は不変）。
+            item["manual"] = manual
+        items.append(item)
     for delivery in orphans:
         delivery_text = str(delivery.get("text", ""))
         items.append({
@@ -363,6 +429,28 @@ def intervention_review_items(interventions: list[dict[str, Any]]) -> list[dict[
     return items
 
 
+def voice_call_diag_items(interventions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """音声呼びかけの検出/無視診断（type=voice_call_diag）を抜き出す.
+
+    detected=true は呼びかけとして検出された発話、false は呼称はあったが
+    誤爆防止（meta_topic / no_request）で無視された発話。不発・誤爆の
+    事後検証用に replay snapshot へ載せる。
+    """
+    items: list[dict[str, Any]] = []
+    for event in interventions:
+        if event.get("type") != "voice_call_diag":
+            continue
+        items.append({
+            "time": event.get("time"),
+            "created_at": event.get("created_at"),
+            "detected": bool(event.get("detected")),
+            "text": str(event.get("text") or ""),
+            "request": event.get("request"),
+            "ignored_reason": event.get("ignored_reason"),
+        })
+    return items
+
+
 def intervention_review_summary(items: list[dict[str, Any]]) -> dict[str, Any]:
     """Summarize saved intervention review items for run-level comparison."""
     status_counts: dict[str, int] = {}
@@ -371,11 +459,20 @@ def intervention_review_summary(items: list[dict[str, Any]]) -> dict[str, Any]:
     candidate_waits: list[float] = []
     trigger_to_delivery: list[float] = []
     flagged_count = 0
+    manual_total = 0
+    manual_delivered = 0
+    manual_expired = 0
     for item in items:
         status = str(item.get("status") or "unknown")
         reason = str(item.get("reason") or "delivery")
         status_counts[status] = status_counts.get(status, 0) + 1
         reason_counts[reason] = reason_counts.get(reason, 0) + 1
+        if reason in ("manual_call", "manual_call_expired"):
+            manual_total += 1
+            if status == "delivered":
+                manual_delivered += 1
+            if status == "expired_manual_call":
+                manual_expired += 1
         timing = item.get("timing") if isinstance(item.get("timing"), dict) else {}
         wait = timing.get("candidate_wait_sec")
         if isinstance(wait, int | float):
@@ -395,6 +492,10 @@ def intervention_review_summary(items: list[dict[str, Any]]) -> dict[str, Any]:
         "status_counts": status_counts,
         "reason_counts": reason_counts,
         "flag_counts": flag_counts,
+        # 手動呼び出し（UI/音声）の成功・不発（追加フィールド。既存キーは不変）
+        "manual_call_total": manual_total,
+        "manual_call_delivered": manual_delivered,
+        "manual_call_expired": manual_expired,
         "avg_candidate_wait_sec": (
             round(sum(candidate_waits) / len(candidate_waits), 3)
             if candidate_waits else None
@@ -585,6 +686,17 @@ def replay_snapshot(source: str | Path, turns: list[dict], events: list[dict],
     """Build the JSON object served by the replay UI."""
     interventions = interventions or []
     review_items = intervention_review_items(interventions)
+    voice_diags = voice_call_diag_items(interventions)
+    review_summary = intervention_review_run_summary(
+        review_items,
+        turn_count=len(turns),
+    )
+    # 音声呼びかけの検出/無視は trigger/delivery とは別系統の診断イベント。
+    # summary へは追加フィールドとして載せる（既存キーは不変）。
+    review_summary["voice_call_detected"] = sum(
+        1 for d in voice_diags if d["detected"])
+    review_summary["voice_call_ignored"] = sum(
+        1 for d in voice_diags if not d["detected"])
     return {
         "source": str(source),
         "topic": opts.topic,
@@ -594,10 +706,8 @@ def replay_snapshot(source: str | Path, turns: list[dict], events: list[dict],
         "events": events,
         "interventions": interventions,
         "intervention_review": review_items,
-        "intervention_review_summary": intervention_review_run_summary(
-            review_items,
-            turn_count=len(turns),
-        ),
+        "intervention_review_summary": review_summary,
+        "voice_call_diag": voice_diags,
     }
 
 

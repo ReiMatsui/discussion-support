@@ -16,6 +16,7 @@ from das.asr.live.replay import (
     load_turns,
     replay_snapshot,
     run_replay,
+    voice_call_diag_items,
 )
 
 
@@ -178,11 +179,147 @@ def test_intervention_review_summary_counts_status_reasons_and_flags():
             "missing_delivery": 1,
             "no_recent_context": 1,
         },
+        "manual_call_total": 0,
+        "manual_call_delivered": 0,
+        "manual_call_expired": 0,
         "avg_candidate_wait_sec": 2.0,
         "max_candidate_wait_sec": 3.0,
         "avg_trigger_to_delivery_sec": 3.0,
         "max_trigger_to_delivery_sec": 4.0,
     }
+
+
+def _manual_call_trigger(event_id="int-0001", *, reason="manual_call",
+                         source="ui", request="ここまで整理して", wait=2.5,
+                         outcome="selected"):
+    return {
+        "event_id": event_id,
+        "type": "trigger",
+        "reason": reason,
+        "detail": request or "直近の議論整理",
+        "metadata": {
+            "recent_utterances": [{"speaker": "A", "text": "話"}],
+            "timing": {"kind": "manual", "source": source, "request": request,
+                       "candidate_wait_sec": wait, "outcome": outcome},
+        },
+        "created_at": "2026-01-01T09:00:00",
+    }
+
+
+def test_intervention_review_items_manual_call_delivered():
+    """manual_call は通常の trigger と同様に delivery とペアリングされる."""
+    items = intervention_review_items([
+        _manual_call_trigger(source="voice"),
+        {"type": "delivery", "trigger_event_id": "int-0001",
+         "created_at": "2026-01-01T09:00:02", "text": "論点は2つです。"},
+    ])
+
+    assert len(items) == 1
+    assert items[0]["status"] == "delivered"
+    assert items[0]["reason"] == "manual_call"
+    assert items[0]["manual"] == {
+        "source": "voice",
+        "request": "ここまで整理して",
+        "outcome": "selected",
+        "candidate_wait_sec": 2.5,
+    }
+    assert items[0]["quality_flags"] == []
+    assert items[0]["trigger_to_delivery_sec"] == 2.0
+
+
+def test_intervention_review_items_manual_call_expired():
+    """manual_call_expired は delivery なしの不発として専用 status になる."""
+    items = intervention_review_items([
+        _manual_call_trigger(reason="manual_call_expired",
+                             wait=31.0, outcome="expired"),
+    ])
+
+    assert len(items) == 1
+    assert items[0]["status"] == "expired_manual_call"
+    assert items[0]["manual"]["outcome"] == "expired"
+    assert items[0]["manual"]["candidate_wait_sec"] == 31.0
+    # missing_delivery ではなく「呼び出し不発」フラグで要確認に入る
+    assert "manual_call_expired" in items[0]["quality_flags"]
+    assert "missing_delivery" not in items[0]["quality_flags"]
+
+
+def test_intervention_review_items_non_manual_have_no_manual_field():
+    """他 kind の item 形式は不変（manual フィールドを持たない）."""
+    items = intervention_review_items([{
+        "event_id": "int-0001", "type": "trigger", "reason": "drift",
+        "detail": "雑談", "metadata": {},
+    }])
+
+    assert "manual" not in items[0]
+
+
+def test_intervention_review_summary_counts_manual_calls():
+    """summary に manual call の成功/不発の指標が追加される."""
+    items = intervention_review_items([
+        _manual_call_trigger("int-0001"),
+        {"type": "delivery", "trigger_event_id": "int-0001",
+         "created_at": "2026-01-01T09:00:02", "text": "論点は2つです。"},
+        _manual_call_trigger("int-0002", reason="manual_call_expired",
+                             wait=31.0, outcome="expired"),
+        {"event_id": "int-0003", "type": "trigger", "reason": "drift",
+         "detail": "雑談", "metadata": {}},
+    ])
+
+    summary = intervention_review_summary(items)
+
+    assert summary["manual_call_total"] == 2
+    assert summary["manual_call_delivered"] == 1
+    assert summary["manual_call_expired"] == 1
+    # 既存指標は不変に動く
+    assert summary["status_counts"]["delivered"] == 1
+    assert summary["reason_counts"]["drift"] == 1
+
+
+def test_voice_call_diag_items_extracts_detected_and_ignored():
+    diags = voice_call_diag_items([
+        {"type": "voice_call_diag", "time": "09:00:01", "detected": True,
+         "text": "ファシリテーター、ここまで整理して", "request": "ここまで整理して",
+         "ignored_reason": None},
+        {"type": "voice_call_diag", "time": "09:00:05", "detected": False,
+         "text": "AIさんですね", "request": None, "ignored_reason": "no_request"},
+        {"event_id": "int-0001", "type": "trigger", "reason": "drift"},
+    ])
+
+    assert [d["detected"] for d in diags] == [True, False]
+    assert diags[0]["request"] == "ここまで整理して"
+    assert diags[1]["ignored_reason"] == "no_request"
+
+
+def test_replay_snapshot_includes_voice_diag_and_manual_metrics():
+    """snapshot に voice_call_diag と summary の追加指標が入り、review を汚さない."""
+    interventions = [
+        _manual_call_trigger("int-0001"),
+        {"type": "delivery", "trigger_event_id": "int-0001",
+         "created_at": "2026-01-01T09:00:02", "text": "論点は2つです。"},
+        _manual_call_trigger("int-0002", reason="manual_call_expired",
+                             wait=31.0, outcome="expired"),
+        {"type": "voice_call_diag", "time": "09:00:01", "detected": True,
+         "text": "ファシリテーター、ここまで整理して",
+         "request": "ここまで整理して", "ignored_reason": None},
+        {"type": "voice_call_diag", "time": "09:00:05", "detected": False,
+         "text": "AIについて話しましょう", "request": None,
+         "ignored_reason": "meta_topic"},
+    ]
+    turns = [{"turn_id": 1, "speaker": "A", "text": "話", "ms": 0}]
+
+    snap = replay_snapshot("x.turns.jsonl", turns, [],
+                           ReplayOptions(no_api=True), interventions)
+
+    assert len(snap["voice_call_diag"]) == 2
+    summary = snap["intervention_review_summary"]
+    assert summary["manual_call_total"] == 2
+    assert summary["manual_call_delivered"] == 1
+    assert summary["manual_call_expired"] == 1
+    assert summary["voice_call_detected"] == 1
+    assert summary["voice_call_ignored"] == 1
+    # diag イベントは trigger/delivery のペアリングを汚さない
+    statuses = {i["status"] for i in snap["intervention_review"]}
+    assert statuses == {"delivered", "expired_manual_call"}
 
 
 def test_intervention_review_run_summary_adds_normalized_metrics():
