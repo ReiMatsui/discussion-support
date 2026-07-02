@@ -268,6 +268,13 @@ class RealtimeAgent(_RealtimeBase):
                 self._q_put(None)   # 再生終端マーカー（現epochタグ付き）
 
         elif etype == "response.done":
+            # F1(保険): cancel で transcript.done が来ない場合でも、中断中に溜まった
+            # 発話済みバッファをエコー参照へ退避してからクリアする（D1）。
+            if self._interrupted:
+                _delivered = self._ai_text_buf.strip()
+                if _delivered and (not self._recent_ai_texts
+                                   or self._recent_ai_texts[-1] != _delivered):
+                    self._recent_ai_texts.append(_delivered)
             self._ai_text_buf = ""
             self._responding = False
             self._interrupted = False     # 次の応答に備えてリセット
@@ -516,6 +523,12 @@ class RealtimeAgent(_RealtimeBase):
         self._interrupted = True
         # --- 介入内容の保存: 割り込まれた内容を記憶（read-modify-writeを原子化, R1） ---
         delivered = self._ai_text_buf.strip()
+        # F1: 実際に再生された冒頭こそがマイクに回り込む音声なので、エコー除去の
+        # 参照 (_recent_ai_texts) に残す。cancel で transcript.done が来ない/部分的な
+        # ケースでも中断発話の漏れ込みを安全網で照合できるようにする（D1）。
+        if delivered and (not self._recent_ai_texts
+                          or self._recent_ai_texts[-1] != delivered):
+            self._recent_ai_texts.append(delivered)
         retry_text = delivered or self._active_intervention_fallback.strip()
         if retry_text:
             with self._state_lock:

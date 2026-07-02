@@ -287,6 +287,39 @@ def test_interrupt_saves_pending_intervention(agent):
     assert "conversation.item.truncate" in agent.ws.types()
 
 
+def test_interrupted_ai_prefix_survives_for_echo_after_response_done(agent):
+    """中断→response.doneでバッファがクリアされても、発話済み冒頭がエコー参照に
+    残り、漏れ込みを安全網で照合できる（F1/D1）.
+
+    F1 が無いと、transcript.done が来ないまま response.done で _ai_text_buf が
+    クリアされ、_recent_ai_texts が空のまま漏れ込みが素通りしていた。"""
+    agent.ai_speaking = True
+    agent._responding = True
+    agent._ai_text_buf = "まず、今日の目的と決め方を確認しましょう"
+
+    agent.interrupt()
+    # cancel 後に transcript.done が来ないまま response.done が到着する状況
+    agent._handle({"type": "response.done"})
+
+    assert agent._ai_text_buf == ""  # バッファはクリアされる
+    assert "まず、今日の目的と決め方を確認しましょう" in list(agent._recent_ai_texts)
+    # 漏れ込んだ冒頭を安全網のしきい値(0.35)超で照合できる
+    assert agent._best_similarity("まず、今日の目的と決め") > 0.35
+
+
+def test_interrupt_registers_delivered_only_once(agent):
+    """発話済み冒頭のエコー参照登録は重複しない（interrupt と response.done の二重登録回避）."""
+    agent.ai_speaking = True
+    agent._responding = True
+    agent._ai_text_buf = "重複しないことを確認します"
+
+    agent.interrupt()
+    agent._handle({"type": "response.done"})
+
+    delivered = "重複しないことを確認します"
+    assert list(agent._recent_ai_texts).count(delivered) == 1
+
+
 def test_interrupt_before_transcript_saves_retry_intent(agent):
     """Phase3の即再生で transcript 到着前に遮られても、介入意図を再送候補に残す."""
     agent.feed("人間", "ここまでの論点を一度整理したいです")
