@@ -938,6 +938,21 @@ def test_set_manual_call_status_dedupes_rev():
     assert s.rev == rev + 1        # 秒が進んだら更新
 
 
+def test_manual_call_status_updates_when_request_changes():
+    """同じ queued でも依頼文/source が変わればステータス表示を最新化する."""
+    s = _make_state()
+    s.agent = _FakeAgent(mode="facilitator")
+
+    s.queue_manual_facilitator_call("ここまで整理して")
+    rev = s.rev
+    s.queue_manual_facilitator_call("Aさんに振って")
+
+    mc = s.api_snapshot()["intervention"]["manual_call"]
+    assert mc["status"] == "queued"
+    assert mc["request"] == "Aさんに振って"
+    assert s.rev > rev
+
+
 def test_manual_call_delivered_after_dispatch():
     """manual_call の trigger 後に届いた発話で「発話済み」になる."""
     s = _make_state()

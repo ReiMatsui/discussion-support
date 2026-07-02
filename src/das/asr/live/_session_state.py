@@ -749,14 +749,18 @@ class SessionState:
         """
         prev = self.manual_call_status or {}
         wait_rounded = round(wait_sec, 0) if wait_sec is not None else None
+        next_source = source if source is not None else prev.get("source")
+        next_request = request if request is not None else prev.get("request")
         if (prev.get("status") == status and prev.get("detail") == detail
-                and prev.get("wait_sec") == wait_rounded):
+                and prev.get("wait_sec") == wait_rounded
+                and prev.get("source") == next_source
+                and prev.get("request") == next_request):
             return
         self.manual_call_status = {
             "status": status,
             "detail": detail,
-            "source": source if source is not None else prev.get("source"),
-            "request": request if request is not None else prev.get("request"),
+            "source": next_source,
+            "request": next_request,
             "at": datetime.datetime.now().strftime("%H:%M:%S"),
             "wait_sec": wait_rounded,
         }
