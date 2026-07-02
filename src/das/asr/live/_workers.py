@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from .stt import STTBackend
 
 from ._constants import (
+    _ACK_CHIME_ENABLED,
     _AGENDA_MIN_UTTS,
     _AGENDA_RETRY_SEC,
     _AGENDA_WINDOW,
@@ -977,6 +978,31 @@ def _run_drift_checker(state: SessionState, oai_key: str, oai_model: str):
             print("# [drift] → 介入要求をキューに投入", flush=True)
 
 
+def _play_ack_chime() -> None:
+    """音声呼びかけを受け取ったことを短いチャイムで即時に伝える（H）.
+
+    STT確定→triage→pause→生成で音声応答まで3〜7秒かかる間、話者は「聞こえたか」が
+    分からず言い直して二重呼び出しになる。150ms程度の減衰サイン波（880Hz・控えめ音量）
+    を鳴らして「聞こえた」を伝える。音は必須機能ではないので失敗は握りつぶし、triage
+    ループを止めないよう daemon スレッドで再生する。
+    """
+    if not _ACK_CHIME_ENABLED:
+        return
+
+    def _play() -> None:
+        with contextlib.suppress(Exception):
+            import sounddevice as sd
+            dur = 0.15
+            t = np.linspace(0, dur, int(SR * dur), endpoint=False)
+            envelope = np.exp(-t * 12.0)                 # なめらかな減衰
+            wave = (0.2 * envelope
+                    * np.sin(2 * np.pi * 880.0 * t)).astype(np.float32)
+            sd.play(wave, SR)
+            sd.wait()
+
+    threading.Thread(target=_play, daemon=True).start()
+
+
 def _run_triage_worker(state: SessionState, oai_key: str,
                        oai_model: str) -> None:
     """確定発話ごとに1回だけ表層分類し、record に ``triage`` 注釈を付ける（H6/M2）.
@@ -1130,6 +1156,9 @@ def _run_triage_worker(state: SessionState, oai_key: str,
                 _log_voice_call_diag(state, text=text, request=request)
                 _set_manual_status(state, "queued", source="voice",
                                    request=request)
+                # 「聞こえた」を即時に伝えるアック音（H）。UI由来のボタン呼び出しは
+                # UIに既にフィードバックがあるため鳴らさない（voice経路だけ）。
+                _play_ack_chime()
 
 
 def _run_fact_checker(state: SessionState, oai_key: str, oai_model: str):

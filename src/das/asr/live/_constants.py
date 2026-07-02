@@ -445,6 +445,9 @@ _INTERVENTION_PAUSE_MANUAL = 1.0  # 手動呼び出し: 発話には被せない
 _MANUAL_CALL_COOLDOWN = 5.0      # 同種の連打防止（global cooldown の影響は受けない）
 _MANUAL_CALL_TTL = 30.0          # 古すぎる手動呼び出しは破棄
 _MANUAL_CALL_MAX_CHARS = 100     # 依頼文の最大長（超過分は切り詰め）
+# 音声呼びかけ検出時の即時アック音（H）。呼びかけが「聞こえた」を短いチャイムで
+# 伝え、言い直し（二重呼び出し）を減らす。実験条件で音を消したい時は False に。
+_ACK_CHIME_ENABLED = True
 
 # --- エコー防止 ---
 _ECHO_COOLDOWN = 2.0          # AI発話終了後のエコーウィンドウ秒数（agent/partner共通）

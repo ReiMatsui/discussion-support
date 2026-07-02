@@ -305,12 +305,15 @@ def test_triage_worker_local_gate_skips_very_short_utterances(monkeypatch):
 
 
 def test_triage_worker_enqueues_facilitator_request(monkeypatch):
-    """呼びかけ依頼を検出したら手動呼び出しキュー（source=voice）に積む."""
+    """呼びかけ依頼を検出したら手動呼び出しキュー（source=voice）に積み、アック音を鳴らす."""
     import das.asr.live._bootstrap as bootstrap
+    import das.asr.live._workers as workers
 
     monkeypatch.setattr(bootstrap, "classify_utterance",
                         lambda *a, **k: {"factual_claim": False,
                                          "facilitator_request": "ここまでの整理"})
+    chimes: list = []
+    monkeypatch.setattr(workers, "_play_ack_chime", lambda: chimes.append(True))
     state = _make_state(with_agent=True)
     state.records = [
         {"speaker": "話者1", "text": "AIさん、ここまで整理して", "ms": 0, "end_ms": 1000},
@@ -322,6 +325,34 @@ def test_triage_worker_enqueues_facilitator_request(monkeypatch):
     got = state.manual_call_requests.get_nowait()
     assert got["request"] == "ここまでの整理"
     assert got["source"] == "voice"
+    assert chimes == [True]   # voice 呼びかけでアック音が鳴る
+
+
+def test_triage_worker_topic_mention_does_not_chime(monkeypatch):
+    """依頼なし（話題としての言及）ではアック音を鳴らさない."""
+    import das.asr.live._bootstrap as bootstrap
+    import das.asr.live._workers as workers
+
+    monkeypatch.setattr(bootstrap, "classify_utterance",
+                        lambda *a, **k: {"factual_claim": False,
+                                         "facilitator_request": ""})
+    chimes: list = []
+    monkeypatch.setattr(workers, "_play_ack_chime", lambda: chimes.append(True))
+    state = _make_state(with_agent=True)
+    state.records = [
+        {"speaker": "話者1", "text": "AIの導入について話しましょう", "ms": 0, "end_ms": 1000},
+    ]
+
+    _run_triage_briefly(state, until=lambda: state.triage_cursor >= 1)
+
+    assert chimes == []
+
+
+def test_play_ack_chime_never_raises():
+    """再生に失敗しても（sounddevice不在など）例外を漏らさない."""
+    from das.asr.live._workers import _play_ack_chime
+
+    _play_ack_chime()   # 例外が上がらなければ合格（音は必須機能ではない）
 
 
 def test_triage_worker_topic_mention_does_not_enqueue(monkeypatch):
