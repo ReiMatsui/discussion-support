@@ -80,6 +80,7 @@ class RealtimeAgent(_RealtimeBase):
         self._conn_error = ""              # 接続エラーメッセージ（UI表示用）
         self.on_ai_utterance = None        # callback(text: str) AI発話確定時
         self.on_speech_start = None        # callback() 音声生成開始時（即座に通知）
+        self.on_speech_end = None          # callback() 音声再生終了時（P2-1 区間記録）
         self._speech_started = False       # 現応答で on_speech_start を通知済みか
         # --- 観測: trigger送信 → 最初の音声（発話開始）までの遅延（§3.5 予算検証用） ---
         self._speak_trigger_at = 0.0       # trigger送信の時刻（monotonic）。0=未計測
@@ -582,7 +583,9 @@ class RealtimeAgent(_RealtimeBase):
         self.ai_speaking = bool(kept_items)  # 残りがあれば再生中のまま
         self._responding = False
         if not kept_items:
-            self._last_speech_end = time.monotonic()
+            # 完全に止まった → 終了フックでAI再生区間を閉じる（P2-1）。
+            # 残りがある場合は終端マーカー到達時に _on_playback_terminator が閉じる。
+            self._end_speech()
         # Realtime APIの応答をキャンセル + 会話履歴をtruncate
         if self.ws:
             with contextlib.suppress(Exception):

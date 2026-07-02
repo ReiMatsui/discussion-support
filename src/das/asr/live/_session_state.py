@@ -1,6 +1,7 @@
 """main()内の共有状態を集約するコンテナ."""
 from __future__ import annotations
 
+import collections
 import contextlib
 import datetime
 import json
@@ -168,6 +169,14 @@ class SessionState:
         self._PCM_KEEP_BYTES = SR * 2 * 120
         self.buf_lock = threading.Lock()
         self.pcm_file = None  # IO[bytes] | None
+        # AI再生区間の記録（P2-1）。マイク音声のmsタイムラインで「AIが鳴っていた
+        # 区間」を残し、エコー判定を壁時計ではなく発話区間の重なりで行う。STT確定が
+        # 遅れてエコー窓の外に出た回り込みも取りこぼさない。source ごとに開いた区間を
+        # 保持し、終了時に閉じて deque に積む。
+        self._ai_speech_lock = threading.Lock()
+        self._ai_speech_intervals: collections.deque[tuple[int, int, str]] = (
+            collections.deque(maxlen=64))
+        self._ai_speech_open: dict[str, int] = {}
 
         # 制御
         self.stop = threading.Event()
@@ -541,6 +550,9 @@ class SessionState:
         self.asr_pcm_total_bytes = 0
         self.stt_time_offset_ms = 0
         self._stt_connection_audio_base_bytes = 0
+        with self._ai_speech_lock:
+            self._ai_speech_intervals.clear()
+            self._ai_speech_open.clear()
         try:
             self.pcm_file = open(self.wav_path, "wb")  # noqa: SIM115
             self.pcm_file.write(b"RIFF" + struct.pack("<I", 0) + b"WAVEfmt " +
@@ -585,6 +597,62 @@ class SessionState:
         if ms is None:
             return None
         return int(ms) + self.stt_time_offset_ms
+
+    # ------------------------------------------------------------------
+    # AI再生区間（エコー判定の区間ベース化, P2-1）
+    # ------------------------------------------------------------------
+    def current_asr_ms(self) -> int:
+        """マイク音声の現在位置をmsで返す（cur_ms/cur_end と同じタイムライン）.
+
+        16kHz・16bit なので 32 bytes/ms。int の読み取りは CPython では原子的で、
+        エコーのマージン用途には十分な精度なのでロックは取らない。
+        """
+        return self.asr_pcm_total_bytes // 32
+
+    def note_ai_speech_start(self, source: str) -> None:
+        """AI（source: agent/partner）の再生開始を現在のマイクms位置で記録する."""
+        with self._ai_speech_lock:
+            self._ai_speech_open[source] = self.current_asr_ms()
+
+    def note_ai_speech_end(self, source: str) -> None:
+        """AI再生の終了で開いていた区間を閉じ、判定用の履歴に積む."""
+        with self._ai_speech_lock:
+            start = self._ai_speech_open.pop(source, None)
+            if start is None:
+                return
+            end = max(self.current_asr_ms(), start)
+            self._ai_speech_intervals.append((start, end, source))
+
+    def has_ai_speech_intervals(self) -> bool:
+        """区間ベース判定に使える記録があるか（無ければ壁時計にフォールバック）."""
+        with self._ai_speech_lock:
+            return bool(self._ai_speech_intervals or self._ai_speech_open)
+
+    def overlaps_ai_speech(self, start_ms: int | None, end_ms: int | None,
+                           *, source: str | None = None,
+                           margin_ms: int = 300) -> bool:
+        """発話区間 [start_ms, end_ms] がAI再生区間と重なるか（±margin_ms）.
+
+        閉じた区間に加え、まだ再生中の開いた区間（[start, 現在]）も対象にする。
+        source を指定すると、その発話元（agent/partner）の区間だけを見る。
+        """
+        if start_ms is None or end_ms is None:
+            return False
+        lo, hi = start_ms - margin_ms, end_ms + margin_ms
+        with self._ai_speech_lock:
+            for a, b, src in self._ai_speech_intervals:
+                if source is not None and src != source:
+                    continue
+                if a <= hi and lo <= b:
+                    return True
+            if self._ai_speech_open:
+                now = self.current_asr_ms()
+                for src, a in self._ai_speech_open.items():
+                    if source is not None and src != source:
+                        continue
+                    if a <= hi and lo <= now:
+                        return True
+        return False
 
     def reset_for_new_meeting(self) -> dict:
         """現在の会議を確定保存し、同一プロセスのまま次の会議に切り替える（F6）.

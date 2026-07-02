@@ -83,11 +83,20 @@ class RecvLoop:
         # 判定したら classify を呼ばずに破棄し、漏れ込んだAI音声で匿名話者が蓄積・
         # 自動登録されるのを防ぐ（D2）。判定に必要なのは cur_text と agent/partner
         # だけで、声紋判定への依存はない。
+        # AI再生区間との重なりでエコー窓を判定する（P2-1）。STT確定が遅れて壁時計の
+        # エコー窓を過ぎた回り込みも、発話区間 [cur_ms, cur_end] が記録済みの再生区間と
+        # 重なれば拾う。ms が無い/記録が無いときは従来の壁時計（in_echo_window）に倒す。
+        _ms_known = self.cur_ms is not None and self.cur_end is not None
+        _use_intervals = _ms_known and s.has_ai_speech_intervals()
         for _src_name, _src in [("agent", agent), ("partner", partner)]:
             if _src is None:
                 continue
-            if _src_name == "agent" and not _src.in_echo_window:
-                continue
+            if _src_name == "agent":
+                _agent_echo = (s.overlaps_ai_speech(self.cur_ms, self.cur_end,
+                                                    source="agent")
+                               if _use_intervals else _src.in_echo_window)
+                if not _agent_echo:
+                    continue
             sim = _src._best_similarity(self.cur_text)
             if sim > 0.35:
                 if self.args.vp_debug:
@@ -129,9 +138,16 @@ class RecvLoop:
                 # 抑止する。室内音響でAI声紋照合(AI_THRESH)が外れた漏れ込みが「新規
                 # 話者の蓄積」に化けるのを塞ぐ。話者判定自体は従来どおり行う。正当な
                 # 人間発話の登録がエコー窓ぶん遅れるのは許容（登録は累積制のため軽微）。
+                # agent 側は再生区間の重なりで判定（P2-1, ms/記録が無ければ壁時計）。
+                # partner 側は従来どおり壁時計。
+                _agent_active = (
+                    s.overlaps_ai_speech(self.cur_ms, self.cur_end, source="agent")
+                    if _use_intervals
+                    else (agent is not None
+                          and (agent.ai_speaking or agent.in_echo_window))
+                )
                 _ai_active = (
-                    (agent is not None
-                     and (agent.ai_speaking or agent.in_echo_window))
+                    _agent_active
                     or (partner is not None
                         and (partner.ai_speaking or partner.in_echo_window))
                 )

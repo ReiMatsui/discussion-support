@@ -1450,9 +1450,18 @@ def _run_facilitator_event_worker(state: SessionState, on_text):
 def _connect_agent(state: SessionState, on_text):
     """ファシリテーターAgentのコールバック設定・接続・ワーカー起動."""
     agent = state.agent
+    if agent is None:
+        return
     # 受信スレッドはイベントを積むだけ。副作用は専用ワーカーで処理（受信ブロック回避）。
     agent.on_ai_utterance = lambda text: state.fac_events.put(("utterance", text))
-    agent.on_speech_start = lambda: state.fac_events.put(("speech_start", None))
+
+    def _agent_speech_start() -> None:
+        # AI再生区間を開き（P2-1）、従来のイベント通知も行う。
+        state.note_ai_speech_start("agent")
+        state.fac_events.put(("speech_start", None))
+
+    agent.on_speech_start = _agent_speech_start
+    agent.on_speech_end = lambda: state.note_ai_speech_end("agent")
     threading.Thread(target=_run_facilitator_event_worker,
                      args=(state, on_text), daemon=True).start()
 

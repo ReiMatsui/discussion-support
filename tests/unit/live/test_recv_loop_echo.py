@@ -134,3 +134,55 @@ def test_normal_utterance_outside_echo_window_counts_normally(tmp_path):
     assert tracker.calls[0]["count"] is True
     assert len(state.records) == 1
     assert state.records[0]["text"] == "これは普通の発言です"
+
+
+def _record_agent_interval(state, start_ms, end_ms):
+    """AI再生区間を [start_ms, end_ms] で記録する（マイクmsタイムライン）."""
+    state.asr_pcm_total_bytes = start_ms * 32
+    state.note_ai_speech_start("agent")
+    state.asr_pcm_total_bytes = end_ms * 32
+    state.note_ai_speech_end("agent")
+
+
+def test_late_echo_overlapping_interval_is_dropped(tmp_path):
+    """壁時計のエコー窓を過ぎても、発話区間がAI再生区間と重なればエコー破棄する（P2-1）."""
+    tracker = _RecordingTracker()
+    state = _make_state(tmp_path, tracker=tracker)
+    # 窓は過ぎている（in_echo=False, ai_speaking=False）が、AIが鳴っていた区間と重なる。
+    state.agent = _EchoAgent(in_echo=False, ai_speaking=False, sim=0.9)  # type: ignore[assignment]
+    _record_agent_interval(state, 1000, 3000)
+    loop = _loop_with(state, ms=1100, end=2900)
+
+    loop.flush()  # type: ignore[no-untyped-call]
+
+    assert tracker.calls == []   # 区間重なりで安全網が発火 → classify を呼ばない
+    assert state.records == []
+
+
+def test_late_overlap_suppresses_count_even_when_window_passed(tmp_path):
+    """安全網に掛からない(sim低)重なり発話でも、区間重なりなら count=False にする（P2-1）."""
+    tracker = _RecordingTracker()
+    state = _make_state(tmp_path, tracker=tracker)
+    state.agent = _EchoAgent(in_echo=False, ai_speaking=False, sim=0.0)  # type: ignore[assignment]
+    _record_agent_interval(state, 1000, 3000)
+    loop = _loop_with(state, text="室内に漏れ込んだ声です", ms=1100, end=2900)
+
+    loop.flush()  # type: ignore[no-untyped-call]
+
+    assert len(tracker.calls) == 1
+    assert tracker.calls[0]["count"] is False
+
+
+def test_non_overlapping_utterance_counts_despite_recorded_intervals(tmp_path):
+    """AI再生区間が記録済みでも、重ならない発話は従来どおり count=True で記録する（P2-1）."""
+    tracker = _RecordingTracker()
+    state = _make_state(tmp_path, tracker=tracker)
+    state.agent = _EchoAgent(in_echo=False, ai_speaking=False, sim=0.9)  # type: ignore[assignment]
+    _record_agent_interval(state, 1000, 3000)
+    loop = _loop_with(state, text="全く別の時間の発言です", ms=10000, end=12000)
+
+    loop.flush()  # type: ignore[no-untyped-call]
+
+    assert len(tracker.calls) == 1
+    assert tracker.calls[0]["count"] is True
+    assert len(state.records) == 1
