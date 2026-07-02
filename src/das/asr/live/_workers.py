@@ -50,6 +50,7 @@ from ._constants import (
     _INVITE_QUIET_RATIO,
     _INVITE_SILENCE,
     _INVITE_WARMUP,
+    _MANUAL_CALL_MAX_CHARS,
     _MANUAL_CALL_TTL,
     AGENT_SPEAKER,
     SR,
@@ -164,6 +165,43 @@ def _looks_like_fact_claim(text: str) -> bool:
         return True
     return bool(_FACT_ASSERTION_RE.search(s)
                 and not _FACT_DEICTIC_SUBJECT_RE.match(s))
+
+
+# 明示呼称（ファシリテーターへの呼びかけ）。冒頭でこれらが「呼びかけ」として
+# 使われている時だけ手動呼び出しの候補にする（話題としての言及は除外）。
+_FACIL_NAMES = r"(?:ファシリテーター|進行役|エーアイ|ＡＩ|AI)"
+# 呼びかけ判定: 冒頭の称呼を拾う。STTは句読点を落とすことがあるため、
+# 呼称直後の「さん」/読点/空白は任意にし、後段の依頼表現で誤爆を抑える。
+_CALL_VOCATIVE_RE = re.compile(
+    rf"^\s*{_FACIL_NAMES}(?:さん)?(?:[、,，\s]*)")
+# 依頼表現（保守的）。呼びかけの後にこれが無ければメタ言及・質問として発火しない。
+_CALL_REQUEST_RE = re.compile(
+    r"(まとめ|整理|確認|聞いて|振って|戻して|助けて|"
+    r"次(?:に|は|を|どう|何|の|へ|決め|進め|回|[、,，\s]|$))")
+# 呼称直後にこれらが来る場合は、呼びかけではなく話題化として扱う。
+_CALL_META_PREFIX_RE = re.compile(
+    r"^(?:について|機能|導入|は|が|を|の|も|って|とは|では)")
+
+
+def _detect_facilitator_call(text: str) -> str | None:
+    """音声での明示的なファシリテーター呼びかけを保守的に検出する（Phase2）.
+
+    冒頭の明示呼称（ファシリテーター/進行役/AI/AIさん…）＋依頼表現がある時だけ
+    依頼文を返す。呼びかけでなければ None。話題としての言及・質問・メタ発話は
+    誤爆させない（呼称の直後に「さん」か読点が無いものは弾く）。
+    """
+    s = (text or "").strip()
+    if not s:
+        return None
+    m = _CALL_VOCATIVE_RE.match(s)
+    if m is None:
+        return None  # 冒頭の明示的な呼びかけが無い（話題化・別位置の言及）
+    rest = re.sub(r"\s+", " ", s[m.end():]).strip(" 　、,，。.！!？?")
+    if _CALL_META_PREFIX_RE.match(rest):
+        return None  # 呼びかけではなく「AIについて」「進行役は」等の話題化
+    if not _CALL_REQUEST_RE.search(rest):
+        return None  # 依頼表現が無い（メタ話題・質問など）
+    return rest[:_MANUAL_CALL_MAX_CHARS]
 
 
 def _intervention_event_metadata(
@@ -1431,8 +1469,23 @@ def _run_agent_worker(state: SessionState):
             if new_records:
                 _last_utt_time[0] = time.monotonic()
             if _enabled:
+                # facilitate モードのみ音声呼びかけを検出する。conversation（AIが
+                # 直接会話）/converse（パートナー有り）では通常応答に任せ、専用検出は
+                # 無効にして二重応答を避ける（設計 Phase2）。
+                _voice_call_on = agent.mode != "conversation" and partner is None
                 for r in new_records:
-                    agent.feed(intervention_speaker_name(state, r), r.get("text", ""))
+                    text = r.get("text", "")
+                    agent.feed(intervention_speaker_name(state, r), text)
+                    if _voice_call_on:
+                        request = _detect_facilitator_call(text)
+                        if request is not None:
+                            state.manual_call_requests.put({
+                                "request": request,
+                                "source": "voice",
+                                "created_at": time.monotonic(),
+                            })
+                            print("# [voice] ファシリテーター呼びかけ検出: "
+                                  f"{request or '直近の議論整理'}", flush=True)
             state.agent_cursor = n
             # --- 自動割り込み ---
             _human_spoke = any(len(t.strip()) > _INTERRUPT_MIN_CHARS

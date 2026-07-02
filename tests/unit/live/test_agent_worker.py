@@ -10,6 +10,7 @@ import threading
 import time
 
 from das.asr.live._workers import (
+    _detect_facilitator_call,
     _log_intervention_event,
     _PendingInterventions,
     _run_agent_worker,
@@ -612,6 +613,101 @@ def test_pending_manual_call_cleared_when_intervention_disabled():
         t.join(timeout=2.0)
 
     assert agent.trigger_calls == []
+
+
+# ---------------------------------------------------------------------------
+# Phase2: 音声での明示的なファシリテーター呼びかけ検出
+# ---------------------------------------------------------------------------
+
+def test_detect_facilitator_call_accepts_explicit_calls():
+    """明示呼称＋依頼表現がある発話は、依頼文を返す."""
+    cases = {
+        "ファシリテーター、ここまで整理して": "ここまで整理して",
+        "進行役さん、次に決めることを確認して": "次に決めることを確認して",
+        "AI、Aさんにも意見を聞いて": "Aさんにも意見を聞いて",
+        "ファシリテーター、話を戻して": "話を戻して",
+        "AIさん、今の論点をまとめて": "今の論点をまとめて",
+        "ファシリテーター ここまで整理して": "ここまで整理して",
+        "AIさん今の論点をまとめて": "今の論点をまとめて",
+    }
+    for text, expected in cases.items():
+        assert _detect_facilitator_call(text) == expected, text
+
+
+def test_detect_facilitator_call_rejects_meta_and_mentions():
+    """呼びかけでない言及・メタ話題・質問・依頼なしは None（誤爆防止）."""
+    negatives = [
+        "AIについて話しましょう",
+        "ファシリテーター機能って便利ですね",
+        "進行役は誰がやりますか",
+        "整理すると、AIの話ですね",
+        "これはAI導入の論点です",
+        "ファシリテーターさん",        # 呼びかけのみ・依頼なし
+        "AI、便利だね",               # 呼びかけ+依頼なし
+        "AIは便利です",
+        "AI、次郎さんの件です",        # 「次」を含む人名で誤爆しない
+        "ファシリテーター機能を確認しましょう",
+    ]
+    for text in negatives:
+        assert _detect_facilitator_call(text) is None, text
+
+
+def test_voice_call_queues_manual_and_triggers():
+    """人間発話の呼びかけが manual(source=voice) として拾われ trigger まで届く."""
+    agent = FakeAgent()
+    state = FakeState(agent, None)
+    state.records = [{"speaker": "#1", "ms": 0, "end_ms": 500,
+                      "text": "ファシリテーター、ここまで整理して"}]
+
+    _run_worker_briefly(state, until=lambda: bool(agent.trigger_calls))
+
+    assert agent.trigger_calls, "音声呼びかけで手動呼び出しが発火するべき"
+    mr = agent.trigger_calls[0]["manual_request"]
+    assert mr is not None
+    assert mr["source"] == "voice"
+    assert mr["request"] == "ここまで整理して"
+    assert state.intervention_events[0]["reason"] == "manual_call"
+    assert state.intervention_events[0]["metadata"]["timing"]["source"] == "voice"
+
+
+def test_voice_meta_mention_does_not_trigger():
+    """『AIについて話しましょう』のような言及では発火しない."""
+    agent = FakeAgent()
+    state = FakeState(agent, None)
+    state.records = [{"speaker": "#1", "ms": 0, "end_ms": 500,
+                      "text": "AIについて話しましょう"}]
+
+    _run_worker_briefly(state, until=lambda: False, timeout=1.0)
+
+    assert agent.trigger_calls == []
+    assert state.manual_call_requests.empty()
+
+
+def test_voice_call_disabled_in_conversation_mode():
+    """conversation モードでは専用の音声呼びかけ検出をしない（二重応答回避）."""
+    agent = FakeAgent(mode="conversation")
+    state = FakeState(agent, None)
+    state.records = [{"speaker": "#1", "ms": 0, "end_ms": 500,
+                      "text": "ファシリテーター、ここまで整理して"}]
+
+    _run_worker_briefly(state, until=lambda: False, timeout=1.0)
+
+    assert state.manual_call_requests.empty()   # 呼びかけを拾っていない
+    assert all(c["manual_request"] is None for c in agent.trigger_calls)
+
+
+def test_voice_call_not_detected_when_intervention_disabled():
+    """介入オフでは呼びかけを拾わない."""
+    agent = FakeAgent()
+    state = FakeState(agent, None)
+    state.intervention_enabled = False
+    state.records = [{"speaker": "#1", "ms": 0, "end_ms": 500,
+                      "text": "ファシリテーター、ここまで整理して"}]
+
+    _run_worker_briefly(state, until=lambda: False, timeout=1.0)
+
+    assert agent.trigger_calls == []
+    assert state.manual_call_requests.empty()
 
 
 def test_fact_request_triggers_before_drift():
