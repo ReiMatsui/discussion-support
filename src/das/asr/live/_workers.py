@@ -1030,8 +1030,9 @@ def _run_triage_worker(state: SessionState, oai_key: str,
             idx = cursor
             r = talk_rs[idx]
             text = str(r.get("text") or "").strip()
-            # 相槌・未確定は intervention_records が除外済み。ここで残る機械的
-            # ゲートは「極端に短い発話」のみ（LLM を呼ぶ価値がない, コスト0）。
+            # 相槌は triage_records が除外済み（未確定話者は呼びかけ検出のため
+            # 含まれる, 修正5）。ここで残る機械的ゲートは「極端に短い発話」のみ
+            # （LLM を呼ぶ価値がない, コスト0）。
             if len(text) < _TRIAGE_MIN_CHARS:
                 annotation = {"factual_claim": False, "facilitator_request": ""}
             else:
