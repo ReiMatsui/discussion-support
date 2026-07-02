@@ -90,6 +90,8 @@ def test_short_silence_holds_all_and_stays_silent():
     reasons = {s["candidate_id"]: s["reason"] for s in d.suppressed}
     assert "発話の切れ目待ち" in reasons["fact-1"]
     assert "発話の切れ目待ち" in reasons["drift"]
+    codes = {s["candidate_id"]: s["code"] for s in d.suppressed}
+    assert codes == {"fact-1": "awaiting_pause", "drift": "awaiting_pause"}
 
 
 def test_same_kind_cooldown_suppresses():
@@ -99,6 +101,7 @@ def test_same_kind_cooldown_suppresses():
     d = c.arbitrate(_inp([_fact(now)], recent=recent, now=now + 0.5))
     assert d.candidate_id is None
     assert "同種介入済み" in d.suppressed[0]["reason"]
+    assert d.suppressed[0]["code"] == "cooldown_kind"
 
 
 def test_expired_fact_is_suppressed():
@@ -109,6 +112,7 @@ def test_expired_fact_is_suppressed():
     d = c.arbitrate(_inp([stale], now=now))
     assert d.candidate_id is None
     assert "期限切れ" in d.suppressed[0]["reason"]
+    assert d.suppressed[0]["code"] == "expired"
 
 
 def test_decision_uses_candidate_id_not_index():
@@ -375,6 +379,7 @@ def test_partner_busy_suppresses_all():
         partner_busy=True))
     assert d.candidate_id is None
     assert all("パートナー発話中" in s["reason"] for s in d.suppressed)
+    assert all(s["code"] == "partner_busy" for s in d.suppressed)
 
 
 def test_echo_window_suppresses_all():
@@ -385,6 +390,7 @@ def test_echo_window_suppresses_all():
         snapshot_epoch=1, now=now, in_echo_window=True))
     assert d.candidate_id is None
     assert "エコーウィンドウ" in d.suppressed[0]["reason"]
+    assert d.suppressed[0]["code"] == "echo_window"
 
 
 def test_drift_confirmation_gate_holds_single_detection():
@@ -397,6 +403,7 @@ def test_drift_confirmation_gate_holds_single_detection():
         snapshot_epoch=1, now=now, required_drift_confirmations=2))
     assert d.candidate_id is None
     assert "確認待ち" in d.suppressed[0]["reason"]
+    assert d.suppressed[0]["code"] == "awaiting_drift_confirmation"
 
 
 def test_drift_fires_after_confirmations_met():
@@ -423,6 +430,7 @@ def test_drift_global_cooldown_suppresses():
         last_intervention_at=now, required_drift_confirmations=1))
     assert d.candidate_id is None
     assert "間隔不足" in d.suppressed[0]["reason"]
+    assert d.suppressed[0]["code"] == "cooldown_global"
 
 
 def test_fact_cooldown_override_is_respected():

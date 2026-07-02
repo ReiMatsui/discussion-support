@@ -28,7 +28,6 @@ from ._constants import (
     _AGENDA_MIN_UTTS,
     _AGENDA_RETRY_SEC,
     _AGENDA_WINDOW,
-    _AGENT_CONV_SILENCE,
     _AGENT_DEBATE_SILENCE,
     _BACKCHANNEL_RE,
     _DRIFT_CHECK_INTERVAL,
@@ -42,14 +41,8 @@ from ._constants import (
     _FACTCHECK_PENDING_TTL,
     _INTERRUPT_MIN_CHARS,
     _INTERVENTION_COOLDOWN,
-    _INTERVENTION_PAUSE_COUNT,
-    _INTERVENTION_PAUSE_DRIFT,
-    _INTERVENTION_PAUSE_FACT,
-    _INTERVENTION_PAUSE_MANUAL,
-    _INTERVENTION_PAUSE_RETRY,
     _INVITE_CHECK_SEC,
     _INVITE_QUIET_RATIO,
-    _INVITE_SILENCE,
     _INVITE_WARMUP,
     _MANUAL_CALL_MAX_CHARS,
     _MANUAL_CALL_TTL,
@@ -64,6 +57,7 @@ from ._facilitation import (
     InterventionLogEntry,
     confidence_score,
     fact_expires_at,
+    policy_for,
 )
 from ._participation import (
     participation_share_key,
@@ -421,21 +415,6 @@ class _NormalTriggerDecision:
     drift_reason: str | None = None
 
 
-def _floor_available_for_intervention(
-    *,
-    silence_elapsed: float,
-    partner_busy: bool,
-    in_echo_window: bool,
-    pause_required: float,
-) -> bool:
-    """参加者の会話を遮らず、介入が自然に入れる短い間があるか."""
-    return (
-        silence_elapsed >= pause_required
-        and not partner_busy
-        and not in_echo_window
-    )
-
-
 def _intervention_timing_metadata(
     *,
     kind: str,
@@ -458,130 +437,6 @@ def _intervention_timing_metadata(
     if queued_wall_at:
         timing["candidate_created_at"] = queued_wall_at
     return timing
-
-
-def _select_barge_in_decision(
-    *,
-    pending: _PendingInterventions,
-    agent,
-    state: SessionState,
-    now: float,
-    last_fact_at: float,
-    last_intervention_at: float,
-    silence_elapsed: float,
-    partner_busy: bool,
-    in_echo_window: bool,
-    cooldown: float,
-    diag_tick: int,
-) -> _BargeInDecision:
-    """ガードを越えて差し込む介入を、優先順位順に1つだけ選ぶ."""
-    pending.drop_stale_facts(now=now)
-    while pending.facts:
-        pending_fact = pending.facts[0]
-        correction = str(pending_fact.get("correction") or "").strip()
-        if not correction:
-            pending.facts.popleft()
-            continue
-        fact_floor_available = _floor_available_for_intervention(
-            silence_elapsed=silence_elapsed,
-            partner_busy=partner_busy,
-            in_echo_window=in_echo_window,
-            pause_required=_INTERVENTION_PAUSE_FACT,
-        )
-        if not fact_floor_available:
-            if diag_tick % 4 == 0:
-                print("# [trigger] hold: 発話の切れ目待ちの事実補正", flush=True)
-            return _BargeInDecision("hold")
-        if now - last_fact_at < _FACTCHECK_COOLDOWN:
-            if diag_tick % 4 == 0:
-                print("# [trigger] hold: クールダウン中の事実補正", flush=True)
-            return _BargeInDecision("hold")
-        return _BargeInDecision("fact", fact=pending_fact)
-
-    if pending.drift_reason is not None:
-        required_drift_count = int(state.proactivity.get("drift_confirmations", 1))
-        if pending.drift_count < required_drift_count:
-            if diag_tick % 20 == 0:
-                print(
-                    "# [trigger] hold: 脱線判定の確認待ち "
-                    f"{pending.drift_count}/{required_drift_count}",
-                    flush=True,
-                )
-            return _BargeInDecision("hold")
-        drift_floor_available = _floor_available_for_intervention(
-            silence_elapsed=silence_elapsed,
-            partner_busy=partner_busy,
-            in_echo_window=in_echo_window,
-            pause_required=_INTERVENTION_PAUSE_DRIFT,
-        )
-        if not drift_floor_available:
-            if diag_tick % 4 == 0:
-                print("# [trigger] hold: 発話の切れ目待ちの脱線介入", flush=True)
-            return _BargeInDecision("hold")
-        if now - last_intervention_at < cooldown:
-            print("# [trigger] skip: クールダウン中の脱線介入", flush=True)
-            pending.clear_drift()
-        else:
-            return _BargeInDecision("drift", drift_reason=pending.drift_reason)
-
-    if agent._pending_intervention is not None:
-        retry_floor_available = _floor_available_for_intervention(
-            silence_elapsed=silence_elapsed,
-            partner_busy=partner_busy,
-            in_echo_window=in_echo_window,
-            pause_required=_INTERVENTION_PAUSE_RETRY,
-        )
-        if not retry_floor_available:
-            if diag_tick % 4 == 0:
-                print("# [trigger] hold: 発話の切れ目待ちの再送", flush=True)
-            return _BargeInDecision("hold")
-        return _BargeInDecision("retry")
-    return _BargeInDecision("none")
-
-
-def _select_normal_trigger_decision(
-    *,
-    pending: _PendingInterventions,
-    agent,
-    silence_elapsed: float,
-    silence_summarize: float | None,
-    partner_present: bool,
-    now: float,
-    last_intervention_at: float,
-    cooldown: float,
-    last_invited: str | None,
-) -> _NormalTriggerDecision:
-    """通常の間で発火する介入を、優先順位順に1つだけ選ぶ（Controller例外時のfallback）.
-
-    注: stall（介入不要後の一押し）は Phase3 で廃止したため、このfallbackでも
-    扱わない。通常の採否は Controller（_controller_normal_decision）が担う。
-    """
-    if agent.mode == "conversation":
-        if agent.pending_count > 0 and silence_elapsed > _AGENT_CONV_SILENCE:
-            return _NormalTriggerDecision(
-                "conversation", f"沈黙{silence_elapsed:.1f}秒")
-        return _NormalTriggerDecision("none")
-
-    silence_thresh = (_AGENT_DEBATE_SILENCE if partner_present
-                      else silence_summarize)
-    if agent.pending_count >= agent.trigger_n:
-        if silence_elapsed < _INTERVENTION_PAUSE_COUNT:
-            return _NormalTriggerDecision("none")
-        return _NormalTriggerDecision(
-            "count", f"{agent.pending_count}>={agent.trigger_n}発話")
-    if (silence_thresh is not None
-            and agent.pending_count > 0
-            and silence_elapsed > silence_thresh):
-        return _NormalTriggerDecision(
-            "silence", f"{silence_elapsed:.1f}>{silence_thresh:.1f}秒")
-    if (pending.invite is not None
-            and silence_elapsed > _INVITE_SILENCE
-            and now - last_intervention_at > cooldown):
-        if pending.invite == last_invited:
-            return _NormalTriggerDecision("skip_invite", invite_target=pending.invite)
-        return _NormalTriggerDecision(
-            "invite", f"{pending.invite}さんに声かけ", invite_target=pending.invite)
-    return _NormalTriggerDecision("none")
 
 
 def _build_candidates(
@@ -880,12 +735,15 @@ def _suppressed_for(
     decision: FacilitationDecision,
     *,
     candidate_id: str,
-    reason_part: str,
+    codes: tuple[str, ...],
 ) -> bool:
-    """Controllerの抑制理由に特定候補/理由が含まれるかを調べる."""
+    """Controllerの抑制に、特定候補×特定コードの組が含まれるかを調べる.
+
+    後処理の分岐は機械可読コード（SuppressionCode）のみで行い、表示文
+    （reason）には依存しない（H4: 文言変更が挙動を変えないため）。
+    """
     return any(
-        s.get("candidate_id") == candidate_id
-        and reason_part in str(s.get("reason", ""))
+        s.get("candidate_id") == candidate_id and s.get("code") in codes
         for s in decision.suppressed
     )
 
@@ -965,8 +823,10 @@ def _controller_barge_in_decision(
     if _suppressed_for(
         decision,
         candidate_id="drift",
-        reason_part="直前の介入から間隔不足",
+        codes=("cooldown_global", "expired"),
     ):
+        # クールダウン中の脱線は「今の脱線」への対応時機を逸しており、
+        # 期限切れは鮮度を失っている。どちらも保持し続けず忘れる。
         pending.clear_drift()
     if decision.candidate_id is None:
         # 候補はあるが今は採らない → 保持して次の機会を待つ（hold）。
@@ -1029,7 +889,7 @@ def _controller_normal_decision(
         # 連続声かけ抑制（同じ人を続けて誘わない）→ skip_invite で invite を消費。
         for s in decision.suppressed:
             if (s["candidate_id"].startswith("invite-")
-                    and "直前と同じ" in s["reason"]):
+                    and s.get("code") == "same_as_last_invited"):
                 return (_NormalTriggerDecision(
                     "skip_invite", invite_target=pending.invite), decision, cands, latency_ms)
         return _NormalTriggerDecision("none"), decision, cands, latency_ms
@@ -1668,18 +1528,12 @@ def _run_agent_worker(state: SessionState):
                     )
                 )
             except Exception as exc:
-                # 採否Controllerの想定外失敗時は、実績のある従来選択にfallback。
-                print(f"# [diag] controller barge-in fallback: {exc}", flush=True)
-                decision = _select_barge_in_decision(
-                    pending=_pending, agent=agent, state=state, now=_now,
-                    last_fact_at=_last_fact_at,
-                    last_intervention_at=_last_intervention_at,
-                    silence_elapsed=_silence_elapsed, partner_busy=_partner_busy,
-                    in_echo_window=bool(agent.in_echo_window), cooldown=_cooldown,
-                    diag_tick=_diag_tick)
-                _ctrl_barge = None
-                _barge_cands = []
-                _ctrl_latency_ms = 0.0
+                # Controllerは決定的（LLMなし）なので、ここに来るのはバグのみ。
+                # 別実装へfallbackすると障害時に挙動が静かに変わるため（M1）、
+                # このtickは何もせず、次のtickで再評価する。
+                print(f"# [diag] controller barge-in error（このtickは見送り）: {exc}",
+                      flush=True)
+                continue
             # 古い判断の破棄（§8.5）: 裁定後に新しい発話で世代がずれたら採らない。
             if (decision.reason not in ("none", "hold")
                     and _ctrl_barge is not None
@@ -1687,6 +1541,7 @@ def _run_agent_worker(state: SessionState):
                 print("# [trigger] skip: stale decision (epoch changed)", flush=True)
                 continue
             if decision.reason != "none":
+                # 候補がある限り _ctrl_barge は必ず存在する（reason!="none" ⇒ 候補あり）。
                 if decision.reason == "fact" and decision.fact is not None:
                     _legacy = _legacy_decision_brief(
                         "fact", str(decision.fact.get("correction") or "").strip())
@@ -1712,20 +1567,6 @@ def _run_agent_worker(state: SessionState):
                         legacy=_legacy,
                         latency_ms=_ctrl_latency_ms,
                     )
-                else:
-                    _review.evaluate(
-                        state,
-                        pending=_pending,
-                        agent=agent,
-                        now=_now,
-                        silence_elapsed=_silence_elapsed,
-                        epoch=state.agent_cursor,
-                        recent_interventions=list(_recent_interventions),
-                        legacy=_legacy,
-                        silence_summarize=_silence_summarize,
-                        partner_present=partner is not None,
-                        last_invited=_last_invited,
-                    )
             # hold は「barge-in レーンに今すぐ話せる候補が無い」だけを意味する。
             # continue で通常レーン（count/silence/invite）ごと止めると、確認待ち
             # の drift 候補1件で他の介入が無期限に飢餓する（C1）。none と同様に
@@ -1736,7 +1577,7 @@ def _run_agent_worker(state: SessionState):
                     kind="fact",
                     now=_now,
                     silence_elapsed=_silence_elapsed,
-                    pause_required=_INTERVENTION_PAUSE_FACT,
+                    pause_required=policy_for("fact").pause,
                     queued_at=float(decision.fact.get("_queued_at", _now)),
                     queued_wall_at=str(decision.fact.get("_queued_wall_at") or ""),
                     policy="fact_freshness_pause",
@@ -1761,7 +1602,7 @@ def _run_agent_worker(state: SessionState):
                     kind="manual",
                     now=_now,
                     silence_elapsed=_silence_elapsed,
-                    pause_required=_INTERVENTION_PAUSE_MANUAL,
+                    pause_required=policy_for("manual").pause,
                     queued_at=_queued_at,
                     queued_wall_at=str(
                         _queued_payload.get("created_wall_at") or ""),
@@ -1785,7 +1626,7 @@ def _run_agent_worker(state: SessionState):
                     kind="drift",
                     now=_now,
                     silence_elapsed=_silence_elapsed,
-                    pause_required=_INTERVENTION_PAUSE_DRIFT,
+                    pause_required=policy_for("drift").pause,
                     queued_at=_pending.last_drift_request_at or None,
                     queued_wall_at=_pending.last_drift_request_wall_at,
                     policy="drift_confirmation_pause",
@@ -1806,7 +1647,7 @@ def _run_agent_worker(state: SessionState):
                     kind="retry",
                     now=_now,
                     silence_elapsed=_silence_elapsed,
-                    pause_required=_INTERVENTION_PAUSE_RETRY,
+                    pause_required=policy_for("retry").pause,
                     queued_at=float(pending_intervention.get("created_at", _now)),
                     policy="retry_extra_pause",
                 )
@@ -1891,17 +1732,10 @@ def _run_agent_worker(state: SessionState):
                 )
             )
         except Exception as exc:
-            print(f"# [diag] controller normal fallback: {exc}", flush=True)
-            normal_decision = _select_normal_trigger_decision(
-                pending=_pending, agent=agent, silence_elapsed=_silence_elapsed,
-                silence_summarize=_silence_summarize,
-                partner_present=partner is not None,
-                now=time.monotonic(),
-                last_intervention_at=_last_intervention_at, cooldown=_cooldown,
-                last_invited=_last_invited)
-            _ctrl_normal = None
-            _normal_cands = []
-            _ctrl_latency_ms = 0.0
+            # barge-in 側と同じ方針: 別実装へfallbackせず、このtickは見送る（M1）。
+            print(f"# [diag] controller normal error（このtickは見送り）: {exc}",
+                  flush=True)
+            continue
         # 古い判断の破棄（§8.5）。
         if (normal_decision.reason not in ("none", "skip_invite")
                 and _ctrl_normal is not None
@@ -1945,7 +1779,7 @@ def _run_agent_worker(state: SessionState):
                 kind="count",
                 now=time.monotonic(),
                 silence_elapsed=_silence_elapsed,
-                pause_required=_INTERVENTION_PAUSE_COUNT,
+                pause_required=policy_for("count").pause,
                 policy="turn_count_pause",
             )
             print(f"# [trigger] count: {normal_decision.detail}", flush=True)
@@ -1972,7 +1806,7 @@ def _run_agent_worker(state: SessionState):
                 kind="invite",
                 now=time.monotonic(),
                 silence_elapsed=_silence_elapsed,
-                pause_required=_INVITE_SILENCE,
+                pause_required=policy_for("invite").pause,
                 policy="participation_pause",
             )
             print(f"# [trigger] invite: {normal_decision.detail}", flush=True)
