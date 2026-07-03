@@ -760,7 +760,11 @@ def _render_cross_condition_panel() -> None:
         return
 
     st.markdown("### 主観評価 (参加者の感じ方)")
-    st.caption("各値は 1〜7 のスコア (高いほど良い、`立場の変化幅` のみ −3〜+3 で 0 が中立)")
+    st.caption(
+        "各値は 1〜7 のスコア (高いほど良い、`立場の変化幅` のみ −3〜+3 で 0 が中立)。"
+        " 平均・SD は **ラン単位の2段集計** (ラン内でペルソナ平均 → ラン間で平均±SD)。"
+        " エラーバーはラン間 SD で、ペルソナ×ランを pool した値ではない。"
+    )
     rows: list[dict] = []
     for cond, payload in by_cond.items():
         for key, label, _ in SUBJECTIVE_METRICS:
@@ -799,6 +803,30 @@ def _render_cross_condition_panel() -> None:
             )
         )
         st.altair_chart(bar + err, use_container_width=False)
+
+    # 参考: ペルソナ別内訳 (ラン横断の flat pool)。立場 (pro/con/neutral) の
+    # 交互作用が平均で潰れていないかを確認するための補助表。
+    persona_rows: list[dict[str, object]] = []
+    for cond, payload in by_cond.items():
+        by_persona = payload.get("by_persona") or {}
+        for persona_name, scores in by_persona.items():
+            row = {
+                "手法": CONDITION_LABELS.get(cond, cond),
+                "ペルソナ": persona_name,
+            }
+            for key, label, _ in SUBJECTIVE_METRICS:
+                mean, _std = scores.get(key, [0.0, 0.0])
+                row[label] = round(mean, 2)
+            persona_rows.append(row)
+    if persona_rows:
+        with st.expander("参考: ペルソナ別の内訳 (立場ごとの交互作用チェック)"):
+            st.caption(
+                "主報告はラン単位2段集計。こちらはペルソナ×ランを pool した参考値。"
+                "特定の立場だけスコアが動いていないかを見る。"
+            )
+            st.dataframe(
+                pd.DataFrame(persona_rows), use_container_width=True, hide_index=True
+            )
 
     # 収束統計
     conv_rows: list[dict] = []

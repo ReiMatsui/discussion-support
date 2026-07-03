@@ -212,8 +212,47 @@ class AggregatedScores:
     intervention_transparency_std: float = 0.0
 
 
+_SCORE_ATTRS: tuple[str, ...] = (
+    "overall_satisfaction",
+    "information_usefulness",
+    "opposition_understanding",
+    "confidence_change",
+    "intervention_transparency",
+)
+
+
+def _mean(values: list[float]) -> float:
+    return fmean(values) if values else 0.0
+
+
+def _std(values: list[float]) -> float:
+    return pstdev(values) if len(values) >= 2 else 0.0
+
+
+def _aggregated_from_series(n: int, series: dict[str, list[float]]) -> AggregatedScores:
+    return AggregatedScores(
+        n=n,
+        overall_satisfaction_mean=_mean(series["overall_satisfaction"]),
+        information_usefulness_mean=_mean(series["information_usefulness"]),
+        opposition_understanding_mean=_mean(series["opposition_understanding"]),
+        confidence_change_mean=_mean(series["confidence_change"]),
+        intervention_transparency_mean=_mean(series["intervention_transparency"]),
+        overall_satisfaction_std=_std(series["overall_satisfaction"]),
+        information_usefulness_std=_std(series["information_usefulness"]),
+        opposition_understanding_std=_std(series["opposition_understanding"]),
+        confidence_change_std=_std(series["confidence_change"]),
+        intervention_transparency_std=_std(series["intervention_transparency"]),
+    )
+
+
 def aggregate_reports(reports: list[JudgeReport]) -> AggregatedScores:
-    """複数ペルソナ x 複数ランの ``JudgeReport`` を平均と標準偏差にまとめる。"""
+    """複数ペルソナ x 複数ランの ``JudgeReport`` を平均と標準偏差にまとめる (flat pool)。
+
+    NOTE (レビュー H-5): これはペルソナ×ランを独立サンプルとして pool する集計で、
+    実効サンプルサイズを過大申告する。条件間比較には
+    :func:`aggregate_reports_by_run` (ラン単位の2段集計) を使うこと。
+    本関数は単一トランスクリプトのペルソナ間集計や参考値算出のために残す。
+    """
 
     if not reports:
         return AggregatedScores(
@@ -225,34 +264,50 @@ def aggregate_reports(reports: list[JudgeReport]) -> AggregatedScores:
             intervention_transparency_mean=0.0,
         )
 
-    def _series(attr: str) -> list[float]:
-        return [float(getattr(r.scores, attr)) for r in reports]
+    series = {attr: [float(getattr(r.scores, attr)) for r in reports] for attr in _SCORE_ATTRS}
+    return _aggregated_from_series(len(reports), series)
 
-    def _mean(values: list[float]) -> float:
-        return fmean(values) if values else 0.0
 
-    def _std(values: list[float]) -> float:
-        return pstdev(values) if len(values) >= 2 else 0.0
+def aggregate_reports_by_run(runs_reports: list[list[JudgeReport]]) -> AggregatedScores:
+    """ラン単位の2段集計 (レビュー H-5 の疑似反復対策)。
 
-    sat = _series("overall_satisfaction")
-    use = _series("information_usefulness")
-    opp = _series("opposition_understanding")
-    conf = _series("confidence_change")
-    tra = _series("intervention_transparency")
+    各ランの主観指標を「ラン内でペルソナ平均」してから、「ラン間で平均±SD」を取る。
+    ``n`` はレポートを持つ **ラン数** (= クラスタ数)。同一ラン内の複数ペルソナは
+    同じ transcript を評価しており独立でないため、pool せずまずラン内で平均する。
 
-    return AggregatedScores(
-        n=len(reports),
-        overall_satisfaction_mean=_mean(sat),
-        information_usefulness_mean=_mean(use),
-        opposition_understanding_mean=_mean(opp),
-        confidence_change_mean=_mean(conf),
-        intervention_transparency_mean=_mean(tra),
-        overall_satisfaction_std=_std(sat),
-        information_usefulness_std=_std(use),
-        opposition_understanding_std=_std(opp),
-        confidence_change_std=_std(conf),
-        intervention_transparency_std=_std(tra),
-    )
+    :param runs_reports: ランごとの ``JudgeReport`` のリスト
+        (``[[run1のペルソナ別report...], [run2の...], ...]``)。
+    """
+
+    # 空ランや report を持たないランは除外
+    non_empty = [reps for reps in runs_reports if reps]
+    if not non_empty:
+        return AggregatedScores(
+            n=0,
+            overall_satisfaction_mean=0.0,
+            information_usefulness_mean=0.0,
+            opposition_understanding_mean=0.0,
+            confidence_change_mean=0.0,
+            intervention_transparency_mean=0.0,
+        )
+
+    # 第1段: ラン内でペルソナ平均 → ランごとに1値
+    run_means: dict[str, list[float]] = {attr: [] for attr in _SCORE_ATTRS}
+    for reps in non_empty:
+        for attr in _SCORE_ATTRS:
+            run_means[attr].append(_mean([float(getattr(r.scores, attr)) for r in reps]))
+
+    # 第2段: ラン間で平均±SD
+    return _aggregated_from_series(len(non_empty), run_means)
+
+
+def aggregate_reports_by_persona(reports: list[JudgeReport]) -> dict[str, AggregatedScores]:
+    """ペルソナ名ごとに (ラン横断で) 集計する。参考値として summary に残すための内訳。"""
+
+    by_name: dict[str, list[JudgeReport]] = {}
+    for rep in reports:
+        by_name.setdefault(rep.persona_name, []).append(rep)
+    return {name: aggregate_reports(reps) for name, reps in by_name.items()}
 
 
 __all__ = [
@@ -261,4 +316,6 @@ __all__ = [
     "JudgeReport",
     "JudgeScores",
     "aggregate_reports",
+    "aggregate_reports_by_persona",
+    "aggregate_reports_by_run",
 ]

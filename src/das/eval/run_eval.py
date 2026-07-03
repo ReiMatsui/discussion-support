@@ -46,7 +46,8 @@ from das.eval.judge import (
     AggregatedScores,
     JudgeAgent,
     JudgeReport,
-    aggregate_reports,
+    aggregate_reports_by_persona,
+    aggregate_reports_by_run,
 )
 from das.eval.metrics import (
     GraphMetrics,
@@ -127,12 +128,16 @@ class EvalResult:
         return grouped
 
     def aggregate(self) -> dict[str, AggregatedScores]:
-        """条件ごとに全ペルソナ x全ラン分の主観指標を平均する。"""
+        """条件ごとに主観指標をラン単位で2段集計する (レビュー H-5)。
+
+        ラン内でペルソナ平均 → ラン間で平均±SD。``AggregatedScores.n`` は
+        レポートを持つ **ラン数** (クラスタ数) になる。
+        """
 
         result: dict[str, AggregatedScores] = {}
         for cond, runs in self.by_condition().items():
-            reports = [rep for r in runs for rep in r.judge_reports]
-            result[cond] = aggregate_reports(reports)
+            runs_reports = [r.judge_reports for r in runs]
+            result[cond] = aggregate_reports_by_run(runs_reports)
         return result
 
 
@@ -275,10 +280,14 @@ def _aggregate_stance(stance_runs: list[dict]) -> dict:
     """ラン群の stance データから、公開/私的 × Pre/Post の平均と shift を集計。
 
     DEBATE benchmark 流の指標:
-      - mean_public_shift: Post.public - Pre.public の平均 (議論で表明する立場の変化)
-      - mean_private_shift: Post.private - Pre.private の平均 (内心の変化)
+      - mean_public_shift: ペルソナごとの (Post.public - Pre.public) の平均
+      - mean_private_shift: ペルソナごとの (Post.private - Pre.private) の平均
       - mean_pre_gap / mean_post_gap: |public - private| の平均 (見せかけの度合)
       - mean_post_gap が 0 に近いほど真の合意、大きいほど表層的合意の懸念
+
+    NOTE (レビュー H-5): shift は「post 平均 − pre 平均」ではなく、pre/post が
+    揃った **ペルソナ単位の paired difference** の平均で計算する。こうしないと
+    一部ペルソナで pre/post が欠損したときに系統的にずれる。
     """
 
     if not stance_runs:
@@ -289,6 +298,8 @@ def _aggregate_stance(stance_runs: list[dict]) -> dict:
     post_privates: list[int] = []
     pre_gaps: list[int] = []
     post_gaps: list[int] = []
+    public_diffs: list[int] = []
+    private_diffs: list[int] = []
     for stance in stance_runs:
         for _persona, phases in stance.items():
             pre = phases.get("pre")
@@ -301,68 +312,87 @@ def _aggregate_stance(stance_runs: list[dict]) -> dict:
                 post_publics.append(post.public_stance)
                 post_privates.append(post.private_stance)
                 post_gaps.append(abs(post.public_stance - post.private_stance))
+            # paired diff: 同一ペルソナで pre/post が揃っている場合のみ
+            if pre is not None and post is not None:
+                public_diffs.append(post.public_stance - pre.public_stance)
+                private_diffs.append(post.private_stance - pre.private_stance)
 
     def _mean(xs: list[int]) -> float:
         return sum(xs) / len(xs) if xs else 0.0
 
-    public_shift = _mean(post_publics) - _mean(pre_publics) if (pre_publics and post_publics) else 0.0
-    private_shift = _mean(post_privates) - _mean(pre_privates) if (pre_privates and post_privates) else 0.0
-
     return {
-        "n_persona_runs": len(pre_publics) if pre_publics else 0,
+        "n_persona_runs": len(public_diffs),
         "mean_pre_public": _mean(pre_publics),
         "mean_pre_private": _mean(pre_privates),
         "mean_post_public": _mean(post_publics),
         "mean_post_private": _mean(post_privates),
-        "mean_public_shift": public_shift,
-        "mean_private_shift": private_shift,
+        "mean_public_shift": _mean(public_diffs),
+        "mean_private_shift": _mean(private_diffs),
         "mean_pre_gap": _mean(pre_gaps),
         "mean_post_gap": _mean(post_gaps),
+    }
+
+
+def _subjective_scores(agg: AggregatedScores) -> dict[str, list[float]]:
+    """``AggregatedScores`` を summary 用の ``{指標: [mean, std]}`` に整形する。"""
+
+    return {
+        "overall_satisfaction": [
+            agg.overall_satisfaction_mean,
+            agg.overall_satisfaction_std,
+        ],
+        "information_usefulness": [
+            agg.information_usefulness_mean,
+            agg.information_usefulness_std,
+        ],
+        "opposition_understanding": [
+            agg.opposition_understanding_mean,
+            agg.opposition_understanding_std,
+        ],
+        "confidence_change": [
+            agg.confidence_change_mean,
+            agg.confidence_change_std,
+        ],
+        "intervention_transparency": [
+            agg.intervention_transparency_mean,
+            agg.intervention_transparency_std,
+        ],
     }
 
 
 def _save_eval_result(eval_dir: Path, result: EvalResult) -> None:
     aggregates = result.aggregate()
     grouped = result.by_condition()
+
+    def _by_condition(cond: str, agg: AggregatedScores) -> dict[str, object]:
+        runs = grouped.get(cond, [])
+        # 参考値: ペルソナ別内訳 (ラン横断の flat pool)。主報告はラン単位2段集計。
+        persona_reports = [rep for r in runs for rep in r.judge_reports]
+        by_persona = {
+            name: _subjective_scores(p_agg)
+            for name, p_agg in aggregate_reports_by_persona(persona_reports).items()
+        }
+        block = {
+            # レビュー H-5: 主観指標の n は「ラン数 (クラスタ数)」。
+            # 旧 n_judge_reports (ペルソナ×ランの pool 数) は過大申告だったため撤廃。
+            "n_runs_scored": agg.n,
+            **_subjective_scores(agg),
+            "by_persona": by_persona,
+            "convergence": _convergence_stats(runs),
+            "structural": aggregate_structural_metrics(
+                [r.structural for r in runs if r.structural]
+            ),
+            "citation": aggregate_citation_stats([r.citation for r in runs if r.citation]),
+            "stance": _aggregate_stance([r.stance for r in runs if r.stance]),
+        }
+        return block
+
     summary_payload = {
         "eval_id": result.eval_id,
         "topic": result.topic,
         "n_runs_total": len(result.runs),
         "by_condition": {
-            cond: {
-                "n_judge_reports": agg.n,
-                "overall_satisfaction": [
-                    agg.overall_satisfaction_mean,
-                    agg.overall_satisfaction_std,
-                ],
-                "information_usefulness": [
-                    agg.information_usefulness_mean,
-                    agg.information_usefulness_std,
-                ],
-                "opposition_understanding": [
-                    agg.opposition_understanding_mean,
-                    agg.opposition_understanding_std,
-                ],
-                "confidence_change": [
-                    agg.confidence_change_mean,
-                    agg.confidence_change_std,
-                ],
-                "intervention_transparency": [
-                    agg.intervention_transparency_mean,
-                    agg.intervention_transparency_std,
-                ],
-                "convergence": _convergence_stats(grouped.get(cond, [])),
-                "structural": aggregate_structural_metrics(
-                    [r.structural for r in grouped.get(cond, []) if r.structural]
-                ),
-                "citation": aggregate_citation_stats(
-                    [r.citation for r in grouped.get(cond, []) if r.citation]
-                ),
-                "stance": _aggregate_stance(
-                    [r.stance for r in grouped.get(cond, []) if r.stance]
-                ),
-            }
-            for cond, agg in aggregates.items()
+            cond: _by_condition(cond, agg) for cond, agg in aggregates.items()
         },
     }
     (eval_dir / "summary.json").write_text(

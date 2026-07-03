@@ -12,6 +12,8 @@ from das.eval.judge import (
     JudgeReport,
     JudgeScores,
     aggregate_reports,
+    aggregate_reports_by_persona,
+    aggregate_reports_by_run,
 )
 from das.eval.persona import build_persona
 from das.llm import OpenAIClient
@@ -211,6 +213,62 @@ def test_aggregate_mean_and_std() -> None:
     assert a.n == 3
     assert a.overall_satisfaction_mean == pytest.approx(5.0)
     assert a.overall_satisfaction_std > 0.0
+
+
+def _rep(name: str, sat: int) -> JudgeReport:
+    return JudgeReport(
+        persona_name=name,
+        condition_name="none",
+        topic="t",
+        scores=_scores(overall_satisfaction=sat),
+    )
+
+
+def test_aggregate_by_run_two_stage_matches_hand_calc() -> None:
+    """2ラン×3ペルソナ固定データで、ラン単位2段集計が手計算と一致する (E2)。
+
+    run1: 満足度 (3,6,6) → ラン平均 5.0
+    run2: 満足度 (4,4,7) → ラン平均 5.0
+    ラン間: 平均 5.0, pstdev([5.0, 5.0]) = 0.0
+    n = ラン数 = 2 (pool した 6 ではない)。
+    """
+
+    run1 = [_rep("A", 3), _rep("B", 6), _rep("C", 6)]
+    run2 = [_rep("A", 4), _rep("B", 4), _rep("C", 7)]
+    a = aggregate_reports_by_run([run1, run2])
+    assert a.n == 2
+    assert a.overall_satisfaction_mean == pytest.approx(5.0)
+    assert a.overall_satisfaction_std == pytest.approx(0.0)
+
+
+def test_aggregate_by_run_std_is_across_runs() -> None:
+    """ラン平均が異なるとき、SD はラン間で計算される。
+
+    run1: (6,6,6) → 6.0, run2: (4,4,4) → 4.0
+    ラン間平均 5.0, pstdev([6.0, 4.0]) = 1.0
+    """
+
+    run1 = [_rep("A", 6), _rep("B", 6), _rep("C", 6)]
+    run2 = [_rep("A", 4), _rep("B", 4), _rep("C", 4)]
+    a = aggregate_reports_by_run([run1, run2])
+    assert a.n == 2
+    assert a.overall_satisfaction_mean == pytest.approx(5.0)
+    assert a.overall_satisfaction_std == pytest.approx(1.0)
+
+
+def test_aggregate_by_run_skips_empty_runs() -> None:
+    a = aggregate_reports_by_run([[], [_rep("A", 5)], []])
+    assert a.n == 1
+    assert a.overall_satisfaction_mean == pytest.approx(5.0)
+
+
+def test_aggregate_by_persona_breakdown() -> None:
+    reports = [_rep("A", 4), _rep("A", 6), _rep("B", 5)]
+    by_persona = aggregate_reports_by_persona(reports)
+    assert set(by_persona) == {"A", "B"}
+    assert by_persona["A"].n == 2
+    assert by_persona["A"].overall_satisfaction_mean == pytest.approx(5.0)
+    assert by_persona["B"].n == 1
 
 
 def test_judge_scores_validation() -> None:

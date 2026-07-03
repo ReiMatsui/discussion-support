@@ -131,8 +131,57 @@ async def test_run_eval_with_judge_aggregates() -> None:
 
     aggregated = result.aggregate()
     assert "none" in aggregated
-    assert aggregated["none"].n == 4
+    # レビュー H-5: ラン単位2段集計に変更したため、n は「ラン数 (クラスタ数)」= 2。
+    # 旧実装ではペルソナ×ランの pool 数 (=4) だった。
+    assert aggregated["none"].n == 2
     assert aggregated["none"].overall_satisfaction_mean == 5.0
+
+
+# --- stance 集計 (paired diff) --------------------------------------
+
+
+def _stance_m(public: int, private: int):
+    from das.agents.stance_agent import StanceMeasurement
+
+    return StanceMeasurement(
+        public_stance=public,
+        private_stance=private,
+        public_reason="r",
+        private_reason="r",
+    )
+
+
+def test_aggregate_stance_uses_paired_diff() -> None:
+    """shift はペルソナ単位の paired diff の平均で計算される (レビュー H-5)。
+
+    A: pre.public=-2 → post.public=2 (diff +4)
+    B: pre.public=2 → post.public=0 (diff -2)
+    paired 平均 = (+4 + -2) / 2 = +1.0。
+    欠損時の頑健性のため post 平均 − pre 平均 ではなく paired で計算する。
+    """
+    from das.eval.run_eval import _aggregate_stance
+
+    stance_run = {
+        "A": {"pre": _stance_m(-2, -2), "post": _stance_m(2, 2)},
+        "B": {"pre": _stance_m(2, 2), "post": _stance_m(0, 0)},
+    }
+    agg = _aggregate_stance([stance_run])
+    assert agg["n_persona_runs"] == 2
+    assert agg["mean_public_shift"] == pytest.approx(1.0)
+    assert agg["mean_private_shift"] == pytest.approx(1.0)
+
+
+def test_aggregate_stance_missing_post_excluded_from_shift() -> None:
+    """post が欠損したペルソナは paired shift に入らない (系統的ずれの回避)。"""
+    from das.eval.run_eval import _aggregate_stance
+
+    stance_run = {
+        "A": {"pre": _stance_m(-2, -2), "post": _stance_m(2, 2)},  # diff +4
+        "B": {"pre": _stance_m(-3, -3)},  # post 欠損 → shift に寄与しない
+    }
+    agg = _aggregate_stance([stance_run])
+    assert agg["n_persona_runs"] == 1
+    assert agg["mean_public_shift"] == pytest.approx(4.0)
 
 
 # --- ファイル出力 ----------------------------------------------------
