@@ -26,11 +26,27 @@ import asyncio
 import time
 from typing import Any, Literal
 
+from pydantic import BaseModel, Field
+
 from das.agents.base import BaseAgent
 from das.graph.schema import Node
 from das.graph.store import GraphStore
 from das.llm import OpenAIClient
 from das.settings import get_settings
+
+_QUERY_SYSTEM_PROMPT = (
+    "あなたは検索クエリ生成器です。与えられた主張文を、検索エンジンで裏取りするための"
+    "短い検索クエリ (固有名詞・数値・論点語を含むキーワード列) に変換してください。"
+    "主張文の当為表現 (〜すべき) や主観は落とし、事実確認に有効な語を残します。"
+    "日本語はそのまま日本語で。1 行のクエリだけを返します。"
+)
+
+
+class _SearchQuery(BaseModel):
+    """検索クエリ生成の構造化出力。"""
+
+    query: str = Field(description="検索エンジン向けの短いクエリ (キーワード列)")
+
 
 SearchPolicy = Literal["eager", "lazy"]
 """検索ポリシー。
@@ -264,11 +280,37 @@ class WebSearchAgent(BaseAgent):
     async def _do_search_for_node(self, node: Node, store: GraphStore) -> list[Node]:
         """実際に検索を実行して store に追加する内部メソッド。"""
 
-        new_nodes = await self.search(node.text)
+        # G4: 主張原文をそのままクエリにせず、検索エンジン向けクエリに変換する
+        query = await self._generate_query(node.text)
+        new_nodes = await self.search(query)
         self._last_search_time = time.monotonic()
         for n in new_nodes:
             store.add_node(n)
         return new_nodes
+
+    async def _generate_query(self, claim_text: str) -> str:
+        """主張文を検索エンジン向けクエリ (キーワード列) に変換する (G4, レビュー M-4)。
+
+        失敗・空のときは主張原文にフォールバックする (検索自体は止めない)。
+        """
+
+        messages = [
+            {"role": "system", "content": _QUERY_SYSTEM_PROMPT},
+            {"role": "user", "content": claim_text},
+        ]
+        try:
+            result = await self.llm.chat_structured(
+                messages,  # type: ignore[arg-type]
+                response_format=_SearchQuery,
+            )
+        except Exception as exc:  # pragma: no cover - 防御的: 失敗時は原文で検索
+            self.log.warning("web_search.query_gen_failed", error=str(exc))
+            return claim_text
+        query = result.query.strip()
+        if not query:
+            return claim_text
+        self.log.info("web_search.query_generated", claim=claim_text[:60], query=query)
+        return query
 
 
 __all__ = ["SearchPolicy", "WebSearchAgent"]
