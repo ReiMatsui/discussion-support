@@ -240,6 +240,7 @@ class LinkingAgent(BaseAgent):
         batch: bool = True,
         hybrid_alpha: float = 0.7,
         cluster_threshold: float = 0.9,
+        active_window: int = 12,
     ) -> None:
         """
         Args:
@@ -269,6 +270,10 @@ class LinkingAgent(BaseAgent):
                 (反論など意味が対立するもの) を拾いやすくする。
             cluster_threshold: soft-merge の cosine 類似度しきい値 (既定 0.9)。既存 claim と
                 これ以上似た新 claim を同クラスタに合流させる (logic_review A2, 非破壊)。
+            active_window: claim↔claim の照合をアクティブ窓内 (turn_index 基準) に限定する
+                窓幅 (既定 12, facilitation と揃える, G6)。発話側ノードが増えても照合対象を
+                直近ターンに絞ってレイテンシを抑える。evidence↔claim は窓で切らない
+                (古い文書知識と新しい主張のリンクは価値があるため)。
         """
 
         super().__init__(llm=llm)
@@ -283,6 +288,7 @@ class LinkingAgent(BaseAgent):
         self._batch = batch
         self._hybrid_alpha = hybrid_alpha
         self._cluster_threshold = cluster_threshold
+        self._active_window = active_window
         self._embeddings: dict[UUID, list[float]] = {}
         self._quality_log = RetrievalQualityLog()
         # G1: evidence↔claim の方向制約で正規化/破棄した件数 (プロンプト遵守率の観測)
@@ -451,10 +457,13 @@ class LinkingAgent(BaseAgent):
     ) -> list[Node]:
         target_vec = await self._ensure_embedding(target)
         # G2: 発話内ペアは extraction が既にエッジ化済みなので linking では再判定しない
+        # G6: claim↔claim はアクティブ窓内のみ照合 (evidence↔claim は窓で切らない)
         others = [
             n
             for n in store.nodes()
-            if n.id != target.id and not _same_utterance(n, target)
+            if n.id != target.id
+            and not _same_utterance(n, target)
+            and self._in_link_window(n, target)
         ]
         if not others:
             return []
@@ -538,6 +547,22 @@ class LinkingAgent(BaseAgent):
             scored.sort(key=lambda pair: pair[1], reverse=True)
             candidates.extend(n for n, _ in scored[: self._top_k_per_source])
         return candidates
+
+    def _in_link_window(self, candidate: Node, target: Node) -> bool:
+        """候補を linking 対象にしてよいか (G6: claim↔claim のアクティブ窓絞り込み)。
+
+        - evidence が絡むペア (evidence↔claim) は窓で切らない。古い文書/Web 知識と
+          新しい主張のリンクは価値があるため、従来どおり embedding top-k 選抜に任せる。
+        - 発話側どうし (claim/premise ↔ claim/premise) は、target の turn_index を
+          現在ターンとしたアクティブ窓 (幅 active_window) の中だけを照合対象にする。
+        """
+
+        if candidate.node_type == "evidence" or target.node_type == "evidence":
+            return True
+        if candidate.source != "utterance" or target.source != "utterance":
+            return True
+        window_start = target.turn_index - self._active_window + 1
+        return candidate.turn_index >= window_start
 
     def _maybe_assign_cluster(self, target: Node, store: GraphStore) -> None:
         """``target`` が既存 claim と十分に類似していれば同クラスタに合流させる。

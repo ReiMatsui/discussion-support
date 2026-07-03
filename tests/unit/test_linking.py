@@ -198,6 +198,70 @@ def test_edge_claim_pair_direction_preserved() -> None:
     assert agent._n_edges_direction_normalized == 0
 
 
+# --- G6: linking アクティブ窓絞り込み ------------------------------------
+
+
+async def test_link_window_excludes_old_claim_keeps_evidence(store: NetworkXGraphStore) -> None:
+    """claim↔claim は窓外を除外、evidence↔claim は窓外でも候補に残す (G6)。"""
+
+    # 現在ターン20の新claim (target)
+    target = Node(text="最新主張", node_type="claim", source="utterance", author="A",
+                  turn_index=20, metadata={"turn_id": 20})
+    old_claim = Node(text="古い主張", node_type="claim", source="utterance", author="B",
+                     turn_index=1, metadata={"turn_id": 1})
+    old_evidence = Node(text="古い文書知識", node_type="evidence", source="document", author="d1")
+    for n in (old_claim, old_evidence, target):
+        store.add_node(n)
+
+    llm = _fake_llm()
+    llm.embed_one = AsyncMock(return_value=[1.0, 0.0])  # type: ignore[method-assign]
+    llm.embed = AsyncMock(side_effect=lambda texts, **k: [[1.0, 0.0] for _ in texts])  # type: ignore[method-assign]
+
+    judged: list[str] = []
+
+    async def fake_judge(messages: list[dict], **kwargs: object) -> _BatchJudgment:
+        content = messages[1]["content"]
+        for text in (old_claim.text, old_evidence.text):
+            if text in content:
+                judged.append(text)
+        return _batch_none(len(judged))
+
+    llm.chat_structured = AsyncMock(side_effect=fake_judge)  # type: ignore[method-assign]
+
+    # active_window=5 → window_start=16。turn1 の old_claim は窓外、evidence は窓無関係。
+    agent = LinkingAgent(llm=llm, top_k=10, threshold=0.6, active_window=5)
+    await agent.link_node(target, store)
+
+    assert old_evidence.text in judged  # evidence は残る
+    assert old_claim.text not in judged  # 窓外 claim は除外
+
+
+async def test_link_window_keeps_recent_claim(store: NetworkXGraphStore) -> None:
+    """窓内の claim は候補に残る (G6)。"""
+
+    target = Node(text="最新主張", node_type="claim", source="utterance", author="A",
+                  turn_index=20, metadata={"turn_id": 20})
+    recent_claim = Node(text="最近の主張", node_type="claim", source="utterance", author="B",
+                        turn_index=18, metadata={"turn_id": 18})
+    store.add_node(recent_claim)
+    store.add_node(target)
+
+    llm = _fake_llm()
+    llm.embed_one = AsyncMock(return_value=[1.0, 0.0])  # type: ignore[method-assign]
+    llm.embed = AsyncMock(side_effect=lambda texts, **k: [[1.0, 0.0] for _ in texts])  # type: ignore[method-assign]
+    judged: list[str] = []
+
+    async def fake_judge(messages: list[dict], **kwargs: object) -> _BatchJudgment:
+        if recent_claim.text in messages[1]["content"]:
+            judged.append(recent_claim.text)
+        return _batch_none(1)
+
+    llm.chat_structured = AsyncMock(side_effect=fake_judge)  # type: ignore[method-assign]
+    agent = LinkingAgent(llm=llm, top_k=10, threshold=0.6, active_window=5)
+    await agent.link_node(target, store)
+    assert recent_claim.text in judged
+
+
 # --- soft-merge クラスタ (logic_review A2) ------------------------------
 
 
