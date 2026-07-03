@@ -23,8 +23,9 @@ class Settings(BaseSettings):
 
     # OpenAI
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
-    openai_model_fast: str = Field(default="gpt-5-mini", alias="OPENAI_MODEL_FAST")
-    openai_model_smart: str = Field(default="gpt-5-mini", alias="OPENAI_MODEL_SMART")
+    # 既定は GPT-5.4 系 (2026-03〜)。旧 gpt-5-mini は2世代前 (05章 要対応1)。
+    openai_model_fast: str = Field(default="gpt-5.4-mini", alias="OPENAI_MODEL_FAST")
+    openai_model_smart: str = Field(default="gpt-5.4-mini", alias="OPENAI_MODEL_SMART")
 
     # Tavily
     tavily_api_key: str = Field(default="", alias="TAVILY_API_KEY")

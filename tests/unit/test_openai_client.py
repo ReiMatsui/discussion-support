@@ -122,8 +122,9 @@ def test_default_models_from_settings(monkeypatch: pytest.MonkeyPatch) -> None:
         settings=Settings(_env_file=None),  # type: ignore[call-arg]
         client=_fake_async_client(),
     )
-    assert client.fast_model == "gpt-5-mini"
-    assert client.smart_model == "gpt-5-mini"
+    # model_update: 既定を GPT-5.4 系へ更新
+    assert client.fast_model == "gpt-5.4-mini"
+    assert client.smart_model == "gpt-5.4-mini"
 
 
 # --- chat (plain text) ----------------------------------------------------
@@ -178,6 +179,21 @@ async def test_chat_omits_temperature_for_gpt5_models() -> None:
     )
     kwargs = create.await_args.kwargs
     assert "temperature" not in kwargs
+
+
+async def test_chat_omits_temperature_for_gpt54_models() -> None:
+    """gpt-5.4 系も reasoning モデルなので temperature を渡さない (model_update)。"""
+
+    create = AsyncMock(return_value=_completion_response("ok"))
+    fake = _fake_async_client(create=create)
+    client = OpenAIClient(client=fake)
+
+    await client.chat(
+        [{"role": "user", "content": "x"}],
+        model="gpt-5.4-mini",
+        temperature=0.7,
+    )
+    assert "temperature" not in create.await_args.kwargs
 
 
 async def test_chat_omits_temperature_for_o_series_models() -> None:

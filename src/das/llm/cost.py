@@ -46,7 +46,10 @@ class ModelPricing:
 # OpenAI 公開料金 (USD/M tokens を /token に換算)。2026-05 時点。
 # 必要に応じて環境変数経由で上書き可能にする拡張は将来案。
 PRICING: dict[str, ModelPricing] = {
-    # GPT-5 series
+    # GPT-5.4 series (2026-03〜, 現行の既定。05章 要対応1)
+    "gpt-5.4-mini": ModelPricing(0.75e-6, 4.50e-6),
+    "gpt-5.4-nano": ModelPricing(0.20e-6, 1.25e-6),
+    # GPT-5 series (旧・過去 run の rescore 用に残す)
     "gpt-5-mini": ModelPricing(0.40e-6, 1.60e-6),
     "gpt-5": ModelPricing(1.25e-6, 10.00e-6),
     "gpt-5-nano": ModelPricing(0.05e-6, 0.40e-6),
