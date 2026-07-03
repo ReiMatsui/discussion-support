@@ -119,6 +119,19 @@ def test_snapshot_roundtrip(store: NetworkXGraphStore, cafeteria_nodes: dict[str
     assert {e.id for e in other.edges()} == {edge.id}
 
 
+def test_node_turn_index_default_and_snapshot(store: NetworkXGraphStore) -> None:
+    """turn_index は default 0 (後方互換) で、snapshot 往復で保存される。"""
+
+    default_node = Node(text="x", node_type="claim", source="utterance")
+    assert default_node.turn_index == 0
+
+    tagged = Node(text="y", node_type="claim", source="utterance", turn_index=7)
+    store.add_node(tagged)
+    other = NetworkXGraphStore()
+    other.load_snapshot(store.snapshot())
+    assert next(iter(other.nodes())).turn_index == 7
+
+
 def test_persistent_replay(tmp_path: Path, cafeteria_nodes: dict[str, Node]) -> None:
     db_path = tmp_path / "graph.sqlite"
     nodes = cafeteria_nodes

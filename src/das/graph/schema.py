@@ -43,6 +43,11 @@ class Node(BaseModel):
     author: str | None = None
     """発話なら話者ID、文献なら doc_id、Web なら domain。"""
 
+    turn_index: int = 0
+    """会議内の確定発話連番 (アクティブ窓判定に使う, logic_review A5)。
+    発話ノードは元発話の連番、evidence (文献/Web) は投入時点の連番。
+    後方互換のため default 0 (未設定の古いスナップショットは 0 扱い)。"""
+
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, Any] = Field(default_factory=dict)
 

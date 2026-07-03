@@ -73,6 +73,7 @@ class ExtractionAgent(BaseAgent):
                     node_type=node_type,
                     source="utterance",
                     author=utterance.speaker,
+                    turn_index=utterance.turn_id,
                     timestamp=utterance.timestamp,
                     metadata={"turn_id": utterance.turn_id},
                 )
