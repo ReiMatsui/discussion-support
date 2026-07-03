@@ -273,6 +273,9 @@ class LinkingAgent(BaseAgent):
         self._cluster_threshold = cluster_threshold
         self._embeddings: dict[UUID, list[float]] = {}
         self._quality_log = RetrievalQualityLog()
+        # G1: evidence↔claim の方向制約で正規化/破棄した件数 (プロンプト遵守率の観測)
+        self._n_edges_direction_normalized = 0
+        self._n_edges_dropped_evidence_pair = 0
 
     # --- 公開 ---------------------------------------------------------
 
@@ -645,19 +648,45 @@ class LinkingAgent(BaseAgent):
         relation: Relation
         # 連結エージェントの呼び出し慣習: a=target, b=candidate
         if judgment.relation == "a_supports_b":
-            src_id, dst_id, relation = target.id, cand.id, "support"
+            src_node, dst_node, relation = target, cand, "support"
         elif judgment.relation == "a_attacks_b":
-            src_id, dst_id, relation = target.id, cand.id, "attack"
+            src_node, dst_node, relation = target, cand, "attack"
         elif judgment.relation == "b_supports_a":
-            src_id, dst_id, relation = cand.id, target.id, "support"
+            src_node, dst_node, relation = cand, target, "support"
         elif judgment.relation == "b_attacks_a":
-            src_id, dst_id, relation = cand.id, target.id, "attack"
+            src_node, dst_node, relation = cand, target, "attack"
         else:  # pragma: no cover - 防御的
             return None
 
+        # G1 (レビュー C-2): evidence↔claim の方向制約をコードで強制する。
+        # 設計不変条件「evidence が常に src (事実が主張を支持/攻撃する)」を、
+        # LLM の向き取り違えに対して正規化する。プロンプト任せにしない。
+        src_is_evidence = src_node.node_type == "evidence"
+        dst_is_evidence = dst_node.node_type == "evidence"
+        if src_is_evidence and dst_is_evidence:
+            # evidence↔evidence は設計上エッジを張らない (中立事実同士に立場はない)
+            self._n_edges_dropped_evidence_pair += 1
+            self.log.info(
+                "linking.edge_dropped_evidence_pair",
+                src_id=str(src_node.id),
+                dst_id=str(dst_node.id),
+            )
+            return None
+        if dst_is_evidence and not src_is_evidence:
+            # claim→evidence 判定を evidence→claim に反転 (relation は保持)。
+            # 意味論を「事実が主張を支持/攻撃する」に固定する。
+            src_node, dst_node = dst_node, src_node
+            self._n_edges_direction_normalized += 1
+            self.log.info(
+                "linking.edge_direction_normalized",
+                evidence_id=str(src_node.id),
+                claim_id=str(dst_node.id),
+                relation=relation,
+            )
+
         return Edge(
-            src_id=src_id,
-            dst_id=dst_id,
+            src_id=src_node.id,
+            dst_id=dst_node.id,
             relation=relation,
             confidence=judgment.confidence,
             rationale=judgment.rationale,

@@ -144,6 +144,60 @@ async def test_top_k_filters_by_embedding_similarity(
     assert judged[0][1] == nodes["a2"].text
 
 
+# --- G1: evidence↔claim 方向制約 ----------------------------------------
+
+
+@pytest.mark.parametrize("relation", ["a_supports_b", "a_attacks_b", "b_supports_a", "b_attacks_a"])
+def test_edge_direction_evidence_always_src(relation: str) -> None:
+    """claim(target) + evidence(cand) では、どの向き判定でも evidence→claim に正規化。"""
+
+    agent = LinkingAgent(llm=_fake_llm(), threshold=0.5)
+    claim = Node(text="主張", node_type="claim", source="utterance", author="A")
+    evidence = Node(text="事実", node_type="evidence", source="document", author="d1")
+    edge = agent._maybe_make_edge(claim, evidence, _judgment(relation, 0.9))
+    assert edge is not None
+    # evidence が常に src、claim が dst
+    assert edge.src_id == evidence.id
+    assert edge.dst_id == claim.id
+    expected_rel = "support" if "supports" in relation else "attack"
+    assert edge.relation == expected_rel
+
+
+def test_edge_direction_normalization_counted() -> None:
+    """claim→evidence 判定 (a_supports_b) は正規化され件数が数えられる。"""
+
+    agent = LinkingAgent(llm=_fake_llm(), threshold=0.5)
+    claim = Node(text="主張", node_type="claim", source="utterance", author="A")
+    evidence = Node(text="事実", node_type="evidence", source="document", author="d1")
+    # b_supports_a は既に evidence→claim なので正規化不要、a_supports_b は正規化される
+    agent._maybe_make_edge(claim, evidence, _judgment("b_supports_a", 0.9))
+    assert agent._n_edges_direction_normalized == 0
+    agent._maybe_make_edge(claim, evidence, _judgment("a_supports_b", 0.9))
+    assert agent._n_edges_direction_normalized == 1
+
+
+def test_edge_evidence_pair_dropped() -> None:
+    """evidence↔evidence はエッジを張らない (設計不変条件)。"""
+
+    agent = LinkingAgent(llm=_fake_llm(), threshold=0.5)
+    e1 = Node(text="事実1", node_type="evidence", source="document", author="d1")
+    e2 = Node(text="事実2", node_type="evidence", source="web", author="w1")
+    assert agent._maybe_make_edge(e1, e2, _judgment("a_supports_b", 0.9)) is None
+    assert agent._n_edges_dropped_evidence_pair == 1
+
+
+def test_edge_claim_pair_direction_preserved() -> None:
+    """claim↔claim (evidence なし) は正規化されず判定どおりの向き。"""
+
+    agent = LinkingAgent(llm=_fake_llm(), threshold=0.5)
+    a = Node(text="主張A", node_type="claim", source="utterance", author="A")
+    b = Node(text="主張B", node_type="claim", source="utterance", author="B")
+    edge = agent._maybe_make_edge(a, b, _judgment("a_attacks_b", 0.9))
+    assert edge is not None
+    assert edge.src_id == a.id and edge.dst_id == b.id
+    assert agent._n_edges_direction_normalized == 0
+
+
 # --- soft-merge クラスタ (logic_review A2) ------------------------------
 
 
