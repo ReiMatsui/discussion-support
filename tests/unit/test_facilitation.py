@@ -176,35 +176,46 @@ def test_select_basic_adjacent(
     assert items[0].reason == "adjacent"
 
 
-def test_select_balance_correction_lifts_minority_side(
+def test_select_priority_is_confidence_no_coefficients(
     cafeteria_store: tuple[NetworkXGraphStore, dict[str, Node]],
 ) -> None:
-    """全体が attack 優勢のとき、target への support の優先度が引き上げられる。"""
+    """priority は confidence そのもの。偏り補正の乗算係数 (旧 1.3/0.7) は撤廃 (Phase2)。
+
+    旧テスト test_select_balance_correction_lifts_minority_side を、係数撤廃後の
+    挙動に置き換えたもの。同じ「attack 優勢の全体 + target への support/attack 各 1 件」
+    でも、support の優先度は引き上げられず confidence のまま。並べ替えは種別優先度で
+    attack が先。
+    """
 
     store, n = cafeteria_store
-    # 全体: 4 attack vs 1 support (attack 優勢、imbalance = 3/5 = 0.6)
     store.add_edge(Edge(src_id=n["a2"].id, dst_id=n["a3"].id, relation="attack", confidence=0.8))
     store.add_edge(Edge(src_id=n["a3"].id, dst_id=n["a2"].id, relation="attack", confidence=0.8))
     store.add_edge(Edge(src_id=n["a4"].id, dst_id=n["a3"].id, relation="attack", confidence=0.7))
-    # target=a1 への支持 1 件 + 攻撃 1 件
     store.add_edge(Edge(src_id=n["a4"].id, dst_id=n["a1"].id, relation="support", confidence=0.6))
     store.add_edge(Edge(src_id=n["a2"].id, dst_id=n["a1"].id, relation="attack", confidence=0.6))
 
     agent = FacilitationAgent(llm=_fake_llm())
     items = agent.select_for_target(n["a1"], store, [])
     by_relation = {it.relation: it for it in items}
-    # support が引き上げられて attack より優先される
-    assert by_relation["support"].priority > by_relation["attack"].priority
-    assert by_relation["support"].reason == "balance_correction"
+    # 係数なし: 両者とも priority == confidence (0.6)、reason は adjacent
+    assert by_relation["support"].priority == pytest.approx(0.6)
+    assert by_relation["attack"].priority == pytest.approx(0.6)
+    assert by_relation["support"].reason == "adjacent"
+    assert by_relation["attack"].reason == "adjacent"
+    # 種別優先度で attack が先頭
+    assert items[0].relation == "attack"
 
 
-def test_select_stage_alignment_in_stalled(
+def test_select_attack_ranks_above_support_by_kind(
     cafeteria_store: tuple[NetworkXGraphStore, dict[str, Node]],
 ) -> None:
-    """停滞時には attack の優先度が上がる (bias を中立化した状態で検証)。"""
+    """種別優先度: 同 confidence なら attack (緊張) が support より先 (Phase2)。
+
+    旧テスト test_select_stage_alignment_in_stalled の置き換え。停滞時の 1.2 倍係数は
+    撤廃し、代わりに並べ替えキー (種別優先度, confidence) で attack を優先する。
+    """
 
     store, n = cafeteria_store
-    # bias を中立にするため support 1 + attack 1
     store.add_edge(Edge(src_id=n["a3"].id, dst_id=n["a1"].id, relation="support", confidence=0.6))
     store.add_edge(Edge(src_id=n["a2"].id, dst_id=n["a1"].id, relation="attack", confidence=0.6))
     transcript = [
@@ -212,11 +223,10 @@ def test_select_stage_alignment_in_stalled(
     ]
     agent = FacilitationAgent(llm=_fake_llm(), max_items=5)
     items = agent.select_for_target(n["a1"], store, transcript)
-    by_relation = {it.relation: it for it in items}
-    # stage=stalled で attack が 1.2 倍され、support は変化なし
-    assert by_relation["attack"].priority > by_relation["support"].priority
-    assert by_relation["attack"].priority > 0.6
-    assert by_relation["attack"].reason == "stage_alignment"
+    # 係数なしで priority は等しいが、種別優先度で attack が先頭
+    assert items[0].relation == "attack"
+    assert items[0].priority == pytest.approx(0.6)
+    assert items[0].reason == "adjacent"
 
 
 def test_select_max_items_caps(
@@ -312,6 +322,50 @@ def test_decide_l1_with_addressed_to_last_speaker() -> None:
     assert decision.kind == "l1"
     assert decision.addressed_to == "A"
     assert len(decision.items) == 1
+    assert decision.items[0].relation == "attack"
+
+
+def test_decide_l1_excludes_out_of_window_attacker() -> None:
+    """アクティブ窓外の古い攻撃元からのエッジは L1 候補にならない (Phase2, A5)。"""
+
+    store = NetworkXGraphStore()
+    target = Node(
+        text="最新の主張", node_type="claim", source="utterance", author="A",
+        turn_index=20, metadata={"turn_id": 20},
+    )
+    old_attacker = Node(
+        text="ずっと前の反論", node_type="claim", source="utterance", author="B",
+        turn_index=1, metadata={"turn_id": 1},
+    )
+    store.add_node(target)
+    store.add_node(old_attacker)
+    store.add_edge(Edge(src_id=old_attacker.id, dst_id=target.id, relation="attack", confidence=0.9))
+
+    # active_window=5 → window_start = 20 - 5 + 1 = 16。turn 1 の攻撃元は窓外。
+    agent = FacilitationAgent(llm=_fake_llm(), active_window=5)
+    decision = agent.decide_intervention([_utt(20, "A")], store)
+    assert decision.kind == "skip"
+
+
+def test_decide_l1_includes_in_window_attacker() -> None:
+    """アクティブ窓内の攻撃元からのエッジは L1 候補になる (Phase2, A5)。"""
+
+    store = NetworkXGraphStore()
+    target = Node(
+        text="最新の主張", node_type="claim", source="utterance", author="A",
+        turn_index=20, metadata={"turn_id": 20},
+    )
+    recent_attacker = Node(
+        text="最近の反論", node_type="claim", source="utterance", author="B",
+        turn_index=18, metadata={"turn_id": 18},
+    )
+    store.add_node(target)
+    store.add_node(recent_attacker)
+    store.add_edge(Edge(src_id=recent_attacker.id, dst_id=target.id, relation="attack", confidence=0.9))
+
+    agent = FacilitationAgent(llm=_fake_llm(), active_window=5)  # window_start=16
+    decision = agent.decide_intervention([_utt(20, "A")], store)
+    assert decision.kind == "l1"
     assert decision.items[0].relation == "attack"
 
 
