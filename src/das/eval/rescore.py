@@ -151,6 +151,31 @@ def load_stance(run_meta: dict[str, Any]) -> dict[str, dict[str, StanceMeasureme
     return result
 
 
+# --- 観測用 AF の後付け構築 (E4) ------------------------------------
+
+
+async def build_observation_af(
+    transcript: list[Utterance], llm: OpenAIClient
+) -> GraphStore:
+    """transcript から extraction+linking を走らせて **観測用 AF** を構築する。
+
+    介入 (処置) には一切使わず、構造指標・合意の構造シグナルを **全条件同一の
+    パイプライン** で計算するためのグラフ (レビュー H-1 / H-2)。none / flat_rag でも
+    このグラフができるので、構造指標が全条件で比較可能になる。
+
+    文書は投入しない (transcript のみ) — 対面でも録音から同じ意味で作れる設計。
+    API コストが増えるため実行時ではなく rescore フェーズで走らせる。
+    """
+
+    from das.runtime import Orchestrator
+
+    orch = Orchestrator.assemble(llm=llm)
+    for utterance in transcript:
+        await orch.bus.publish(utterance)
+    await orch.bus.drain()
+    return orch.store
+
+
 # --- 1 ラン分の rescore ---------------------------------------------
 
 
@@ -163,8 +188,17 @@ async def rescore_run(
     consensus_kwargs: dict[str, Any] | None,
     llm: OpenAIClient,
     judge: JudgeAgent | None,
+    build_observation: bool = True,
+    observation_store: GraphStore | None = None,
 ) -> SingleRunResult:
-    """1 run ディレクトリを再採点し、採点出力を書き戻して結果を返す。"""
+    """1 run ディレクトリを再採点し、採点出力を書き戻して結果を返す。
+
+    ``build_observation`` (E4): True なら transcript から観測用 AF を後付け構築し、
+    構造指標・合意の構造シグナルを全条件同一にそのグラフから計算する。テストや
+    「構造指標を触らず judge だけ差し替えたい」ケースでは False にできる。
+    ``observation_store`` を直接渡すとその構築をスキップして再利用する
+    (テスト用の注入口)。
+    """
 
     transcript_path = run_dir / "transcript.jsonl"
     if not transcript_path.exists():
@@ -190,6 +224,11 @@ async def rescore_run(
     if run_meta_path.exists():
         stance = load_stance(json.loads(run_meta_path.read_text(encoding="utf-8")))
 
+    # 観測用 AF: 明示注入 > 構築フラグ > なし
+    obs_store = observation_store
+    if obs_store is None and build_observation:
+        obs_store = await build_observation_af(transcript, llm)
+
     scores = await score_run(
         transcript=transcript,
         condition_name=condition_name,
@@ -201,6 +240,7 @@ async def rescore_run(
         judge=judge,
         consensus_agent=None,  # rescore は決定的なキーワード+構造合意判定を使う
         consensus_kwargs=consensus_kwargs,
+        observation_store=obs_store,
     )
 
     result = SingleRunResult(
@@ -215,6 +255,7 @@ async def rescore_run(
         snapshot=store.snapshot() if store is not None else None,
         consensus=scores.consensus,
         structural=scores.structural,
+        structural_intervention=scores.structural_intervention,
         citation=scores.citation,
         stance=stance,
     )
@@ -231,11 +272,15 @@ async def rescore_eval_dir(
     *,
     llm: OpenAIClient,
     judge: JudgeAgent | None,
+    build_observation: bool = True,
 ) -> EvalResult:
     """eval_dir 配下の全 run を再採点し、summary.json を作り直す。
 
     ``aqua-rescore`` と同じく condition/run_* をスキャンする。旧形式や破損 run は
     ``RescoreError`` を送出して停止する (黙って誤計算しない)。
+
+    ``build_observation`` (E4): True なら全条件で観測用 AF を後付け構築して構造
+    指標を統一する (API コスト増)。構造指標を触らず判定だけ再計算したいときは False。
     """
 
     meta = load_eval_meta(eval_dir)
@@ -259,6 +304,7 @@ async def rescore_eval_dir(
                 consensus_kwargs=consensus_kwargs,
                 llm=llm,
                 judge=judge,
+                build_observation=build_observation,
             )
             runs.append(result)
             n_scored += 1
@@ -281,6 +327,7 @@ async def rescore_eval_dir(
 
 __all__ = [
     "RescoreError",
+    "build_observation_af",
     "load_eval_meta",
     "personas_from_meta",
     "rescore_eval_dir",

@@ -246,6 +246,12 @@ def eval_rescore(
         "--no-judge",
         help="judge (LLM 主観採点) を再実行しない。構造指標・citation のみ再計算。",
     ),
+    no_observation_af: bool = typer.Option(
+        False,
+        "--no-observation-af",
+        help="観測用 AF の後付け構築を行わない。構造指標は既存の介入用 AF (full_proposal のみ) "
+        "から計算する。既定では全条件で transcript から観測用 AF を構築する (API コスト増)。",
+    ),
     model: str | None = typer.Option(
         None,
         "--model",
@@ -264,6 +270,9 @@ def eval_rescore(
     citation・consensus を再計算し、judge_reports.json / run_meta.json / summary.json を
     作り直す。judge プロンプトや citation 閾値を直したあとの再採点に使う。
 
+    既定では全条件で transcript から **観測用 AF** を後付け構築し、構造指標と合意の
+    構造シグナルを全条件同一に計算する (none / flat_rag でも構造指標が非ゼロになる)。
+
     旧形式 (personas / topic / transcript を保存していない) の eval は明確なエラーで
     停止する (黙って誤計算しない)。
     """
@@ -272,6 +281,7 @@ def eval_rescore(
         _run_eval_rescore(
             eval_dir=eval_dir,
             no_judge=no_judge,
+            no_observation_af=no_observation_af,
             model=model,
             budget=budget,
             hard_budget=hard_budget,
@@ -283,6 +293,7 @@ async def _run_eval_rescore(
     *,
     eval_dir: Path,
     no_judge: bool,
+    no_observation_af: bool,
     model: str | None,
     budget: float | None,
     hard_budget: float | None,
@@ -299,9 +310,14 @@ async def _run_eval_rescore(
     llm = OpenAIClient(cost_tracker=tracker)
     judge = None if no_judge else JudgeAgent(llm=llm, model=model)
 
-    typer.echo(f"[rescore] scanning {eval_dir} (judge={'off' if no_judge else 'on'})")
+    typer.echo(
+        f"[rescore] scanning {eval_dir} (judge={'off' if no_judge else 'on'}, "
+        f"observation_af={'off' if no_observation_af else 'on'})"
+    )
     try:
-        result = await rescore_eval_dir(eval_dir, llm=llm, judge=judge)
+        result = await rescore_eval_dir(
+            eval_dir, llm=llm, judge=judge, build_observation=not no_observation_af
+        )
     except RescoreError as exc:
         typer.echo(f"[rescore] ERROR: {exc}", err=True)
         raise typer.Exit(1) from exc

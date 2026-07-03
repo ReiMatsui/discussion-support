@@ -95,7 +95,14 @@ class SingleRunResult:
     """セッション終了時の合意検出レポート (until_consensus 有効時のみ非 None)。"""
 
     structural: DiscussionStructuralMetrics | None = None
-    """AF + transcript から決定的に計算した構造指標 (DQI 風)。"""
+    """構造指標 (DQI 風)。E4 以降は **観測用 AF** (全条件で transcript から同一
+    パイプラインで後付け構築したグラフ) を基準に計算する。観測用 AF が無い実行時
+    経路では介入用 AF (full_proposal のみ) から計算する。"""
+
+    structural_intervention: DiscussionStructuralMetrics | None = None
+    """参考: 介入用 AF (full_proposal の処置に使ったグラフ) から計算した構造指標。
+    観測用 AF を使う場合のみ非 None。条件間比較には使わず参考出力に留める
+    (レビュー H-2: 構築条件を揃えるため主指標は観測用 AF に統一)。"""
 
     citation: CitationStats | None = None
     """提示情報の引用率 (source 別)。RQ4 の直接 evidence。"""
@@ -229,6 +236,11 @@ def _save_run_scores(run_dir: Path, result: SingleRunResult) -> None:
         }
     if result.structural is not None:
         run_meta["structural_metrics"] = asdict(result.structural)
+    if result.structural_intervention is not None:
+        # 参考: 介入用 AF 由来 (主指標は観測用 AF の structural_metrics)
+        run_meta["structural_metrics_intervention_af"] = asdict(
+            result.structural_intervention
+        )
     if result.citation is not None:
         run_meta["citation"] = result.citation.to_dict()
     if result.stance:
@@ -688,6 +700,7 @@ async def _run_single(
         snapshot=snapshot,
         consensus=scores.consensus,
         structural=scores.structural,
+        structural_intervention=scores.structural_intervention,
         citation=scores.citation,
         stance=stance_data if stance_data else None,
     )
@@ -701,6 +714,8 @@ class RunScores:
     judge_reports: list[JudgeReport]
     structural: DiscussionStructuralMetrics
     citation: CitationStats
+    structural_intervention: DiscussionStructuralMetrics | None = None
+    """参考: 介入用 AF 由来の構造指標 (観測用 AF を使ったときのみ非 None)。"""
 
 
 def _interventions_for_citation(
@@ -743,15 +758,24 @@ async def score_run(
     judge: JudgeAgent | None = None,
     consensus_agent: object | None = None,
     consensus_kwargs: dict[str, Any] | None = None,
+    observation_store: GraphStore | None = None,
 ) -> RunScores:
     """保存済み or 生成直後の run を採点する (consensus / judge / structural / citation)。
 
     会話生成とは独立に呼べる = ``das eval-rescore`` の心臓部。judge プロンプトや
     citation 閾値を直したあと、会話を再生成せずに再採点できる。stance は実行時に
     measure した生データを summary 段で集計するため、ここには含めない。
+
+    ``observation_store`` (E4): transcript から後付け構築した **観測用 AF** を渡すと、
+    構造指標と合意の構造シグナルを全条件同一にこのグラフから計算する。``store``
+    (介入用 AF) 由来の構造指標は ``structural_intervention`` に参考として残す。
+    観測用 AF を渡さない実行時経路では従来通り ``store`` を使う。
     """
 
     consensus_kwargs = consensus_kwargs or {}
+
+    # 構造指標・合意の構造シグナルは観測用 AF を優先 (レビュー H-1 / H-2)。
+    metric_store = observation_store if observation_store is not None else store
 
     # 合意検出の最終レポート (until_consensus でない場合も「実際に合意していたか」を
     # 後付け判定して残すと分析しやすいので、常に算出する)。
@@ -761,11 +785,13 @@ async def score_run(
             topic=topic,
             personas=personas,
             agent=consensus_agent,
-            store=store,
+            store=metric_store,
             **consensus_kwargs,
         )
     else:
-        consensus_report = detect_consensus(transcript, store=store, **consensus_kwargs)
+        consensus_report = detect_consensus(
+            transcript, store=metric_store, **consensus_kwargs
+        )
 
     judge_reports: list[JudgeReport] = []
     if judge is not None:
@@ -777,7 +803,11 @@ async def score_run(
             info_log=intervention_log,
         )
 
-    structural = compute_structural_metrics(transcript, store)
+    structural = compute_structural_metrics(transcript, metric_store)
+    # 観測用 AF を使ったときのみ、介入用 AF 由来の指標を参考として別途計算する
+    structural_intervention: DiscussionStructuralMetrics | None = None
+    if observation_store is not None and store is not None:
+        structural_intervention = compute_structural_metrics(transcript, store)
 
     # 引用率: 介入で提示された情報が次発話で使われた率 (RQ4 直接指標)
     interventions_for_citation = _interventions_for_citation(intervention_log)
@@ -795,6 +825,7 @@ async def score_run(
         judge_reports=judge_reports,
         structural=structural,
         citation=citation,
+        structural_intervention=structural_intervention,
     )
 
 
