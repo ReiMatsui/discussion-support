@@ -41,6 +41,16 @@ class GraphStore(Protocol):
         """``direction`` は 'in' | 'out' | 'both'."""
         ...
 
+    # --- soft-merge クラスタ (logic_review A2) -------------------------
+
+    def assign_cluster(self, node_id: UUID, cluster_id: UUID) -> None:
+        """``node_id`` を ``cluster_id`` の代表を持つクラスタに合流させる (非破壊)。"""
+        ...
+
+    def cluster_of(self, node_id: UUID) -> UUID:
+        """``node_id`` が属するクラスタの代表 node_id (未登録なら自分自身)。"""
+        ...
+
     # --- スナップショット ----------------------------------------------
 
     def snapshot(self) -> dict: ...

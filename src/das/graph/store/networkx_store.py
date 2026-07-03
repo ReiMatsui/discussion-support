@@ -48,6 +48,10 @@ class NetworkXGraphStore:
         self._graph: nx.MultiDiGraph = nx.MultiDiGraph()
         self._nodes: dict[UUID, Node] = {}
         self._edges: dict[UUID, Edge] = {}
+        # soft-merge クラスタ: member node_id -> 代表 node_id (logic_review A2)。
+        # 非破壊 (ノードは残し、指標だけクラスタ単位で数える) のため、frozen Node を
+        # 書き換えず store 側のマップで保持する。未登録ノードは自分自身が代表。
+        self._clusters: dict[UUID, UUID] = {}
         if db_path is None:
             self._conn = sqlite3.connect(":memory:")
             self._db_path: Path | None = None
@@ -138,12 +142,32 @@ class NetworkXGraphStore:
                     result.append(edge)
         return result
 
+    # --- soft-merge クラスタ (logic_review A2) -------------------------
+
+    def assign_cluster(self, node_id: UUID, cluster_id: UUID) -> None:
+        """``node_id`` を ``cluster_id`` の代表を持つクラスタに合流させる。
+
+        非破壊: ノード自体は変更せず、member -> 代表 のマップだけ更新する。
+        代表自身に別クラスタが割り当てられている場合はそれを辿って正規化する。
+        """
+
+        rep = self._clusters.get(cluster_id, cluster_id)
+        if node_id == rep:
+            return
+        self._clusters[node_id] = rep
+
+    def cluster_of(self, node_id: UUID) -> UUID:
+        """``node_id`` が属するクラスタの代表 node_id を返す (未登録なら自分自身)。"""
+
+        return self._clusters.get(node_id, node_id)
+
     # --- スナップショット --------------------------------------------
 
     def snapshot(self) -> dict:
         return {
             "nodes": [json.loads(n.model_dump_json()) for n in self._nodes.values()],
             "edges": [json.loads(e.model_dump_json()) for e in self._edges.values()],
+            "clusters": {str(k): str(v) for k, v in self._clusters.items()},
         }
 
     def load_snapshot(self, payload: dict) -> None:
@@ -155,6 +179,8 @@ class NetworkXGraphStore:
         for raw in payload.get("edges", []):
             edge = Edge.model_validate(raw)
             self.add_edge(edge)
+        for member, rep in (payload.get("clusters") or {}).items():
+            self._clusters[UUID(member)] = UUID(rep)
 
     def close(self) -> None:
         self._conn.close()

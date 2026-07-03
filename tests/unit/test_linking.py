@@ -144,6 +144,78 @@ async def test_top_k_filters_by_embedding_similarity(
     assert judged[0][1] == nodes["a2"].text
 
 
+# --- soft-merge クラスタ (logic_review A2) ------------------------------
+
+
+async def test_soft_merge_similar_claims_share_cluster(store: NetworkXGraphStore) -> None:
+    """cluster_threshold 以上に似た新 claim は既存 claim と同クラスタになる。"""
+
+    existing = Node(text="プラ容器を廃止すべき", node_type="claim", source="utterance", author="A")
+    dissimilar = Node(text="今日は雨だ", node_type="claim", source="utterance", author="C")
+    store.add_node(existing)
+    store.add_node(dissimilar)
+    target = Node(text="プラ容器は廃止したほうがよい", node_type="claim", source="utterance", author="B")
+    store.add_node(target)
+
+    llm = _fake_llm()
+    llm.embed_one = AsyncMock(return_value=[1.0, 0.0, 0.0])  # target  # type: ignore[method-assign]
+    embeddings_by_text = {
+        existing.text: [0.99, 0.02, 0.0],  # target とほぼ同一 (sim ~0.999)
+        dissimilar.text: [0.0, 1.0, 0.0],  # 直交
+    }
+
+    async def fake_embed(texts: list[str], **kwargs: object) -> list[list[float]]:
+        return [embeddings_by_text[t] for t in texts]
+
+    llm.embed = AsyncMock(side_effect=fake_embed)  # type: ignore[method-assign]
+    llm.chat_structured = AsyncMock(side_effect=lambda messages, **k: _batch_none(2))  # type: ignore[method-assign]
+
+    agent = LinkingAgent(llm=llm, threshold=0.6, cluster_threshold=0.9)
+    await agent.link_node(target, store)
+
+    # target は existing と同クラスタ、dissimilar とは別クラスタ
+    assert store.cluster_of(target.id) == store.cluster_of(existing.id)
+    assert store.cluster_of(target.id) != store.cluster_of(dissimilar.id)
+
+
+async def test_soft_merge_below_threshold_keeps_separate(store: NetworkXGraphStore) -> None:
+    """類似度が cluster_threshold 未満なら合流しない (自分が代表のまま)。"""
+
+    existing = Node(text="A についての主張", node_type="claim", source="utterance", author="A")
+    store.add_node(existing)
+    target = Node(text="B についての別主張", node_type="claim", source="utterance", author="B")
+    store.add_node(target)
+
+    llm = _fake_llm()
+    llm.embed_one = AsyncMock(return_value=[1.0, 0.0])  # type: ignore[method-assign]
+    llm.embed = AsyncMock(side_effect=lambda texts, **k: [[0.6, 0.8] for _ in texts])  # sim=0.6  # type: ignore[method-assign]
+    llm.chat_structured = AsyncMock(side_effect=lambda messages, **k: _batch_none(1))  # type: ignore[method-assign]
+
+    agent = LinkingAgent(llm=llm, threshold=0.6, cluster_threshold=0.9)
+    await agent.link_node(target, store)
+
+    assert store.cluster_of(target.id) == target.id  # 合流していない
+
+
+async def test_soft_merge_ignores_non_claim_target(store: NetworkXGraphStore) -> None:
+    """premise/evidence は soft-merge の対象外 (claim ↔ claim のみ)。"""
+
+    existing = Node(text="根拠テキスト", node_type="premise", source="document", author="d1")
+    store.add_node(existing)
+    target = Node(text="根拠テキスト", node_type="premise", source="document", author="d2")
+    store.add_node(target)
+
+    llm = _fake_llm()
+    llm.embed_one = AsyncMock(return_value=[1.0, 0.0])  # type: ignore[method-assign]
+    llm.embed = AsyncMock(side_effect=lambda texts, **k: [[1.0, 0.0] for _ in texts])  # type: ignore[method-assign]
+    llm.chat_structured = AsyncMock(side_effect=lambda messages, **k: _batch_none(1))  # type: ignore[method-assign]
+
+    agent = LinkingAgent(llm=llm, threshold=0.6, cluster_threshold=0.9)
+    await agent.link_node(target, store)
+
+    assert store.cluster_of(target.id) == target.id  # premise は合流しない
+
+
 # --- 関係推定とエッジ書き込み ------------------------------------------
 
 

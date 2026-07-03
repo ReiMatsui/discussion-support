@@ -227,6 +227,7 @@ class LinkingAgent(BaseAgent):
         judge_timeout: float | None = 30.0,
         batch: bool = True,
         hybrid_alpha: float = 0.7,
+        cluster_threshold: float = 0.9,
     ) -> None:
         """
         Args:
@@ -254,6 +255,8 @@ class LinkingAgent(BaseAgent):
                 既定 0.7 (embedding 重視だが BM25 でキーワード一致も考慮)。
                 BM25 を混ぜることで、embedding では遠いが論証的に関連する候補
                 (反論など意味が対立するもの) を拾いやすくする。
+            cluster_threshold: soft-merge の cosine 類似度しきい値 (既定 0.9)。既存 claim と
+                これ以上似た新 claim を同クラスタに合流させる (logic_review A2, 非破壊)。
         """
 
         super().__init__(llm=llm)
@@ -267,6 +270,7 @@ class LinkingAgent(BaseAgent):
         self._judge_timeout = judge_timeout
         self._batch = batch
         self._hybrid_alpha = hybrid_alpha
+        self._cluster_threshold = cluster_threshold
         self._embeddings: dict[UUID, list[float]] = {}
         self._quality_log = RetrievalQualityLog()
 
@@ -290,6 +294,9 @@ class LinkingAgent(BaseAgent):
         """
 
         candidates = await self._select_candidates(target, store)
+        # soft-merge: 候補選定で全ノードの embedding が cache 済みなので、それを
+        # 再利用して同義 claim を同クラスタに割り当てる (logic_review A2, 非破壊)。
+        self._maybe_assign_cluster(target, store)
         if not candidates:
             self.log.info(
                 "linking.done",
@@ -511,6 +518,44 @@ class LinkingAgent(BaseAgent):
             scored.sort(key=lambda pair: pair[1], reverse=True)
             candidates.extend(n for n, _ in scored[: self._top_k_per_source])
         return candidates
+
+    def _maybe_assign_cluster(self, target: Node, store: GraphStore) -> None:
+        """``target`` が既存 claim と十分に類似していれば同クラスタに合流させる。
+
+        logic_review A2 の soft-merge。同義主張が言い直されるたびに別ノードになる
+        問題を、非破壊 (ノードは残す) にクラスタ単位でまとめて指標を数えられるように
+        する。claim ↔ claim のみ対象、``_select_candidates`` が cache 済みの embedding を
+        再利用するので追加の埋め込み呼び出しは無い。
+        """
+
+        if target.node_type != "claim":
+            return
+        target_vec = self._embeddings.get(target.id)
+        if target_vec is None:
+            return
+
+        best_id: UUID | None = None
+        best_sim = 0.0
+        for n in store.nodes():
+            if n.id == target.id or n.node_type != "claim":
+                continue
+            vec = self._embeddings.get(n.id)
+            if vec is None:
+                continue
+            sim = cosine_similarity(target_vec, vec)
+            if sim > best_sim:
+                best_sim = sim
+                best_id = n.id
+
+        if best_id is not None and best_sim >= self._cluster_threshold:
+            rep = store.cluster_of(best_id)
+            store.assign_cluster(target.id, rep)
+            self.log.info(
+                "linking.cluster_merge",
+                target_id=str(target.id),
+                cluster_rep=str(rep),
+                similarity=round(best_sim, 3),
+            )
 
     async def _ensure_embedding(self, node: Node) -> list[float]:
         if node.id in self._embeddings:

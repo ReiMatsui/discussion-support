@@ -132,6 +132,34 @@ def test_node_turn_index_default_and_snapshot(store: NetworkXGraphStore) -> None
     assert next(iter(other.nodes())).turn_index == 7
 
 
+def test_cluster_assign_and_lookup(store: NetworkXGraphStore) -> None:
+    """assign_cluster / cluster_of の基本と、代表の正規化・snapshot 往復。"""
+
+    a = Node(text="主張1", node_type="claim", source="utterance")
+    b = Node(text="主張1'", node_type="claim", source="utterance")
+    c = Node(text="主張1''", node_type="claim", source="utterance")
+    for n in (a, b, c):
+        store.add_node(n)
+
+    # 未登録は自分自身が代表
+    assert store.cluster_of(a.id) == a.id
+
+    # b を a のクラスタへ
+    store.assign_cluster(b.id, a.id)
+    assert store.cluster_of(b.id) == a.id
+    assert store.cluster_of(a.id) == a.id  # 代表は不変
+
+    # c を b のクラスタへ → 代表は a に正規化される (連鎖を作らない)
+    store.assign_cluster(c.id, b.id)
+    assert store.cluster_of(c.id) == a.id
+
+    # snapshot 往復でクラスタが保存される
+    other = NetworkXGraphStore()
+    other.load_snapshot(store.snapshot())
+    assert other.cluster_of(b.id) == a.id
+    assert other.cluster_of(c.id) == a.id
+
+
 def test_persistent_replay(tmp_path: Path, cafeteria_nodes: dict[str, Node]) -> None:
     db_path = tmp_path / "graph.sqlite"
     nodes = cafeteria_nodes
