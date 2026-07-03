@@ -16,6 +16,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from das.asr.live._af_runtime import run_af_runtime
 from das.asr.live._assemblyai_diarization import AssemblyAIStreamingDiarizationProvider
 from das.asr.live._constants import (
     _AGENDA_PROMPT,
@@ -756,6 +757,22 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
                 threading.Thread(target=_run_structuring_checker,
                                 args=(state, _oai_key, _oai_model), daemon=True).start()
                 print("# 整理介入: 有効（N発話到達時にLLMで価値判定）", flush=True)
+                # --- AF ランタイム (H1 フェーズ3, 介入なし・レイテンシ計測) ---
+                # extraction/linking を毎発話回すため API コストが増える。既定では
+                # 無効で、DAS_AF_RUNTIME=1 のときだけ常駐させる (フェーズ4 で
+                # Controller に接続したら既定 ON に切り替える想定)。
+                if os.environ.get("DAS_AF_RUNTIME") == "1":
+                    _af_snapshot = os.path.splitext(out_path)[0] + ".af.json"
+                    threading.Thread(
+                        target=run_af_runtime,
+                        args=(state, _oai_key, _oai_model),
+                        kwargs={
+                            "docs_dir": getattr(args, "docs", None),
+                            "snapshot_path": _af_snapshot,
+                        },
+                        daemon=True,
+                    ).start()
+                    print("# AF ランタイム: 有効（介入なし・レイテンシ計測）", flush=True)
                 # --- 議題未指定なら冒頭アジェンダ自動検出（S3） ---
                 if not _explicit_agenda:
                     threading.Thread(target=_run_agenda_detector,
