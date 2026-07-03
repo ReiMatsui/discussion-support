@@ -25,6 +25,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from das.agents.stance_agent import StanceAgent, StanceMeasurement
@@ -158,10 +159,12 @@ def _serialize_utterance(u: Utterance) -> dict:
     }
 
 
-def _save_run(
-    run_dir: Path,
-    result: SingleRunResult,
-) -> None:
+def _save_run_inputs(run_dir: Path, result: SingleRunResult) -> None:
+    """採点の **入力** となる生データを保存する (transcript / 介入ログ / AF snapshot)。
+
+    これらは会話生成フェーズの成果物で、rescore では読むだけで上書きしない。
+    """
+
     _ensure_dir(run_dir)
 
     transcript_path = run_dir / "transcript.jsonl"
@@ -181,6 +184,17 @@ def _save_run(
             json.dumps(result.snapshot, ensure_ascii=False, indent=2, default=str),
             encoding="utf-8",
         )
+
+
+def _save_run_scores(run_dir: Path, result: SingleRunResult) -> None:
+    """採点の **出力** を保存する (judge_reports.json / run_meta.json)。
+
+    ``das eval-rescore`` はこの関数だけを呼び、生データ (transcript 等) には触れない。
+    stance は生データだが run_meta.json に同居しているため、ここで書き戻す
+    (rescore 時は読み込んだ生 stance をそのまま渡す)。
+    """
+
+    _ensure_dir(run_dir)
 
     if result.judge_reports:
         reports_payload = [
@@ -235,6 +249,13 @@ def _save_run(
         json.dumps(run_meta, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+
+
+def _save_run(run_dir: Path, result: SingleRunResult) -> None:
+    """1 ラン分の入力(生データ)と出力(採点)を両方保存する (実行フェーズ用)。"""
+
+    _save_run_inputs(run_dir, result)
+    _save_run_scores(run_dir, result)
 
 
 def _convergence_stats(runs: list[SingleRunResult]) -> dict:
@@ -613,47 +634,7 @@ async def _run_single(
         if log_attr:
             intervention_log = log_attr
 
-    # 合意検出の最終レポート (until_consensus でない場合も「実際に合意していたか」を
-    # 後付け判定して残すと分析しやすいので、常に算出する)。
-    if consensus_agent is not None:
-        consensus_report = await detect_consensus_with_llm(
-            transcript,
-            topic=topic,
-            personas=personas,
-            agent=consensus_agent,
-            store=final_store,
-            **consensus_kwargs,
-        )
-    else:
-        consensus_report = detect_consensus(
-            transcript, store=final_store, **consensus_kwargs
-        )
-
-    _emit(
-        {
-            "type": "run_end",
-            "condition": condition_name,
-            "run_idx": run_idx,
-            "n_turns": len(transcript),
-            "consensus_reached": consensus_report.consensus_reached,
-            "consensus_signal": consensus_report.signal,
-            "consensus_at": consensus_report.detected_at_turn,
-        }
-    )
-
-    judge_reports: list[JudgeReport] = []
-    if judge is not None:
-        judge_reports = await judge.evaluate_session(
-            personas,
-            topic,
-            transcript,
-            condition_name=condition_name,
-            info_log=intervention_log,
-        )
-
-    structural = compute_structural_metrics(transcript, final_store)
-
-    # Post-discussion stance polling
+    # Post-discussion stance polling (採点ではなく実行フェーズの測定。生データを残す)
     if stance_agent is not None:
         for p in personas:
             try:
@@ -666,30 +647,140 @@ async def _run_single(
             except Exception as exc:  # pragma: no cover - 防御的
                 _log.warning("stance.post.failed", persona=p.name, error=str(exc))
 
-    # 引用率: 介入で提示された情報が次発話で使われた率 (RQ4 直接指標)
-    interventions_for_citation = (
-        [
-            {
-                "kind": e.kind,
-                "turn_id": e.turn_id,
-                # レビュー C-2: 照合は「実際に情報が注入された話者」= persona_name
-                # (次話者) の直後の発話を基準にする。addressed_to (グラフ上の宛先=
-                # 直前の発話者) は参考として残すが citation 判定には使わない。
-                "persona_name": e.persona_name,
-                "addressed_to": e.addressed_to,
-                "items": [
-                    {
-                        "source_text": it.get("source_text", ""),
-                        "source_kind": it.get("source_kind", "unknown"),
-                    }
-                    for it in e.items
-                ],
-            }
-            for e in intervention_log
-        ]
-        if intervention_log
-        else []
+    # 採点 (consensus / judge / structural / citation) は score_run に一元化。
+    # rescore CLI (das eval-rescore) も同じ score_run を使い、保存済み run から
+    # 会話再生成なしで再採点できる (= 実行と採点の分離)。
+    scores = await score_run(
+        transcript=transcript,
+        condition_name=condition_name,
+        topic=topic,
+        personas=personas,
+        intervention_log=intervention_log,
+        store=final_store,
+        llm=llm,
+        judge=judge,
+        consensus_agent=consensus_agent,
+        consensus_kwargs=consensus_kwargs,
     )
+
+    # run_end はイベント列の最後に発火する (UI streaming の契約)。
+    _emit(
+        {
+            "type": "run_end",
+            "condition": condition_name,
+            "run_idx": run_idx,
+            "n_turns": len(transcript),
+            "consensus_reached": scores.consensus.consensus_reached,
+            "consensus_signal": scores.consensus.signal,
+            "consensus_at": scores.consensus.detected_at_turn,
+        }
+    )
+
+    return SingleRunResult(
+        run_id=run_id,
+        condition_name=condition_name,
+        topic=topic,
+        transcript=transcript,
+        transcript_metrics_=t_metrics,
+        graph_metrics_=g_metrics,
+        judge_reports=scores.judge_reports,
+        intervention_log=intervention_log,
+        snapshot=snapshot,
+        consensus=scores.consensus,
+        structural=scores.structural,
+        citation=scores.citation,
+        stance=stance_data if stance_data else None,
+    )
+
+
+@dataclass(frozen=True)
+class RunScores:
+    """1 ラン分の採点結果 (会話生成とは独立に再計算できる部分)。"""
+
+    consensus: ConsensusReport
+    judge_reports: list[JudgeReport]
+    structural: DiscussionStructuralMetrics
+    citation: CitationStats
+
+
+def _interventions_for_citation(
+    intervention_log: list[InterventionLogEntry] | None,
+) -> list[dict[str, Any]]:
+    """介入ログを citation 計算が期待する dict 列に整形する。"""
+
+    if not intervention_log:
+        return []
+    return [
+        {
+            "kind": e.kind,
+            "turn_id": e.turn_id,
+            # レビュー C-2: 照合は「実際に情報が注入された話者」= persona_name
+            # (次話者) の直後の発話を基準にする。addressed_to (グラフ上の宛先=
+            # 直前の発話者) は参考として残すが citation 判定には使わない。
+            "persona_name": e.persona_name,
+            "addressed_to": e.addressed_to,
+            "items": [
+                {
+                    "source_text": it.get("source_text", ""),
+                    "source_kind": it.get("source_kind", "unknown"),
+                }
+                for it in e.items
+            ],
+        }
+        for e in intervention_log
+    ]
+
+
+async def score_run(
+    *,
+    transcript: list[Utterance],
+    condition_name: str,
+    topic: str,
+    personas: list[PersonaSpec],
+    intervention_log: list[InterventionLogEntry] | None,
+    store: GraphStore | None,
+    llm: OpenAIClient,
+    judge: JudgeAgent | None = None,
+    consensus_agent: object | None = None,
+    consensus_kwargs: dict[str, Any] | None = None,
+) -> RunScores:
+    """保存済み or 生成直後の run を採点する (consensus / judge / structural / citation)。
+
+    会話生成とは独立に呼べる = ``das eval-rescore`` の心臓部。judge プロンプトや
+    citation 閾値を直したあと、会話を再生成せずに再採点できる。stance は実行時に
+    measure した生データを summary 段で集計するため、ここには含めない。
+    """
+
+    consensus_kwargs = consensus_kwargs or {}
+
+    # 合意検出の最終レポート (until_consensus でない場合も「実際に合意していたか」を
+    # 後付け判定して残すと分析しやすいので、常に算出する)。
+    if consensus_agent is not None:
+        consensus_report = await detect_consensus_with_llm(
+            transcript,
+            topic=topic,
+            personas=personas,
+            agent=consensus_agent,
+            store=store,
+            **consensus_kwargs,
+        )
+    else:
+        consensus_report = detect_consensus(transcript, store=store, **consensus_kwargs)
+
+    judge_reports: list[JudgeReport] = []
+    if judge is not None:
+        judge_reports = await judge.evaluate_session(
+            personas,
+            topic,
+            transcript,
+            condition_name=condition_name,
+            info_log=intervention_log,
+        )
+
+    structural = compute_structural_metrics(transcript, store)
+
+    # 引用率: 介入で提示された情報が次発話で使われた率 (RQ4 直接指標)
+    interventions_for_citation = _interventions_for_citation(intervention_log)
     # n-gram 一致 + embedding 類似度の両方で判定 (言い換え引用も捕捉)
     try:
         citation = await compute_citation_stats_with_embeddings(
@@ -699,20 +790,11 @@ async def _run_single(
         _log.warning("citation.embedding_failed", error=str(exc))
         citation = compute_citation_stats(transcript, interventions_for_citation)
 
-    return SingleRunResult(
-        run_id=run_id,
-        condition_name=condition_name,
-        topic=topic,
-        transcript=transcript,
-        transcript_metrics_=t_metrics,
-        graph_metrics_=g_metrics,
-        judge_reports=judge_reports,
-        intervention_log=intervention_log,
-        snapshot=snapshot,
+    return RunScores(
         consensus=consensus_report,
+        judge_reports=judge_reports,
         structural=structural,
         citation=citation,
-        stance=stance_data if stance_data else None,
     )
 
 
@@ -935,6 +1017,8 @@ __all__ = [
     "ConditionFactory",
     "EvalResult",
     "ProgressCallback",
+    "RunScores",
     "SingleRunResult",
     "run_eval",
+    "score_run",
 ]
