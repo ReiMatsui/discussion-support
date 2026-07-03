@@ -40,6 +40,8 @@ from ._constants import (
 Kind = Literal[
     "fact", "manual", "drift", "retry", "summarize", "silence",
     "invite", "conversation",
+    # AF ベース介入 (H1 フェーズ4)。既定 OFF で、AF ランタイム有効時のみ生成される。
+    "af_l1", "af_l2",
 ]
 
 InterruptPolicy = Literal["allow_barge_in", "wait_for_pause", "never_barge_in"]
@@ -187,6 +189,10 @@ _KIND_POLICY: dict[str, _KindPolicy] = {
     "silence":  _KindPolicy(5, 0.0, 0.0, 2000, "low"),
     "invite":   _KindPolicy(6, _INVITE_SILENCE, _INTERVENTION_COOLDOWN, 2000, "wait_for_pause", "global"),
     "conversation": _KindPolicy(7, _AGENT_CONV_SILENCE, 0.0, 2000, "low"),
+    # AF ベース介入 (H1 フェーズ4)。af_l1 は個別通知 (retry の後・summarize 帯)、
+    # af_l2 は俯瞰。俯瞰は頻発させないため global scope + 長め cooldown。
+    "af_l1":    _KindPolicy(4, 1.5, 20.0, 2000, "wait_for_pause"),
+    "af_l2":    _KindPolicy(6, 2.0, 60.0, 2000, "wait_for_pause", "global"),
 }
 _DEFAULT_POLICY = _KindPolicy(9, 1.0, _INTERVENTION_COOLDOWN, 2000, "low")
 
