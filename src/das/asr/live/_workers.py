@@ -181,6 +181,11 @@ def _set_manual_status(state: SessionState, status: str, **kw) -> None:
             setter(status, **kw)
 
 
+# AF ベース介入候補の TTL（H1 フェーズ4）。af_l1 はアクティブ窓と整合、af_l2 は長め。
+_AF_L1_PENDING_TTL = 45.0
+_AF_L2_PENDING_TTL = 90.0
+
+
 @dataclass
 class _PendingInterventions:
     """agent_worker が一元調停する未処理介入要求."""
@@ -194,6 +199,8 @@ class _PendingInterventions:
     invite: str | None = None
     manual_call: dict | None = None
     summarize: dict[str, Any] | None = None
+    # AF ベース介入（af_l1/af_l2）。AF ランタイム有効時のみ _run_af_checker が積む。
+    af: dict[str, Any] | None = None
 
     def drain(self, state: SessionState, *, now: float) -> None:
         """各監視ワーカーのキューを回収し、保留状態に反映する."""
@@ -240,6 +247,15 @@ class _PendingInterventions:
                     self.summarize.setdefault("created_at", now)
                 except queue.Empty:
                     break
+        af_q = getattr(state, "af_requests", None)
+        if af_q is not None:
+            while True:
+                try:
+                    # 最新の AF 介入候補だけを保持する（AF 有効時のみ積まれる）。
+                    self.af = af_q.get_nowait()
+                    self.af.setdefault("created_at", now)
+                except queue.Empty:
+                    break
 
     def drop_stale_manual(self, *, now: float) -> dict | None:
         """会話タイミングを外した古い手動呼び出しを破棄する（TTL）.
@@ -260,6 +276,19 @@ class _PendingInterventions:
     def clear_manual(self) -> None:
         self.manual_call = None
 
+    def clear_af(self) -> None:
+        self.af = None
+
+    def drop_stale_af(self, *, now: float) -> None:
+        """タイミングを外した古い AF 介入候補を破棄する（TTL, 種別別）."""
+        if self.af is None:
+            return
+        ttl = _AF_L2_PENDING_TTL if self.af.get("kind") == "af_l2" else _AF_L1_PENDING_TTL
+        age = now - float(self.af.get("created_at", now))
+        if age > ttl:
+            print(f"# [trigger] skip: 古い AF 介入候補を破棄（{age:.0f}秒経過）", flush=True)
+            self.af = None
+
     def clear_all(self) -> None:
         """介入オフ/モードオフ時に、worker内で保持した候補も破棄する."""
         self.drift_reason = None
@@ -270,6 +299,7 @@ class _PendingInterventions:
         self.invite = None
         self.manual_call = None
         self.summarize = None
+        self.af = None
 
     def drop_stale_facts(self, *, now: float) -> None:
         """会話タイミングを外した古い事実補正を破棄する."""
@@ -316,6 +346,7 @@ class _NormalTriggerDecision:
     invite_target: str | None = None
     drift_reason: str | None = None
     summary_focus: str | None = None
+    af_text: str | None = None  # AF ベース介入の提示文（H1 フェーズ4）
 
 
 def _intervention_timing_metadata(
@@ -427,6 +458,24 @@ def _build_candidates(
             interrupt_policy="wait_for_pause",
             retryable=True,
             payload={"focus": focus},
+        ))
+
+    # AF ベース介入（H1 フェーズ4）。AF ランタイム有効時のみ pending.af が入る。
+    if mode != "conversation" and pending.af:
+        a = pending.af
+        af_kind = str(a.get("kind") or "af_l1")
+        af_created = float(a.get("created_at", now))
+        af_ttl = _AF_L2_PENDING_TTL if af_kind == "af_l2" else _AF_L1_PENDING_TTL
+        cands.append(InterventionCandidate(
+            id=af_kind,
+            kind=af_kind,  # type: ignore[arg-type]
+            brief=str(a.get("brief") or ""),
+            target_speaker=a.get("target_speaker"),
+            created_at=af_created,
+            expires_at=af_created + af_ttl,
+            interrupt_policy="wait_for_pause",
+            retryable=True,
+            payload={"af_text": str(a.get("af_text") or ""), "kind": af_kind},
         ))
 
     if mode == "conversation" and getattr(agent, "pending_count", 0) > 0:
@@ -633,8 +682,9 @@ class _InterventionReviewRecorder:
 # 通常トリガーはフロア返却後に評価する。Controller はそれぞれのレーンの
 # 候補集合から「採否」だけを決める（固定優先順位の置換, Phase2）。
 _BARGEIN_KINDS = ("fact", "manual", "drift", "retry")
+# af_l1/af_l2 は wait_for_pause なので通常レーン。AF 無効時は候補自体が出ない。
 # Phase3: stall は廃止（Speaker から「介入不要」判断を外したため）。
-_NORMAL_KINDS = ("summarize", "silence", "invite", "conversation")
+_NORMAL_KINDS = ("summarize", "silence", "invite", "conversation", "af_l1", "af_l2")
 
 
 def _suppressed_for(
@@ -771,6 +821,7 @@ def _controller_normal_decision(
     conversation の候補から Controller が採否を決め、既存 dispatch 用の
     ``_NormalTriggerDecision`` に逆変換する。
     """
+    pending.drop_stale_af(now=now)  # 古い AF 介入候補は破棄（TTL）
     all_cands = _build_candidates(
         pending, agent, now=now, silence_summarize=silence_summarize,
         partner_present=partner_present, last_invited=last_invited)
@@ -815,6 +866,12 @@ def _controller_normal_decision(
         return (_NormalTriggerDecision(
             "invite", f"{chosen.target_speaker}さんに声かけ",
             invite_target=chosen.target_speaker), decision, cands, latency_ms)
+    if chosen.kind in ("af_l1", "af_l2"):
+        return (_NormalTriggerDecision(
+            chosen.kind, chosen.brief,
+            invite_target=chosen.target_speaker,
+            af_text=str(chosen.payload.get("af_text", ""))),
+            decision, cands, latency_ms)
     return _NormalTriggerDecision("none"), decision, cands, latency_ms
 
 
@@ -1389,6 +1446,106 @@ def _run_structuring_checker(state: SessionState, oai_key: str,
         _print_line(f"# 🧭 整理介入の価値あり: {focus or '（焦点なし）'}")
         state.summarize_requests.put({"focus": focus})
         print("# [structuring] → 整理介入の要求をキューに投入", flush=True)
+
+
+def _af_l1_presentation(decision: Any) -> str:
+    """AF L1 decision の items を関係ラベル付き提示文に整文する（H1 フェーズ4）."""
+    label = {"support": "支持", "attack": "反論"}
+    who = decision.addressed_to
+    head = f"{who}さんの先ほどの発言に対する関連情報:" if who else "関連情報:"
+    lines = [head]
+    for it in decision.items:
+        tag = label.get(it.relation, "参考")
+        lines.append(f"- [{tag}] {it.source_text}")
+    return "\n".join(lines)
+
+
+def _af_checker_tick(state: SessionState, facil: Any, presented: set[str]) -> int:
+    """AF checker の 1 周分。af 候補を state.af_requests に積み、積んだ件数を返す。
+
+    ``facil`` は :class:`FacilitationAgent`。``presented`` は提示済み source_text 集合
+    (呼び出し側が meeting 世代ごとに保持)。テスト容易性のため 1 周を関数化してある。
+    """
+    from das.types import Utterance
+
+    runtime = getattr(state, "af_runtime", None)
+    if runtime is None:
+        return 0  # AF 無効 (既定): 何もしない
+    agent = state.agent
+    if agent is None or getattr(agent, "mode", "facilitator") == "conversation":
+        return 0
+    epoch = state.meeting_epoch
+    with state.state_lock:
+        talk_rs = intervention_records([
+            r for r in state.records
+            if "speaker" in r and r.get("text")
+            and r.get("speaker") != AGENT_SPEAKER
+        ])
+    if not talk_rs:
+        return 0
+    transcript = [
+        Utterance(turn_id=i + 1, speaker=intervention_speaker_name(state, r),
+                  text=str(r["text"]))
+        for i, r in enumerate(talk_rs)
+    ]
+    try:
+        store = runtime.store
+        decision = facil.decide_intervention(transcript, store)
+        if decision.kind == "l1":
+            decision = facil.apply_l1_value_gate(
+                decision, store, transcript, presented_source_texts=presented)
+    except Exception as exc:  # pragma: no cover - 防御的
+        print(f"# [af] decide error: {exc}", flush=True)
+        return 0
+    if decision.kind == "skip":
+        return 0
+    # 副作用（キュー投入）の直前で epoch 再確認（H2）。
+    with state.state_lock:
+        if state.meeting_epoch != epoch:
+            return 0
+    if decision.kind == "l1":
+        for it in decision.items:
+            presented.add(it.source_text.strip())
+        state.af_requests.put({
+            "kind": "af_l1",
+            "brief": decision.reason,
+            "af_text": _af_l1_presentation(decision),
+            "target_speaker": decision.addressed_to,
+        })
+        print(f"# [af] → af_l1 候補を投入（{len(decision.items)}件）", flush=True)
+        return 1
+    state.af_requests.put({
+        "kind": "af_l2",
+        "brief": decision.reason,
+        "af_text": decision.brief,
+        "target_speaker": None,
+    })
+    print("# [af] → af_l2 候補を投入", flush=True)
+    return 1
+
+
+def _run_af_checker(state: SessionState, *, interval: float = 3.0) -> None:
+    """AF ベース介入の候補生成ワーカー（H1 フェーズ4, AF ランタイム有効時のみ）.
+
+    ``state.af_runtime`` (run_af_runtime がセット) が育てた AF を数秒周期で読み、
+    ``decide_intervention`` + L1 価値ゲートで介入候補を決めて ``state.af_requests``
+    に積む。trigger は行わず、既存の _run_agent_worker が Controller 採否を通す。
+    AF ランタイムが無い (既定 OFF) なら何もしない = ルールベース挙動は不変。
+    """
+    from das.agents.facilitation import FacilitationAgent
+
+    facil = FacilitationAgent(llm=None)  # decide_intervention は LLM を呼ばない (決定的)
+    presented: set[str] = set()
+    epoch = state.meeting_epoch
+    while not state.stop.is_set():
+        time.sleep(interval)
+        if not _intervention_enabled(state):
+            continue
+        if state.meeting_epoch != epoch:
+            epoch = state.meeting_epoch
+            presented = set()
+            facil.reset()
+        _af_checker_tick(state, facil, presented)
 
 
 def _on_agent_text_factory(state: SessionState):
@@ -2009,6 +2166,25 @@ def _run_agent_worker(state: SessionState):
             _last_invited = normal_decision.invite_target
             _pending.invite = None
             _note_intervention(_last_intervention_at, "invite", normal_decision.detail)
+        elif normal_decision.reason in ("af_l1", "af_l2"):
+            # AF ベース介入（H1 フェーズ4）。AF 有効時のみここに到達する。
+            _af_kind = normal_decision.reason
+            timing = _intervention_timing_metadata(
+                kind=_af_kind,
+                now=time.monotonic(),
+                silence_elapsed=_silence_elapsed,
+                pause_required=policy_for(_af_kind).pause,
+                policy="af_intervention",
+            )
+            print(f"# [trigger] {_af_kind}: {normal_decision.detail[:40]}", flush=True)
+            _log_intervention_event(
+                state, _af_kind, normal_decision.detail, timing=timing)
+            agent.trigger(topics=_topics,
+                          af_presentation=normal_decision.af_text,
+                          invite_target=normal_decision.invite_target)
+            _last_intervention_at = time.monotonic()
+            _pending.clear_af()  # 採択したら消費
+            _note_intervention(_last_intervention_at, _af_kind, normal_decision.detail)
         elif normal_decision.reason == "skip_invite":
             _pending.invite = None  # 同じ人を連続では誘わない
 

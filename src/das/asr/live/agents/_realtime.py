@@ -368,6 +368,7 @@ class RealtimeAgent(_RealtimeBase):
                 fact_correction: dict | None = None,
                 manual_request: dict | None = None,
                 summary_focus: str | None = None,
+                af_presentation: str | None = None,
                 retry_intervention: bool | None = None,
                 is_retry: bool = False):
         """蓄積した発話をRealtimeAPIに送信し応答を要求.
@@ -403,7 +404,7 @@ class RealtimeAgent(_RealtimeBase):
                 return  # 既に応答生成中、または別スレッドが確保済み
             if (not self._pending and self._pending_intervention is None
                     and not drift_reason and not invite_target and not fact_correction
-                    and not manual_request):
+                    and not manual_request and not af_presentation):
                 return
             self._responding = True  # 確保（この時点でレースは閉じる）
             # スナップショットのみ取得。実際のクリアは送信成功後に行い、
@@ -466,6 +467,15 @@ class RealtimeAgent(_RealtimeBase):
                 "直近の流れを踏まえ、一言で短く整理してください。"
             )
             conv = f"{summary_note}\n\n{conv}" if conv else summary_note
+        # --- AF ベース介入コンテキスト（H1 フェーズ4: 関係ラベル付き提示） ---
+        if af_presentation:
+            af_note = (
+                "[関連情報の提示]\n"
+                f"{af_presentation}\n"
+                "この関係(支持/反論)を踏まえ、宛先の参加者に向けて短い一言で自然に伝えてください。"
+                "説教・長い説明はせず、提示された情報の要点だけを届けてください。"
+            )
+            conv = f"{af_note}\n\n{conv}" if conv else af_note
         # --- 保存された介入内容をコンテキストに追加 ---
         # 注: 有効な介入は送信成功までクリアしない（Bug 2）。
         #     期限切れの介入のみ、送信成否に関わらずここで破棄する。
