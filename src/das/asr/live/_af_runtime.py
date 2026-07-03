@@ -77,6 +77,8 @@ class AFRuntime:
         )
         self._cursor = 0
         self._epoch = getattr(state, "meeting_epoch", 0)
+        # 指示語解決の参照文脈に使う直近発話 (G2)
+        self._recent_utts: list[Utterance] = []
         # レイテンシ実測 (ms)。フェーズ3 完了時に p50/p90 を報告する。
         self.latencies_ms: dict[str, list[float]] = {
             "extraction": [],
@@ -97,18 +99,24 @@ class AFRuntime:
             await self._orch.ingest_documents(self._docs_dir)
             _log.info("af_runtime.docs_ingested", docs_dir=str(self._docs_dir))
 
-    async def ingest_utterance(self, utterance: Utterance) -> None:
+    async def ingest_utterance(
+        self, utterance: Utterance, context: list[Utterance] | None = None
+    ) -> None:
         """1 発話を extraction → linking で AF に取り込み、レイテンシを記録する。
 
         「ノード追加」「エッジ追加」を分けて計測するため、bus.drain ではなく
         extraction / linking を直接呼ぶ (フェーズ3 は介入なしなので web_search /
         NodeAdded 連鎖は不要)。フェーズ4 で Controller に繋ぐ際に bus 経路へ戻す。
+        ``context`` は指示語解決の参照文脈 (G2)。
         """
 
         t0 = time.monotonic()
-        nodes = await self._orch.extraction.extract(utterance)
-        for node in nodes:
+        result = await self._orch.extraction.extract(utterance, context=context)
+        for node in result.nodes:
             self._store.add_node(node)
+        for edge in result.edges:
+            self._store.add_edge(edge)
+        nodes = result.nodes
         t_node = time.monotonic()
         for node in nodes:
             await self._orch.linking.link_node(node, self._store)
@@ -163,6 +171,7 @@ class AFRuntime:
         )
         self._cursor = 0
         self._epoch = epoch
+        self._recent_utts = []
         _log.info("af_runtime.reset", epoch=epoch)
 
     def save_snapshot(self) -> None:
@@ -207,11 +216,13 @@ class AFRuntime:
         for offset, record in enumerate(new, start=1):
             turn_id = self._cursor + offset
             utterance = self._build_utterance(record, turn_id)
+            context = self._recent_utts[-3:]
             try:
-                loop.run_until_complete(self.ingest_utterance(utterance))
+                loop.run_until_complete(self.ingest_utterance(utterance, context))
                 ingested += 1
             except Exception as exc:  # pragma: no cover - 防御的
                 _log.warning("af_runtime.ingest_failed", error=str(exc))
+            self._recent_utts.append(utterance)
 
         # cursor 書き戻し (副作用) の直前に epoch を再確認 (H2)。
         with state.state_lock:

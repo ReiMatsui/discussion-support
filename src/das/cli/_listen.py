@@ -245,18 +245,8 @@ async def _run_listen_soniox_async(
             if not history:
                 continue
             try:
-                decision = facilitator.decide_intervention(list(history), store)
-                if decision.kind == "l2":
-                    with contextlib.suppress(Exception):
-                        better = await facilitator.compose_l2_brief(list(history), store)
-                        if better:
-                            decision = InterventionDecision(
-                                kind=decision.kind,
-                                items=decision.items,
-                                brief=better,
-                                addressed_to=decision.addressed_to,
-                                reason=decision.reason,
-                            )
+                # 判断 + L2 整文を facilitation 側で一元化 (レビュー M-1)
+                decision = await facilitator.decide_and_render(list(history), store)
                 _present(decision)
             except Exception as exc:
                 typer.echo(f"[listen-soniox] 介入判定エラー: {exc!r}")

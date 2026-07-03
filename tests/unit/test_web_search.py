@@ -5,13 +5,21 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from das.agents.web_search import WebSearchAgent
+from das.agents.web_search import WebSearchAgent, _SearchQuery
 from das.graph.schema import Edge, Node
 from das.graph.store import NetworkXGraphStore
+
+
+def _mock_query_gen(agent: WebSearchAgent, query: str = "検索キーワード") -> AsyncMock:
+    """_generate_query が使う chat_structured をモックする (実 LLM を呼ばない)。"""
+
+    m = AsyncMock(return_value=_SearchQuery(query=query))
+    agent.llm.chat_structured = m  # type: ignore[method-assign]
+    return m
 
 
 def _fake_tavily(results: list[dict]) -> MagicMock:
@@ -111,6 +119,7 @@ async def test_maybe_search_skips_when_node_has_enough_edges() -> None:
 
 async def test_maybe_search_fires_for_isolated_claim() -> None:
     agent = WebSearchAgent(api_key="fake", min_existing_edges=1)
+    _mock_query_gen(agent)
     fake = _fake_tavily(
         [{"url": "https://a.com/x", "title": "T", "content": "Relevant snippet"}]
     )
@@ -125,6 +134,41 @@ async def test_maybe_search_fires_for_isolated_claim() -> None:
     assert new[0].source == "web"
     # store にも追加されている
     assert any(n.id == new[0].id for n in store.nodes())
+
+
+async def test_search_uses_generated_query_not_raw_claim() -> None:
+    """G4: 主張原文でなく生成された検索クエリで Tavily を叩く。"""
+
+    agent = WebSearchAgent(api_key="fake", min_existing_edges=1)
+    gen = _mock_query_gen(agent, query="紙容器 コスト 事例")
+    fake = _fake_tavily([{"url": "https://a.com/x", "title": "T", "content": "c"}])
+    agent._client = fake
+
+    store = NetworkXGraphStore()
+    target = Node(
+        text="紙容器を導入すべきだ", node_type="claim", source="utterance", author="A"
+    )
+    store.add_node(target)
+
+    await agent.maybe_search_for_node(target, store)
+    gen.assert_awaited_once()
+    # Tavily に渡ったクエリは生成クエリで、主張原文ではない
+    assert fake.search.call_args.kwargs["query"] == "紙容器 コスト 事例"
+
+
+async def test_generate_query_falls_back_to_claim_on_failure() -> None:
+    """クエリ生成が失敗したら主張原文で検索する (検索自体は止めない)。"""
+
+    agent = WebSearchAgent(api_key="fake", min_existing_edges=1)
+    agent.llm.chat_structured = AsyncMock(side_effect=RuntimeError("boom"))  # type: ignore[method-assign]
+    fake = _fake_tavily([{"url": "u", "title": "t", "content": "c"}])
+    agent._client = fake
+
+    store = NetworkXGraphStore()
+    target = Node(text="原文クエリ", node_type="claim", source="utterance", author="A")
+    store.add_node(target)
+    await agent.maybe_search_for_node(target, store)
+    assert fake.search.call_args.kwargs["query"] == "原文クエリ"
 
 
 async def test_maybe_search_skips_non_claim_nodes() -> None:

@@ -487,27 +487,10 @@ class ConditionFullProposal:
 
         store = self._orchestrator.store
 
-        # 同期 API で「いつ・誰に・何を」を決める。L2 が選ばれた場合は
-        # この段階での brief は deterministic なので、必要なら LLM 整文を後置する。
-        decision = self._facilitator.decide_intervention(history, store)
+        # 「いつ・誰に・何を」の判断 + L2 の LLM 整文を facilitation 側で一元化
+        # (レビュー M-1: 後置整文の複製を作らない)。
+        decision = await self._facilitator.decide_and_render(history, store)
         self._last_decision_kind = decision.kind
-
-        # L2 のときは LLM で自然文に整える (失敗時は decision.brief をそのまま使う)
-        if decision.kind == "l2":
-            try:
-                better_brief = await self._facilitator.compose_l2_brief(
-                    history, store
-                )
-                if better_brief:
-                    decision = InterventionDecision(
-                        kind=decision.kind,
-                        items=decision.items,
-                        brief=better_brief,
-                        addressed_to=decision.addressed_to,
-                        reason=decision.reason,
-                    )
-            except Exception as exc:  # pragma: no cover - 防御的
-                self._log.warning("l2_brief.format_failed", error=str(exc))
 
         # 介入ログ
         self._last_items = list(decision.items)

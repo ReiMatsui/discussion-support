@@ -475,10 +475,15 @@ def test_reset_clears_internal_state() -> None:
 # --- compose_l2_brief (deterministic fallback) ---------------------------
 
 
-def test_compose_l2_brief_deterministic_runs_without_llm() -> None:
-    """LLM が None でも deterministic fallback が走る。"""
+def test_compose_l2_brief_falls_back_to_deterministic_on_llm_failure() -> None:
+    """LLM 整文が失敗したら deterministic fallback が走る。
+
+    G3 で「llm is None なら deterministic」の到達不能分岐 (レビュー M-1) を削除した。
+    BaseAgent が常に llm を生成するため、fallback は「LLM 呼び出しの失敗」で担保する。
+    """
 
     import asyncio
+    from unittest.mock import AsyncMock
 
     store = NetworkXGraphStore()
     a1 = Node(text="主張", node_type="claim", source="utterance", author="A")
@@ -488,8 +493,41 @@ def test_compose_l2_brief_deterministic_runs_without_llm() -> None:
     store.add_edge(Edge(src_id=a2.id, dst_id=a1.id, relation="attack", confidence=0.9))
     store.add_edge(Edge(src_id=a2.id, dst_id=a1.id, relation="attack", confidence=0.8))
 
-    agent = FacilitationAgent(llm=None)
+    agent = FacilitationAgent(llm=_fake_llm())
+    agent.llm.chat = AsyncMock(side_effect=RuntimeError("boom"))  # type: ignore[method-assign]
     transcript = [_utt(i, ["A", "B"][i % 2], "発言") for i in range(1, 5)]
     brief = asyncio.run(agent.compose_l2_brief(transcript, store))
     assert "ここまでの整理" in brief
     assert "支持" in brief or "反論" in brief
+
+
+def test_decide_and_render_passes_through_non_l2() -> None:
+    """decide_and_render: skip/L1 は LLM 整文を呼ばずそのまま返す。"""
+
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    agent = FacilitationAgent(llm=_fake_llm())
+    agent.compose_l2_brief = AsyncMock()  # type: ignore[method-assign]
+    decision = asyncio.run(agent.decide_and_render([], NetworkXGraphStore()))
+    assert decision.kind == "skip"
+    agent.compose_l2_brief.assert_not_awaited()
+
+
+def test_decide_and_render_renders_l2_brief() -> None:
+    """decide_and_render: L2 のとき compose_l2_brief で brief を差し替える。"""
+
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from das.agents.facilitation import InterventionDecision
+
+    agent = FacilitationAgent(llm=_fake_llm())
+    agent.decide_intervention = MagicMock(  # type: ignore[method-assign]
+        return_value=InterventionDecision(kind="l2", brief="det", reason="r")
+    )
+    agent.compose_l2_brief = AsyncMock(return_value="LLM 整文版")  # type: ignore[method-assign]
+    decision = asyncio.run(agent.decide_and_render([], NetworkXGraphStore()))
+    assert decision.kind == "l2"
+    assert decision.brief == "LLM 整文版"
+    agent.compose_l2_brief.assert_awaited_once()

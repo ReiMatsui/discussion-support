@@ -10,6 +10,8 @@
 
 **設計原則**: what/whom は AF 状態のみから決める（`decide_intervention`）。when は会話の物理（Controller の pause/cooldown/floor）。how は RealtimeAgent のプロンプト。この三層分離を崩さない。
 
+**モード方針（2026-07-03 ユーザー決定・フェーズ4実装者への拘束事項）**: AFランタイムとAF介入は**フェーズ4以降も既定OFFのまま**とし、明示的なフラグ（`DAS_AF_RUNTIME=1` および CLI `--af`）でのみ有効化する。従来のルールベース介入のみのモード（drift/fact/invite/summarize/manual）は移行期の暫定ではなく、**恒久的な運用・デモ・比較条件**として維持する。理由: (1) AF構築は毎発話 extraction+linking が走り処理が重い、(2) レイテンシ悪化時のフォールバック、(3) 「AF介入 vs ルールベース介入」自体が対面パイロットの ablation 条件になる。フェーズ4で「既定ONへ切替」は**行わない**。ルールベースモードの既存挙動（現行デモ）を壊す変更も不可。
+
 ## 1. アーキテクチャ
 
 ```

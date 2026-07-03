@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -45,6 +46,8 @@ class Orchestrator:
         self._linking = linking
         self._web_search = web_search
         self._log = get_logger("das.runtime.orchestrator")
+        # 抽出の指示語解決に使う直近発話バッファ (G2)。
+        self._recent_utterances: deque[Utterance] = deque(maxlen=8)
 
     # --- 組み立て -----------------------------------------------------
 
@@ -112,9 +115,16 @@ class Orchestrator:
     # --- ハンドラ -----------------------------------------------------
 
     async def _on_utterance(self, event: Utterance) -> None:
-        nodes = await self._extraction.extract(event)
-        for node in nodes:
+        # 直前までの発話を参照文脈として渡す (指示語・省略の解決, G2)
+        context = list(self._recent_utterances)
+        self._recent_utterances.append(event)
+        result = await self._extraction.extract(event, context=context)
+        for node in result.nodes:
             self._store.add_node(node)
+        # 発話内エッジ (created_by="extraction") を先に張る (linking は発話内を再判定しない)
+        for edge in result.edges:
+            self._store.add_edge(edge)
+        for node in result.nodes:
             await self._bus.publish(NodeAdded(node_id=node.id, source=node.source))
 
     async def _on_node_added(self, event: NodeAdded) -> None:

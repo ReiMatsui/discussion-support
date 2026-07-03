@@ -80,6 +80,18 @@ def _load_system_prompt() -> str:
     return (_PROMPTS_DIR / "linking.md").read_text(encoding="utf-8")
 
 
+def _same_utterance(a: Node, b: Node) -> bool:
+    """2 ノードが同一発話由来か (G2: 発話内ペアを linking 候補から除外する)。"""
+
+    if a.source != "utterance" or b.source != "utterance":
+        return False
+    a_turn = a.metadata.get("turn_id")
+    b_turn = b.metadata.get("turn_id")
+    if a_turn is not None and b_turn is not None:
+        return bool(a_turn == b_turn and a.author == b.author)
+    return False
+
+
 def cosine_similarity(a: list[float], b: list[float]) -> float:
     """2 ベクトル間の cosine 類似度。次元不一致や零ベクトルは 0.0 を返す。"""
 
@@ -228,6 +240,7 @@ class LinkingAgent(BaseAgent):
         batch: bool = True,
         hybrid_alpha: float = 0.7,
         cluster_threshold: float = 0.9,
+        active_window: int = 12,
     ) -> None:
         """
         Args:
@@ -257,6 +270,10 @@ class LinkingAgent(BaseAgent):
                 (反論など意味が対立するもの) を拾いやすくする。
             cluster_threshold: soft-merge の cosine 類似度しきい値 (既定 0.9)。既存 claim と
                 これ以上似た新 claim を同クラスタに合流させる (logic_review A2, 非破壊)。
+            active_window: claim↔claim の照合をアクティブ窓内 (turn_index 基準) に限定する
+                窓幅 (既定 12, facilitation と揃える, G6)。発話側ノードが増えても照合対象を
+                直近ターンに絞ってレイテンシを抑える。evidence↔claim は窓で切らない
+                (古い文書知識と新しい主張のリンクは価値があるため)。
         """
 
         super().__init__(llm=llm)
@@ -271,8 +288,12 @@ class LinkingAgent(BaseAgent):
         self._batch = batch
         self._hybrid_alpha = hybrid_alpha
         self._cluster_threshold = cluster_threshold
+        self._active_window = active_window
         self._embeddings: dict[UUID, list[float]] = {}
         self._quality_log = RetrievalQualityLog()
+        # G1: evidence↔claim の方向制約で正規化/破棄した件数 (プロンプト遵守率の観測)
+        self._n_edges_direction_normalized = 0
+        self._n_edges_dropped_evidence_pair = 0
 
     # --- 公開 ---------------------------------------------------------
 
@@ -435,7 +456,15 @@ class LinkingAgent(BaseAgent):
         store: GraphStore,
     ) -> list[Node]:
         target_vec = await self._ensure_embedding(target)
-        others = [n for n in store.nodes() if n.id != target.id]
+        # G2: 発話内ペアは extraction が既にエッジ化済みなので linking では再判定しない
+        # G6: claim↔claim はアクティブ窓内のみ照合 (evidence↔claim は窓で切らない)
+        others = [
+            n
+            for n in store.nodes()
+            if n.id != target.id
+            and not _same_utterance(n, target)
+            and self._in_link_window(n, target)
+        ]
         if not others:
             return []
 
@@ -518,6 +547,22 @@ class LinkingAgent(BaseAgent):
             scored.sort(key=lambda pair: pair[1], reverse=True)
             candidates.extend(n for n, _ in scored[: self._top_k_per_source])
         return candidates
+
+    def _in_link_window(self, candidate: Node, target: Node) -> bool:
+        """候補を linking 対象にしてよいか (G6: claim↔claim のアクティブ窓絞り込み)。
+
+        - evidence が絡むペア (evidence↔claim) は窓で切らない。古い文書/Web 知識と
+          新しい主張のリンクは価値があるため、従来どおり embedding top-k 選抜に任せる。
+        - 発話側どうし (claim/premise ↔ claim/premise) は、target の turn_index を
+          現在ターンとしたアクティブ窓 (幅 active_window) の中だけを照合対象にする。
+        """
+
+        if candidate.node_type == "evidence" or target.node_type == "evidence":
+            return True
+        if candidate.source != "utterance" or target.source != "utterance":
+            return True
+        window_start = target.turn_index - self._active_window + 1
+        return candidate.turn_index >= window_start
 
     def _maybe_assign_cluster(self, target: Node, store: GraphStore) -> None:
         """``target`` が既存 claim と十分に類似していれば同クラスタに合流させる。
@@ -645,19 +690,45 @@ class LinkingAgent(BaseAgent):
         relation: Relation
         # 連結エージェントの呼び出し慣習: a=target, b=candidate
         if judgment.relation == "a_supports_b":
-            src_id, dst_id, relation = target.id, cand.id, "support"
+            src_node, dst_node, relation = target, cand, "support"
         elif judgment.relation == "a_attacks_b":
-            src_id, dst_id, relation = target.id, cand.id, "attack"
+            src_node, dst_node, relation = target, cand, "attack"
         elif judgment.relation == "b_supports_a":
-            src_id, dst_id, relation = cand.id, target.id, "support"
+            src_node, dst_node, relation = cand, target, "support"
         elif judgment.relation == "b_attacks_a":
-            src_id, dst_id, relation = cand.id, target.id, "attack"
+            src_node, dst_node, relation = cand, target, "attack"
         else:  # pragma: no cover - 防御的
             return None
 
+        # G1 (レビュー C-2): evidence↔claim の方向制約をコードで強制する。
+        # 設計不変条件「evidence が常に src (事実が主張を支持/攻撃する)」を、
+        # LLM の向き取り違えに対して正規化する。プロンプト任せにしない。
+        src_is_evidence = src_node.node_type == "evidence"
+        dst_is_evidence = dst_node.node_type == "evidence"
+        if src_is_evidence and dst_is_evidence:
+            # evidence↔evidence は設計上エッジを張らない (中立事実同士に立場はない)
+            self._n_edges_dropped_evidence_pair += 1
+            self.log.info(
+                "linking.edge_dropped_evidence_pair",
+                src_id=str(src_node.id),
+                dst_id=str(dst_node.id),
+            )
+            return None
+        if dst_is_evidence and not src_is_evidence:
+            # claim→evidence 判定を evidence→claim に反転 (relation は保持)。
+            # 意味論を「事実が主張を支持/攻撃する」に固定する。
+            src_node, dst_node = dst_node, src_node
+            self._n_edges_direction_normalized += 1
+            self.log.info(
+                "linking.edge_direction_normalized",
+                evidence_id=str(src_node.id),
+                claim_id=str(dst_node.id),
+                relation=relation,
+            )
+
         return Edge(
-            src_id=src_id,
-            dst_id=dst_id,
+            src_id=src_node.id,
+            dst_id=dst_node.id,
             relation=relation,
             confidence=judgment.confidence,
             rationale=judgment.rationale,

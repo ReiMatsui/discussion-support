@@ -50,6 +50,57 @@ def test_resolve_pricing_falls_back_to_default() -> None:
     assert p.output_per_token == PRICING["gpt-5-mini"].output_per_token
 
 
+# --- G5: 集計が全呼び出しを拾う / soft 超過ログの到達性 ------------------
+
+
+def test_record_aggregates_all_calls() -> None:
+    """record した全呼び出しが n_calls / total / by_model に反映される。"""
+
+    tracker = CostTracker()
+    tracker.record("gpt-5-mini", 100, 50)
+    tracker.record("gpt-5-mini", 200, 100)
+    tracker.record("gpt-5-nano", 10, 5)
+
+    assert tracker.n_calls == 3
+    by_model = tracker.by_model
+    assert by_model["gpt-5-mini"].n_calls == 2
+    assert by_model["gpt-5-nano"].n_calls == 1
+    # total は各モデル price × tokens の合計
+    expected = (
+        resolve_pricing("gpt-5-mini").cost(300, 150)
+        + resolve_pricing("gpt-5-nano").cost(10, 5)
+    )
+    assert tracker.total_usd == pytest.approx(expected)
+
+
+def test_soft_budget_exceeded_log_reachable_after_warning() -> None:
+    """M-5: 80% warning 後でも soft budget 超過ログが到達する (専用フラグ)。
+
+    旧実装は soft 超過ログの条件が `not self._warning_emitted` で、80% warning が先に
+    フラグを立てるため到達不能だった。専用フラグ導入で超過を跨いだ最初の record で
+    到達することを固定する。
+    """
+
+    # 1 呼び出しあたりのコストが分かるよう gpt-5-mini を使う
+    unit = resolve_pricing("gpt-5-mini").cost(1000, 0)
+    tracker = CostTracker(budget_usd=unit * 2)  # 2 呼び出し分を予算に
+
+    # 1 回目: 50% (warning 閾値 80% 未満)
+    tracker.record("gpt-5-mini", 1000, 0)
+    assert tracker._warning_emitted is False
+    assert tracker._soft_exceeded_emitted is False
+
+    # 2 回目: 100% (>= 80% で warning が立つ。まだ超過はしていない)
+    tracker.record("gpt-5-mini", 1000, 0)
+    assert tracker._warning_emitted is True
+    assert tracker._soft_exceeded_emitted is False
+
+    # 3 回目: 予算超過 → soft 超過ログが到達 (専用フラグが立つ)
+    tracker.record("gpt-5-mini", 1000, 0)
+    assert tracker.is_over_budget() is True
+    assert tracker._soft_exceeded_emitted is True
+
+
 # --- CostTracker (集計) ---------------------------------------------
 
 

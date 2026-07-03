@@ -505,8 +505,8 @@ class FacilitationAgent(BaseAgent):
 
         bias = bias or self.detect_bias(store)
         stage = stage or self.detect_stage(transcript, store)
-        if self.llm is None:
-            return self._compose_l2_brief_deterministic(transcript, store, bias, stage)
+        # BaseAgent が self.llm を必ず生成するため、旧「llm is None なら deterministic」
+        # 分岐は到達不能だった (レビュー M-1)。LLM 失敗時の fallback は下の except で担保。
         try:
             return await self._compose_l2_brief_llm(transcript, store, bias, stage)
         except Exception as exc:  # pragma: no cover - 防御的
@@ -515,6 +515,35 @@ class FacilitationAgent(BaseAgent):
                 error=str(exc),
             )
             return self._compose_l2_brief_deterministic(transcript, store, bias, stage)
+
+    async def decide_and_render(
+        self, transcript: list[Utterance], store: GraphStore
+    ) -> InterventionDecision:
+        """介入判断 + L2 の LLM 整文を一箇所で行う (配信経路の共通入口)。
+
+        ``decide_intervention`` は同期・LLM 0 回で L2 の brief は deterministic。
+        L2 が選ばれたときだけ LLM で自然文に整え、``InterventionDecision`` を組み直す。
+        以前は eval / listen-soniox の 2 経路にこの後置整文が複製されていた
+        (レビュー M-1)。整文の一元化により H1 のライブ調停器もこの入口を流用できる。
+        """
+
+        decision = self.decide_intervention(transcript, store)
+        if decision.kind != "l2":
+            return decision
+        try:
+            better = await self.compose_l2_brief(transcript, store)
+        except Exception as exc:  # pragma: no cover - 防御的
+            self.log.warning("facilitation.l2_render_failed", error=str(exc))
+            return decision
+        if better and better != decision.brief:
+            return InterventionDecision(
+                kind=decision.kind,
+                items=decision.items,
+                brief=better,
+                addressed_to=decision.addressed_to,
+                reason=decision.reason,
+            )
+        return decision
 
     def _compose_l2_brief_or_fallback(
         self,

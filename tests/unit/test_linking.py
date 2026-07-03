@@ -144,6 +144,124 @@ async def test_top_k_filters_by_embedding_similarity(
     assert judged[0][1] == nodes["a2"].text
 
 
+# --- G1: evidence↔claim 方向制約 ----------------------------------------
+
+
+@pytest.mark.parametrize("relation", ["a_supports_b", "a_attacks_b", "b_supports_a", "b_attacks_a"])
+def test_edge_direction_evidence_always_src(relation: str) -> None:
+    """claim(target) + evidence(cand) では、どの向き判定でも evidence→claim に正規化。"""
+
+    agent = LinkingAgent(llm=_fake_llm(), threshold=0.5)
+    claim = Node(text="主張", node_type="claim", source="utterance", author="A")
+    evidence = Node(text="事実", node_type="evidence", source="document", author="d1")
+    edge = agent._maybe_make_edge(claim, evidence, _judgment(relation, 0.9))
+    assert edge is not None
+    # evidence が常に src、claim が dst
+    assert edge.src_id == evidence.id
+    assert edge.dst_id == claim.id
+    expected_rel = "support" if "supports" in relation else "attack"
+    assert edge.relation == expected_rel
+
+
+def test_edge_direction_normalization_counted() -> None:
+    """claim→evidence 判定 (a_supports_b) は正規化され件数が数えられる。"""
+
+    agent = LinkingAgent(llm=_fake_llm(), threshold=0.5)
+    claim = Node(text="主張", node_type="claim", source="utterance", author="A")
+    evidence = Node(text="事実", node_type="evidence", source="document", author="d1")
+    # b_supports_a は既に evidence→claim なので正規化不要、a_supports_b は正規化される
+    agent._maybe_make_edge(claim, evidence, _judgment("b_supports_a", 0.9))
+    assert agent._n_edges_direction_normalized == 0
+    agent._maybe_make_edge(claim, evidence, _judgment("a_supports_b", 0.9))
+    assert agent._n_edges_direction_normalized == 1
+
+
+def test_edge_evidence_pair_dropped() -> None:
+    """evidence↔evidence はエッジを張らない (設計不変条件)。"""
+
+    agent = LinkingAgent(llm=_fake_llm(), threshold=0.5)
+    e1 = Node(text="事実1", node_type="evidence", source="document", author="d1")
+    e2 = Node(text="事実2", node_type="evidence", source="web", author="w1")
+    assert agent._maybe_make_edge(e1, e2, _judgment("a_supports_b", 0.9)) is None
+    assert agent._n_edges_dropped_evidence_pair == 1
+
+
+def test_edge_claim_pair_direction_preserved() -> None:
+    """claim↔claim (evidence なし) は正規化されず判定どおりの向き。"""
+
+    agent = LinkingAgent(llm=_fake_llm(), threshold=0.5)
+    a = Node(text="主張A", node_type="claim", source="utterance", author="A")
+    b = Node(text="主張B", node_type="claim", source="utterance", author="B")
+    edge = agent._maybe_make_edge(a, b, _judgment("a_attacks_b", 0.9))
+    assert edge is not None
+    assert edge.src_id == a.id and edge.dst_id == b.id
+    assert agent._n_edges_direction_normalized == 0
+
+
+# --- G6: linking アクティブ窓絞り込み ------------------------------------
+
+
+async def test_link_window_excludes_old_claim_keeps_evidence(store: NetworkXGraphStore) -> None:
+    """claim↔claim は窓外を除外、evidence↔claim は窓外でも候補に残す (G6)。"""
+
+    # 現在ターン20の新claim (target)
+    target = Node(text="最新主張", node_type="claim", source="utterance", author="A",
+                  turn_index=20, metadata={"turn_id": 20})
+    old_claim = Node(text="古い主張", node_type="claim", source="utterance", author="B",
+                     turn_index=1, metadata={"turn_id": 1})
+    old_evidence = Node(text="古い文書知識", node_type="evidence", source="document", author="d1")
+    for n in (old_claim, old_evidence, target):
+        store.add_node(n)
+
+    llm = _fake_llm()
+    llm.embed_one = AsyncMock(return_value=[1.0, 0.0])  # type: ignore[method-assign]
+    llm.embed = AsyncMock(side_effect=lambda texts, **k: [[1.0, 0.0] for _ in texts])  # type: ignore[method-assign]
+
+    judged: list[str] = []
+
+    async def fake_judge(messages: list[dict], **kwargs: object) -> _BatchJudgment:
+        content = messages[1]["content"]
+        for text in (old_claim.text, old_evidence.text):
+            if text in content:
+                judged.append(text)
+        return _batch_none(len(judged))
+
+    llm.chat_structured = AsyncMock(side_effect=fake_judge)  # type: ignore[method-assign]
+
+    # active_window=5 → window_start=16。turn1 の old_claim は窓外、evidence は窓無関係。
+    agent = LinkingAgent(llm=llm, top_k=10, threshold=0.6, active_window=5)
+    await agent.link_node(target, store)
+
+    assert old_evidence.text in judged  # evidence は残る
+    assert old_claim.text not in judged  # 窓外 claim は除外
+
+
+async def test_link_window_keeps_recent_claim(store: NetworkXGraphStore) -> None:
+    """窓内の claim は候補に残る (G6)。"""
+
+    target = Node(text="最新主張", node_type="claim", source="utterance", author="A",
+                  turn_index=20, metadata={"turn_id": 20})
+    recent_claim = Node(text="最近の主張", node_type="claim", source="utterance", author="B",
+                        turn_index=18, metadata={"turn_id": 18})
+    store.add_node(recent_claim)
+    store.add_node(target)
+
+    llm = _fake_llm()
+    llm.embed_one = AsyncMock(return_value=[1.0, 0.0])  # type: ignore[method-assign]
+    llm.embed = AsyncMock(side_effect=lambda texts, **k: [[1.0, 0.0] for _ in texts])  # type: ignore[method-assign]
+    judged: list[str] = []
+
+    async def fake_judge(messages: list[dict], **kwargs: object) -> _BatchJudgment:
+        if recent_claim.text in messages[1]["content"]:
+            judged.append(recent_claim.text)
+        return _batch_none(1)
+
+    llm.chat_structured = AsyncMock(side_effect=fake_judge)  # type: ignore[method-assign]
+    agent = LinkingAgent(llm=llm, top_k=10, threshold=0.6, active_window=5)
+    await agent.link_node(target, store)
+    assert recent_claim.text in judged
+
+
 # --- soft-merge クラスタ (logic_review A2) ------------------------------
 
 
