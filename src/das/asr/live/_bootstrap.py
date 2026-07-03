@@ -609,7 +609,7 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
 
     # --- 論点抽出 ---
     _oai_key = os.environ.get("OPENAI_API_KEY", "")
-    _oai_model = os.environ.get("OPENAI_MODEL_FAST", "gpt-5-mini")
+    _oai_model = os.environ.get("OPENAI_MODEL_FAST", "gpt-5.4-mini")
 
     # --- AIエージェント: コールバック ---
     _on_agent_text = _on_agent_text_factory(state)

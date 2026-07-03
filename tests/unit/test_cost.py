@@ -50,6 +50,21 @@ def test_resolve_pricing_falls_back_to_default() -> None:
     assert p.output_per_token == PRICING["gpt-5-mini"].output_per_token
 
 
+def test_resolve_pricing_gpt54_series() -> None:
+    """GPT-5.4 mini/nano の料金が解決でき、旧 gpt-5 とは別行になる (model_update)。"""
+
+    mini = resolve_pricing("gpt-5.4-mini")
+    assert mini.input_per_token == pytest.approx(0.75e-6)
+    assert mini.output_per_token == pytest.approx(4.50e-6)
+    nano = resolve_pricing("gpt-5.4-nano")
+    assert nano.input_per_token == pytest.approx(0.20e-6)
+    # 日付サフィックス付きでも 5.4-mini にマッチ (gpt-5 にフォールバックしない)
+    dated = resolve_pricing("gpt-5.4-mini-2026-03-01")
+    assert dated.input_per_token == pytest.approx(0.75e-6)
+    # 旧 gpt-5-mini 行は rescore 用に残っている
+    assert resolve_pricing("gpt-5-mini").input_per_token == pytest.approx(0.40e-6)
+
+
 # --- G5: 集計が全呼び出しを拾う / soft 超過ログの到達性 ------------------
 
 
