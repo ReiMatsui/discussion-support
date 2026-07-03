@@ -551,10 +551,45 @@ class ConditionFullProposal:
         return "\n".join(lines)
 
 
+# --- FullProposal (関係ラベル除去 = dose 統制 ablation) ------------------
+
+
+class ConditionFullProposalUnlabeled(ConditionFullProposal):
+    """dose 統制 ablation 条件 (レビュー E3 / H-6)。
+
+    ``full_proposal`` と **同一のトリガー・同一の選定・同一の件数** で提示するが、
+    提示文から関係ラベル (支持/反論) だけを除去し、全項目を中立の「参考」で示す。
+    選定ロジック (extraction/linking/facilitation) は親クラスをそのまま継承し、
+    複製しない。提示整形の 2 メソッドだけを override する。
+
+    ``full_proposal`` との比較が「関係ラベルの寄与」(RQ4) を、提示量・頻度・件数を
+    交絡させずに検定できる最もクリーンな ablation になる。
+    """
+
+    name = "full_proposal_unlabeled"
+
+    @staticmethod
+    def _format_l1_self(decision: InterventionDecision) -> str:
+        lines = ["[あなたの先ほどの発言に対する関連情報]"]
+        for it in decision.items:
+            # relation を渡さず、全項目を中立ラベル (relation_label("") = 参考) にする
+            lines.append(f"- [{relation_label('')}] {it.source_text}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_l1_third_person(decision: InterventionDecision) -> str:
+        speaker = decision.addressed_to or "直前の発言者"
+        lines = [f"[{speaker}さんの先ほどの発言に対する関連情報]"]
+        for it in decision.items:
+            lines.append(f"- [{relation_label('')}] {it.source_text}")
+        return "\n".join(lines)
+
+
 __all__ = [
     "Condition",
     "ConditionFlatRAG",
     "ConditionFullProposal",
+    "ConditionFullProposalUnlabeled",
     "ConditionGraphlessFacilitation",
     "ConditionNone",
     "FlatRAGItem",

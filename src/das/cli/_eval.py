@@ -523,6 +523,7 @@ async def _run_eval_cli(
     from das.eval import (
         ConditionFlatRAG,
         ConditionFullProposal,
+        ConditionFullProposalUnlabeled,
         ConditionNone,
         JudgeAgent,
         cafeteria_personas,
@@ -583,6 +584,18 @@ async def _run_eval_cli(
         elif name == "full_proposal":
             factories[name] = lambda llm=llm, top_k=linking_top_k, top_k_ps=linking_top_k_per_source, lmodel=linking_model: (
                 ConditionFullProposal(
+                    llm=llm,
+                    enable_web_search=web_search,
+                    max_web_searches=max_web_searches,
+                    top_k=top_k,
+                    top_k_per_source=top_k_ps,
+                    linking_model=lmodel,
+                )
+            )
+        elif name == "full_proposal_unlabeled":
+            # dose 統制 ablation: full_proposal と同一設定で関係ラベルのみ除去 (E3)
+            factories[name] = lambda llm=llm, top_k=linking_top_k, top_k_ps=linking_top_k_per_source, lmodel=linking_model: (
+                ConditionFullProposalUnlabeled(
                     llm=llm,
                     enable_web_search=web_search,
                     max_web_searches=max_web_searches,

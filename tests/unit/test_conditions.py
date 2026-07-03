@@ -10,6 +10,7 @@ import pytest
 from das.eval.conditions import (
     ConditionFlatRAG,
     ConditionFullProposal,
+    ConditionFullProposalUnlabeled,
     ConditionNone,
 )
 from das.eval.persona import build_persona
@@ -182,6 +183,105 @@ async def test_full_proposal_returns_support_attack_info(
     assert "[支持] 統計データ" in info
     assert "[反論] コスト懸念" in info
     fake_orch.bus.publish.assert_awaited_once()
+
+
+async def _build_full_proposal_case(
+    cond: ConditionFullProposal, monkeypatch: pytest.MonkeyPatch
+) -> tuple[str | None, ConditionFullProposal]:
+    """support/attack エッジを 1 本ずつ持つ固定ストアで info_provider を 1 回回す。
+
+    ``test_full_proposal_returns_support_attack_info`` と同じ選定シナリオを、
+    渡された condition (full_proposal / unlabeled) で実行する。
+    """
+
+    from uuid import uuid4
+
+    from das.graph.schema import Edge, Node
+    from das.graph.store import NetworkXGraphStore
+
+    fake_store = NetworkXGraphStore()
+    fake_orch = MagicMock()
+    fake_orch.bus = MagicMock()
+    fake_orch.bus.publish = AsyncMock()
+    fake_orch.bus.drain = AsyncMock()
+    fake_orch.ingest_documents = AsyncMock(return_value=[])
+    fake_orch.store = fake_store
+    monkeypatch.setattr(
+        "das.eval.conditions.Orchestrator.assemble",
+        lambda *a, **k: fake_orch,
+    )
+    await cond.setup()
+
+    target = Node(
+        id=uuid4(),
+        text="プラ容器を廃止すべき",
+        node_type="claim",
+        source="utterance",
+        author="A",
+        metadata={"turn_id": 1},
+    )
+    doc_supporter = Node(text="統計データ", node_type="premise", source="document", author="d1")
+    attacker = Node(
+        text="コスト懸念",
+        node_type="claim",
+        source="utterance",
+        author="B",
+        metadata={"turn_id": 0},
+    )
+    fake_store.add_node(target)
+    fake_store.add_node(doc_supporter)
+    fake_store.add_node(attacker)
+    fake_store.add_edge(
+        Edge(src_id=doc_supporter.id, dst_id=target.id, relation="support", confidence=0.9)
+    )
+    fake_store.add_edge(
+        Edge(src_id=attacker.id, dst_id=target.id, relation="attack", confidence=0.8)
+    )
+
+    persona = build_persona(name="A")
+    history = [Utterance(turn_id=1, speaker="A", text="プラ容器を廃止すべき")]
+    info = await cond.info_provider(history, persona)
+    return info, cond
+
+
+async def test_unlabeled_same_selection_only_label_differs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """unlabeled は full_proposal と同一選定・件数・対象で、ラベル文字列のみ中立化 (E3)。"""
+
+    llm = _fake_llm()
+    info, cond = await _build_full_proposal_case(
+        ConditionFullProposalUnlabeled(llm=llm), monkeypatch
+    )
+
+    assert info is not None
+    # 提示文: 全項目が中立ラベル「参考」。支持/反論 の文字は出さない。
+    assert "[参考] 統計データ" in info
+    assert "[参考] コスト懸念" in info
+    assert "[支持]" not in info
+    assert "[反論]" not in info
+
+    # 選定は親と同一: 介入ログの items は依然 support/attack を保持し、
+    # 件数・対象 (persona_name) も full_proposal と同じ 1 介入 2 件。
+    log = cond.intervention_log
+    assert len(log) == 1
+    entry = log[0]
+    assert entry.persona_name == "A"
+    assert entry.turn_id == 1
+    relations = sorted(it.get("relation") for it in entry.items)
+    assert relations == ["attack", "support"]
+
+
+def test_unlabeled_is_subclass_reusing_selection() -> None:
+    """unlabeled は選定ロジックを複製せず FullProposal を継承している。"""
+
+    assert issubclass(ConditionFullProposalUnlabeled, ConditionFullProposal)
+    assert ConditionFullProposalUnlabeled.name == "full_proposal_unlabeled"
+    # 選定系メソッドは override していない (提示整形のみ override)
+    assert (
+        ConditionFullProposalUnlabeled.info_provider
+        is ConditionFullProposal.info_provider
+    )
 
 
 async def test_full_proposal_intervention_log_records_each_turn(
