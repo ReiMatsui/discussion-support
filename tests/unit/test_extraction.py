@@ -13,6 +13,7 @@ from das.agents.extraction import (
     ExtractionAgent,
     _ExtractedUnit,
     _ExtractionResult,
+    _IntraEdge,
 )
 from das.llm import OpenAIClient
 from das.types import Utterance
@@ -48,7 +49,8 @@ async def test_extract_decomposes_utterance(utterance: Utterance) -> None:
     )
 
     agent = ExtractionAgent(llm=llm)
-    nodes = await agent.extract(utterance)
+    result = await agent.extract(utterance)
+    nodes = result.nodes
 
     assert len(nodes) == 2
     premise, claim = nodes
@@ -76,9 +78,9 @@ async def test_extract_skips_empty_or_whitespace(utterance: Utterance) -> None:
         )
     )
     agent = ExtractionAgent(llm=llm)
-    nodes = await agent.extract(utterance)
+    result = await agent.extract(utterance)
 
-    assert [n.text for n in nodes] == ["本物の主張"]
+    assert [n.text for n in result.nodes] == ["本物の主張"]
 
 
 async def test_extract_returns_empty_when_no_units(utterance: Utterance) -> None:
@@ -87,7 +89,9 @@ async def test_extract_returns_empty_when_no_units(utterance: Utterance) -> None
         return_value=_ExtractionResult(units=[])
     )
     agent = ExtractionAgent(llm=llm)
-    assert await agent.extract(utterance) == []
+    result = await agent.extract(utterance)
+    assert result.nodes == []
+    assert result.edges == []
 
 
 async def test_extract_passes_speaker_and_turn_in_user_prompt(utterance: Utterance) -> None:
@@ -107,3 +111,62 @@ async def test_extract_passes_speaker_and_turn_in_user_prompt(utterance: Utteran
     assert "話者: A" in user_msg["content"]
     assert "発話番号: 5" in user_msg["content"]
     assert "プラ容器" in user_msg["content"]
+
+
+async def test_extract_includes_context_for_reference_resolution(
+    utterance: Utterance,
+) -> None:
+    """context を渡すと user メッセージに参照文脈 (話者名付き) が入る (G2)。"""
+
+    llm = _fake_llm()
+    captured = AsyncMock(return_value=_ExtractionResult(units=[]))
+    llm.chat_structured = captured  # type: ignore[method-assign]
+
+    agent = ExtractionAgent(llm=llm)
+    context = [Utterance(turn_id=4, speaker="B", text="紙容器はコストが3倍だ")]
+    await agent.extract(utterance, context=context)
+
+    content = captured.await_args.args[0][1]["content"]
+    assert "参照文脈" in content
+    assert "B: 紙容器はコストが3倍だ" in content
+    # 判定対象は元発話
+    assert "発話番号: 5" in content
+
+
+async def test_extract_builds_intra_edges(utterance: Utterance) -> None:
+    """intra_edges が created_by=extraction のエッジになる (G2, H-1)。"""
+
+    llm = _fake_llm()
+    llm.chat_structured = AsyncMock(  # type: ignore[method-assign]
+        return_value=_ExtractionResult(
+            units=[
+                _ExtractedUnit(text="根拠", node_type="premise"),
+                _ExtractedUnit(text="主張", node_type="claim"),
+            ],
+            intra_edges=[_IntraEdge(src=0, dst=1, relation="support")],
+        )
+    )
+    agent = ExtractionAgent(llm=llm)
+    result = await agent.extract(utterance)
+
+    assert len(result.nodes) == 2
+    assert len(result.edges) == 1
+    edge = result.edges[0]
+    assert edge.src_id == result.nodes[0].id  # premise
+    assert edge.dst_id == result.nodes[1].id  # claim
+    assert edge.relation == "support"
+    assert edge.created_by == "extraction"
+    assert edge.confidence == 1.0
+
+
+async def test_extract_intra_edges_default_empty(utterance: Utterance) -> None:
+    """intra_edges を返さない (旧スキーマ互換) 場合はエッジ 0 件。"""
+
+    llm = _fake_llm()
+    llm.chat_structured = AsyncMock(  # type: ignore[method-assign]
+        return_value=_ExtractionResult(units=[_ExtractedUnit(text="主張", node_type="claim")])
+    )
+    agent = ExtractionAgent(llm=llm)
+    result = await agent.extract(utterance)
+    assert len(result.nodes) == 1
+    assert result.edges == []

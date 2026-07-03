@@ -80,6 +80,18 @@ def _load_system_prompt() -> str:
     return (_PROMPTS_DIR / "linking.md").read_text(encoding="utf-8")
 
 
+def _same_utterance(a: Node, b: Node) -> bool:
+    """2 ノードが同一発話由来か (G2: 発話内ペアを linking 候補から除外する)。"""
+
+    if a.source != "utterance" or b.source != "utterance":
+        return False
+    a_turn = a.metadata.get("turn_id")
+    b_turn = b.metadata.get("turn_id")
+    if a_turn is not None and b_turn is not None:
+        return bool(a_turn == b_turn and a.author == b.author)
+    return False
+
+
 def cosine_similarity(a: list[float], b: list[float]) -> float:
     """2 ベクトル間の cosine 類似度。次元不一致や零ベクトルは 0.0 を返す。"""
 
@@ -438,7 +450,12 @@ class LinkingAgent(BaseAgent):
         store: GraphStore,
     ) -> list[Node]:
         target_vec = await self._ensure_embedding(target)
-        others = [n for n in store.nodes() if n.id != target.id]
+        # G2: 発話内ペアは extraction が既にエッジ化済みなので linking では再判定しない
+        others = [
+            n
+            for n in store.nodes()
+            if n.id != target.id and not _same_utterance(n, target)
+        ]
         if not others:
             return []
 

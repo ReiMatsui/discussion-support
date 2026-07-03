@@ -125,9 +125,13 @@ def test_poll_once_resets_on_new_meeting_epoch() -> None:
 
 
 async def test_ingest_utterance_records_latency_and_adds_nodes() -> None:
+    from das.agents.extraction import ExtractionOutput
+
     rt, _ = _runtime([])
     node = Node(text="主張", node_type="claim", source="utterance", author="A", turn_index=1)
-    rt._orch.extraction.extract = AsyncMock(return_value=[node])  # type: ignore[method-assign]
+    rt._orch.extraction.extract = AsyncMock(  # type: ignore[method-assign]
+        return_value=ExtractionOutput(nodes=[node], edges=[])
+    )
     rt._orch.linking.link_node = AsyncMock(return_value=[])  # type: ignore[method-assign]
 
     await rt.ingest_utterance(
