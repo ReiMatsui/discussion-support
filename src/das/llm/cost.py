@@ -146,6 +146,8 @@ class CostTracker:
         self._total = 0.0
         self._by_model: dict[str, ModelUsage] = {}
         self._warning_emitted = False
+        # soft budget 超過ログ専用フラグ (M-5: 80% warning フラグと共用すると到達不能だった)
+        self._soft_exceeded_emitted = False
         self._log = get_logger("das.llm.cost")
 
     # --- 読み出し ----------------------------------------------------
@@ -241,8 +243,12 @@ class CostTracker:
                 pct=round(100.0 * self._total / self._budget, 1),
             )
 
-        # soft budget 超過時はログのみ (新規 run は run_eval 側で gate)
-        if self.is_over_budget() and not self._warning_emitted:
+        # soft budget 超過時はログのみ (新規 run は run_eval 側で gate)。
+        # M-5: 80% warning が _warning_emitted を立てるため、旧実装の
+        # `not self._warning_emitted` 条件はこの info ログをほぼ到達不能にしていた。
+        # 専用フラグ _soft_exceeded_emitted で「超過を跨いだ最初の 1 回」に出す。
+        if self.is_over_budget() and not self._soft_exceeded_emitted:
+            self._soft_exceeded_emitted = True
             self._log.info(
                 "cost.soft_budget_exceeded",
                 cumulative_usd=round(self._total, 4),
