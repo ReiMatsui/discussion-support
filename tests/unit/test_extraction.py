@@ -57,6 +57,9 @@ async def test_extract_decomposes_utterance(utterance: Utterance) -> None:
     assert premise.source == "utterance"
     assert premise.author == "A"
     assert premise.metadata["turn_id"] == 5
+    # turn_index はアクティブ窓判定用に発話連番 (= turn_id) を持つ (logic_review A5)
+    assert premise.turn_index == 5
+    assert claim.turn_index == 5
     assert premise.timestamp == utterance.timestamp
     assert claim.node_type == "claim"
 

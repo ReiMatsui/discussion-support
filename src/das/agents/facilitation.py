@@ -122,6 +122,7 @@ class FacilitationAgent(BaseAgent):
         max_items: int = 2,
         recent_window: int = 4,
         bias_threshold: float = 0.4,
+        active_window: int = 12,
         stall_window: int = 4,
         stall_max_new_claims: int = 1,
         stall_max_new_attacks: int = 0,
@@ -132,7 +133,11 @@ class FacilitationAgent(BaseAgent):
         Parameters:
           - ``max_items``: L1 で提示する最大件数 (研究計画書「1〜2 件」に従い既定 2)
           - ``recent_window``: stage 判定で見る直近発話数
-          - ``bias_threshold``: imbalance_ratio がこの値を超えたら偏り
+          - ``bias_threshold``: (非推奨) 旧・累積比率ベース偏り判定のしきい値。
+            現在 L2 の偏りトリガーは窓内の weak/over 件数 (件数条件) で判定するため
+            使わないが、外部呼び出し互換のため引数は残す (logic_review B3)。
+          - ``active_window``: L1 候補・偏り検知を限定する直近ターン数 (logic_review A5)。
+            turn_index が ``現在ターン - active_window + 1`` 以上のノードを窓内とみなす。
           - ``stall_window``: stalled 判定で見る直近発話数
           - ``stall_max_new_claims``: その窓で新 claim がこれ以下なら停滞シグナル
           - ``stall_max_new_attacks``: その窓で新 attack がこれ以下なら停滞シグナル
@@ -144,6 +149,7 @@ class FacilitationAgent(BaseAgent):
         self._max_items = max_items
         self._recent_window = recent_window
         self._bias_threshold = bias_threshold
+        self._active_window = active_window
         self._stall_window = stall_window
         self._stall_max_new_claims = stall_max_new_claims
         self._stall_max_new_attacks = stall_max_new_attacks
@@ -166,10 +172,23 @@ class FacilitationAgent(BaseAgent):
 
     # --- 偏り検知 (グラフ状態のみに依存) -------------------------------
 
-    def detect_bias(self, store: GraphStore) -> BiasReport:
-        """グラフ全体の支持/攻撃の偏りを集計する。"""
+    def detect_bias(
+        self, store: GraphStore, *, window_start: int | None = None
+    ) -> BiasReport:
+        """支持/攻撃の偏りを集計する。
 
-        edges = list(store.edges())
+        ``window_start`` を渡すと、対象主張 (エッジの dst) が ``turn_index >=
+        window_start`` の **アクティブ窓内** ノードのエッジだけを数える
+        (logic_review A5/B3: 累積比率の鈍化を避ける)。None なら従来どおり全体集計。
+        """
+
+        def _dst_in_window(dst_id: UUID) -> bool:
+            if window_start is None:
+                return True
+            node = store.get_node(dst_id)
+            return node is not None and node.turn_index >= window_start
+
+        edges = [e for e in store.edges() if _dst_in_window(e.dst_id)]
         n_support = sum(1 for e in edges if e.relation == "support")
         n_attack = sum(1 for e in edges if e.relation == "attack")
 
@@ -339,9 +358,13 @@ class FacilitationAgent(BaseAgent):
             self._record(decision, n_utts, n_edges)
             return decision
 
+        # アクティブ窓の下限ターン (logic_review A5)。現在ターン = 最新発話の turn_id。
+        window_start = last_utt.turn_id - self._active_window + 1
+
         # --- L2 判定 (俯瞰サマリの必要性) -----------------------------
 
-        bias = self.detect_bias(store)
+        # 偏り検知はアクティブ窓内に限定 (累積比率の鈍化を回避)
+        bias = self.detect_bias(store, window_start=window_start)
         stage = self.detect_stage(transcript, store)
 
         # L2 を出してからの間隔 + 最低限の発話数を満たしている必要がある
@@ -358,13 +381,13 @@ class FacilitationAgent(BaseAgent):
                     f"停滞 (直近 {stage.n_recent_utterances} 発話で新 claim "
                     f"{stage.new_claims_in_window} 件 / 新 attack {stage.new_attacks_in_window} 件)"
                 )
-            if (
-                bias.imbalance_ratio > self._bias_threshold
-                and len(bias.weak_claims) + len(bias.over_supported_claims) >= 1
-            ):
+            # 偏りトリガーは窓内の件数条件 (累積比率は廃止, logic_review B3):
+            # 窓内に「攻撃過多で支持ゼロ (weak)」または「支持過多で反論ゼロ (over)」の
+            # 主張が 1 件でもあれば俯瞰で扱う。
+            if len(bias.weak_claims) + len(bias.over_supported_claims) >= 1:
                 l2_triggers.append(
-                    f"構造的偏り (imbalance={bias.imbalance_ratio:.2f}, "
-                    f"weak={len(bias.weak_claims)}, over={len(bias.over_supported_claims)})"
+                    f"構造的偏り (窓内 weak={len(bias.weak_claims)}, "
+                    f"over={len(bias.over_supported_claims)})"
                 )
 
         if l2_triggers:
@@ -389,14 +412,16 @@ class FacilitationAgent(BaseAgent):
         items: list[InfoItem] = []
         seen: set[str] = set()
         for node in last_utt_nodes:
-            for item in self._select_for_target(node, store, bias=bias, stage=stage):
+            for item in self._select_for_target(
+                node, store, window_start=window_start
+            ):
                 key = f"{item.relation}|{item.source_text}|{item.target_text}"
                 if key in seen:
                     continue
                 seen.add(key)
                 items.append(item)
 
-        items.sort(key=lambda it: it.priority, reverse=True)
+        items.sort(key=self._item_sort_key, reverse=True)
         items = items[: self._max_items]
 
         if not items:
@@ -586,8 +611,8 @@ class FacilitationAgent(BaseAgent):
 
         bias = self.detect_bias(store)
         stage = self.detect_stage(transcript, store)
-        items = self._select_for_target(target_node, store, bias=bias, stage=stage)
-        items.sort(key=lambda i: i.priority, reverse=True)
+        items = self._select_for_target(target_node, store)
+        items.sort(key=self._item_sort_key, reverse=True)
         result = items[: self._max_items]
         self.log.info(
             "facilitation.selected",
@@ -599,15 +624,32 @@ class FacilitationAgent(BaseAgent):
         )
         return result
 
+    @staticmethod
+    def _item_sort_key(item: InfoItem) -> tuple[int, float]:
+        """並べ替えキー = (種別優先度, confidence)。乗算係数は使わない。
+
+        種別優先度: 緊張の高い attack (未応答の反論) を support より優先する。
+        logic_review B3 の「係数は撤廃してソートキーを説明可能に」に対応。
+        """
+
+        kind_priority = 1 if item.relation == "attack" else 0
+        return (kind_priority, item.priority)
+
     def _select_for_target(
         self,
         target_node: Node,
         store: GraphStore,
         *,
-        bias: BiasReport,
-        stage: StageReport,
+        window_start: int | None = None,
     ) -> list[InfoItem]:
-        """priority 計算を含む内部ヘルパ (sort/cut は呼び出し側)。"""
+        """target への隣接エッジを ``InfoItem`` にする内部ヘルパ (sort/cut は呼び出し側)。
+
+        ``window_start`` を渡すと、source ノードが ``turn_index >= window_start`` の
+        **アクティブ窓内** のエッジだけを候補にする (logic_review A5: 窓外の古い
+        未応答攻撃を L1 候補から外す)。priority は confidence そのもの。偏り/ステージの
+        乗算係数 (旧 1.3/0.7/1.2/0.85) は使わない。並べ替えは呼び出し側が
+        ``_item_sort_key`` (種別優先度, confidence) で行う。
+        """
 
         items: list[InfoItem] = []
         seen: set[str] = set()
@@ -615,31 +657,13 @@ class FacilitationAgent(BaseAgent):
             src = store.get_node(edge.src_id)
             if src is None or src.id == target_node.id:
                 continue
+            # アクティブ窓フィルタ: 窓外 (古い) source からのエッジは L1 候補にしない
+            if window_start is not None and src.turn_index < window_start:
+                continue
             key = f"{edge.relation}|{src.id}"
             if key in seen:
                 continue
             seen.add(key)
-
-            priority = edge.confidence
-            reason: Literal["adjacent", "balance_correction", "stage_alignment"] = (
-                "adjacent"
-            )
-
-            # 偏り補正
-            if bias.imbalance_ratio > self._bias_threshold:
-                if edge.relation != bias.dominant_side:
-                    priority = min(priority * 1.3, 1.0)
-                    reason = "balance_correction"
-                else:
-                    priority *= 0.7  # 優勢側を抑制
-
-            # ステージ補正
-            if stage.stage == "stalled" and edge.relation == "attack":
-                priority = min(priority * 1.2, 1.0)
-                if reason == "adjacent":
-                    reason = "stage_alignment"
-            elif stage.stage == "diverge" and edge.relation == "support":
-                priority *= 0.85
 
             items.append(
                 InfoItem(
@@ -651,8 +675,8 @@ class FacilitationAgent(BaseAgent):
                     source_author=src.author,
                     confidence=edge.confidence,
                     rationale=edge.rationale,
-                    priority=max(0.0, min(priority, 1.0)),
-                    reason=reason,
+                    priority=edge.confidence,
+                    reason="adjacent",
                 )
             )
         return items
