@@ -233,6 +233,106 @@ def aqua_rescore(
                                   budget=budget, hard_budget=hard_budget))
 
 
+@app.command(name="eval-rescore")
+def eval_rescore(
+    eval_dir: Path = typer.Argument(
+        ...,
+        exists=True,
+        file_okay=False,
+        help="既存の eval ディレクトリ (das eval が生成したもの)",
+    ),
+    no_judge: bool = typer.Option(
+        False,
+        "--no-judge",
+        help="judge (LLM 主観採点) を再実行しない。構造指標・citation のみ再計算。",
+    ),
+    no_observation_af: bool = typer.Option(
+        False,
+        "--no-observation-af",
+        help="観測用 AF の後付け構築を行わない。構造指標は既存の介入用 AF (full_proposal のみ) "
+        "から計算する。既定では全条件で transcript から観測用 AF を構築する (API コスト増)。",
+    ),
+    model: str | None = typer.Option(
+        None,
+        "--model",
+        help="judge に使う LLM モデル (省略時はクライアント既定の smart_model)",
+    ),
+    budget: float | None = typer.Option(
+        None, "--budget", help="累積コストの **ソフト上限** (USD)。"
+    ),
+    hard_budget: float | None = typer.Option(
+        None, "--hard-budget", help="累積コストの **ハード上限** (USD)。"
+    ),
+) -> None:
+    """既存 eval を **会話再生成なしで** 再採点する (実行と採点の分離)。
+
+    保存済みの transcript / 介入ログ / AF snapshot / 生 stance から、judge・構造指標・
+    citation・consensus を再計算し、judge_reports.json / run_meta.json / summary.json を
+    作り直す。judge プロンプトや citation 閾値を直したあとの再採点に使う。
+
+    既定では全条件で transcript から **観測用 AF** を後付け構築し、構造指標と合意の
+    構造シグナルを全条件同一に計算する (none / flat_rag でも構造指標が非ゼロになる)。
+
+    旧形式 (personas / topic / transcript を保存していない) の eval は明確なエラーで
+    停止する (黙って誤計算しない)。
+    """
+
+    asyncio.run(
+        _run_eval_rescore(
+            eval_dir=eval_dir,
+            no_judge=no_judge,
+            no_observation_af=no_observation_af,
+            model=model,
+            budget=budget,
+            hard_budget=hard_budget,
+        )
+    )
+
+
+async def _run_eval_rescore(
+    *,
+    eval_dir: Path,
+    no_judge: bool,
+    no_observation_af: bool,
+    model: str | None,
+    budget: float | None,
+    hard_budget: float | None,
+) -> None:
+    from das.eval.judge import JudgeAgent
+    from das.eval.rescore import RescoreError, rescore_eval_dir
+    from das.llm import CostTracker
+
+    tracker = (
+        CostTracker(budget_usd=budget, hard_budget_usd=hard_budget)
+        if (budget is not None or hard_budget is not None)
+        else CostTracker()
+    )
+    llm = OpenAIClient(cost_tracker=tracker)
+    judge = None if no_judge else JudgeAgent(llm=llm, model=model)
+
+    typer.echo(
+        f"[rescore] scanning {eval_dir} (judge={'off' if no_judge else 'on'}, "
+        f"observation_af={'off' if no_observation_af else 'on'})"
+    )
+    try:
+        result = await rescore_eval_dir(
+            eval_dir, llm=llm, judge=judge, build_observation=not no_observation_af
+        )
+    except RescoreError as exc:
+        typer.echo(f"[rescore] ERROR: {exc}", err=True)
+        raise typer.Exit(1) from exc
+
+    typer.echo(
+        f"[rescore] done: {len(result.runs)} runs re-scored, "
+        f"summary.json 更新済み  [cost: {tracker.format_status()}]"
+    )
+    for cond, agg in result.aggregate().items():
+        typer.echo(
+            f"  {cond}: n_runs={agg.n} "
+            f"満足度 {agg.overall_satisfaction_mean:.2f}±{agg.overall_satisfaction_std:.2f}"
+        )
+
+
 # --- 実体 --------------------------------------------------------------
 
 
@@ -439,6 +539,7 @@ async def _run_eval_cli(
     from das.eval import (
         ConditionFlatRAG,
         ConditionFullProposal,
+        ConditionFullProposalUnlabeled,
         ConditionNone,
         JudgeAgent,
         cafeteria_personas,
@@ -499,6 +600,18 @@ async def _run_eval_cli(
         elif name == "full_proposal":
             factories[name] = lambda llm=llm, top_k=linking_top_k, top_k_ps=linking_top_k_per_source, lmodel=linking_model: (
                 ConditionFullProposal(
+                    llm=llm,
+                    enable_web_search=web_search,
+                    max_web_searches=max_web_searches,
+                    top_k=top_k,
+                    top_k_per_source=top_k_ps,
+                    linking_model=lmodel,
+                )
+            )
+        elif name == "full_proposal_unlabeled":
+            # dose 統制 ablation: full_proposal と同一設定で関係ラベルのみ除去 (E3)
+            factories[name] = lambda llm=llm, top_k=linking_top_k, top_k_ps=linking_top_k_per_source, lmodel=linking_model: (
+                ConditionFullProposalUnlabeled(
                     llm=llm,
                     enable_web_search=web_search,
                     max_web_searches=max_web_searches,

@@ -25,6 +25,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from das.agents.stance_agent import StanceAgent, StanceMeasurement
@@ -46,7 +47,8 @@ from das.eval.judge import (
     AggregatedScores,
     JudgeAgent,
     JudgeReport,
-    aggregate_reports,
+    aggregate_reports_by_persona,
+    aggregate_reports_by_run,
 )
 from das.eval.metrics import (
     GraphMetrics,
@@ -93,7 +95,14 @@ class SingleRunResult:
     """セッション終了時の合意検出レポート (until_consensus 有効時のみ非 None)。"""
 
     structural: DiscussionStructuralMetrics | None = None
-    """AF + transcript から決定的に計算した構造指標 (DQI 風)。"""
+    """構造指標 (DQI 風)。E4 以降は **観測用 AF** (全条件で transcript から同一
+    パイプラインで後付け構築したグラフ) を基準に計算する。観測用 AF が無い実行時
+    経路では介入用 AF (full_proposal のみ) から計算する。"""
+
+    structural_intervention: DiscussionStructuralMetrics | None = None
+    """参考: 介入用 AF (full_proposal の処置に使ったグラフ) から計算した構造指標。
+    観測用 AF を使う場合のみ非 None。条件間比較には使わず参考出力に留める
+    (レビュー H-2: 構築条件を揃えるため主指標は観測用 AF に統一)。"""
 
     citation: CitationStats | None = None
     """提示情報の引用率 (source 別)。RQ4 の直接 evidence。"""
@@ -127,12 +136,16 @@ class EvalResult:
         return grouped
 
     def aggregate(self) -> dict[str, AggregatedScores]:
-        """条件ごとに全ペルソナ x全ラン分の主観指標を平均する。"""
+        """条件ごとに主観指標をラン単位で2段集計する (レビュー H-5)。
+
+        ラン内でペルソナ平均 → ラン間で平均±SD。``AggregatedScores.n`` は
+        レポートを持つ **ラン数** (クラスタ数) になる。
+        """
 
         result: dict[str, AggregatedScores] = {}
         for cond, runs in self.by_condition().items():
-            reports = [rep for r in runs for rep in r.judge_reports]
-            result[cond] = aggregate_reports(reports)
+            runs_reports = [r.judge_reports for r in runs]
+            result[cond] = aggregate_reports_by_run(runs_reports)
         return result
 
 
@@ -153,10 +166,12 @@ def _serialize_utterance(u: Utterance) -> dict:
     }
 
 
-def _save_run(
-    run_dir: Path,
-    result: SingleRunResult,
-) -> None:
+def _save_run_inputs(run_dir: Path, result: SingleRunResult) -> None:
+    """採点の **入力** となる生データを保存する (transcript / 介入ログ / AF snapshot)。
+
+    これらは会話生成フェーズの成果物で、rescore では読むだけで上書きしない。
+    """
+
     _ensure_dir(run_dir)
 
     transcript_path = run_dir / "transcript.jsonl"
@@ -176,6 +191,17 @@ def _save_run(
             json.dumps(result.snapshot, ensure_ascii=False, indent=2, default=str),
             encoding="utf-8",
         )
+
+
+def _save_run_scores(run_dir: Path, result: SingleRunResult) -> None:
+    """採点の **出力** を保存する (judge_reports.json / run_meta.json)。
+
+    ``das eval-rescore`` はこの関数だけを呼び、生データ (transcript 等) には触れない。
+    stance は生データだが run_meta.json に同居しているため、ここで書き戻す
+    (rescore 時は読み込んだ生 stance をそのまま渡す)。
+    """
+
+    _ensure_dir(run_dir)
 
     if result.judge_reports:
         reports_payload = [
@@ -210,6 +236,11 @@ def _save_run(
         }
     if result.structural is not None:
         run_meta["structural_metrics"] = asdict(result.structural)
+    if result.structural_intervention is not None:
+        # 参考: 介入用 AF 由来 (主指標は観測用 AF の structural_metrics)
+        run_meta["structural_metrics_intervention_af"] = asdict(
+            result.structural_intervention
+        )
     if result.citation is not None:
         run_meta["citation"] = result.citation.to_dict()
     if result.stance:
@@ -230,6 +261,13 @@ def _save_run(
         json.dumps(run_meta, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+
+
+def _save_run(run_dir: Path, result: SingleRunResult) -> None:
+    """1 ラン分の入力(生データ)と出力(採点)を両方保存する (実行フェーズ用)。"""
+
+    _save_run_inputs(run_dir, result)
+    _save_run_scores(run_dir, result)
 
 
 def _convergence_stats(runs: list[SingleRunResult]) -> dict:
@@ -275,10 +313,14 @@ def _aggregate_stance(stance_runs: list[dict]) -> dict:
     """ラン群の stance データから、公開/私的 × Pre/Post の平均と shift を集計。
 
     DEBATE benchmark 流の指標:
-      - mean_public_shift: Post.public - Pre.public の平均 (議論で表明する立場の変化)
-      - mean_private_shift: Post.private - Pre.private の平均 (内心の変化)
+      - mean_public_shift: ペルソナごとの (Post.public - Pre.public) の平均
+      - mean_private_shift: ペルソナごとの (Post.private - Pre.private) の平均
       - mean_pre_gap / mean_post_gap: |public - private| の平均 (見せかけの度合)
       - mean_post_gap が 0 に近いほど真の合意、大きいほど表層的合意の懸念
+
+    NOTE (レビュー H-5): shift は「post 平均 − pre 平均」ではなく、pre/post が
+    揃った **ペルソナ単位の paired difference** の平均で計算する。こうしないと
+    一部ペルソナで pre/post が欠損したときに系統的にずれる。
     """
 
     if not stance_runs:
@@ -289,6 +331,8 @@ def _aggregate_stance(stance_runs: list[dict]) -> dict:
     post_privates: list[int] = []
     pre_gaps: list[int] = []
     post_gaps: list[int] = []
+    public_diffs: list[int] = []
+    private_diffs: list[int] = []
     for stance in stance_runs:
         for _persona, phases in stance.items():
             pre = phases.get("pre")
@@ -301,68 +345,87 @@ def _aggregate_stance(stance_runs: list[dict]) -> dict:
                 post_publics.append(post.public_stance)
                 post_privates.append(post.private_stance)
                 post_gaps.append(abs(post.public_stance - post.private_stance))
+            # paired diff: 同一ペルソナで pre/post が揃っている場合のみ
+            if pre is not None and post is not None:
+                public_diffs.append(post.public_stance - pre.public_stance)
+                private_diffs.append(post.private_stance - pre.private_stance)
 
     def _mean(xs: list[int]) -> float:
         return sum(xs) / len(xs) if xs else 0.0
 
-    public_shift = _mean(post_publics) - _mean(pre_publics) if (pre_publics and post_publics) else 0.0
-    private_shift = _mean(post_privates) - _mean(pre_privates) if (pre_privates and post_privates) else 0.0
-
     return {
-        "n_persona_runs": len(pre_publics) if pre_publics else 0,
+        "n_persona_runs": len(public_diffs),
         "mean_pre_public": _mean(pre_publics),
         "mean_pre_private": _mean(pre_privates),
         "mean_post_public": _mean(post_publics),
         "mean_post_private": _mean(post_privates),
-        "mean_public_shift": public_shift,
-        "mean_private_shift": private_shift,
+        "mean_public_shift": _mean(public_diffs),
+        "mean_private_shift": _mean(private_diffs),
         "mean_pre_gap": _mean(pre_gaps),
         "mean_post_gap": _mean(post_gaps),
+    }
+
+
+def _subjective_scores(agg: AggregatedScores) -> dict[str, list[float]]:
+    """``AggregatedScores`` を summary 用の ``{指標: [mean, std]}`` に整形する。"""
+
+    return {
+        "overall_satisfaction": [
+            agg.overall_satisfaction_mean,
+            agg.overall_satisfaction_std,
+        ],
+        "information_usefulness": [
+            agg.information_usefulness_mean,
+            agg.information_usefulness_std,
+        ],
+        "opposition_understanding": [
+            agg.opposition_understanding_mean,
+            agg.opposition_understanding_std,
+        ],
+        "confidence_change": [
+            agg.confidence_change_mean,
+            agg.confidence_change_std,
+        ],
+        "intervention_transparency": [
+            agg.intervention_transparency_mean,
+            agg.intervention_transparency_std,
+        ],
     }
 
 
 def _save_eval_result(eval_dir: Path, result: EvalResult) -> None:
     aggregates = result.aggregate()
     grouped = result.by_condition()
+
+    def _by_condition(cond: str, agg: AggregatedScores) -> dict[str, object]:
+        runs = grouped.get(cond, [])
+        # 参考値: ペルソナ別内訳 (ラン横断の flat pool)。主報告はラン単位2段集計。
+        persona_reports = [rep for r in runs for rep in r.judge_reports]
+        by_persona = {
+            name: _subjective_scores(p_agg)
+            for name, p_agg in aggregate_reports_by_persona(persona_reports).items()
+        }
+        block = {
+            # レビュー H-5: 主観指標の n は「ラン数 (クラスタ数)」。
+            # 旧 n_judge_reports (ペルソナ×ランの pool 数) は過大申告だったため撤廃。
+            "n_runs_scored": agg.n,
+            **_subjective_scores(agg),
+            "by_persona": by_persona,
+            "convergence": _convergence_stats(runs),
+            "structural": aggregate_structural_metrics(
+                [r.structural for r in runs if r.structural]
+            ),
+            "citation": aggregate_citation_stats([r.citation for r in runs if r.citation]),
+            "stance": _aggregate_stance([r.stance for r in runs if r.stance]),
+        }
+        return block
+
     summary_payload = {
         "eval_id": result.eval_id,
         "topic": result.topic,
         "n_runs_total": len(result.runs),
         "by_condition": {
-            cond: {
-                "n_judge_reports": agg.n,
-                "overall_satisfaction": [
-                    agg.overall_satisfaction_mean,
-                    agg.overall_satisfaction_std,
-                ],
-                "information_usefulness": [
-                    agg.information_usefulness_mean,
-                    agg.information_usefulness_std,
-                ],
-                "opposition_understanding": [
-                    agg.opposition_understanding_mean,
-                    agg.opposition_understanding_std,
-                ],
-                "confidence_change": [
-                    agg.confidence_change_mean,
-                    agg.confidence_change_std,
-                ],
-                "intervention_transparency": [
-                    agg.intervention_transparency_mean,
-                    agg.intervention_transparency_std,
-                ],
-                "convergence": _convergence_stats(grouped.get(cond, [])),
-                "structural": aggregate_structural_metrics(
-                    [r.structural for r in grouped.get(cond, []) if r.structural]
-                ),
-                "citation": aggregate_citation_stats(
-                    [r.citation for r in grouped.get(cond, []) if r.citation]
-                ),
-                "stance": _aggregate_stance(
-                    [r.stance for r in grouped.get(cond, []) if r.stance]
-                ),
-            }
-            for cond, agg in aggregates.items()
+            cond: _by_condition(cond, agg) for cond, agg in aggregates.items()
         },
     }
     (eval_dir / "summary.json").write_text(
@@ -583,47 +646,7 @@ async def _run_single(
         if log_attr:
             intervention_log = log_attr
 
-    # 合意検出の最終レポート (until_consensus でない場合も「実際に合意していたか」を
-    # 後付け判定して残すと分析しやすいので、常に算出する)。
-    if consensus_agent is not None:
-        consensus_report = await detect_consensus_with_llm(
-            transcript,
-            topic=topic,
-            personas=personas,
-            agent=consensus_agent,
-            store=final_store,
-            **consensus_kwargs,
-        )
-    else:
-        consensus_report = detect_consensus(
-            transcript, store=final_store, **consensus_kwargs
-        )
-
-    _emit(
-        {
-            "type": "run_end",
-            "condition": condition_name,
-            "run_idx": run_idx,
-            "n_turns": len(transcript),
-            "consensus_reached": consensus_report.consensus_reached,
-            "consensus_signal": consensus_report.signal,
-            "consensus_at": consensus_report.detected_at_turn,
-        }
-    )
-
-    judge_reports: list[JudgeReport] = []
-    if judge is not None:
-        judge_reports = await judge.evaluate_session(
-            personas,
-            topic,
-            transcript,
-            condition_name=condition_name,
-            info_log=intervention_log,
-        )
-
-    structural = compute_structural_metrics(transcript, final_store)
-
-    # Post-discussion stance polling
+    # Post-discussion stance polling (採点ではなく実行フェーズの測定。生データを残す)
     if stance_agent is not None:
         for p in personas:
             try:
@@ -636,30 +659,158 @@ async def _run_single(
             except Exception as exc:  # pragma: no cover - 防御的
                 _log.warning("stance.post.failed", persona=p.name, error=str(exc))
 
-    # 引用率: 介入で提示された情報が次発話で使われた率 (RQ4 直接指標)
-    interventions_for_citation = (
-        [
-            {
-                "kind": e.kind,
-                "turn_id": e.turn_id,
-                # レビュー C-2: 照合は「実際に情報が注入された話者」= persona_name
-                # (次話者) の直後の発話を基準にする。addressed_to (グラフ上の宛先=
-                # 直前の発話者) は参考として残すが citation 判定には使わない。
-                "persona_name": e.persona_name,
-                "addressed_to": e.addressed_to,
-                "items": [
-                    {
-                        "source_text": it.get("source_text", ""),
-                        "source_kind": it.get("source_kind", "unknown"),
-                    }
-                    for it in e.items
-                ],
-            }
-            for e in intervention_log
-        ]
-        if intervention_log
-        else []
+    # 採点 (consensus / judge / structural / citation) は score_run に一元化。
+    # rescore CLI (das eval-rescore) も同じ score_run を使い、保存済み run から
+    # 会話再生成なしで再採点できる (= 実行と採点の分離)。
+    scores = await score_run(
+        transcript=transcript,
+        condition_name=condition_name,
+        topic=topic,
+        personas=personas,
+        intervention_log=intervention_log,
+        store=final_store,
+        llm=llm,
+        judge=judge,
+        consensus_agent=consensus_agent,
+        consensus_kwargs=consensus_kwargs,
     )
+
+    # run_end はイベント列の最後に発火する (UI streaming の契約)。
+    _emit(
+        {
+            "type": "run_end",
+            "condition": condition_name,
+            "run_idx": run_idx,
+            "n_turns": len(transcript),
+            "consensus_reached": scores.consensus.consensus_reached,
+            "consensus_signal": scores.consensus.signal,
+            "consensus_at": scores.consensus.detected_at_turn,
+        }
+    )
+
+    return SingleRunResult(
+        run_id=run_id,
+        condition_name=condition_name,
+        topic=topic,
+        transcript=transcript,
+        transcript_metrics_=t_metrics,
+        graph_metrics_=g_metrics,
+        judge_reports=scores.judge_reports,
+        intervention_log=intervention_log,
+        snapshot=snapshot,
+        consensus=scores.consensus,
+        structural=scores.structural,
+        structural_intervention=scores.structural_intervention,
+        citation=scores.citation,
+        stance=stance_data if stance_data else None,
+    )
+
+
+@dataclass(frozen=True)
+class RunScores:
+    """1 ラン分の採点結果 (会話生成とは独立に再計算できる部分)。"""
+
+    consensus: ConsensusReport
+    judge_reports: list[JudgeReport]
+    structural: DiscussionStructuralMetrics
+    citation: CitationStats
+    structural_intervention: DiscussionStructuralMetrics | None = None
+    """参考: 介入用 AF 由来の構造指標 (観測用 AF を使ったときのみ非 None)。"""
+
+
+def _interventions_for_citation(
+    intervention_log: list[InterventionLogEntry] | None,
+) -> list[dict[str, Any]]:
+    """介入ログを citation 計算が期待する dict 列に整形する。"""
+
+    if not intervention_log:
+        return []
+    return [
+        {
+            "kind": e.kind,
+            "turn_id": e.turn_id,
+            # レビュー C-2: 照合は「実際に情報が注入された話者」= persona_name
+            # (次話者) の直後の発話を基準にする。addressed_to (グラフ上の宛先=
+            # 直前の発話者) は参考として残すが citation 判定には使わない。
+            "persona_name": e.persona_name,
+            "addressed_to": e.addressed_to,
+            "items": [
+                {
+                    "source_text": it.get("source_text", ""),
+                    "source_kind": it.get("source_kind", "unknown"),
+                }
+                for it in e.items
+            ],
+        }
+        for e in intervention_log
+    ]
+
+
+async def score_run(
+    *,
+    transcript: list[Utterance],
+    condition_name: str,
+    topic: str,
+    personas: list[PersonaSpec],
+    intervention_log: list[InterventionLogEntry] | None,
+    store: GraphStore | None,
+    llm: OpenAIClient,
+    judge: JudgeAgent | None = None,
+    consensus_agent: object | None = None,
+    consensus_kwargs: dict[str, Any] | None = None,
+    observation_store: GraphStore | None = None,
+) -> RunScores:
+    """保存済み or 生成直後の run を採点する (consensus / judge / structural / citation)。
+
+    会話生成とは独立に呼べる = ``das eval-rescore`` の心臓部。judge プロンプトや
+    citation 閾値を直したあと、会話を再生成せずに再採点できる。stance は実行時に
+    measure した生データを summary 段で集計するため、ここには含めない。
+
+    ``observation_store`` (E4): transcript から後付け構築した **観測用 AF** を渡すと、
+    構造指標と合意の構造シグナルを全条件同一にこのグラフから計算する。``store``
+    (介入用 AF) 由来の構造指標は ``structural_intervention`` に参考として残す。
+    観測用 AF を渡さない実行時経路では従来通り ``store`` を使う。
+    """
+
+    consensus_kwargs = consensus_kwargs or {}
+
+    # 構造指標・合意の構造シグナルは観測用 AF を優先 (レビュー H-1 / H-2)。
+    metric_store = observation_store if observation_store is not None else store
+
+    # 合意検出の最終レポート (until_consensus でない場合も「実際に合意していたか」を
+    # 後付け判定して残すと分析しやすいので、常に算出する)。
+    if consensus_agent is not None:
+        consensus_report = await detect_consensus_with_llm(
+            transcript,
+            topic=topic,
+            personas=personas,
+            agent=consensus_agent,
+            store=metric_store,
+            **consensus_kwargs,
+        )
+    else:
+        consensus_report = detect_consensus(
+            transcript, store=metric_store, **consensus_kwargs
+        )
+
+    judge_reports: list[JudgeReport] = []
+    if judge is not None:
+        judge_reports = await judge.evaluate_session(
+            personas,
+            topic,
+            transcript,
+            condition_name=condition_name,
+            info_log=intervention_log,
+        )
+
+    structural = compute_structural_metrics(transcript, metric_store)
+    # 観測用 AF を使ったときのみ、介入用 AF 由来の指標を参考として別途計算する
+    structural_intervention: DiscussionStructuralMetrics | None = None
+    if observation_store is not None and store is not None:
+        structural_intervention = compute_structural_metrics(transcript, store)
+
+    # 引用率: 介入で提示された情報が次発話で使われた率 (RQ4 直接指標)
+    interventions_for_citation = _interventions_for_citation(intervention_log)
     # n-gram 一致 + embedding 類似度の両方で判定 (言い換え引用も捕捉)
     try:
         citation = await compute_citation_stats_with_embeddings(
@@ -669,20 +820,12 @@ async def _run_single(
         _log.warning("citation.embedding_failed", error=str(exc))
         citation = compute_citation_stats(transcript, interventions_for_citation)
 
-    return SingleRunResult(
-        run_id=run_id,
-        condition_name=condition_name,
-        topic=topic,
-        transcript=transcript,
-        transcript_metrics_=t_metrics,
-        graph_metrics_=g_metrics,
-        judge_reports=judge_reports,
-        intervention_log=intervention_log,
-        snapshot=snapshot,
+    return RunScores(
         consensus=consensus_report,
+        judge_reports=judge_reports,
         structural=structural,
         citation=citation,
-        stance=stance_data if stance_data else None,
+        structural_intervention=structural_intervention,
     )
 
 
@@ -905,6 +1048,8 @@ __all__ = [
     "ConditionFactory",
     "EvalResult",
     "ProgressCallback",
+    "RunScores",
     "SingleRunResult",
     "run_eval",
+    "score_run",
 ]
