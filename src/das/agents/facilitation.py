@@ -48,6 +48,11 @@ class BiasReport:
     over_supported_claims: list[Node] = field(default_factory=list)
     """支持を 2 件以上受けて反論が無い発話 claim ノード。"""
 
+    unanswered_attacks: list[Node] = field(default_factory=list)
+    """攻撃を 1 件以上受けて支持が 0 の発話 claim ノード (未応答の反論)。weak_claims を
+    含む上位集合。af_l2 の偏りトリガーはこれ (行動可能な争点) のみで発火し、over
+    (支持偏重) 単独では発火しない。"""
+
     @property
     def imbalance_ratio(self) -> float:
         """0 = 完全均衡, 1 = 完全に片寄り。"""
@@ -204,14 +209,20 @@ class FacilitationAgent(BaseAgent):
 
         weak: list[Node] = []
         over: list[Node] = []
+        unanswered: list[Node] = []
         for node_id, counts in per_node.items():
             node = store.get_node(node_id)
             if node is None or node.source != "utterance":
                 continue
-            if counts.get("attack", 0) >= 2 and counts.get("support", 0) == 0:
+            n_a = counts.get("attack", 0)
+            n_s = counts.get("support", 0)
+            if n_a >= 2 and n_s == 0:
                 weak.append(node)
-            elif counts.get("support", 0) >= 2 and counts.get("attack", 0) == 0:
+            elif n_s >= 2 and n_a == 0:
                 over.append(node)
+            # 未応答の反論: 攻撃を受けているのに支持が 0 (weak を含む上位集合)。
+            if n_a >= 1 and n_s == 0:
+                unanswered.append(node)
 
         dominant: Literal["support", "attack", "balanced"]
         if n_support == 0 and n_attack == 0:
@@ -229,6 +240,7 @@ class FacilitationAgent(BaseAgent):
             dominant_side=dominant,
             weak_claims=weak,
             over_supported_claims=over,
+            unanswered_attacks=unanswered,
         )
 
     # --- ステージ検知 (グラフ状態ベース) -------------------------------
@@ -397,13 +409,14 @@ class FacilitationAgent(BaseAgent):
                     f"停滞 (直近 {stage.n_recent_utterances} 発話で新 claim "
                     f"{stage.new_claims_in_window} 件 / 新 attack {stage.new_attacks_in_window} 件)"
                 )
-            # 偏りトリガーは窓内の件数条件 (累積比率は廃止, logic_review B3):
-            # 窓内に「攻撃過多で支持ゼロ (weak)」または「支持過多で反論ゼロ (over)」の
-            # 主張が 1 件でもあれば俯瞰で扱う。
-            if len(bias.weak_claims) + len(bias.over_supported_claims) >= 1:
+            # 偏りトリガーは「行動可能な争点」に限定する (課題1):
+            # 窓内に未応答の反論 (攻撃を受けて支持ゼロ = weak を含む) がある場合のみ
+            # 俯瞰で扱う。over (支持偏重・反論ゼロ) は合意が進んでいるだけで介入余地が
+            # 薄いため、単独では発火させない。
+            if bias.unanswered_attacks:
                 l2_triggers.append(
-                    f"構造的偏り (窓内 weak={len(bias.weak_claims)}, "
-                    f"over={len(bias.over_supported_claims)})"
+                    f"未応答の反論 (窓内 unanswered={len(bias.unanswered_attacks)}, "
+                    f"weak={len(bias.weak_claims)}; over={len(bias.over_supported_claims)})"
                 )
 
         if l2_triggers:

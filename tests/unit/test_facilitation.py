@@ -101,6 +101,23 @@ def test_bias_over_supported_detected(
     assert n["a1"] in bias.over_supported_claims
 
 
+def test_bias_unanswered_excludes_over_supported(
+    cafeteria_store: tuple[NetworkXGraphStore, dict[str, Node]],
+) -> None:
+    """課題1: 攻撃を受け支持0 の claim だけ unanswered_attacks に入り、over(支持偏重)
+    は入らない。af_l2 偏りトリガーは unanswered のみで発火する。"""
+    store, n = cafeteria_store
+    # a1: 攻撃1件・支持0 → 未応答の反論。a2: 支持2件・攻撃0 → over (未応答ではない)。
+    store.add_edge(Edge(src_id=n["a2"].id, dst_id=n["a1"].id, relation="attack", confidence=0.9))
+    store.add_edge(Edge(src_id=n["a3"].id, dst_id=n["a2"].id, relation="support", confidence=0.9))
+    store.add_edge(Edge(src_id=n["a4"].id, dst_id=n["a2"].id, relation="support", confidence=0.8))
+    agent = FacilitationAgent(llm=_fake_llm())
+    bias = agent.detect_bias(store)
+    assert n["a1"] in bias.unanswered_attacks
+    assert n["a2"] in bias.over_supported_claims
+    assert n["a2"] not in bias.unanswered_attacks
+
+
 # --- detect_stage -------------------------------------------------------
 
 
