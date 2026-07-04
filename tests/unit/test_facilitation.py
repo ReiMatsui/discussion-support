@@ -9,6 +9,8 @@ import pytest
 from das.agents.facilitation import (
     BiasReport,
     FacilitationAgent,
+    InfoItem,
+    InterventionDecision,
     StageReport,
 )
 from das.graph.schema import Edge, Node
@@ -470,6 +472,105 @@ def test_reset_clears_internal_state() -> None:
     agent.reset()
     # reset 後は再び 1 ターン目から始まったかのように扱える
     assert agent._last_decision_kind is None  # type: ignore[attr-defined]
+
+
+# --- L1 価値ゲート (B1, フェーズ4) --------------------------------------
+
+
+def _l1_decision(*items: InfoItem) -> InterventionDecision:
+    return InterventionDecision(kind="l1", items=list(items), addressed_to="A", reason="r")
+
+
+def _item(relation: str, *, source_text: str, source_kind: str = "utterance",
+          target_text: str = "最新主張", target_speaker: str = "A") -> InfoItem:
+    return InfoItem(
+        relation=relation,  # type: ignore[arg-type]
+        target_text=target_text,
+        target_speaker=target_speaker,
+        source_text=source_text,
+        source_kind=source_kind,  # type: ignore[arg-type]
+        source_author="X",
+        confidence=0.8,
+    )
+
+
+def _gate_store(target_turn: int = 20, n_support: int = 0) -> tuple[NetworkXGraphStore, Node]:
+    store = NetworkXGraphStore()
+    target = Node(text="最新主張", node_type="claim", source="utterance", author="A",
+                  turn_index=target_turn, metadata={"turn_id": target_turn})
+    store.add_node(target)
+    for i in range(n_support):
+        s = Node(text=f"支持{i}", node_type="evidence", source="document", author=f"d{i}")
+        store.add_node(s)
+        store.add_edge(Edge(src_id=s.id, dst_id=target.id, relation="support", confidence=0.8))
+    return store, target
+
+
+def test_l1_gate_keeps_unanswered_attack() -> None:
+    """未応答の攻撃は緊張ありで残る。"""
+    agent = FacilitationAgent(llm=_fake_llm())
+    store, _ = _gate_store()
+    decision = _l1_decision(_item("attack", source_text="コスト懸念"))
+    out = agent.apply_l1_value_gate(decision, store, [_utt(20, "A")])
+    assert out.kind == "l1"
+    assert len(out.items) == 1
+
+
+def test_l1_gate_drops_mere_support() -> None:
+    """単なる発話同士の支持は緊張なしで落ちる → skip。"""
+    agent = FacilitationAgent(llm=_fake_llm())
+    store, _ = _gate_store()
+    decision = _l1_decision(_item("support", source_text="同意です", source_kind="utterance"))
+    out = agent.apply_l1_value_gate(decision, store, [_utt(20, "A")])
+    assert out.kind == "skip"
+
+
+def test_l1_gate_keeps_evidence_for_unsupported_claim() -> None:
+    """根拠なし主張への evidence 支持は残る。既に支持があれば落ちる。"""
+    agent = FacilitationAgent(llm=_fake_llm())
+    # 支持ゼロ → 残る
+    store0, _ = _gate_store(n_support=0)
+    d = _l1_decision(_item("support", source_text="統計データ", source_kind="document"))
+    assert agent.apply_l1_value_gate(d, store0, [_utt(20, "A")]).kind == "l1"
+    # 既に支持2件 → evidence 支持は冗長で落ちる
+    store2, _ = _gate_store(n_support=2)
+    d2 = _l1_decision(_item("support", source_text="別の統計", source_kind="document"))
+    assert agent.apply_l1_value_gate(d2, store2, [_utt(20, "A")]).kind == "skip"
+
+
+def test_l1_gate_drops_already_presented() -> None:
+    """提示済み集合にある source_text は新規性なしで落ちる。"""
+    agent = FacilitationAgent(llm=_fake_llm())
+    store, _ = _gate_store()
+    d = _l1_decision(_item("attack", source_text="コスト懸念"))
+    out = agent.apply_l1_value_gate(d, store, [_utt(20, "A")],
+                                    presented_source_texts={"コスト懸念"})
+    assert out.kind == "skip"
+
+
+def test_l1_gate_drops_text_already_in_transcript() -> None:
+    """source_text の主要部が直近 transcript に既出なら落ちる。"""
+    agent = FacilitationAgent(llm=_fake_llm())
+    store, _ = _gate_store()
+    d = _l1_decision(_item("attack", source_text="コスト懸念がある"))
+    transcript = [_utt(19, "B", "コスト懸念があるよね"), _utt(20, "A", "最新主張")]
+    assert agent.apply_l1_value_gate(d, store, transcript).kind == "skip"
+
+
+def test_l1_gate_drops_stale_target() -> None:
+    """対象主張が窓外 (turn_index < window_start) なら落ちる。"""
+    agent = FacilitationAgent(llm=_fake_llm())
+    store, _ = _gate_store(target_turn=1)  # ずっと前の主張
+    d = _l1_decision(_item("attack", source_text="コスト懸念"))
+    # 現在ターン20, active_window=12 → window_start=9。turn1 は窓外。
+    assert agent.apply_l1_value_gate(d, store, [_utt(20, "A")]).kind == "skip"
+
+
+def test_l1_gate_passthrough_non_l1() -> None:
+    """skip / L2 はそのまま通す。"""
+    agent = FacilitationAgent(llm=_fake_llm())
+    skip = InterventionDecision(kind="skip", reason="x")
+    assert agent.apply_l1_value_gate(skip, NetworkXGraphStore(), []) is skip
 
 
 # --- compose_l2_brief (deterministic fallback) ---------------------------

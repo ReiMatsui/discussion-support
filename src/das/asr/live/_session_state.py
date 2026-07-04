@@ -120,6 +120,12 @@ class SessionState:
         # 「今、整理が価値を足す」とLLM判定したときだけ {"focus": str} を積む。
         # _run_agent_worker が裁定して trigger する（count の無条件介入を置換）。
         self.summarize_requests: queue.Queue[dict[str, Any]] = queue.Queue()
+        # AF ベース介入の要求キュー（H1 フェーズ4）。_run_af_checker が
+        # decide_intervention + 価値ゲートの結果を積む。AF ランタイム有効時のみ動く。
+        # {"kind": "af_l1"|"af_l2", "brief", "af_text", "target_speaker"} を積む。
+        self.af_requests: queue.Queue[dict[str, Any]] = queue.Queue()
+        # AF ランタイム (run_af_runtime がセット)。None ならルールベースのみ。
+        self.af_runtime: Any = None
         # 直近の手動呼び出しの進行状況（UX観測用, UI表示）。
         # {"status": queued|waiting|dispatched|delivered|expired|cancelled,
         #  "detail", "source", "request", "at", "wait_sec"} または None。

@@ -16,6 +16,7 @@ from das.asr.live._facilitation import (
     InterventionLogEntry,
     confidence_score,
     fact_expires_at,
+    policy_for,
 )
 from das.asr.live._workers import (
     _build_candidates,
@@ -58,6 +59,17 @@ def _summarize(now, *, focus="論点の整理"):
     return InterventionCandidate(id="summarize", kind="summarize", brief=focus,
                                  created_at=now, retryable=True,
                                  payload={"focus": focus})
+
+
+def _af_l1(now, *, cid="af_l1", conf=0.8):
+    return InterventionCandidate(id=cid, kind="af_l1", brief="関係ラベル付き提示",
+                                 confidence=conf, created_at=now,
+                                 interrupt_policy="wait_for_pause")
+
+
+def _af_l2(now):
+    return InterventionCandidate(id="af_l2", kind="af_l2", brief="議論の俯瞰",
+                                 created_at=now, interrupt_policy="wait_for_pause")
 
 
 # ---------------------------------------------------------------------------
@@ -156,6 +168,55 @@ def test_fact_preferred_over_manual():
     d = c.arbitrate(_inp([_manual(now), _fact(now)], now=now))
     assert d.candidate_id == "fact-1"
     assert any(s["candidate_id"] == "manual" for s in d.suppressed)
+
+
+# --- AF ベース介入 (フェーズ4b) -----------------------------------------
+
+
+def test_af_policy_values():
+    """af_l1 / af_l2 のポリシーが設計どおり (priority / pause / cooldown / scope)."""
+    l1 = policy_for("af_l1")
+    assert (l1.priority, l1.pause, l1.cooldown, l1.cooldown_scope) == (4, 1.5, 20.0, "kind")
+    l2 = policy_for("af_l2")
+    assert (l2.priority, l2.pause, l2.cooldown, l2.cooldown_scope) == (6, 2.0, 60.0, "global")
+
+
+def test_af_l1_arbitrated_when_pause_met():
+    now = time.monotonic()
+    c = FacilitationController()
+    # pause 1.5s 必要。silence 2.0s なら採択
+    d = c.arbitrate(_inp([_af_l1(now)], silence_elapsed=2.0, now=now))
+    assert d.candidate_id == "af_l1"
+    # silence 1.0s (<1.5) なら間待ちで抑制
+    d2 = c.arbitrate(_inp([_af_l1(now)], silence_elapsed=1.0, now=now))
+    assert d2.candidate_id is None
+    assert any(s["code"] == "awaiting_pause" for s in d2.suppressed)
+
+
+def test_af_l2_needs_longer_pause():
+    now = time.monotonic()
+    c = FacilitationController()
+    assert c.arbitrate(_inp([_af_l2(now)], silence_elapsed=2.5, now=now)).candidate_id == "af_l2"
+    assert c.arbitrate(_inp([_af_l2(now)], silence_elapsed=1.8, now=now)).candidate_id is None
+
+
+def test_fact_preferred_over_af_l1():
+    """fact (priority0) は af_l1 (priority4) より優先される."""
+    now = time.monotonic()
+    c = FacilitationController()
+    d = c.arbitrate(_inp([_af_l1(now), _fact(now)], silence_elapsed=2.0, now=now))
+    assert d.candidate_id == "fact-1"
+    assert any(s["candidate_id"] == "af_l1" for s in d.suppressed)
+
+
+def test_af_l1_preferred_over_invite():
+    """af_l1 (priority4) は invite (priority6) より優先される."""
+    now = time.monotonic()
+    c = FacilitationController()
+    invite = InterventionCandidate(id="invite-B", kind="invite", brief="Bさんに声かけ",
+                                   target_speaker="B", created_at=now)
+    d = c.arbitrate(_inp([invite, _af_l1(now)], silence_elapsed=3.0, now=now))
+    assert d.candidate_id == "af_l1"
 
 
 def test_manual_preferred_over_drift():

@@ -39,6 +39,7 @@ from das.asr.live._workers import (
     _connect_agent,
     _on_agent_text_factory,
     _on_partner_text_factory,
+    _run_af_checker,
     _run_agenda_detector,
     _run_drift_checker,
     _run_fact_checker,
@@ -95,6 +96,7 @@ class LiveArgs:
     debate_voice: str = "echo"
     topic: str | None = None   # 人間同士モードの議題（脱線判定の基準）
     proactivity: str = "standard"  # 介入の積極性（controlled/standard/active）
+    af: bool = False  # AF ベース介入を有効化 (H1 フェーズ4)。既定 OFF (モード方針)。
 
 
 # ---------------------------------------------------------------------------
@@ -757,11 +759,15 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
                 threading.Thread(target=_run_structuring_checker,
                                 args=(state, _oai_key, _oai_model), daemon=True).start()
                 print("# 整理介入: 有効（N発話到達時にLLMで価値判定）", flush=True)
-                # --- AF ランタイム (H1 フェーズ3, 介入なし・レイテンシ計測) ---
-                # extraction/linking を毎発話回すため API コストが増える。既定では
-                # 無効で、DAS_AF_RUNTIME=1 のときだけ常駐させる (フェーズ4 で
-                # Controller に接続したら既定 ON に切り替える想定)。
-                if os.environ.get("DAS_AF_RUNTIME") == "1":
+                # --- AF ランタイム + AF 介入 (H1 フェーズ3/4) ---
+                # extraction/linking を毎発話回すため API コストが増える。**既定では
+                # 無効**で、--af または DAS_AF_RUNTIME=1 のときだけ常駐＋介入する
+                # (モード方針 2026-07-03: 既定 OFF・ルールベースモード恒久維持)。
+                _af_enabled = (
+                    os.environ.get("DAS_AF_RUNTIME") == "1"
+                    or bool(getattr(args, "af", False))
+                )
+                if _af_enabled:
                     _af_snapshot = os.path.splitext(out_path)[0] + ".af.json"
                     threading.Thread(
                         target=run_af_runtime,
@@ -772,7 +778,11 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
                         },
                         daemon=True,
                     ).start()
-                    print("# AF ランタイム: 有効（介入なし・レイテンシ計測）", flush=True)
+                    # AF checker: AF から介入候補を作り Controller 採否へ流す (フェーズ4)
+                    threading.Thread(
+                        target=_run_af_checker, args=(state,), daemon=True,
+                    ).start()
+                    print("# AF 介入: 有効（--af / DAS_AF_RUNTIME=1）", flush=True)
                 # --- 議題未指定なら冒頭アジェンダ自動検出（S3） ---
                 if not _explicit_agenda:
                     threading.Thread(target=_run_agenda_detector,

@@ -32,6 +32,8 @@ from das.types import Utterance
 
 Stage = Literal["diverge", "converge", "stalled"]
 DecisionKind = Literal["skip", "l1", "l2"]
+L1SkipReason = Literal["no_tension", "already_presented", "stale"]
+"""L1 価値ゲートで候補を落とした理由コード (B1)。「なぜ出さなかったか」は一次データ。"""
 
 
 @dataclass(frozen=True)
@@ -544,6 +546,130 @@ class FacilitationAgent(BaseAgent):
                 reason=decision.reason,
             )
         return decision
+
+    # --- L1 価値ゲート (B1, フェーズ4) ---------------------------------
+
+    def apply_l1_value_gate(
+        self,
+        decision: InterventionDecision,
+        store: GraphStore,
+        transcript: list[Utterance],
+        *,
+        presented_source_texts: set[str] | None = None,
+    ) -> InterventionDecision:
+        """L1 候補を「緊張 × 新規性 × 鮮度」で絞る (logic_review B1)。
+
+        AF ライブ経路 (AF checker) が ``decide_intervention`` の L1 に後置適用する。
+        eval / 従来経路の挙動は変えない (この関数を呼ばなければ従来どおり)。落とした
+        候補は理由コード付きでログする (``af_l1_skip``)。全部落ちたら skip を返す。
+
+        判定 (すべて満たすものだけ残す):
+          1. 緊張: 対象への「未応答の攻撃」または「根拠なし主張への evidence 支持」
+             (単なる発話同士の支持・類似は出さない)
+          2. 新規性: source_text が提示済み集合になく、直近 transcript にも既出でない
+          3. 鮮度: 対象主張がアクティブ窓内
+        """
+
+        if decision.kind != "l1":
+            return decision
+        presented = presented_source_texts or set()
+        current_turn = transcript[-1].turn_id if transcript else 0
+        window_start = current_turn - self._active_window + 1
+        recent_text = " ".join(u.text for u in transcript[-self._active_window :])
+
+        kept: list[InfoItem] = []
+        for item in decision.items:
+            target = self._find_target_node(item, store)
+            reason = self._l1_gate_reason(
+                item, target, store, window_start, presented, recent_text
+            )
+            if reason is not None:
+                self.log.info(
+                    "af_l1_skip",
+                    reason=reason,
+                    relation=item.relation,
+                    source=item.source_text[:40],
+                )
+                continue
+            kept.append(item)
+
+        if not kept:
+            return InterventionDecision(
+                kind="skip", reason="価値ゲートで全 L1 候補を抑制"
+            )
+        if len(kept) == len(decision.items):
+            return decision
+        return InterventionDecision(
+            kind="l1",
+            items=kept,
+            addressed_to=decision.addressed_to,
+            reason=decision.reason,
+        )
+
+    def _l1_gate_reason(
+        self,
+        item: InfoItem,
+        target: Node | None,
+        store: GraphStore,
+        window_start: int,
+        presented: set[str],
+        recent_text: str,
+    ) -> L1SkipReason | None:
+        """L1 候補を落とす理由。残すべきなら None を返す。"""
+
+        # 鮮度: 対象主張が窓外なら落とす
+        if target is not None and target.turn_index < window_start:
+            return "stale"
+        # 緊張: 未応答の攻撃 / 根拠なし主張への evidence 支持 でなければ落とす
+        if not self._item_has_tension(item, target, store):
+            return "no_tension"
+        # 新規性: 提示済み or 直近 transcript に既出なら落とす
+        src = item.source_text.strip()
+        if src and (src in presented or self._text_already_seen(src, recent_text)):
+            return "already_presented"
+        return None
+
+    @staticmethod
+    def _item_has_tension(
+        item: InfoItem, target: Node | None, store: GraphStore
+    ) -> bool:
+        """この L1 候補が構造的緊張を表すか (B1)。"""
+
+        if item.relation == "attack":
+            # 対象主張への攻撃 = 未応答の攻撃を通知する価値がある
+            return True
+        if item.relation == "support" and item.source_kind in ("document", "web"):
+            # evidence が支持 → 対象が「根拠なし主張」(他に support が無い) なら価値あり
+            if target is None:
+                return False
+            n_support = sum(
+                1
+                for e in store.neighbors(target.id, direction="in")
+                if e.relation == "support"
+            )
+            return n_support <= 1
+        # 単なる発話同士の支持・類似は出さない
+        return False
+
+    @staticmethod
+    def _text_already_seen(source_text: str, recent_text: str) -> bool:
+        """source_text の主要部が直近 transcript に既出か (簡易部分一致)。"""
+
+        head = source_text.strip()[:15]
+        return bool(head) and head in recent_text
+
+    @staticmethod
+    def _find_target_node(item: InfoItem, store: GraphStore) -> Node | None:
+        """L1 候補の対象 (target) 発話ノードを text+author で引く。"""
+
+        for n in store.nodes():
+            if (
+                n.source == "utterance"
+                and n.text == item.target_text
+                and n.author == item.target_speaker
+            ):
+                return n
+        return None
 
     def _compose_l2_brief_or_fallback(
         self,
