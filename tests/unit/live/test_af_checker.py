@@ -96,6 +96,35 @@ def test_af_checker_skips_conversation_mode():
     assert _af_checker_tick(state, _fac_agent(), set()) == 0
 
 
+def test_af_l2_refire_guard_requires_new_nodes():
+    """前回 af_l2 以降に新規発話ノードが4件追加されるまで af_l2 を再発火しない。"""
+    from das.agents.facilitation import InterventionDecision
+
+    store = _store_with_unanswered_attack()  # 発話ノード2件
+    runtime = SimpleNamespace(store=store)
+    state = _FakeState([{"speaker": "A", "text": "x"}], af_runtime=runtime)
+    facil = _fac_agent()
+    # decide を常に L2 (停滞) にして、ガードだけを検証する
+    facil.decide_intervention = lambda transcript, s: InterventionDecision(  # type: ignore[method-assign]
+        kind="l2", brief="俯瞰", reason="停滞")
+    gate: dict = {}
+
+    assert _af_checker_tick(state, facil, set(), gate) == 1  # 初回は発火
+    assert gate["last_l2_node_count"] == 2
+    # 新規ノード追加なし → 抑止
+    assert _af_checker_tick(state, facil, set(), gate) == 0
+    # 発話ノードを3件だけ追加 → まだ不足 (< 4)
+    for i in range(3):
+        store.add_node(Node(text=f"a{i}", node_type="claim", source="utterance",
+                            author="A", turn_index=10 + i))
+    assert _af_checker_tick(state, facil, set(), gate) == 0
+    # さらに1件追加 → 計4件 → 再発火
+    store.add_node(Node(text="a4", node_type="claim", source="utterance",
+                        author="A", turn_index=20))
+    assert _af_checker_tick(state, facil, set(), gate) == 1
+    assert gate["last_l2_node_count"] == 6
+
+
 # --- 候補プラミング -----------------------------------------------------
 
 

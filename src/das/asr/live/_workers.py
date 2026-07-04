@@ -1464,13 +1464,25 @@ def _af_l1_presentation(decision: Any) -> str:
     return "\n".join(lines)
 
 
-def _af_checker_tick(state: SessionState, facil: Any, presented: set[str]) -> int:
+# af_l2 再発火ガード: 前回 af_l2 以降にグラフへ新規発話ノードがこれだけ追加される
+# まで次の af_l2 を出さない (cooldown とは別の「状態が十分変化したか」条件)。
+_AF_L2_MIN_NEW_NODES = 4
+
+
+def _af_checker_tick(
+    state: SessionState, facil: Any, presented: set[str],
+    af_gate: dict[str, int] | None = None,
+) -> int:
     """AF checker の 1 周分。af 候補を state.af_requests に積み、積んだ件数を返す。
 
     ``facil`` は :class:`FacilitationAgent`。``presented`` は提示済み source_text 集合
-    (呼び出し側が meeting 世代ごとに保持)。テスト容易性のため 1 周を関数化してある。
+    (呼び出し側が meeting 世代ごとに保持)。``af_gate`` は af_l2 再発火ガードの状態
+    ({"last_l2_node_count": int})。テスト容易性のため 1 周を関数化してある。
     """
     from das.types import Utterance
+
+    if af_gate is None:
+        af_gate = {}
 
     runtime = getattr(state, "af_runtime", None)
     if runtime is None:
@@ -1518,6 +1530,17 @@ def _af_checker_tick(state: SessionState, facil: Any, presented: set[str]) -> in
         })
         print(f"# [af] → af_l1 候補を投入（{len(decision.items)}件）", flush=True)
         return 1
+    # af_l2 再発火ガード: 前回 af_l2 以降に新規発話ノードが規定数追加されるまで出さない。
+    n_utt = sum(1 for node in store.nodes() if node.source == "utterance")
+    last = af_gate.get("last_l2_node_count")
+    if last is not None and n_utt - last < _AF_L2_MIN_NEW_NODES:
+        print(
+            f"# [af] af_l2 skip: 前回af_l2以降の新規発話ノード不足 "
+            f"({n_utt - last}/{_AF_L2_MIN_NEW_NODES})",
+            flush=True,
+        )
+        return 0
+    af_gate["last_l2_node_count"] = n_utt
     state.af_requests.put({
         "kind": "af_l2",
         "brief": decision.reason,
@@ -1540,6 +1563,7 @@ def _run_af_checker(state: SessionState, *, interval: float = 3.0) -> None:
 
     facil = FacilitationAgent(llm=None)  # decide_intervention は LLM を呼ばない (決定的)
     presented: set[str] = set()
+    af_gate: dict[str, int] = {}
     epoch = state.meeting_epoch
     while not state.stop.is_set():
         time.sleep(interval)
@@ -1548,8 +1572,9 @@ def _run_af_checker(state: SessionState, *, interval: float = 3.0) -> None:
         if state.meeting_epoch != epoch:
             epoch = state.meeting_epoch
             presented = set()
+            af_gate = {}
             facil.reset()
-        _af_checker_tick(state, facil, presented)
+        _af_checker_tick(state, facil, presented, af_gate)
 
 
 def _on_agent_text_factory(state: SessionState):
