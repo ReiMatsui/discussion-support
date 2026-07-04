@@ -446,7 +446,11 @@ def _build_candidates(
             retryable=True,
         ))
 
-    if mode != "conversation" and pending.summarize:
+    # summarize 抑止規則 (設計 88f9a78): pending に af_l2 が保留されている間は
+    # summarize 候補を生成しない (af_l2 が整理介入を代表する)。priority は変えない。
+    # af 候補は --af 有効時しか存在しないため、ルールベースモードの挙動は不変。
+    _af_l2_pending = bool(pending.af) and str(pending.af.get("kind") if pending.af else "") == "af_l2"
+    if mode != "conversation" and pending.summarize and not _af_l2_pending:
         s = pending.summarize
         focus = str(s.get("focus") or "").strip()
         created = float(s.get("created_at", now))

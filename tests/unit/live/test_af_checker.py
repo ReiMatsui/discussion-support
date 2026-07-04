@@ -130,6 +130,27 @@ def test_no_af_candidate_when_pending_empty():
     assert not any(c.kind in ("af_l1", "af_l2") for c in cands)
 
 
+def test_pending_af_l2_suppresses_summarize():
+    """保留中 af_l2 がある間は summarize 候補を生成しない (設計88f9a78)。"""
+    now = time.monotonic()
+    agent = SimpleNamespace(mode="facilitator", pending_count=0, _pending_intervention=None)
+    # summarize と af_l2 が両方保留
+    pending = _PendingInterventions()
+    pending.summarize = {"focus": "整理", "created_at": now}
+    pending.af = {"kind": "af_l2", "brief": "俯瞰", "af_text": "t", "created_at": now}
+    kinds = {c.kind for c in _build_candidates(pending, agent, now=now)}
+    assert "af_l2" in kinds
+    assert "summarize" not in kinds  # 抑止された
+
+    # af_l1 保留では summarize は抑止されない (af_l2 のときだけ)
+    pending2 = _PendingInterventions()
+    pending2.summarize = {"focus": "整理", "created_at": now}
+    pending2.af = {"kind": "af_l1", "brief": "提示", "af_text": "t", "created_at": now}
+    kinds2 = {c.kind for c in _build_candidates(pending2, agent, now=now)}
+    assert "summarize" in kinds2
+    assert "af_l1" in kinds2
+
+
 def test_controller_normal_decision_maps_af():
     now = time.monotonic()
     pending = _PendingInterventions()
