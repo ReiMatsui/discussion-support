@@ -16,17 +16,19 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import threading
 import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from das.agents.linking import cosine_similarity
 from das.graph.store import GraphStore, NetworkXGraphStore
 from das.llm import OpenAIClient
 from das.logging import get_logger
 from das.runtime import Orchestrator
 from das.types import Utterance
-from das.viz.render import dump_snapshot
 
 from ._constants import AGENT_SPEAKER
 from ._speaker_policy import intervention_records, intervention_speaker_name
@@ -85,6 +87,32 @@ class AFRuntime:
             "linking": [],
             "total": [],
         }
+        # 介入ノード・応答エッジの計測 (フェーズ5, B4)。制御には使わず記録のみ。
+        # AF の argumentation スキーマ (support/attack) を汚さないよう、Node/Edge では
+        # なく計測専用の構造で保持し snapshot / interventions.jsonl に落とす。
+        self._interventions: list[dict[str, Any]] = []
+        self._response_edges: list[dict[str, Any]] = []
+        self._intervention_lock = threading.Lock()
+        self._responds_threshold = 0.6
+
+    def note_intervention(self, kind: str, text: str) -> None:
+        """worker が af 介入を配信したときに呼ぶ (別スレッド安全)。受容計測用に記録する。
+
+        提示された介入を「intervention ノード」相当として記録し、以降の発話取り込みで
+        embedding 類似が閾値超なら responds_to (受容の痕跡) を張る = ライブ版 citation。
+        """
+        if not text:
+            return
+        with self._intervention_lock:
+            iv_id = f"iv-{len(self._interventions) + 1:03d}"
+            self._interventions.append({
+                "id": iv_id,
+                "kind": kind,
+                "text": text,
+                "at": time.time(),
+                "presented_at_turn": self._cursor,
+                "embedding": None,  # 遅延埋め込み (af_runtime スレッドで計算)
+            })
 
     @property
     def store(self) -> GraphStore:
@@ -128,6 +156,8 @@ class AFRuntime:
         self.latencies_ms["extraction"].append(ext_ms)
         self.latencies_ms["linking"].append(link_ms)
         self.latencies_ms["total"].append(total_ms)
+        # 受容の痕跡 (responds_to) を計測する (フェーズ5, 制御には使わない)
+        await self._detect_responds_to(nodes)
         _log.info(
             "af_runtime.ingested",
             turn_index=utterance.turn_id,
@@ -137,6 +167,37 @@ class AFRuntime:
             linking_ms=round(link_ms, 1),
             total_ms=round(total_ms, 1),
         )
+
+    async def _detect_responds_to(self, new_nodes: list[Any]) -> None:
+        """新規発話ノードが過去の af 介入に応答しているか (embedding 類似) を記録する。
+
+        閾値超なら responds_to (受容の痕跡) を計測レイヤに追加する。linking が計算
+        済みの発話ノード embedding を再利用し、介入テキストのみ遅延埋め込みする。
+        """
+
+        with self._intervention_lock:
+            interventions = list(self._interventions)
+        if not interventions or not new_nodes:
+            return
+        node_vecs = self._orch.linking.embeddings  # {node_id: vec}
+        for iv in interventions:
+            if iv.get("embedding") is None:
+                try:
+                    iv["embedding"] = await self._llm.embed_one(str(iv["text"]))
+                except Exception:  # pragma: no cover - 防御的
+                    continue
+            for node in new_nodes:
+                vec = node_vecs.get(node.id)
+                if vec is None:
+                    continue
+                sim = cosine_similarity(iv["embedding"], vec)
+                if sim >= self._responds_threshold:
+                    self._response_edges.append({
+                        "intervention_id": iv["id"],
+                        "utterance_node_id": str(node.id),
+                        "similarity": round(sim, 3),
+                        "responded_at_turn": node.turn_index,
+                    })
 
     def latency_summary(self) -> dict[str, Any]:
         """各フェーズの p50/p90/件数を返す (レイテンシ実測レポート用)。"""
@@ -172,14 +233,52 @@ class AFRuntime:
         self._cursor = 0
         self._epoch = epoch
         self._recent_utts = []
+        with self._intervention_lock:
+            self._interventions = []
+        self._response_edges = []
         _log.info("af_runtime.reset", epoch=epoch)
 
+    def acceptance_summary(self) -> dict[str, Any]:
+        """ライブ版 citation: 配信した af 介入のうち応答された割合 (受容性指標)。"""
+
+        with self._intervention_lock:
+            n_iv = len(self._interventions)
+        responded = {e["intervention_id"] for e in self._response_edges}
+        return {
+            "n_interventions": n_iv,
+            "n_responded": len(responded),
+            "acceptance_rate": (len(responded) / n_iv) if n_iv else 0.0,
+            "n_response_edges": len(self._response_edges),
+        }
+
     def save_snapshot(self) -> None:
-        if self._snapshot_path is not None:
-            try:
-                dump_snapshot(self._store, self._snapshot_path)
-            except Exception as exc:  # pragma: no cover - 防御的
-                _log.warning("af_runtime.snapshot_failed", error=str(exc))
+        if self._snapshot_path is None:
+            return
+        try:
+            # snapshot に介入・応答エッジの計測を同梱する (embedding は保存しない)。
+            with self._intervention_lock:
+                ivs = [
+                    {k: v for k, v in iv.items() if k != "embedding"}
+                    for iv in self._interventions
+                ]
+            payload = {
+                **self._store.snapshot(),
+                "af_interventions": ivs,
+                "af_response_edges": list(self._response_edges),
+            }
+            self._snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+            self._snapshot_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2, default=str),
+                encoding="utf-8",
+            )
+            # 受容の痕跡 (responds_to) を interventions.jsonl にも落とす (段階C資産)
+            iv_path = self._snapshot_path.with_suffix(".interventions.jsonl")
+            iv_path.write_text(
+                "\n".join(json.dumps(e, ensure_ascii=False) for e in self._response_edges),
+                encoding="utf-8",
+            )
+        except Exception as exc:  # pragma: no cover - 防御的
+            _log.warning("af_runtime.snapshot_failed", error=str(exc))
 
     # --- ポーリング ----------------------------------------------------
 

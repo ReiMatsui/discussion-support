@@ -446,7 +446,11 @@ def _build_candidates(
             retryable=True,
         ))
 
-    if mode != "conversation" and pending.summarize:
+    # summarize 抑止規則 (設計 88f9a78): pending に af_l2 が保留されている間は
+    # summarize 候補を生成しない (af_l2 が整理介入を代表する)。priority は変えない。
+    # af 候補は --af 有効時しか存在しないため、ルールベースモードの挙動は不変。
+    _af_l2_pending = bool(pending.af) and str(pending.af.get("kind") if pending.af else "") == "af_l2"
+    if mode != "conversation" and pending.summarize and not _af_l2_pending:
         s = pending.summarize
         focus = str(s.get("focus") or "").strip()
         created = float(s.get("created_at", now))
@@ -2182,6 +2186,11 @@ def _run_agent_worker(state: SessionState):
             agent.trigger(topics=_topics,
                           af_presentation=normal_decision.af_text,
                           invite_target=normal_decision.invite_target)
+            # 受容計測 (フェーズ5): 配信した af 介入を AF ランタイムに記録する。
+            _af_rt = getattr(state, "af_runtime", None)
+            if _af_rt is not None and normal_decision.af_text:
+                with contextlib.suppress(Exception):
+                    _af_rt.note_intervention(_af_kind, normal_decision.af_text)
             _last_intervention_at = time.monotonic()
             _pending.clear_af()  # 採択したら消費
             _note_intervention(_last_intervention_at, _af_kind, normal_decision.detail)

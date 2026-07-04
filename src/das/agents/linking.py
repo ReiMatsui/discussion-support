@@ -302,6 +302,11 @@ class LinkingAgent(BaseAgent):
         """Retrieval 品質ログ。事後分析用。"""
         return self._quality_log
 
+    @property
+    def embeddings(self) -> dict[UUID, list[float]]:
+        """計算済みノード embedding のキャッシュ (node_id -> ベクトル)。読み取り用。"""
+        return self._embeddings
+
     async def link_node(self, target: Node, store: GraphStore) -> list[Edge]:
         """``target`` と既存ノード群との関係を推定し、閾値超のエッジを書き込む。
 
