@@ -1551,6 +1551,81 @@ def _af_checker_tick(
     return 1
 
 
+class _AfEarlyGenGate:
+    """af 介入の生成先行・再生ゲートの状態機械 (フェーズ6, **af 限定**).
+
+    毎ループ :meth:`tick` を呼ぶ。時計は持たず、``silence`` と ``new_utterance`` を
+    引数で受けるので、フェイク時計で状態遷移を単体テストできる。summarize 等
+    ルールベース種別には一切関与しない (モード方針: 対象は af_l1/af_l2 のみ)。
+
+    遷移:
+      - af 候補あり & 未 hold & agent フリー & 沈黙 [0.3s, pause) → trigger(hold) 生成先行
+      - hold 中 & 沈黙 >= pause (フロア成立) → release_playback で一斉再生
+      - hold 中 & 新規確定発話 (会話が動いた) → cancel_held で破棄 (リトライにしない)
+      - af 候補が消えた & hold 中 → cancel_held
+    """
+
+    EARLY_GEN_SILENCE = 0.3
+
+    def __init__(self) -> None:
+        self._holding = False
+        self._held_kind: str | None = None
+        self._held_af: dict[str, Any] | None = None
+
+    @property
+    def is_holding(self) -> bool:
+        return self._holding
+
+    @property
+    def held_kind(self) -> str | None:
+        return self._held_kind
+
+    def reset(self) -> None:
+        self._holding = False
+        self._held_kind = None
+        self._held_af = None
+
+    def tick(
+        self, *, agent: Any, af: dict[str, Any] | None,
+        silence: float, new_utterance: bool, agent_busy: bool,
+        topics: Any = None,
+    ) -> str:
+        """1 ループ分の処理。行った操作名 (trigger/release/cancel/holding/none) を返す。"""
+
+        # フロア成立前に新規確定発話が来たら、生成先行を破棄する。
+        if new_utterance and self._holding:
+            agent.cancel_held()
+            self.reset()
+            return "cancel"
+        if not af:
+            if self._holding:
+                agent.cancel_held()
+                self.reset()
+                return "cancel"
+            return "none"
+        kind = str(af.get("kind") or "af_l1")
+        pause = policy_for(kind).pause
+        if self._holding:
+            if silence >= pause:
+                agent.release_playback()  # フロア成立 → 貯めた音声を一斉再生
+                self.reset()
+                return "release"
+            return "holding"
+        # 未 hold: 生成先行の窓 [0.3s, pause) & agent フリーなら hold 付き trigger。
+        if not agent_busy and self.EARLY_GEN_SILENCE <= silence < pause:
+            agent.trigger(
+                topics=topics,
+                af_presentation=str(af.get("af_text") or ""),
+                invite_target=af.get("target_speaker"),
+                hold_playback=True,
+            )
+            self._holding = True
+            self._held_kind = kind
+            self._held_af = af
+            return "trigger"
+        return "none"
+
+
 def _run_af_checker(state: SessionState, *, interval: float = 3.0) -> None:
     """AF ベース介入の候補生成ワーカー（H1 フェーズ4, AF ランタイム有効時のみ）.
 
@@ -1757,6 +1832,10 @@ def _run_agent_worker(state: SessionState):
     # 物理タイミング（floor/barge-in）と fact fast lane は維持しつつ、
     # 「どの候補を今採るか／黙るか」を Controller が一元裁定する。
     _controller = FacilitationController()
+    # af 生成先行・再生ゲート (フェーズ6, --af 有効時のみ作動する。af 限定)。
+    _af_gate = _AfEarlyGenGate()
+    _af_held_text = ""
+    _af_held_kind = "af_l1"
     # 採否の経緯（採択/抑制/latency）を intervention_review.jsonl へ記録する。
     _review = _InterventionReviewRecorder()
     _recent_interventions: collections.deque[InterventionLogEntry] = (
@@ -1770,6 +1849,7 @@ def _run_agent_worker(state: SessionState):
     while not state.stop.is_set():
         time.sleep(0.25)
         _diag_tick += 1
+        _af_new_utt = False  # このtickで新規確定発話が来たか (af 生成先行のcancel用)
         partner = state.partner  # 動的参照: 実行中のパートナー接続/切断に追従（F3）
         if agent is None or not agent._connected or not agent.enabled:
             if agent is None or not agent.enabled:
@@ -1809,6 +1889,7 @@ def _run_agent_worker(state: SessionState):
                     continue
             if new_records:
                 _last_utt_time[0] = time.monotonic()
+                _af_new_utt = True  # フロア成立前なら af 生成先行を cancel する材料
             if _enabled:
                 # 音声呼びかけの検出は _run_triage_worker（LLM分類）が担う。
                 # ここでは発話をエージェントに供給するだけ。
@@ -1864,6 +1945,38 @@ def _run_agent_worker(state: SessionState):
         # --- drift_checker/participation_checkerからの要求を回収（R2/S4） ---
         # busyでも取りこぼさないよう、キューは毎ループ必ずdrainして最新を保持する。
         _pending.drain(state, now=time.monotonic())
+
+        # --- af 生成先行・再生ゲート (フェーズ6, --af 有効時のみ・af 限定) ---
+        # AF が無効 (既定) ならこのブロックは丸ごとスキップされ、ルールベースの
+        # 採否・trigger 経路は一切変わらない (モード方針)。summarize には関与しない。
+        if getattr(state, "af_runtime", None) is not None and _enabled:
+            try:
+                _af_action = _af_gate.tick(
+                    agent=agent,
+                    af=_pending.af,
+                    silence=_effective_silence(state, time.monotonic(), _last_utt_time),
+                    new_utterance=_af_new_utt,
+                    agent_busy=bool(agent._responding or agent.ai_speaking),
+                    topics=list(state.topics) if state.topics else None,
+                )
+                if _af_action == "trigger":
+                    _held = _pending.af or {}
+                    _af_held_text = str(_held.get("af_text") or "")
+                    _af_held_kind = str(_held.get("kind") or "af_l1")
+                    _pending.clear_af()  # 生成先行で消費 → Controller に二重採択させない
+                    _log_intervention_event(state, _af_held_kind, "af 生成先行(hold)")
+                elif _af_action == "release":
+                    _afrt = state.af_runtime
+                    if _afrt is not None and _af_held_text:
+                        with contextlib.suppress(Exception):
+                            _afrt.note_intervention(_af_held_kind, _af_held_text)
+                    _last_intervention_at = time.monotonic()
+                    _note_intervention(_last_intervention_at, _af_held_kind, "af release")
+                    _af_held_text = ""
+                if _af_gate.is_holding:
+                    _pending.clear_af()  # hold 中は af を1件ずつに保つ (積み増さない)
+            except Exception as _afe:  # pragma: no cover - 防御的
+                print(f"# [af] early-gen error: {_afe}", flush=True)
 
         # --- 最優先のバージイン（ガードバイパス）:
         # ①事実補正 ②脱線介入 ③中断介入のリトライ ---
