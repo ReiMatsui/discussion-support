@@ -20,7 +20,6 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
@@ -73,6 +72,10 @@ class StageReport:
 
     speaker_diversity: float
     """直近窓のユニーク話者比 (0..1)。発散の補助指標。"""
+
+    n_utterance_nodes_in_window: int = 0
+    """窓内 (直近ターン) に AF 取り込み済みの発話ノード数。0 なら会話停止 or 取り込み
+    遅れ = 停滞と診断しない (窓内に発話があるのに構造が伸びない場合のみ停滞)。"""
 
 
 @dataclass(frozen=True)
@@ -256,13 +259,20 @@ class FacilitationAgent(BaseAgent):
 
         new_claims = 0
         new_attacks = 0
+        n_utt_in_window = 0
         if store is not None:
-            new_claims, new_attacks = self._count_recent_additions(recent, store)
+            new_claims, new_attacks, n_utt_in_window = self._count_recent_additions(
+                recent, store
+            )
 
         stage: Stage
-        # stalled はグラフ状態に依存するため store 必須
+        # stalled はグラフ状態に依存するため store 必須。
+        # 新定義 (af_l2 連発の修正): 「窓内に AF 取り込み済みの発話ノードがある」のに
+        # 構造 (claim/attack) が伸びていないときだけ停滞とする。窓内に発話ノードが無い
+        # (会話停止 or AF 取り込み遅れ) なら停滞と診断しない。
         if (
             store is not None
+            and n_utt_in_window > 0
             and new_claims <= self._stall_max_new_claims
             and new_attacks <= self._stall_max_new_attacks
         ):
@@ -281,33 +291,37 @@ class FacilitationAgent(BaseAgent):
             new_claims_in_window=new_claims,
             new_attacks_in_window=new_attacks,
             speaker_diversity=diversity,
+            n_utterance_nodes_in_window=n_utt_in_window,
         )
 
     def _count_recent_additions(
         self, recent_utts: list[Utterance], store: GraphStore
-    ) -> tuple[int, int]:
-        """直近発話に対応する新 claim ノード数 / 新 attack エッジ数。
+    ) -> tuple[int, int, int]:
+        """直近発話の窓に対応する (新 claim 数, 新 attack 数, 窓内発話ノード数)。
 
-        対応キーは ``timestamp`` を使う (turn_id はシミュレーション固有で
-        対面では存在しない可能性があるため避ける)。
+        対応キーは ``turn_index`` を使う。以前は ``timestamp`` を使っていたが、ライブの
+        AF checker は毎 tick transcript を ``now()`` で作り直すため timestamp 窓が既存
+        ノードに一致せず、new_claims が常に 0 → 常時 stalled → af_l2 連発の根本原因だった。
+        turn_index は extraction がノードに付与し (発話連番)、transcript の turn_id と
+        整合するため、ライブ・eval の両方で正しく窓を切れる。
         """
 
         if not recent_utts:
-            return 0, 0
-        window_start: datetime = recent_utts[0].timestamp
+            return 0, 0, 0
+        min_turn = min(u.turn_id for u in recent_utts)
 
         utterance_nodes_in_window: set[UUID] = set()
         n_claims = 0
         for node in store.nodes():
             if node.source != "utterance":
                 continue
-            if node.timestamp >= window_start:
+            if node.turn_index >= min_turn:
                 utterance_nodes_in_window.add(node.id)
                 if node.node_type == "claim":
                     n_claims += 1
 
         if not utterance_nodes_in_window:
-            return n_claims, 0
+            return n_claims, 0, 0
 
         n_attacks = sum(
             1
@@ -315,7 +329,7 @@ class FacilitationAgent(BaseAgent):
             if e.relation == "attack"
             and (e.src_id in utterance_nodes_in_window or e.dst_id in utterance_nodes_in_window)
         )
-        return n_claims, n_attacks
+        return n_claims, n_attacks, len(utterance_nodes_in_window)
 
     # --- 介入判断 (Stage 1: いつ介入するか) ----------------------------
 
