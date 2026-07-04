@@ -117,14 +117,18 @@ def test_stage_diverge_with_diverse_speakers() -> None:
     assert stage.stage == "diverge"
 
 
-def test_stage_stalled_when_no_new_claims_or_attacks() -> None:
-    """直近窓で新 claim も新 attack も追加されていなければ stalled。"""
+def test_stage_stalled_when_window_has_nodes_but_no_new_claims() -> None:
+    """窓内に AF 取り込み済みの発話ノードがあるのに新 claim/attack が伸びなければ stalled。
 
-    # 古いノードのみがある store。直近発話に対応するノードは無い。
+    新定義 (af_l2 連発の修正): 直近ターンの発話ノードは存在する (会話は動いている) が
+    それらが premise ばかりで claim を生んでいない = 議論が回っている状態を停滞とする。
+    """
     store = NetworkXGraphStore()
-    old = Node(text="古い主張", node_type="claim", source="utterance", author="X")
-    store.add_node(old)
-
+    # 直近ターン (1〜4) の発話ノードはあるが、すべて premise で claim は 0
+    for i in range(1, 5):
+        store.add_node(Node(text=f"繰り返し前提{i}", node_type="premise",
+                            source="utterance", author="A", turn_index=i,
+                            metadata={"turn_id": i}))
     transcript = [
         Utterance(turn_id=i, speaker="A", text="繰り返しの発言") for i in range(1, 5)
     ]
@@ -132,7 +136,26 @@ def test_stage_stalled_when_no_new_claims_or_attacks() -> None:
     stage = agent.detect_stage(transcript, store)
     assert stage.stage == "stalled"
     assert stage.new_claims_in_window == 0
-    assert stage.new_attacks_in_window == 0
+    assert stage.n_utterance_nodes_in_window == 4
+
+
+def test_stage_not_stalled_when_window_has_no_af_nodes() -> None:
+    """窓内に AF ノードが無い (会話停止 / AF 取り込み遅れ) なら停滞と診断しない。
+
+    以前は timestamp 窓が既存ノードに一致せず new_claims=0 → 常時 stalled → af_l2
+    連発の根本原因だった。窓内発話ノード 0 のときは stalled にしない。
+    """
+    store = NetworkXGraphStore()
+    old = Node(text="古い主張", node_type="claim", source="utterance", author="X",
+               turn_index=0)  # 窓 (turn>=1) の外
+    store.add_node(old)
+    transcript = [
+        Utterance(turn_id=i, speaker="A", text="繰り返しの発言") for i in range(1, 5)
+    ]
+    agent = FacilitationAgent(llm=_fake_llm())
+    stage = agent.detect_stage(transcript, store)
+    assert stage.n_utterance_nodes_in_window == 0
+    assert stage.stage != "stalled"
 
 
 def test_stage_empty_transcript() -> None:

@@ -9,11 +9,13 @@ import queue
 import threading
 import time
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 from das.asr.live._facilitation import FacilitationController
 from das.asr.live._workers import (
     _af_checker_tick,
     _af_l1_presentation,
+    _AfEarlyGenGate,
     _build_candidates,
     _controller_normal_decision,
     _PendingInterventions,
@@ -96,6 +98,35 @@ def test_af_checker_skips_conversation_mode():
     assert _af_checker_tick(state, _fac_agent(), set()) == 0
 
 
+def test_af_l2_refire_guard_requires_new_nodes():
+    """前回 af_l2 以降に新規発話ノードが4件追加されるまで af_l2 を再発火しない。"""
+    from das.agents.facilitation import InterventionDecision
+
+    store = _store_with_unanswered_attack()  # 発話ノード2件
+    runtime = SimpleNamespace(store=store)
+    state = _FakeState([{"speaker": "A", "text": "x"}], af_runtime=runtime)
+    facil = _fac_agent()
+    # decide を常に L2 (停滞) にして、ガードだけを検証する
+    facil.decide_intervention = lambda transcript, s: InterventionDecision(  # type: ignore[method-assign]
+        kind="l2", brief="俯瞰", reason="停滞")
+    gate: dict = {}
+
+    assert _af_checker_tick(state, facil, set(), gate) == 1  # 初回は発火
+    assert gate["last_l2_node_count"] == 2
+    # 新規ノード追加なし → 抑止
+    assert _af_checker_tick(state, facil, set(), gate) == 0
+    # 発話ノードを3件だけ追加 → まだ不足 (< 4)
+    for i in range(3):
+        store.add_node(Node(text=f"a{i}", node_type="claim", source="utterance",
+                            author="A", turn_index=10 + i))
+    assert _af_checker_tick(state, facil, set(), gate) == 0
+    # さらに1件追加 → 計4件 → 再発火
+    store.add_node(Node(text="a4", node_type="claim", source="utterance",
+                        author="A", turn_index=20))
+    assert _af_checker_tick(state, facil, set(), gate) == 1
+    assert gate["last_l2_node_count"] == 6
+
+
 # --- 候補プラミング -----------------------------------------------------
 
 
@@ -173,6 +204,97 @@ def test_drop_stale_af():
     pending.af = {"kind": "af_l1", "created_at": now - 100.0}  # 45s TTL 超過
     pending.drop_stale_af(now=now)
     assert pending.af is None
+
+
+# --- _AfEarlyGenGate: 生成先行・再生ゲートの状態機械 (フェーズ6) --------
+
+
+def _gate_agent():
+    return MagicMock(trigger=MagicMock(), release_playback=MagicMock(),
+                     cancel_held=MagicMock())
+
+
+def _af_l1(af_text="[反論] X"):
+    return {"kind": "af_l1", "af_text": af_text, "target_speaker": "A"}
+
+
+def test_gate_early_generates_at_0_3s():
+    """沈黙 0.3s〜pause 未満 & agent フリーで hold 付き trigger する。"""
+    gate = _AfEarlyGenGate()
+    agent = _gate_agent()
+    # af_l1 pause=1.5。silence 0.4 → 生成先行
+    assert gate.tick(agent=agent, af=_af_l1(), silence=0.4,
+                     new_utterance=False, agent_busy=False) == "trigger"
+    assert gate.is_holding is True
+    _, kwargs = agent.trigger.call_args
+    assert kwargs["hold_playback"] is True
+    assert kwargs["af_presentation"] == "[反論] X"
+
+
+def test_gate_no_trigger_below_threshold_or_busy():
+    gate = _AfEarlyGenGate()
+    agent = _gate_agent()
+    assert gate.tick(agent=agent, af=_af_l1(), silence=0.1,
+                     new_utterance=False, agent_busy=False) == "none"
+    assert gate.tick(agent=agent, af=_af_l1(), silence=0.5,
+                     new_utterance=False, agent_busy=True) == "none"
+    agent.trigger.assert_not_called()
+
+
+def test_gate_no_early_trigger_when_pause_already_met():
+    """沈黙が既に pause 以上なら生成先行しない (通常 dispatch が扱う)。"""
+    gate = _AfEarlyGenGate()
+    agent = _gate_agent()
+    assert gate.tick(agent=agent, af=_af_l1(), silence=2.0,
+                     new_utterance=False, agent_busy=False) == "none"
+    assert gate.is_holding is False
+
+
+def test_gate_releases_at_pause():
+    gate = _AfEarlyGenGate()
+    agent = _gate_agent()
+    gate.tick(agent=agent, af=_af_l1(), silence=0.4, new_utterance=False, agent_busy=False)
+    # 沈黙 1.4 (< pause 1.5) → まだ保留
+    assert gate.tick(agent=agent, af=_af_l1(), silence=1.4,
+                     new_utterance=False, agent_busy=True) == "holding"
+    agent.release_playback.assert_not_called()
+    # 沈黙 1.6 (>= pause) → フロア成立で再生
+    assert gate.tick(agent=agent, af=_af_l1(), silence=1.6,
+                     new_utterance=False, agent_busy=True) == "release"
+    agent.release_playback.assert_called_once()
+    assert gate.is_holding is False
+
+
+def test_gate_cancels_on_new_utterance():
+    gate = _AfEarlyGenGate()
+    agent = _gate_agent()
+    gate.tick(agent=agent, af=_af_l1(), silence=0.4, new_utterance=False, agent_busy=False)
+    # フロア成立前に新規確定発話 → 破棄
+    assert gate.tick(agent=agent, af=_af_l1(), silence=0.8,
+                     new_utterance=True, agent_busy=True) == "cancel"
+    agent.cancel_held.assert_called_once()
+    assert gate.is_holding is False
+
+
+def test_gate_cancels_when_candidate_disappears():
+    gate = _AfEarlyGenGate()
+    agent = _gate_agent()
+    gate.tick(agent=agent, af=_af_l1(), silence=0.4, new_utterance=False, agent_busy=False)
+    assert gate.tick(agent=agent, af=None, silence=0.8,
+                     new_utterance=False, agent_busy=True) == "cancel"
+    agent.cancel_held.assert_called_once()
+
+
+def test_gate_af_l2_uses_longer_pause():
+    """af_l2 は pause 2.0。1.8 では保留、2.1 で release。"""
+    gate = _AfEarlyGenGate()
+    agent = _gate_agent()
+    af2 = {"kind": "af_l2", "af_text": "俯瞰", "target_speaker": None}
+    gate.tick(agent=agent, af=af2, silence=0.5, new_utterance=False, agent_busy=False)
+    assert gate.tick(agent=agent, af=af2, silence=1.8,
+                     new_utterance=False, agent_busy=True) == "holding"
+    assert gate.tick(agent=agent, af=af2, silence=2.1,
+                     new_utterance=False, agent_busy=True) == "release"
 
 
 def test_af_l1_presentation_labels():
