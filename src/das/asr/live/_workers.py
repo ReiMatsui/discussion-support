@@ -358,6 +358,7 @@ def _intervention_timing_metadata(
     queued_at: float | None = None,
     queued_wall_at: str | None = None,
     policy: str = "floor_pause",
+    hold_to_release_ms: float | None = None,
 ) -> dict:
     """介入の自然さ/遅延レビュー用タイミング情報を作る."""
     timing = {
@@ -370,6 +371,8 @@ def _intervention_timing_metadata(
         timing["candidate_wait_sec"] = round(max(0.0, now - queued_at), 3)
     if queued_wall_at:
         timing["candidate_created_at"] = queued_wall_at
+    if hold_to_release_ms is not None:
+        timing["hold_to_release_ms"] = round(hold_to_release_ms, 1)
     return timing
 
 
@@ -1467,17 +1470,32 @@ def _af_l1_presentation(decision: Any) -> str:
 # af_l2 再発火ガード: 前回 af_l2 以降にグラフへ新規発話ノードがこれだけ追加される
 # まで次の af_l2 を出さない (cooldown とは別の「状態が十分変化したか」条件)。
 _AF_L2_MIN_NEW_NODES = 4
+# 同種理由バックオフの上限。同じ理由タイプで状態が改善しないまま再発火が続くほど
+# 必要新規ノード数を倍化する (4→8→16)。理由タイプが変わるか応答エッジ検出でリセット。
+# 「無視されている介入を同じ調子で繰り返さない」(B4)。
+_AF_L2_MAX_NEW_NODES = 16
+_AF_L2_MAX_LEVEL = 2  # 4 * 2**2 = 16 で上限に達する
+
+
+def _af_l2_reason_type(reason: str) -> str:
+    """af_l2 の理由文字列を粗い理由タイプに分類する (同種理由バックオフ用)。"""
+    if "停滞" in reason:
+        return "stalled"
+    if "未応答" in reason or "偏り" in reason:
+        return "bias"
+    return "other"
 
 
 def _af_checker_tick(
     state: SessionState, facil: Any, presented: set[str],
-    af_gate: dict[str, int] | None = None,
+    af_gate: dict[str, Any] | None = None,
 ) -> int:
     """AF checker の 1 周分。af 候補を state.af_requests に積み、積んだ件数を返す。
 
     ``facil`` は :class:`FacilitationAgent`。``presented`` は提示済み source_text 集合
     (呼び出し側が meeting 世代ごとに保持)。``af_gate`` は af_l2 再発火ガードの状態
-    ({"last_l2_node_count": int})。テスト容易性のため 1 周を関数化してある。
+    ({"last_l2_node_count": int, "last_l2_reason_type": str, "l2_required_nodes": int,
+    "last_l2_resp_count": int})。テスト容易性のため 1 周を関数化してある。
     """
     from das.types import Utterance
 
@@ -1530,47 +1548,75 @@ def _af_checker_tick(
         })
         print(f"# [af] → af_l1 候補を投入（{len(decision.items)}件）", flush=True)
         return 1
-    # af_l2 再発火ガード: 前回 af_l2 以降に新規発話ノードが規定数追加されるまで出さない。
+    # af_l2 再発火ガード + 同種理由バックオフ (課題2)。
+    # 前回 af_l2 以降に新規発話ノードが「必要数」追加されるまで出さない。必要数は、
+    # 同じ理由タイプで状態が改善しない (応答エッジも増えない) まま再発火が続くほど
+    # 倍化する (4→8→16)。理由タイプが変わるか、応答エッジが増えたらベース(4)に戻す。
     n_utt = sum(1 for node in store.nodes() if node.source == "utterance")
+    reason_type = _af_l2_reason_type(decision.reason)
+    n_resp = len(getattr(runtime, "_response_edges", []) or [])
     last = af_gate.get("last_l2_node_count")
-    if last is not None and n_utt - last < _AF_L2_MIN_NEW_NODES:
+    last_type = af_gate.get("last_l2_reason_type")
+    last_resp = int(af_gate.get("last_l2_resp_count", 0))
+    level = int(af_gate.get("l2_backoff_level", 0))
+    # 理由タイプが変わった / 応答エッジが増えた (介入が届いた) → バックオフをリセット。
+    reset = last is None or reason_type != last_type or n_resp > last_resp
+    if reset:
+        level = 0
+    required = min(_AF_L2_MIN_NEW_NODES * (2 ** level), _AF_L2_MAX_NEW_NODES)
+    if last is not None and n_utt - last < required:
         print(
             f"# [af] af_l2 skip: 前回af_l2以降の新規発話ノード不足 "
-            f"({n_utt - last}/{_AF_L2_MIN_NEW_NODES})",
+            f"({n_utt - last}/{required}, 理由={reason_type}, lv={level})",
             flush=True,
         )
         return 0
+    # 発火。同種理由・未改善のまま再発火した場合だけ、次回の必要数を倍化する。
+    next_level = 0 if reset else min(level + 1, _AF_L2_MAX_LEVEL)
     af_gate["last_l2_node_count"] = n_utt
+    af_gate["last_l2_reason_type"] = reason_type
+    af_gate["last_l2_resp_count"] = n_resp
+    af_gate["l2_backoff_level"] = next_level
     state.af_requests.put({
         "kind": "af_l2",
         "brief": decision.reason,
         "af_text": decision.brief,
         "target_speaker": None,
     })
-    print("# [af] → af_l2 候補を投入", flush=True)
+    print(f"# [af] → af_l2 候補を投入 (理由={reason_type}, 必要数={required})", flush=True)
     return 1
 
 
 class _AfEarlyGenGate:
     """af 介入の生成先行・再生ゲートの状態機械 (フェーズ6, **af 限定**).
 
-    毎ループ :meth:`tick` を呼ぶ。時計は持たず、``silence`` と ``new_utterance`` を
-    引数で受けるので、フェイク時計で状態遷移を単体テストできる。summarize 等
-    ルールベース種別には一切関与しない (モード方針: 対象は af_l1/af_l2 のみ)。
+    毎ループ :meth:`tick` を呼ぶ。時計・沈黙・Controller の採否状態を引数で受けるので、
+    フェイク時計で状態遷移を単体テストできる。summarize 等ルールベース種別には一切
+    関与しない (モード方針: 対象は af_l1/af_l2 のみ)。
+
+    ``status`` は Controller から得た af 候補の採否状態 (三層分離の「WHEN」を委譲):
+      - ``"deliver"`` : cooldown/arbitration/フロアを通過し **今** 配信してよい (pause 成立)
+      - ``"hold"``    : ``awaiting_pause`` のみで抑制 = 採択見込みだが間待ち → 生成先行の対象
+      - ``"none"``    : af 候補なし / cooldown・期限切れ・他候補優先などで見送り
 
     遷移:
-      - af 候補あり & 未 hold & agent フリー & 沈黙 [0.3s, pause) → trigger(hold) 生成先行
-      - hold 中 & 沈黙 >= pause (フロア成立) → release_playback で一斉再生
+      - 未 hold & status=hold & agent フリー & 沈黙>=0.3 → trigger(hold) で生成先行
+      - 未 hold & status=deliver & agent フリー & 沈黙>=0.3 → 即時 trigger (取り込み遅延で
+        pause 通過後に候補が来たケース。生成先行の余地なし。hold_to_release は付かない)
+      - hold 中 & status=deliver (フロア成立) → release_playback で一斉再生
       - hold 中 & 新規確定発話 (会話が動いた) → cancel_held で破棄 (リトライにしない)
-      - af 候補が消えた & hold 中 → cancel_held
+      - hold 中 & 保持時間が上限超過 → cancel_held (フロアが返らないまま抱え込まない, B4)
     """
 
     EARLY_GEN_SILENCE = 0.3
+    MAX_HOLD_SEC = 8.0  # フロアが返らないまま生成先行を抱え込む上限 (安全弁)
 
     def __init__(self) -> None:
         self._holding = False
         self._held_kind: str | None = None
         self._held_af: dict[str, Any] | None = None
+        self._held_since: float | None = None
+        self._last_release_ms: float | None = None
 
     @property
     def is_holding(self) -> bool:
@@ -1580,50 +1626,122 @@ class _AfEarlyGenGate:
     def held_kind(self) -> str | None:
         return self._held_kind
 
+    @property
+    def last_release_ms(self) -> float | None:
+        """直近の release で計測した hold→再生の所要 ms (未 release なら None)。"""
+        return self._last_release_ms
+
     def reset(self) -> None:
         self._holding = False
         self._held_kind = None
         self._held_af = None
+        self._held_since = None
+
+    def _fire(self, agent: Any, af: dict[str, Any], *, hold: bool, topics: Any) -> None:
+        agent.trigger(
+            topics=topics,
+            af_presentation=str(af.get("af_text") or ""),
+            invite_target=af.get("target_speaker"),
+            hold_playback=hold,
+        )
 
     def tick(
-        self, *, agent: Any, af: dict[str, Any] | None,
+        self, *, agent: Any, af: dict[str, Any] | None, status: str,
         silence: float, new_utterance: bool, agent_busy: bool,
-        topics: Any = None,
+        now: float | None = None, topics: Any = None,
     ) -> str:
-        """1 ループ分の処理。行った操作名 (trigger/release/cancel/holding/none) を返す。"""
-
-        # フロア成立前に新規確定発話が来たら、生成先行を破棄する。
-        if new_utterance and self._holding:
-            agent.cancel_held()
-            self.reset()
-            return "cancel"
-        if not af:
-            if self._holding:
+        """1 ループ分の処理。行った操作名 (trigger/deliver/release/cancel/holding/none) を返す。"""
+        if self._holding:
+            # フロア成立前に新規確定発話が来たら、生成先行を破棄する (リトライにしない)。
+            if new_utterance:
                 agent.cancel_held()
                 self.reset()
                 return "cancel"
-            return "none"
-        kind = str(af.get("kind") or "af_l1")
-        pause = policy_for(kind).pause
-        if self._holding:
-            if silence >= pause:
-                agent.release_playback()  # フロア成立 → 貯めた音声を一斉再生
+            # 候補が消えた (TTL 失効・応答済みなど) → 破棄。
+            if not af:
+                agent.cancel_held()
+                self.reset()
+                return "cancel"
+            if status == "deliver":  # フロア成立 → 貯めた音声を一斉再生
+                agent.release_playback()
+                self._last_release_ms = getattr(agent, "last_hold_to_release_ms", None)
                 self.reset()
                 return "release"
+            # フロアが返らないまま抱え込まない (安全弁)。
+            if (now is not None and self._held_since is not None
+                    and now - self._held_since > self.MAX_HOLD_SEC):
+                agent.cancel_held()
+                self.reset()
+                return "cancel"
             return "holding"
-        # 未 hold: 生成先行の窓 [0.3s, pause) & agent フリーなら hold 付き trigger。
-        if not agent_busy and self.EARLY_GEN_SILENCE <= silence < pause:
-            agent.trigger(
-                topics=topics,
-                af_presentation=str(af.get("af_text") or ""),
-                invite_target=af.get("target_speaker"),
-                hold_playback=True,
-            )
+        # 未 hold。生成先行は agent フリー & 沈黙が最小値以上のときだけ検討する。
+        if agent_busy or silence < self.EARLY_GEN_SILENCE or not af:
+            return "none"
+        if status == "hold":  # 採択見込み・間待ち → 生成先行 (hold)
+            self._fire(agent, af, hold=True, topics=topics)
             self._holding = True
-            self._held_kind = kind
+            self._held_kind = str(af.get("kind") or "af_l1")
             self._held_af = af
+            self._held_since = now
             return "trigger"
+        if status == "deliver":  # 既に pause 成立 → 生成先行の余地なく即時配信
+            self._fire(agent, af, hold=False, topics=topics)
+            self._held_kind = str(af.get("kind") or "af_l1")
+            return "deliver"
         return "none"
+
+
+def _af_gate_status(
+    controller: FacilitationController,
+    pending: _PendingInterventions,
+    agent: Any,
+    *,
+    now: float,
+    silence_elapsed: float,
+    recent_interventions: list[InterventionLogEntry],
+    cooldown: float,
+    last_intervention_at: float,
+    epoch: int,
+    partner_busy: bool,
+    in_echo_window: bool,
+) -> tuple[str, dict[str, Any] | None]:
+    """af 候補の採否状態を Controller に問い、ゲート駆動用の status を返す (WHEN を委譲).
+
+    三層分離: WHAT/WHOM は AF (decide_intervention)、WHEN は Controller (cooldown/
+    arbitration/フロア) が決める。ゲートは再生タイミングだけを担う。ここで Controller
+    の ``arbitrate`` を af 候補にかけ、
+
+      - 採択 (candidate_id が af)         → ``"deliver"`` (pause 成立・今出してよい)
+      - 何も採らず af が awaiting_pause のみ → ``"hold"``    (採択見込み・間待ち)
+      - それ以外 (cooldown/期限切れ/他優先) → ``"none"``
+
+    を返す。af 候補が無い / conversation モードなら ``("none", None)``。af 候補は
+    ``--af`` 有効時しか積まれないので、ルールベース経路には影響しない。
+    """
+    if not pending.af or getattr(agent, "mode", "facilitator") == "conversation":
+        return "none", None
+    cands = [c for c in _build_candidates(pending, agent, now=now)
+             if c.kind in ("af_l1", "af_l2")]
+    if not cands:
+        return "none", None
+    af_cand = cands[0]
+    decision = controller.arbitrate(FacilitationInput(
+        candidates=tuple(cands),
+        recent_interventions=tuple(recent_interventions),
+        silence_elapsed=silence_elapsed,
+        snapshot_epoch=epoch,
+        now=now,
+        cooldown=cooldown,
+        partner_busy=partner_busy,
+        in_echo_window=in_echo_window,
+        last_intervention_at=last_intervention_at,
+        required_drift_confirmations=0,
+    ))
+    if decision.candidate_id == af_cand.id:
+        return "deliver", pending.af
+    if _suppressed_for(decision, candidate_id=af_cand.id, codes=("awaiting_pause",)):
+        return "hold", pending.af
+    return "none", pending.af
 
 
 def _run_af_checker(state: SessionState, *, interval: float = 3.0) -> None:
@@ -1638,7 +1756,7 @@ def _run_af_checker(state: SessionState, *, interval: float = 3.0) -> None:
 
     facil = FacilitationAgent(llm=None)  # decide_intervention は LLM を呼ばない (決定的)
     presented: set[str] = set()
-    af_gate: dict[str, int] = {}
+    af_gate: dict[str, Any] = {}
     epoch = state.meeting_epoch
     while not state.stop.is_set():
         time.sleep(interval)
@@ -1949,32 +2067,79 @@ def _run_agent_worker(state: SessionState):
         # --- af 生成先行・再生ゲート (フェーズ6, --af 有効時のみ・af 限定) ---
         # AF が無効 (既定) ならこのブロックは丸ごとスキップされ、ルールベースの
         # 採否・trigger 経路は一切変わらない (モード方針)。summarize には関与しない。
+        # WHEN は Controller に委譲 (_af_gate_status)。ゲートは再生タイミングだけ担い、
+        # deliver/release/cancel の時点でだけ pending.af を消費する (hold 中は保持し続け、
+        # Controller の判定が pause 成立で "deliver" に変わるのを待つ)。
         if getattr(state, "af_runtime", None) is not None and _enabled:
             try:
+                _af_now = time.monotonic()
+                _af_partner_busy = bool(
+                    partner is not None and (partner.ai_speaking or partner._responding))
+                _af_status, _af_payload = _af_gate_status(
+                    _controller, _pending, agent,
+                    now=_af_now,
+                    silence_elapsed=_effective_silence(state, _af_now, _last_utt_time),
+                    recent_interventions=list(_recent_interventions),
+                    cooldown=_cooldown,
+                    last_intervention_at=_last_intervention_at,
+                    epoch=state.agent_cursor,
+                    partner_busy=_af_partner_busy,
+                    in_echo_window=bool(getattr(agent, "in_echo_window", False)),
+                )
                 _af_action = _af_gate.tick(
                     agent=agent,
-                    af=_pending.af,
-                    silence=_effective_silence(state, time.monotonic(), _last_utt_time),
+                    af=_af_payload,
+                    status=_af_status,
+                    silence=_effective_silence(state, _af_now, _last_utt_time),
                     new_utterance=_af_new_utt,
                     agent_busy=bool(agent._responding or agent.ai_speaking),
+                    now=_af_now,
                     topics=list(state.topics) if state.topics else None,
                 )
-                if _af_action == "trigger":
-                    _held = _pending.af or {}
+                if _af_action == "trigger":  # 生成先行(hold)開始 — pending.af は保持
+                    _held = _af_payload or {}
                     _af_held_text = str(_held.get("af_text") or "")
                     _af_held_kind = str(_held.get("kind") or "af_l1")
-                    _pending.clear_af()  # 生成先行で消費 → Controller に二重採択させない
                     _log_intervention_event(state, _af_held_kind, "af 生成先行(hold)")
-                elif _af_action == "release":
+                elif _af_action == "deliver":  # 取り込み遅延で pause 通過後に来た → 即時配信
+                    _held = _af_payload or {}
+                    _af_kd = str(_held.get("kind") or "af_l1")
+                    _af_tx = str(_held.get("af_text") or "")
+                    _afrt = state.af_runtime
+                    if _afrt is not None and _af_tx:
+                        with contextlib.suppress(Exception):
+                            _afrt.note_intervention(_af_kd, _af_tx)
+                    _pending.clear_af()  # 消費
+                    _last_intervention_at = _af_now
+                    _note_intervention(_last_intervention_at, _af_kd, "af 即時配信")
+                    _log_intervention_event(
+                        state, _af_kd, "af 即時配信",
+                        timing=_intervention_timing_metadata(
+                            kind=_af_kd, now=_af_now,
+                            silence_elapsed=_effective_silence(state, _af_now, _last_utt_time),
+                            pause_required=policy_for(_af_kd).pause,
+                            policy="af_intervention"))
+                elif _af_action == "release":  # フロア成立 → 生成先行分を一斉再生
                     _afrt = state.af_runtime
                     if _afrt is not None and _af_held_text:
                         with contextlib.suppress(Exception):
                             _afrt.note_intervention(_af_held_kind, _af_held_text)
-                    _last_intervention_at = time.monotonic()
+                    _pending.clear_af()  # 消費
+                    _last_intervention_at = _af_now
                     _note_intervention(_last_intervention_at, _af_held_kind, "af release")
+                    _log_intervention_event(
+                        state, _af_held_kind, "af release",
+                        timing=_intervention_timing_metadata(
+                            kind=_af_held_kind, now=_af_now,
+                            silence_elapsed=_effective_silence(state, _af_now, _last_utt_time),
+                            pause_required=policy_for(_af_held_kind).pause,
+                            policy="af_intervention",
+                            hold_to_release_ms=_af_gate.last_release_ms))
                     _af_held_text = ""
-                if _af_gate.is_holding:
-                    _pending.clear_af()  # hold 中は af を1件ずつに保つ (積み増さない)
+                elif _af_action == "cancel":  # フロアが返らず/会話が動いた → 破棄
+                    _pending.clear_af()  # 消費 (リトライにしない, B4)
+                    _af_held_text = ""
+                    print("# [af] 生成先行を破棄 (フロア未成立/新規発話)", flush=True)
             except Exception as _afe:  # pragma: no cover - 防御的
                 print(f"# [af] early-gen error: {_afe}", flush=True)
 
