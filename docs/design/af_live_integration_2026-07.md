@@ -72,7 +72,7 @@ L1候補は次を**すべて**満たすときだけ出す（決定的判定、LL
   - `af_l1`: priority 4（retry の後・summarize の前）、pause 1.5s、kind cooldown 20s、wait_for_pause
   - `af_l2`: priority 6、pause 2.0s、cooldown 60s、**global scope**（俯瞰は頻発させない）
 - AF checker は候補を `_PendingInterventions` に積む（fact 同様 TTL 必須: af_l1 は 45s——アクティブ窓と整合、af_l2 は 90s）
-- summarize と af_l2 の関係: **af_l2 が生成可能（グラフが十分育っている）なら summarize 候補より優先**（同 tick に両方あれば priority で af_l2 が勝つ設定にし、summarize は「AFがまだ薄い序盤の代替」と位置づける）
+- summarize と af_l2 の関係（2026-07-03 改訂・フェーズ4実装時の相談で確定）: 当初の記述は priority 明示値（af_l2=6 > summarize=4）と矛盾していたため、次の規則に置き換える——**`_PendingInterventions` に af_l2 候補が保留されている間は summarize 候補を生成しない**（af_l2 の TTL 内は af_l2 が整理介入を代表する。summarize は「AFがまだ薄い/無効な時の代替」）。この規則は af 候補が存在するとき（=--af 有効時）しか作動しないため、ルールベースモードの挙動は不変（モード方針と整合）。priority 値の変更はしない
 - dispatch: 採択時 `agent.trigger(af_presentation=payload)`。payload は関係ラベル付き提示文（`InterventionDecision` の items を整文したもの。整文は既存 L2 経路の `facilitation` 側ヘルパーを流用し、**呼び出し側複製を作らない**——レビュー02の既知問題を悪化させない）
 
 ## 4. 実装フェーズ（コミット順）
