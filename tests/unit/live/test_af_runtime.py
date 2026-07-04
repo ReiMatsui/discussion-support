@@ -145,6 +145,73 @@ async def test_ingest_utterance_records_latency_and_adds_nodes() -> None:
     rt._orch.linking.link_node.assert_awaited_once()
 
 
+# --- 介入ノード・応答エッジの計測 (フェーズ5) ---------------------------
+
+
+async def _ingest_with_embedding(rt, node, vec) -> None:
+    """extraction=node, linking=no-op(ただし embedding を仕込む) で 1 発話取り込む。"""
+    from das.agents.extraction import ExtractionOutput
+
+    rt._orch.extraction.extract = AsyncMock(  # type: ignore[method-assign]
+        return_value=ExtractionOutput(nodes=[node], edges=[])
+    )
+
+    async def _fake_link(n, store):  # type: ignore[no-untyped-def]
+        rt._orch.linking._embeddings[n.id] = vec
+        return []
+
+    rt._orch.linking.link_node = AsyncMock(side_effect=_fake_link)  # type: ignore[method-assign]
+    await rt.ingest_utterance(Utterance(turn_id=node.turn_index, speaker=node.author, text=node.text))
+
+
+async def test_note_intervention_and_responds_to() -> None:
+    """介入を記録し、類似発話が来たら responds_to (受容の痕跡) が張られる。"""
+    rt, _ = _runtime([])
+    rt._llm.embed_one = AsyncMock(return_value=[1.0, 0.0])  # type: ignore[method-assign]
+    rt.note_intervention("af_l1", "コスト懸念がある")
+
+    node = Node(text="コスト懸念に同意", node_type="claim", source="utterance",
+                author="B", turn_index=2)
+    await _ingest_with_embedding(rt, node, [0.99, 0.01])  # 介入と高類似
+
+    summ = rt.acceptance_summary()
+    assert summ["n_interventions"] == 1
+    assert summ["n_responded"] == 1
+    assert summ["acceptance_rate"] == pytest.approx(1.0)
+
+
+async def test_no_responds_to_when_dissimilar() -> None:
+    """類似度が閾値未満なら responds_to は張られない。"""
+    rt, _ = _runtime([])
+    rt._llm.embed_one = AsyncMock(return_value=[1.0, 0.0])  # type: ignore[method-assign]
+    rt.note_intervention("af_l1", "コスト懸念がある")
+
+    node = Node(text="全然別の話", node_type="claim", source="utterance",
+                author="B", turn_index=2)
+    await _ingest_with_embedding(rt, node, [0.0, 1.0])  # 直交
+
+    summ = rt.acceptance_summary()
+    assert summ["n_interventions"] == 1
+    assert summ["n_responded"] == 0
+    assert summ["acceptance_rate"] == pytest.approx(0.0)
+
+
+def test_snapshot_includes_interventions(tmp_path: Path) -> None:
+    snap = tmp_path / "sess.af.json"
+    rt, _ = _runtime([], snapshot_path=snap)
+    rt.note_intervention("af_l1", "提示テキスト")
+    rt._response_edges.append({"intervention_id": "iv-001", "utterance_node_id": "x",
+                               "similarity": 0.9, "responded_at_turn": 2})
+    rt.save_snapshot()
+    payload = json.loads(snap.read_text(encoding="utf-8"))
+    assert len(payload["af_interventions"]) == 1
+    assert payload["af_interventions"][0]["text"] == "提示テキスト"
+    assert "embedding" not in payload["af_interventions"][0]
+    assert len(payload["af_response_edges"]) == 1
+    # interventions.jsonl も書かれる
+    assert snap.with_suffix(".interventions.jsonl").exists()
+
+
 # --- snapshot 保存 ------------------------------------------------------
 
 

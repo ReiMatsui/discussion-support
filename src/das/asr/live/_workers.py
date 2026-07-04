@@ -2186,6 +2186,11 @@ def _run_agent_worker(state: SessionState):
             agent.trigger(topics=_topics,
                           af_presentation=normal_decision.af_text,
                           invite_target=normal_decision.invite_target)
+            # 受容計測 (フェーズ5): 配信した af 介入を AF ランタイムに記録する。
+            _af_rt = getattr(state, "af_runtime", None)
+            if _af_rt is not None and normal_decision.af_text:
+                with contextlib.suppress(Exception):
+                    _af_rt.note_intervention(_af_kind, normal_decision.af_text)
             _last_intervention_at = time.monotonic()
             _pending.clear_af()  # 採択したら消費
             _note_intervention(_last_intervention_at, _af_kind, normal_decision.detail)
