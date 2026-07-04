@@ -5,7 +5,14 @@ from das.asr.live._constants import realtime_url
 from das.asr.live.agents._partner import ConversationPartner
 from das.asr.live.agents._realtime import RealtimeAgent
 
-from .conftest import make_chunk
+from .conftest import make_chunk, queue_real_chunks
+
+
+def _feed_held_audio(agent):
+    """hold 中の応答に音声デルタ + 終端を流す (フェイクイベント)。"""
+    agent._handle({"type": "response.output_item.added", "item": {"id": "i1"}})
+    agent._handle({"type": "response.output_audio.delta", "delta": make_chunk()})
+    agent._handle({"type": "response.output_audio.done"})
 
 # ---------------------------------------------------------------------------
 # trigger()
@@ -31,6 +38,61 @@ def test_trigger_sends_create_and_response(agent):
     assert "これはテスト発言です" in agent.ws.last_create_text()
     # _pending は送信後にクリアされている
     assert agent.pending_count == 0
+
+
+# ---------------------------------------------------------------------------
+# 生成先行・再生ゲート (フェーズ6)
+# ---------------------------------------------------------------------------
+
+def test_hold_playback_buffers_audio_without_playing(agent):
+    """hold_playback=True の trigger は音声を貯め、再生キューへ流さない。"""
+    agent.trigger(af_presentation="[反論] コスト懸念", hold_playback=True)
+    assert agent.is_holding_playback is True
+    _feed_held_audio(agent)
+    assert queue_real_chunks(agent) == 0      # 再生キューへ流れていない
+    assert agent.ai_speaking is False         # まだ発話開始していない
+
+
+def test_release_playback_flushes_held_audio(agent):
+    """release_playback でフロア成立時に貯めた音声を一斉再生する。"""
+    started = []
+    agent.on_speech_start = lambda: started.append(1)
+    agent.trigger(af_presentation="[反論] X", hold_playback=True)
+    _feed_held_audio(agent)
+    agent.release_playback()
+    assert agent.is_holding_playback is False
+    assert queue_real_chunks(agent) == 1      # 貯めた音声が流れた
+    assert agent.ai_speaking is True
+    assert started == [1]                     # 発話開始通知は release 時
+    assert agent.last_hold_to_release_ms is not None
+
+
+def test_cancel_held_discards_and_cancels(agent):
+    """cancel_held は貯めた音声を捨て response.cancel を送り、リトライにしない。"""
+    agent.trigger(af_presentation="[反論] X", hold_playback=True)
+    _feed_held_audio(agent)
+    agent.cancel_held()
+    assert agent.is_holding_playback is False
+    assert queue_real_chunks(agent) == 0      # 破棄された
+    assert "response.cancel" in agent.ws.types()
+    assert agent._responding is False
+    assert agent._pending_intervention is None  # リトライ扱いにしない
+
+
+def test_release_and_cancel_are_noop_without_hold(agent):
+    """hold していないときの release/cancel は no-op（既存挙動に影響しない）。"""
+    agent.release_playback()
+    agent.cancel_held()
+    assert agent.ws.types() == []
+
+
+def test_trigger_without_hold_plays_immediately(agent):
+    """hold_playback 未指定の trigger は従来どおり即再生（ルールベース不変）。"""
+    agent.trigger(af_presentation="[反論] X")
+    assert agent.is_holding_playback is False
+    _feed_held_audio(agent)
+    assert queue_real_chunks(agent) == 1      # 即再生キューへ
+    assert agent.ai_speaking is True
 
 
 def test_trigger_marks_utterances_as_data_not_instructions(agent):

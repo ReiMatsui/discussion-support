@@ -85,6 +85,14 @@ class RealtimeAgent(_RealtimeBase):
         # --- 観測: trigger送信 → 最初の音声（発話開始）までの遅延（§3.5 予算検証用） ---
         self._speak_trigger_at = 0.0       # trigger送信の時刻（monotonic）。0=未計測
         self._last_speak_latency_ms: float | None = None  # 直近の trigger→発話開始 ms
+        # --- 生成先行・再生ゲート（C-L2, フェーズ6） ---
+        # hold_playback=True の trigger は生成を即開始するが、音声を再生キューへ
+        # 流さず _held_audio に貯める。release_playback() でフロア成立時に一斉再生、
+        # cancel_held() で破棄（response.cancel）。対象は af_l1/af_l2 のみ。
+        self._hold_playback = False
+        self._held_audio: list[tuple[int, bytes | None]] = []
+        self._hold_start_at = 0.0
+        self._last_hold_to_release_ms: float | None = None
         self._playback_thread: threading.Thread | None = None
         # --- エコー防止 ---
         self._responding = False           # response生成中フラグ
@@ -241,6 +249,11 @@ class RealtimeAgent(_RealtimeBase):
             chunk = ev.get("delta", "")
             if chunk:
                 pcm = base64.b64decode(chunk)
+                # 再生ゲート（フェーズ6）: hold 中は再生キューへ流さず貯める
+                # (ai_speaking / on_speech_start は release まで発火しない)。
+                if self._hold_playback:
+                    self._held_audio.append((self._play_epoch, pcm))
+                    return
                 # Speaker分離（Phase3）: 採択済み候補を話すだけなので、テキスト確認を
                 # 待たずに即再生する。最初の音声で発話開始を通知（Partner停止用）。
                 if not self._speech_started:
@@ -271,7 +284,10 @@ class RealtimeAgent(_RealtimeBase):
 
         elif etype == "response.output_audio.done":
             if not self._interrupted:
-                self._q_put(None)   # 再生終端マーカー（現epochタグ付き）
+                if self._hold_playback:
+                    self._held_audio.append((self._play_epoch, None))
+                else:
+                    self._q_put(None)   # 再生終端マーカー（現epochタグ付き）
 
         elif etype == "response.done":
             # F1(保険): cancel で transcript.done が来ない場合でも、中断中に溜まった
@@ -369,6 +385,7 @@ class RealtimeAgent(_RealtimeBase):
                 manual_request: dict | None = None,
                 summary_focus: str | None = None,
                 af_presentation: str | None = None,
+                hold_playback: bool = False,
                 retry_intervention: bool | None = None,
                 is_retry: bool = False):
         """蓄積した発話をRealtimeAPIに送信し応答を要求.
@@ -522,6 +539,13 @@ class RealtimeAgent(_RealtimeBase):
                     "content": [{"type": "input_text", "text": conv}],
                 },
             }))
+            # 再生ゲート（フェーズ6）: hold なら音声を貯めてフロア成立まで再生を保留する。
+            if hold_playback:
+                with self._state_lock:
+                    self._hold_playback = True
+                    self._held_audio = []
+                    self._hold_start_at = time.monotonic()
+                    self._last_hold_to_release_ms = None
             # 発話開始遅延の計測開始。response.create 直前に刻むことで、
             # 受信スレッドが即座に最初の音声を処理しても取り逃がさない。
             self._last_speak_latency_ms = None
@@ -646,6 +670,67 @@ class RealtimeAgent(_RealtimeBase):
         self._current_item_id = None
         print("# AI Agent: 割り込み検出 — 応答を中断", flush=True)
         self._log_state("→INTERRUPTED (割り込み)")
+
+    # --- 生成先行・再生ゲート（C-L2, フェーズ6） ---
+
+    @property
+    def is_holding_playback(self) -> bool:
+        """hold_playback で音声再生を保留中か。"""
+        return self._hold_playback
+
+    @property
+    def last_hold_to_release_ms(self) -> float | None:
+        """直近の trigger(hold)→release までの保留時間 (ms)。timing metadata 用。"""
+        return self._last_hold_to_release_ms
+
+    def release_playback(self) -> None:
+        """保留していた音声をフロア成立時に一斉再生する（フェーズ6）.
+
+        貯めた音声を再生キューへ流し、発話開始（on_speech_start / ai_speaking）を
+        このタイミングで通知する。hold 中でなければ no-op。
+        """
+        with self._state_lock:
+            if not self._hold_playback:
+                return
+            self._hold_playback = False
+            held = self._held_audio
+            self._held_audio = []
+            if self._hold_start_at:
+                self._last_hold_to_release_ms = round(
+                    (time.monotonic() - self._hold_start_at) * 1000, 1)
+                self._hold_start_at = 0.0
+        if not held:
+            return
+        # フロア成立 → 発話開始を通知（Partner 停止など）してから音声を流す。
+        if not self._speech_started:
+            self._speech_started = True
+            if self.on_speech_start:
+                with contextlib.suppress(Exception):
+                    self.on_speech_start()
+        self.ai_speaking = True
+        for item in held:
+            self._audio_q.put(item)  # 貯めた (epoch, payload) をそのまま流す
+        self._log_state("→SPEAKING (release_playback)")
+
+    def cancel_held(self) -> None:
+        """フロア成立前に新規発話が来たとき、保留中の生成を破棄する（フェーズ6）.
+
+        response.cancel を送り、貯めた音声を捨てる。**リトライ扱いにしない**
+        （中断内容を保存しないので次の機会に再送されない）。hold 中でなければ no-op。
+        """
+        with self._state_lock:
+            if not self._hold_playback:
+                return
+            self._hold_playback = False
+            self._held_audio = []
+            self._interrupted = True  # 以降届く残留チャンクを破棄
+            self._hold_start_at = 0.0
+        if self.ws:
+            with contextlib.suppress(Exception):
+                self.ws.send(json.dumps({"type": "response.cancel"}))
+        with self._state_lock:
+            self._responding = False
+        self._log_state("→CANCELLED (cancel_held)")
 
     @property
     def pending_count(self) -> int:
