@@ -191,6 +191,19 @@ def _is_backchannel(text: str) -> bool:
     return not t or bool(_BACKCHANNEL_RE.match(t))
 
 
+def _as_bool(value: Any) -> bool:
+    """LLM 出力の真偽値を頑健に正規化する (T9-1)。
+
+    JSON パースで bool になるのが正だが、LLM が文字列 ``"false"`` / ``"no"`` 等を
+    返すと ``bool("false")`` が True になる。文字列は明示的に真値語だけ True にする。
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "1", "yes", "y")
+    return bool(value)
+
+
 # AF ベース介入候補の TTL（H1 フェーズ4）。af_l1 はアクティブ窓と整合、af_l2 は長め。
 _AF_L1_PENDING_TTL = 45.0
 _AF_L2_PENDING_TTL = 90.0
@@ -1229,7 +1242,7 @@ def _run_triage_worker(state: SessionState, oai_key: str,
                                   "facilitator_request": ""}
                 else:
                     annotation = {
-                        "factual_claim": bool(result.get("factual_claim")),
+                        "factual_claim": _as_bool(result.get("factual_claim")),
                         "facilitator_request": str(
                             result.get("facilitator_request") or ""
                         ).strip()[:_MANUAL_CALL_MAX_CHARS],
@@ -1356,7 +1369,7 @@ def _run_fact_checker(state: SessionState, oai_key: str, oai_model: str):
         # 採用するのは high confidence の訂正だけ (docstring と一致)。confidence が
         # 欠落・不正値なら安全側で発火しない。低確度の訂正を対面議論に流さない。
         _fact_confidence = str(result.get("confidence") or "").strip().lower()
-        if result.get("should_correct") and _fact_confidence == "high":
+        if _as_bool(result.get("should_correct")) and _fact_confidence == "high":
             correction = str(result.get("correction") or "").strip()
             if correction:
                 norm = re.sub(r"[\s、。,.，．!！?？]+", "", correction).lower()
@@ -2128,6 +2141,8 @@ def _run_agent_worker(state: SessionState):
         if getattr(state, "af_runtime", None) is not None and _enabled:
             try:
                 _af_now = time.monotonic()
+                with state.topics_lock:  # topics 読み出しは lock 取得で統一 (T9-5)
+                    _af_topics = list(state.topics) if state.topics else None
                 _af_partner_busy = bool(
                     partner is not None and (partner.ai_speaking or partner._responding))
                 _af_status, _af_payload = _af_gate_status(
@@ -2149,7 +2164,7 @@ def _run_agent_worker(state: SessionState):
                     new_utterance=_af_new_utt,
                     agent_busy=bool(agent._responding or agent.ai_speaking),
                     now=_af_now,
-                    topics=list(state.topics) if state.topics else None,
+                    topics=_af_topics,
                 )
                 if _af_action == "trigger":  # 生成先行(hold)開始 — pending.af は保持
                     _held = _af_payload or {}

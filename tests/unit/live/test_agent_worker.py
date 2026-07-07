@@ -1128,6 +1128,19 @@ def test_unconfirmed_speaker_interrupts_ai():
     assert agent.interrupts == 1
 
 
+def test_as_bool_normalizes_llm_output():
+    """T9-1: LLM が文字列 'false'/'no' を返しても bool として正しく False にする。"""
+    from das.asr.live._workers import _as_bool
+    assert _as_bool(True) is True
+    assert _as_bool(False) is False
+    assert _as_bool("true") is True
+    assert _as_bool("false") is False   # bool("false") のバグを回避
+    assert _as_bool("no") is False
+    assert _as_bool("yes") is True
+    assert _as_bool(None) is False
+    assert _as_bool("") is False
+
+
 def test_backchannel_does_not_interrupt_facilitator():
     """T7: 8文字超でも相槌 (「なるほどなるほど確かに」) ではファシリテーターを止めない。"""
     agent = FakeAgent()

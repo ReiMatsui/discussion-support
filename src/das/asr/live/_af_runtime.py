@@ -195,7 +195,12 @@ class AFRuntime:
             if iv.get("embedding") is None:
                 try:
                     iv["embedding"] = await self._llm.embed_one(str(iv["text"]))
-                except Exception:  # pragma: no cover - 防御的
+                except Exception as exc:  # pragma: no cover - 防御的
+                    # 埋め込み失敗で受容照合が飛ぶのを黙って握りつぶさない (T9-4)。
+                    # embedding は None のままなので次発話取り込みで毎回再試行される
+                    # (=失敗が続くと毎回 API を叩くコストがある点に注意)。
+                    _log.warning("af_runtime.embed_failed",
+                                 intervention_id=iv.get("id"), error=str(exc))
                     continue
             for node in new_nodes:
                 vec = node_vecs.get(node.id)

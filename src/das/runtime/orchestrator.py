@@ -130,6 +130,10 @@ class Orchestrator:
     async def _on_node_added(self, event: NodeAdded) -> None:
         node = self._store.get_node(event.node_id)
         if node is None:  # pragma: no cover - 防御的
+            # ノードが取得できないと linking / Web publish が黙って飛ばされる。
+            # 通常起こらないが、起きたら気付けるよう warning を残す (T9-6)。
+            self._log.warning("orchestrator.node_missing_skip_linking",
+                              node_id=str(event.node_id))
             return
         # 連結エージェントは新ノードに対し、既存ノード群との関係を推定する
         await self._linking.link_node(node, self._store)
