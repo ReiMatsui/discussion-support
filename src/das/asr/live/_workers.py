@@ -181,6 +181,16 @@ def _set_manual_status(state: SessionState, status: str, **kw) -> None:
             setter(status, **kw)
 
 
+def _is_backchannel(text: str) -> bool:
+    """相槌 (「そうですね」「なるほど」等) か判定する (空文字も割り込み対象外扱い)。
+
+    ファシリテーター/パートナー両方の自動割り込み判定を共通化するヘルパー (T7)。
+    相槌でAIの発話をキャンセルしないための除外に使う。
+    """
+    t = text.strip()
+    return not t or bool(_BACKCHANNEL_RE.match(t))
+
+
 # AF ベース介入候補の TTL（H1 フェーズ4）。af_l1 はアクティブ窓と整合、af_l2 は長め。
 _AF_L1_PENDING_TTL = 45.0
 _AF_L2_PENDING_TTL = 90.0
@@ -2065,16 +2075,17 @@ def _run_agent_worker(state: SessionState):
                 state.agent_cursor = n
             # --- 自動割り込み ---
             # 発話の存在は話者未確定でも確実なので raw スライスで判定する。
-            # 8文字超の相槌は稀なので backchannel 除外は不要。
+            # ファシリテーター/パートナーとも相槌 (_is_backchannel) は割り込みに使わない
+            # (T7: 長めの相槌でファシリテーター発話がキャンセルされるのを防ぐ)。
             _raw_texts = [str(r.get("text", "")) for r in _raw_new]
             _human_spoke = any(len(t.strip()) > _INTERRUPT_MIN_CHARS
+                               and not _is_backchannel(t)
                                for t in _raw_texts)
             if _human_spoke and agent.ai_speaking:
                 agent.interrupt()
             if partner is not None and (partner.ai_speaking or partner._responding):
                 _real_utterances = [t.strip() for t in _raw_texts
-                                    if t.strip()
-                                    and not _BACKCHANNEL_RE.match(t.strip())]
+                                    if not _is_backchannel(t)]
                 if _real_utterances:
                     partner.interrupt()
                     for i, utt in enumerate(_real_utterances):

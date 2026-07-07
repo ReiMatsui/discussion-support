@@ -1128,6 +1128,18 @@ def test_unconfirmed_speaker_interrupts_ai():
     assert agent.interrupts == 1
 
 
+def test_backchannel_does_not_interrupt_facilitator():
+    """T7: 8文字超でも相槌 (「なるほどなるほど確かに」) ではファシリテーターを止めない。"""
+    agent = FakeAgent()
+    agent.ai_speaking = True
+    state = FakeState(agent, None)
+    state.records = [{"speaker": "?", "text": "なるほどなるほど確かに"}]  # 11文字の相槌
+
+    _run_worker_briefly(state, until=lambda: agent.interrupts > 0, timeout=1.0)
+
+    assert agent.interrupts == 0
+
+
 def test_unconfirmed_speaker_not_fed_to_agent():
     """未確定話者の発話は割り込み判定には使うが、agent.feed には流さない."""
     agent = FakeAgent()
