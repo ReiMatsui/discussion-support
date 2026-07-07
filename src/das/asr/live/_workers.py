@@ -181,6 +181,29 @@ def _set_manual_status(state: SessionState, status: str, **kw) -> None:
             setter(status, **kw)
 
 
+def _is_backchannel(text: str) -> bool:
+    """相槌 (「そうですね」「なるほど」等) か判定する (空文字も割り込み対象外扱い)。
+
+    ファシリテーター/パートナー両方の自動割り込み判定を共通化するヘルパー (T7)。
+    相槌でAIの発話をキャンセルしないための除外に使う。
+    """
+    t = text.strip()
+    return not t or bool(_BACKCHANNEL_RE.match(t))
+
+
+def _as_bool(value: Any) -> bool:
+    """LLM 出力の真偽値を頑健に正規化する (T9-1)。
+
+    JSON パースで bool になるのが正だが、LLM が文字列 ``"false"`` / ``"no"`` 等を
+    返すと ``bool("false")`` が True になる。文字列は明示的に真値語だけ True にする。
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "1", "yes", "y")
+    return bool(value)
+
+
 # AF ベース介入候補の TTL（H1 フェーズ4）。af_l1 はアクティブ窓と整合、af_l2 は長め。
 _AF_L1_PENDING_TTL = 45.0
 _AF_L2_PENDING_TTL = 90.0
@@ -494,8 +517,15 @@ def _build_candidates(
             interrupt_policy="wait_for_pause",
         ))
 
-    silence_thresh = (_AGENT_DEBATE_SILENCE if partner_present
-                      else silence_summarize)
+    # 沈黙要約の閾値: プロファイルの無効化設定 (silence_summarize is None) を尊重する。
+    # controlled は「沈黙要約なし」の設計なので、Partner 同席でも沈黙候補を出さない。
+    # 有効な場合のみ、Partner 会話を邪魔しない意図で debate 閾値と大きい方を採る。
+    if silence_summarize is None:
+        silence_thresh = None
+    elif partner_present:
+        silence_thresh = max(silence_summarize, _AGENT_DEBATE_SILENCE)
+    else:
+        silence_thresh = silence_summarize
     if (mode != "conversation"
             and silence_thresh is not None
             and getattr(agent, "pending_count", 0) > 0):
@@ -794,7 +824,12 @@ def _controller_barge_in_decision(
     if decision.candidate_id is None:
         # 候補はあるが今は採らない → 保持して次の機会を待つ（hold）。
         return _BargeInDecision("hold"), decision, cands, latency_ms
-    chosen = next(c for c in cands if c.id == decision.candidate_id)
+    chosen = next((c for c in cands if c.id == decision.candidate_id), None)
+    if chosen is None:
+        # Controller/LLM が候補に無い ID を返した → クラッシュせず今回は見送る (T5)。
+        print(f"# [diag] controller: 不正な candidate_id={decision.candidate_id}"
+              f"（バージイン見送り）", flush=True)
+        return _BargeInDecision("hold"), decision, cands, latency_ms
     if chosen.kind == "fact":
         return (_BargeInDecision("fact", fact=chosen.payload.get("fact")),
                 decision, cands, latency_ms)
@@ -857,7 +892,12 @@ def _controller_normal_decision(
                 return (_NormalTriggerDecision(
                     "skip_invite", invite_target=pending.invite), decision, cands, latency_ms)
         return _NormalTriggerDecision("none"), decision, cands, latency_ms
-    chosen = next(c for c in cands if c.id == decision.candidate_id)
+    chosen = next((c for c in cands if c.id == decision.candidate_id), None)
+    if chosen is None:
+        # Controller/LLM が候補に無い ID を返した → クラッシュせず今回は見送る (T5)。
+        print(f"# [diag] controller: 不正な candidate_id={decision.candidate_id}"
+              f"（通常レーン見送り）", flush=True)
+        return _NormalTriggerDecision("none"), decision, cands, latency_ms
     if chosen.kind == "conversation":
         return (_NormalTriggerDecision("conversation", f"沈黙{silence_elapsed:.1f}秒"),
                 decision, cands, latency_ms)
@@ -893,6 +933,7 @@ def _run_agenda_detector(state: SessionState, oai_key: str, oai_model: str):
     from das.asr.live._bootstrap import detect_agenda as _detect_agenda
 
     _last_attempt = 0.0
+    _known_epoch = getattr(state, "meeting_epoch", 0)  # 会議リセット検知用 (T3)
     while not state.stop.is_set():
         time.sleep(2)
         if not oai_key:
@@ -903,11 +944,17 @@ def _run_agenda_detector(state: SessionState, oai_key: str, oai_model: str):
             if state.topics:
                 return  # 既に議題/論点あり → 役目終了
         with state.state_lock:
+            epoch = state.meeting_epoch
             talk_rs = intervention_records([
                 r for r in state.records
                 if "speaker" in r and r.get("text")
                 and r.get("speaker") != AGENT_SPEAKER
             ])
+        # 会議リセット (epoch 変化) で再試行スロットルを戻す (T3)。旧会議の
+        # 発話を新会議の議題としてシードしないよう、下でも副作用直前に再確認する。
+        if epoch != _known_epoch:
+            _known_epoch = epoch
+            _last_attempt = 0.0
         if len(talk_rs) < _AGENDA_MIN_UTTS:
             continue
         if time.monotonic() - _last_attempt < _AGENDA_RETRY_SEC:
@@ -916,7 +963,8 @@ def _run_agenda_detector(state: SessionState, oai_key: str, oai_model: str):
         utts = [{"speaker": intervention_speaker_name(state, r), "text": r["text"]}
                 for r in talk_rs[:_AGENDA_WINDOW]]
         agenda = _detect_agenda(utts, oai_key, oai_model)
-        if agenda:
+        # シード (副作用) の直前で epoch 再確認: 検出中にリセットが起きたら破棄する。
+        if agenda and state.meeting_epoch == epoch:
             state.seed_topic(agenda, speaker="議題(自動)")
             _print_line(f"# 議題を自動検出してシード: {agenda}")
             return
@@ -1091,6 +1139,7 @@ def _run_triage_worker(state: SessionState, oai_key: str,
 
     _retry_counts: dict[int, int] = {}
     _backlog_warned = False
+    _known_epoch = getattr(state, "meeting_epoch", 0)  # 会議リセット検知用 (T3)
     while not state.stop.is_set():
         time.sleep(0.25)
         agent = state.agent
@@ -1098,6 +1147,13 @@ def _run_triage_worker(state: SessionState, oai_key: str,
             continue
         with state.state_lock:
             epoch = state.meeting_epoch
+        # 会議リセット (epoch 変化) で index ベースのローカル状態を破棄する (T3)。
+        # 旧会議の retry カウントが新会議の同 index 発話に誤適用されるのを防ぐ。
+        if epoch != _known_epoch:
+            _known_epoch = epoch
+            _retry_counts.clear()
+            _backlog_warned = False
+        with state.state_lock:
             # 呼びかけ検出は話者同一性に依存しないため、未確定話者も含む
             # triage_records でフィルタする（修正5）。triage_cursor はこの
             # フィルタ後リストへのインデックスで、fact_cursor(intervention_records
@@ -1186,7 +1242,7 @@ def _run_triage_worker(state: SessionState, oai_key: str,
                                   "facilitator_request": ""}
                 else:
                     annotation = {
-                        "factual_claim": bool(result.get("factual_claim")),
+                        "factual_claim": _as_bool(result.get("factual_claim")),
                         "facilitator_request": str(
                             result.get("facilitator_request") or ""
                         ).strip()[:_MANUAL_CALL_MAX_CHARS],
@@ -1238,6 +1294,7 @@ def _run_fact_checker(state: SessionState, oai_key: str, oai_model: str):
     _last_check = 0.0
     _recent_corrections: list[tuple[float, str]] = []
     _retry_counts: dict[int, int] = {}
+    _known_epoch = getattr(state, "meeting_epoch", 0)  # 会議リセット検知用 (T3)
     while not state.stop.is_set():
         time.sleep(0.25)
         agent = state.agent
@@ -1249,6 +1306,13 @@ def _run_fact_checker(state: SessionState, oai_key: str, oai_model: str):
             continue
         with state.state_lock:
             epoch = state.meeting_epoch
+        # 会議リセット (epoch 変化) で index ベースの retry と重複補正履歴を破棄する (T3)。
+        # 旧会議の補正が新会議の補正を dedup で握りつぶすのを防ぐ。
+        if epoch != _known_epoch:
+            _known_epoch = epoch
+            _retry_counts.clear()
+            _recent_corrections = []
+        with state.state_lock:
             talk_rs = intervention_records([
                 r for r in state.records
                 if "speaker" in r and r.get("text")
@@ -1302,7 +1366,10 @@ def _run_fact_checker(state: SessionState, oai_key: str, oai_model: str):
                 continue
             state.fact_cursor = next_idx + 1
         _retry_counts.pop(next_idx, None)
-        if result.get("should_correct"):
+        # 採用するのは high confidence の訂正だけ (docstring と一致)。confidence が
+        # 欠落・不正値なら安全側で発火しない。低確度の訂正を対面議論に流さない。
+        _fact_confidence = str(result.get("confidence") or "").strip().lower()
+        if _as_bool(result.get("should_correct")) and _fact_confidence == "high":
             correction = str(result.get("correction") or "").strip()
             if correction:
                 norm = re.sub(r"[\s、。,.，．!！?？]+", "", correction).lower()
@@ -2021,16 +2088,17 @@ def _run_agent_worker(state: SessionState):
                 state.agent_cursor = n
             # --- 自動割り込み ---
             # 発話の存在は話者未確定でも確実なので raw スライスで判定する。
-            # 8文字超の相槌は稀なので backchannel 除外は不要。
+            # ファシリテーター/パートナーとも相槌 (_is_backchannel) は割り込みに使わない
+            # (T7: 長めの相槌でファシリテーター発話がキャンセルされるのを防ぐ)。
             _raw_texts = [str(r.get("text", "")) for r in _raw_new]
             _human_spoke = any(len(t.strip()) > _INTERRUPT_MIN_CHARS
+                               and not _is_backchannel(t)
                                for t in _raw_texts)
             if _human_spoke and agent.ai_speaking:
                 agent.interrupt()
             if partner is not None and (partner.ai_speaking or partner._responding):
                 _real_utterances = [t.strip() for t in _raw_texts
-                                    if t.strip()
-                                    and not _BACKCHANNEL_RE.match(t.strip())]
+                                    if not _is_backchannel(t)]
                 if _real_utterances:
                     partner.interrupt()
                     for i, utt in enumerate(_real_utterances):
@@ -2073,6 +2141,8 @@ def _run_agent_worker(state: SessionState):
         if getattr(state, "af_runtime", None) is not None and _enabled:
             try:
                 _af_now = time.monotonic()
+                with state.topics_lock:  # topics 読み出しは lock 取得で統一 (T9-5)
+                    _af_topics = list(state.topics) if state.topics else None
                 _af_partner_busy = bool(
                     partner is not None and (partner.ai_speaking or partner._responding))
                 _af_status, _af_payload = _af_gate_status(
@@ -2094,7 +2164,7 @@ def _run_agent_worker(state: SessionState):
                     new_utterance=_af_new_utt,
                     agent_busy=bool(agent._responding or agent.ai_speaking),
                     now=_af_now,
-                    topics=list(state.topics) if state.topics else None,
+                    topics=_af_topics,
                 )
                 if _af_action == "trigger":  # 生成先行(hold)開始 — pending.af は保持
                     _held = _af_payload or {}

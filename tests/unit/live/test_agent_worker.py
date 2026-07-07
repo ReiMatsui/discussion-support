@@ -1024,6 +1024,95 @@ def test_structuring_checker_rejudges_after_pending_reset(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# 事実補正の confidence ゲート (T2): high のみ採用する
+# ---------------------------------------------------------------------------
+
+def _run_fact_briefly(state, *, until, timeout=2.0):
+    from das.asr.live._workers import _run_fact_checker
+    t = threading.Thread(target=_run_fact_checker,
+                         args=(state, "key", "model"), daemon=True)
+    t.start()
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline and not until():
+        time.sleep(0.05)
+    state.stop.set()
+    t.join(timeout=2.0)
+
+
+def _fact_state():
+    agent = FakeAgent()
+    state = FakeState(agent, None)
+    state.records = [{"speaker": "A", "text": "地球は平らだ",
+                      "ms": 0, "triage": {"factual_claim": True}}]
+    return state
+
+
+def _run_fact_with_confidence(monkeypatch, confidence):
+    import das.asr.live._bootstrap as bs
+    result = {"should_correct": True, "correction": "地球は球体です"}
+    if confidence is not None:
+        result["confidence"] = confidence
+    monkeypatch.setattr(bs, "check_fact_correction", lambda utts, k, m: dict(result))
+    state = _fact_state()
+    _run_fact_briefly(state, until=lambda: not state.factcheck_requests.empty(),
+                      timeout=1.5)
+    return state
+
+
+def test_factcheck_non_high_confidence_does_not_fire(monkeypatch):
+    """T2: confidence が high 以外 (medium/low/欠落/不正) では訂正を発火しない。"""
+    for conf in ("medium", "low", None, "HIGH_TYPO"):
+        state = _run_fact_with_confidence(monkeypatch, conf)
+        assert state.factcheck_requests.empty(), f"confidence={conf} は発火しないべき"
+
+
+def test_factcheck_high_confidence_fires(monkeypatch):
+    """T2: confidence=high の訂正は factcheck_requests に積まれる。"""
+    state = _run_fact_with_confidence(monkeypatch, "high")
+    assert not state.factcheck_requests.empty()
+    req = state.factcheck_requests.get_nowait()
+    assert req["correction"] == "地球は球体です"
+
+
+def test_factcheck_dedup_resets_on_meeting_epoch_change(monkeypatch):
+    """T3: 会議リセット (epoch 変化) で重複補正履歴がクリアされ、同じ補正でも新会議で
+    再発火する (旧会議の履歴が新会議を握りつぶさない)。"""
+    import das.asr.live._bootstrap as bs
+    from das.asr.live._workers import _run_fact_checker
+
+    monkeypatch.setattr(bs, "check_fact_correction", lambda utts, k, m: {
+        "should_correct": True, "confidence": "high", "correction": "地球は球体です"})
+    agent = FakeAgent()
+    state = FakeState(agent, None)
+    state.records = [{"speaker": "A", "text": "c1", "ms": 0,
+                      "triage": {"factual_claim": True}}]
+
+    def _wait(pred, timeout=3.0):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline and not pred():
+            time.sleep(0.05)
+        return pred()
+
+    t = threading.Thread(target=_run_fact_checker, args=(state, "key", "model"),
+                         daemon=True)
+    t.start()
+    try:
+        assert _wait(lambda: not state.factcheck_requests.empty()), "会議1で発火"
+        state.factcheck_requests.get_nowait()
+        # 会議2: epoch++・records差し替え・cursorリセット。同じ補正文でも再発火する。
+        with state.state_lock:
+            state.meeting_epoch += 1
+            state.records = [{"speaker": "A", "text": "c2", "ms": 0,
+                              "triage": {"factual_claim": True}}]
+            state.fact_cursor = 0
+        assert _wait(lambda: not state.factcheck_requests.empty()), \
+            "epoch 跨ぎで重複補正履歴がリセットされ再発火する"
+    finally:
+        state.stop.set()
+        t.join(timeout=2.0)
+
+
+# ---------------------------------------------------------------------------
 # 未確定話者の割り込み（C1）: 声紋が確定しない発話でもAIを止められる
 # ---------------------------------------------------------------------------
 
@@ -1037,6 +1126,31 @@ def test_unconfirmed_speaker_interrupts_ai():
     _run_worker_briefly(state, until=lambda: agent.interrupts > 0)
 
     assert agent.interrupts == 1
+
+
+def test_as_bool_normalizes_llm_output():
+    """T9-1: LLM が文字列 'false'/'no' を返しても bool として正しく False にする。"""
+    from das.asr.live._workers import _as_bool
+    assert _as_bool(True) is True
+    assert _as_bool(False) is False
+    assert _as_bool("true") is True
+    assert _as_bool("false") is False   # bool("false") のバグを回避
+    assert _as_bool("no") is False
+    assert _as_bool("yes") is True
+    assert _as_bool(None) is False
+    assert _as_bool("") is False
+
+
+def test_backchannel_does_not_interrupt_facilitator():
+    """T7: 8文字超でも相槌 (「なるほどなるほど確かに」) ではファシリテーターを止めない。"""
+    agent = FakeAgent()
+    agent.ai_speaking = True
+    state = FakeState(agent, None)
+    state.records = [{"speaker": "?", "text": "なるほどなるほど確かに"}]  # 11文字の相槌
+
+    _run_worker_briefly(state, until=lambda: agent.interrupts > 0, timeout=1.0)
+
+    assert agent.interrupts == 0
 
 
 def test_unconfirmed_speaker_not_fed_to_agent():

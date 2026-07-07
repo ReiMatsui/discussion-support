@@ -179,14 +179,44 @@ def detect_consensus(
         誤検出を避ける)
     """
 
-    if not transcript or len(transcript) < min_turns_before_consensus:
+    reached, primary, confidence, rationales, fired = _evaluate_consensus(
+        transcript, store, agreement_window, agreement_threshold,
+        stall_window, min_turns_before_consensus)
+    if not reached and not fired and (
+            not transcript or len(transcript) < min_turns_before_consensus):
         return ConsensusReport(
-            consensus_reached=False,
-            signal="none",
-            confidence=0.0,
-            rationale="ターン数が不足",
-            detected_at_turn=None,
-        )
+            consensus_reached=False, signal="none", confidence=0.0,
+            rationale="ターン数が不足", detected_at_turn=None)
+
+    # detected_at_turn: プレフィックスに対して同じ判定を再評価し、合意条件が最初に
+    # 成立したターンを特定する (T6)。cheap シグナルは transcript(+store の turn_id 付き
+    # ノード) の純関数なので prefix で再評価しても整合する。最終ターン固定の偽時刻を
+    # 記録しない。
+    detected_at = _first_consensus_turn(
+        transcript, store, agreement_window, agreement_threshold,
+        stall_window, min_turns_before_consensus) if reached else None
+
+    return ConsensusReport(
+        consensus_reached=reached,
+        signal=primary,
+        confidence=confidence if reached else 0.0,
+        rationale="; ".join(rationales) if rationales else "シグナルなし",
+        detected_at_turn=detected_at,
+        fired_signals=fired,
+    )
+
+
+def _evaluate_consensus(
+    transcript: list[Utterance],
+    store: GraphStore | None,
+    agreement_window: int,
+    agreement_threshold: float,
+    stall_window: int,
+    min_turns_before_consensus: int,
+) -> tuple[bool, ConsensusSignal, float, list[str], list[ConsensusSignal]]:
+    """合意条件の中核評価 (detected_at_turn を含まない)。prefix 再評価から再利用する。"""
+    if not transcript or len(transcript) < min_turns_before_consensus:
+        return False, "none", 0.0, [], []
 
     fired: list[ConsensusSignal] = []
     rationales: list[str] = []
@@ -235,14 +265,31 @@ def detect_consensus(
     elif fired:
         primary = fired[0]
 
-    return ConsensusReport(
-        consensus_reached=consensus,
-        signal=primary,
-        confidence=confidence if consensus else 0.0,
-        rationale="; ".join(rationales) if rationales else "シグナルなし",
-        detected_at_turn=transcript[-1].turn_id if consensus else None,
-        fired_signals=fired,
-    )
+    return consensus, primary, confidence, rationales, fired
+
+
+def _first_consensus_turn(
+    transcript: list[Utterance],
+    store: GraphStore | None,
+    agreement_window: int,
+    agreement_threshold: float,
+    stall_window: int,
+    min_turns_before_consensus: int,
+) -> int | None:
+    """合意条件が最初に成立したターンの turn_id を返す (成立しなければ None)。
+
+    transcript のプレフィックスに対して :func:`_evaluate_consensus` を再評価し、最初に
+    consensus が立った時点の末尾ターンを返す。構造シグナルは store 内ノードの turn_id を
+    プレフィックスの窓で絞って数えるため、prefix 再評価でも整合する。
+    """
+    for i in range(min_turns_before_consensus, len(transcript) + 1):
+        prefix = transcript[:i]
+        reached, *_ = _evaluate_consensus(
+            prefix, store, agreement_window, agreement_threshold,
+            stall_window, min_turns_before_consensus)
+        if reached:
+            return prefix[-1].turn_id
+    return None
 
 
 async def detect_consensus_with_llm(
@@ -300,7 +347,11 @@ async def detect_consensus_with_llm(
         signal=cheap.signal if consensus_pass else "none",
         confidence=judgement.confidence if consensus_pass else 0.0,
         rationale=judgement.rationale,
-        detected_at_turn=transcript[-1].turn_id if consensus_pass else None,
+        # 前段の cheap 検出が特定した「合意条件が最初に成立したターン」を使う (T6)。
+        # cheap が構造/キーワードのゲートを跨いだターンで、LLM はそれを全体で追認する。
+        # cheap が完全合意に至っていない (単一シグナルで LLM を起動した) 場合は turn を
+        # 特定できないため None (最終ターン固定の偽時刻は記録しない)。
+        detected_at_turn=cheap.detected_at_turn if consensus_pass else None,
         fired_signals=cheap.fired_signals,
         llm_judgement=judgement_dict,
     )

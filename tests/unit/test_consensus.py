@@ -65,6 +65,27 @@ def test_explicit_agreement_detected() -> None:
     assert report.detected_at_turn == 6
 
 
+def test_detected_at_turn_is_first_not_last() -> None:
+    """T6: 合意成立ターンは最終ターン固定ではなく、最初に成立したターンを記録する。"""
+    transcript = _utterances(
+        ["A", "B", "C", "A", "B", "C", "A", "B"],
+        [
+            "プラ容器を廃止すべき",
+            "コストの懸念がある",
+            "折衷案が良いかも",
+            "なるほど、それは確かに納得できます",   # turn 4
+            "賛成です。歩み寄りましょう",            # turn 5
+            "私もその通りだと思います",              # turn 6 ← ここで成立
+            "同意します、その方向で進めましょう",     # turn 7
+            "賛成です、まとめましょう",              # turn 8 (最終)
+        ],
+    )
+    report = detect_consensus(transcript)
+    assert report.consensus_reached is True
+    # 最終ターン(8)ではなく、合意条件が最初に立った turn 6 を記録する。
+    assert report.detected_at_turn == 6
+
+
 def test_structural_signal_with_store() -> None:
     """合意キーワードはなくても、新規 claim と attack が止まれば構造合意を返す。"""
 

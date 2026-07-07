@@ -243,6 +243,31 @@ def test_no_af_candidate_when_pending_empty():
     assert not any(c.kind in ("af_l1", "af_l2") for c in cands)
 
 
+def _silence_candidate(silence_summarize, partner_present):
+    now = time.monotonic()
+    agent = SimpleNamespace(mode="facilitator", pending_count=3, _pending_intervention=None)
+    cands = _build_candidates(_PendingInterventions(), agent, now=now,
+                              silence_summarize=silence_summarize,
+                              partner_present=partner_present)
+    return next((c for c in cands if c.kind == "silence"), None)
+
+
+def test_silence_threshold_respects_profile_with_partner():
+    """T1: Partner 同席でも silence_summarize=None (controlled) なら沈黙候補は出さず、
+    有効なら max(profile, debate=15.0) を採る。"""
+    # controlled (None): Partner の有無に関わらず沈黙候補なし
+    assert _silence_candidate(None, partner_present=True) is None
+    assert _silence_candidate(None, partner_present=False) is None
+    # active (8.0): Partner ありは max(8,15)=15、Partner なしは 8
+    c = _silence_candidate(8.0, partner_present=True)
+    assert c is not None and c.payload["pause_required"] == 15.0
+    c = _silence_candidate(8.0, partner_present=False)
+    assert c is not None and c.payload["pause_required"] == 8.0
+    # standard (18.0): Partner ありは max(18,15)=18 (プロファイルの方が長い)
+    c = _silence_candidate(18.0, partner_present=True)
+    assert c is not None and c.payload["pause_required"] == 18.0
+
+
 def test_pending_af_l2_suppresses_summarize():
     """保留中 af_l2 がある間は summarize 候補を生成しない (設計88f9a78)。"""
     now = time.monotonic()
@@ -278,6 +303,31 @@ def test_controller_normal_decision_maps_af():
         recent_interventions=[], epoch=1)
     assert decision.reason == "af_l1"
     assert decision.af_text == "[反論] X"
+
+
+def test_controller_normal_decision_survives_invalid_candidate_id():
+    """T5: Controller が候補に無い candidate_id を返してもクラッシュせず見送る。"""
+    from das.asr.live._facilitation import FacilitationDecision
+
+    now = time.monotonic()
+    pending = _PendingInterventions()
+    pending.af = {"kind": "af_l1", "brief": "提示", "af_text": "[反論] X",
+                  "target_speaker": "A", "created_at": now}
+
+    class _BogusController:
+        def arbitrate(self, inp):
+            return FacilitationDecision(
+                decision_id="d", candidate_id="does-not-exist", urgency="low",
+                valid_for_epoch=inp.snapshot_epoch, deadline_ms=0,
+                suppressed=(), reason="bogus")
+
+    agent = SimpleNamespace(mode="facilitator", pending_count=0, _pending_intervention=None)
+    decision, _ctrl, _cands, _lat = _controller_normal_decision(
+        _BogusController(), pending=pending, agent=agent, now=now,
+        silence_elapsed=3.0, silence_summarize=None, partner_present=False,
+        last_intervention_at=0.0, cooldown=8.0, last_invited=None,
+        recent_interventions=[], epoch=1)
+    assert decision.reason == "none"  # StopIteration せず見送り
 
 
 def test_drop_stale_af():
