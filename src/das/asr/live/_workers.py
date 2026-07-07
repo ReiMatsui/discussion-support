@@ -494,8 +494,15 @@ def _build_candidates(
             interrupt_policy="wait_for_pause",
         ))
 
-    silence_thresh = (_AGENT_DEBATE_SILENCE if partner_present
-                      else silence_summarize)
+    # 沈黙要約の閾値: プロファイルの無効化設定 (silence_summarize is None) を尊重する。
+    # controlled は「沈黙要約なし」の設計なので、Partner 同席でも沈黙候補を出さない。
+    # 有効な場合のみ、Partner 会話を邪魔しない意図で debate 閾値と大きい方を採る。
+    if silence_summarize is None:
+        silence_thresh = None
+    elif partner_present:
+        silence_thresh = max(silence_summarize, _AGENT_DEBATE_SILENCE)
+    else:
+        silence_thresh = silence_summarize
     if (mode != "conversation"
             and silence_thresh is not None
             and getattr(agent, "pending_count", 0) > 0):

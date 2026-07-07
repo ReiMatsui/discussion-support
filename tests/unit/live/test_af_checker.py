@@ -243,6 +243,31 @@ def test_no_af_candidate_when_pending_empty():
     assert not any(c.kind in ("af_l1", "af_l2") for c in cands)
 
 
+def _silence_candidate(silence_summarize, partner_present):
+    now = time.monotonic()
+    agent = SimpleNamespace(mode="facilitator", pending_count=3, _pending_intervention=None)
+    cands = _build_candidates(_PendingInterventions(), agent, now=now,
+                              silence_summarize=silence_summarize,
+                              partner_present=partner_present)
+    return next((c for c in cands if c.kind == "silence"), None)
+
+
+def test_silence_threshold_respects_profile_with_partner():
+    """T1: Partner 同席でも silence_summarize=None (controlled) なら沈黙候補は出さず、
+    有効なら max(profile, debate=15.0) を採る。"""
+    # controlled (None): Partner の有無に関わらず沈黙候補なし
+    assert _silence_candidate(None, partner_present=True) is None
+    assert _silence_candidate(None, partner_present=False) is None
+    # active (8.0): Partner ありは max(8,15)=15、Partner なしは 8
+    c = _silence_candidate(8.0, partner_present=True)
+    assert c is not None and c.payload["pause_required"] == 15.0
+    c = _silence_candidate(8.0, partner_present=False)
+    assert c is not None and c.payload["pause_required"] == 8.0
+    # standard (18.0): Partner ありは max(18,15)=18 (プロファイルの方が長い)
+    c = _silence_candidate(18.0, partner_present=True)
+    assert c is not None and c.payload["pause_required"] == 18.0
+
+
 def test_pending_af_l2_suppresses_summarize():
     """保留中 af_l2 がある間は summarize 候補を生成しない (設計88f9a78)。"""
     now = time.monotonic()
