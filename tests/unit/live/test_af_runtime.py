@@ -145,6 +145,29 @@ async def test_ingest_utterance_records_latency_and_adds_nodes() -> None:
     rt._orch.linking.link_node.assert_awaited_once()
 
 
+async def test_ingest_discards_result_when_epoch_changes_during_extraction() -> None:
+    """T4: extraction (LLM) 中に会議リセットが起きたら、store に一切反映せず破棄する。"""
+    from das.agents.extraction import ExtractionOutput
+
+    rt, state = _runtime([])
+    node = Node(text="旧会議主張", node_type="claim", source="utterance", author="A",
+                turn_index=1)
+
+    async def _extract(utt, context=None):  # type: ignore[no-untyped-def]
+        state.meeting_epoch = 1  # 抽出中に会議リセット
+        return ExtractionOutput(nodes=[node], edges=[])
+
+    rt._orch.extraction.extract = AsyncMock(side_effect=_extract)  # type: ignore[method-assign]
+    rt._orch.linking.link_node = AsyncMock(return_value=[])  # type: ignore[method-assign]
+
+    await rt.ingest_utterance(
+        Utterance(turn_id=1, speaker="A", text="x"), expected_epoch=0)
+
+    assert list(rt.store.nodes()) == []              # store に追加されない
+    assert len(rt.latencies_ms["total"]) == 0        # レイテンシも記録しない
+    rt._orch.linking.link_node.assert_not_awaited()  # linking も呼ばれない
+
+
 # --- 介入ノード・応答エッジの計測 (フェーズ5) ---------------------------
 
 

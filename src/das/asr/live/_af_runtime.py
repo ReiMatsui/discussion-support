@@ -128,7 +128,8 @@ class AFRuntime:
             _log.info("af_runtime.docs_ingested", docs_dir=str(self._docs_dir))
 
     async def ingest_utterance(
-        self, utterance: Utterance, context: list[Utterance] | None = None
+        self, utterance: Utterance, context: list[Utterance] | None = None,
+        *, expected_epoch: int | None = None,
     ) -> None:
         """1 発話を extraction → linking で AF に取り込み、レイテンシを記録する。
 
@@ -136,10 +137,20 @@ class AFRuntime:
         extraction / linking を直接呼ぶ (フェーズ3 は介入なしなので web_search /
         NodeAdded 連鎖は不要)。フェーズ4 で Controller に繋ぐ際に bus 経路へ戻す。
         ``context`` は指示語解決の参照文脈 (G2)。
+
+        ``expected_epoch`` (T4): extraction (LLM 呼び出し) の完了後・store 反映前に
+        会議世代を再確認する。処理中に会議リセットが起きていたら、旧会議の発話を
+        新グラフに混入させないよう結果を破棄する (store には一切反映しない)。
         """
 
         t0 = time.monotonic()
         result = await self._orch.extraction.extract(utterance, context=context)
+        # store 反映前に epoch 再確認 (T4): リセット跨ぎの発話は破棄する。
+        if (expected_epoch is not None
+                and getattr(self._state, "meeting_epoch", expected_epoch) != expected_epoch):
+            _log.info("af_runtime.ingest_discarded_epoch_changed",
+                      turn_index=utterance.turn_id)
+            return
         for node in result.nodes:
             self._store.add_node(node)
         for edge in result.edges:
@@ -313,11 +324,19 @@ class AFRuntime:
         new = talk_rs[self._cursor : n]
         ingested = 0
         for offset, record in enumerate(new, start=1):
+            # 各イテレーション先頭で epoch を確認し、リセット済みなら以降を取り込まない
+            # (旧会議の残り発話を新グラフに流し込まないための早期 break, T4)。
+            with state.state_lock:
+                if state.meeting_epoch != epoch:
+                    break
             turn_id = self._cursor + offset
             utterance = self._build_utterance(record, turn_id)
             context = self._recent_utts[-3:]
             try:
-                loop.run_until_complete(self.ingest_utterance(utterance, context))
+                # ingest_utterance 内でも extraction 完了後・store 反映前に epoch を
+                # 再確認し、処理中のリセットで混入させない (T4)。
+                loop.run_until_complete(
+                    self.ingest_utterance(utterance, context, expected_epoch=epoch))
                 ingested += 1
             except Exception as exc:  # pragma: no cover - 防御的
                 _log.warning("af_runtime.ingest_failed", error=str(exc))
