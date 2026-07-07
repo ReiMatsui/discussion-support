@@ -900,6 +900,7 @@ def _run_agenda_detector(state: SessionState, oai_key: str, oai_model: str):
     from das.asr.live._bootstrap import detect_agenda as _detect_agenda
 
     _last_attempt = 0.0
+    _known_epoch = getattr(state, "meeting_epoch", 0)  # 会議リセット検知用 (T3)
     while not state.stop.is_set():
         time.sleep(2)
         if not oai_key:
@@ -910,11 +911,17 @@ def _run_agenda_detector(state: SessionState, oai_key: str, oai_model: str):
             if state.topics:
                 return  # 既に議題/論点あり → 役目終了
         with state.state_lock:
+            epoch = state.meeting_epoch
             talk_rs = intervention_records([
                 r for r in state.records
                 if "speaker" in r and r.get("text")
                 and r.get("speaker") != AGENT_SPEAKER
             ])
+        # 会議リセット (epoch 変化) で再試行スロットルを戻す (T3)。旧会議の
+        # 発話を新会議の議題としてシードしないよう、下でも副作用直前に再確認する。
+        if epoch != _known_epoch:
+            _known_epoch = epoch
+            _last_attempt = 0.0
         if len(talk_rs) < _AGENDA_MIN_UTTS:
             continue
         if time.monotonic() - _last_attempt < _AGENDA_RETRY_SEC:
@@ -923,7 +930,8 @@ def _run_agenda_detector(state: SessionState, oai_key: str, oai_model: str):
         utts = [{"speaker": intervention_speaker_name(state, r), "text": r["text"]}
                 for r in talk_rs[:_AGENDA_WINDOW]]
         agenda = _detect_agenda(utts, oai_key, oai_model)
-        if agenda:
+        # シード (副作用) の直前で epoch 再確認: 検出中にリセットが起きたら破棄する。
+        if agenda and state.meeting_epoch == epoch:
             state.seed_topic(agenda, speaker="議題(自動)")
             _print_line(f"# 議題を自動検出してシード: {agenda}")
             return
@@ -1098,6 +1106,7 @@ def _run_triage_worker(state: SessionState, oai_key: str,
 
     _retry_counts: dict[int, int] = {}
     _backlog_warned = False
+    _known_epoch = getattr(state, "meeting_epoch", 0)  # 会議リセット検知用 (T3)
     while not state.stop.is_set():
         time.sleep(0.25)
         agent = state.agent
@@ -1105,6 +1114,13 @@ def _run_triage_worker(state: SessionState, oai_key: str,
             continue
         with state.state_lock:
             epoch = state.meeting_epoch
+        # 会議リセット (epoch 変化) で index ベースのローカル状態を破棄する (T3)。
+        # 旧会議の retry カウントが新会議の同 index 発話に誤適用されるのを防ぐ。
+        if epoch != _known_epoch:
+            _known_epoch = epoch
+            _retry_counts.clear()
+            _backlog_warned = False
+        with state.state_lock:
             # 呼びかけ検出は話者同一性に依存しないため、未確定話者も含む
             # triage_records でフィルタする（修正5）。triage_cursor はこの
             # フィルタ後リストへのインデックスで、fact_cursor(intervention_records
@@ -1245,6 +1261,7 @@ def _run_fact_checker(state: SessionState, oai_key: str, oai_model: str):
     _last_check = 0.0
     _recent_corrections: list[tuple[float, str]] = []
     _retry_counts: dict[int, int] = {}
+    _known_epoch = getattr(state, "meeting_epoch", 0)  # 会議リセット検知用 (T3)
     while not state.stop.is_set():
         time.sleep(0.25)
         agent = state.agent
@@ -1256,6 +1273,13 @@ def _run_fact_checker(state: SessionState, oai_key: str, oai_model: str):
             continue
         with state.state_lock:
             epoch = state.meeting_epoch
+        # 会議リセット (epoch 変化) で index ベースの retry と重複補正履歴を破棄する (T3)。
+        # 旧会議の補正が新会議の補正を dedup で握りつぶすのを防ぐ。
+        if epoch != _known_epoch:
+            _known_epoch = epoch
+            _retry_counts.clear()
+            _recent_corrections = []
+        with state.state_lock:
             talk_rs = intervention_records([
                 r for r in state.records
                 if "speaker" in r and r.get("text")

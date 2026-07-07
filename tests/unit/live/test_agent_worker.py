@@ -1074,6 +1074,44 @@ def test_factcheck_high_confidence_fires(monkeypatch):
     assert req["correction"] == "地球は球体です"
 
 
+def test_factcheck_dedup_resets_on_meeting_epoch_change(monkeypatch):
+    """T3: 会議リセット (epoch 変化) で重複補正履歴がクリアされ、同じ補正でも新会議で
+    再発火する (旧会議の履歴が新会議を握りつぶさない)。"""
+    import das.asr.live._bootstrap as bs
+    from das.asr.live._workers import _run_fact_checker
+
+    monkeypatch.setattr(bs, "check_fact_correction", lambda utts, k, m: {
+        "should_correct": True, "confidence": "high", "correction": "地球は球体です"})
+    agent = FakeAgent()
+    state = FakeState(agent, None)
+    state.records = [{"speaker": "A", "text": "c1", "ms": 0,
+                      "triage": {"factual_claim": True}}]
+
+    def _wait(pred, timeout=3.0):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline and not pred():
+            time.sleep(0.05)
+        return pred()
+
+    t = threading.Thread(target=_run_fact_checker, args=(state, "key", "model"),
+                         daemon=True)
+    t.start()
+    try:
+        assert _wait(lambda: not state.factcheck_requests.empty()), "会議1で発火"
+        state.factcheck_requests.get_nowait()
+        # 会議2: epoch++・records差し替え・cursorリセット。同じ補正文でも再発火する。
+        with state.state_lock:
+            state.meeting_epoch += 1
+            state.records = [{"speaker": "A", "text": "c2", "ms": 0,
+                              "triage": {"factual_claim": True}}]
+            state.fact_cursor = 0
+        assert _wait(lambda: not state.factcheck_requests.empty()), \
+            "epoch 跨ぎで重複補正履歴がリセットされ再発火する"
+    finally:
+        state.stop.set()
+        t.join(timeout=2.0)
+
+
 # ---------------------------------------------------------------------------
 # 未確定話者の割り込み（C1）: 声紋が確定しない発話でもAIを止められる
 # ---------------------------------------------------------------------------
