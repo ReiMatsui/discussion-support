@@ -1309,7 +1309,10 @@ def _run_fact_checker(state: SessionState, oai_key: str, oai_model: str):
                 continue
             state.fact_cursor = next_idx + 1
         _retry_counts.pop(next_idx, None)
-        if result.get("should_correct"):
+        # 採用するのは high confidence の訂正だけ (docstring と一致)。confidence が
+        # 欠落・不正値なら安全側で発火しない。低確度の訂正を対面議論に流さない。
+        _fact_confidence = str(result.get("confidence") or "").strip().lower()
+        if result.get("should_correct") and _fact_confidence == "high":
             correction = str(result.get("correction") or "").strip()
             if correction:
                 norm = re.sub(r"[\s、。,.，．!！?？]+", "", correction).lower()

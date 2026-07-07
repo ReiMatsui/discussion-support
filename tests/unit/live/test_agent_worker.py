@@ -1024,6 +1024,57 @@ def test_structuring_checker_rejudges_after_pending_reset(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# 事実補正の confidence ゲート (T2): high のみ採用する
+# ---------------------------------------------------------------------------
+
+def _run_fact_briefly(state, *, until, timeout=2.0):
+    from das.asr.live._workers import _run_fact_checker
+    t = threading.Thread(target=_run_fact_checker,
+                         args=(state, "key", "model"), daemon=True)
+    t.start()
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline and not until():
+        time.sleep(0.05)
+    state.stop.set()
+    t.join(timeout=2.0)
+
+
+def _fact_state():
+    agent = FakeAgent()
+    state = FakeState(agent, None)
+    state.records = [{"speaker": "A", "text": "地球は平らだ",
+                      "ms": 0, "triage": {"factual_claim": True}}]
+    return state
+
+
+def _run_fact_with_confidence(monkeypatch, confidence):
+    import das.asr.live._bootstrap as bs
+    result = {"should_correct": True, "correction": "地球は球体です"}
+    if confidence is not None:
+        result["confidence"] = confidence
+    monkeypatch.setattr(bs, "check_fact_correction", lambda utts, k, m: dict(result))
+    state = _fact_state()
+    _run_fact_briefly(state, until=lambda: not state.factcheck_requests.empty(),
+                      timeout=1.5)
+    return state
+
+
+def test_factcheck_non_high_confidence_does_not_fire(monkeypatch):
+    """T2: confidence が high 以外 (medium/low/欠落/不正) では訂正を発火しない。"""
+    for conf in ("medium", "low", None, "HIGH_TYPO"):
+        state = _run_fact_with_confidence(monkeypatch, conf)
+        assert state.factcheck_requests.empty(), f"confidence={conf} は発火しないべき"
+
+
+def test_factcheck_high_confidence_fires(monkeypatch):
+    """T2: confidence=high の訂正は factcheck_requests に積まれる。"""
+    state = _run_fact_with_confidence(monkeypatch, "high")
+    assert not state.factcheck_requests.empty()
+    req = state.factcheck_requests.get_nowait()
+    assert req["correction"] == "地球は球体です"
+
+
+# ---------------------------------------------------------------------------
 # 未確定話者の割り込み（C1）: 声紋が確定しない発話でもAIを止められる
 # ---------------------------------------------------------------------------
 
