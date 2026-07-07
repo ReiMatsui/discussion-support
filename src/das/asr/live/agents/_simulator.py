@@ -118,6 +118,8 @@ class DiscussionSimulator:
         print(f"# Simulator: 議論開始 — 議題「{self.topic}」", flush=True)
 
         turn = 0
+        _parse_failures = 0  # 連続パース失敗数 (無限リトライ防止, T10-4)
+        _max_parse_failures = 5
         while not self._stop.is_set():
             # ファシリテーター介入があればコンテキストに注入
             facilitator_msgs = []
@@ -154,12 +156,18 @@ class DiscussionSimulator:
             # 「話者名: 発言」をパース
             speaker, utterance = self._parse_turn(text)
             if not speaker or not utterance:
-                # パース失敗 → 再試行
+                # パース失敗 → 再試行 (ただし連続失敗が続いたら打ち切る, T10-4)。
+                _parse_failures += 1
+                if _parse_failures >= _max_parse_failures:
+                    print(f"# Simulator: パース失敗が {_max_parse_failures} 回連続 → "
+                          f"シミュレーションを終了", flush=True)
+                    break
                 self._history.append({"role": "assistant", "content": text})
                 self._history.append({"role": "user", "content":
                     "フォーマットが正しくありません。「話者名: 発言」の形式で1人の発言だけ生成してください。"})
                 continue
 
+            _parse_failures = 0  # 成功したらカウンタをリセット
             self._history.append({"role": "assistant", "content": text})
             # 会話履歴が長くなりすぎないよう制限
             if len(self._history) > 40:
