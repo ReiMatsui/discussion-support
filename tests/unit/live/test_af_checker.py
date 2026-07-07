@@ -305,6 +305,31 @@ def test_controller_normal_decision_maps_af():
     assert decision.af_text == "[反論] X"
 
 
+def test_controller_normal_decision_survives_invalid_candidate_id():
+    """T5: Controller が候補に無い candidate_id を返してもクラッシュせず見送る。"""
+    from das.asr.live._facilitation import FacilitationDecision
+
+    now = time.monotonic()
+    pending = _PendingInterventions()
+    pending.af = {"kind": "af_l1", "brief": "提示", "af_text": "[反論] X",
+                  "target_speaker": "A", "created_at": now}
+
+    class _BogusController:
+        def arbitrate(self, inp):
+            return FacilitationDecision(
+                decision_id="d", candidate_id="does-not-exist", urgency="low",
+                valid_for_epoch=inp.snapshot_epoch, deadline_ms=0,
+                suppressed=(), reason="bogus")
+
+    agent = SimpleNamespace(mode="facilitator", pending_count=0, _pending_intervention=None)
+    decision, _ctrl, _cands, _lat = _controller_normal_decision(
+        _BogusController(), pending=pending, agent=agent, now=now,
+        silence_elapsed=3.0, silence_summarize=None, partner_present=False,
+        last_intervention_at=0.0, cooldown=8.0, last_invited=None,
+        recent_interventions=[], epoch=1)
+    assert decision.reason == "none"  # StopIteration せず見送り
+
+
 def test_drop_stale_af():
     now = time.monotonic()
     pending = _PendingInterventions()

@@ -801,7 +801,12 @@ def _controller_barge_in_decision(
     if decision.candidate_id is None:
         # 候補はあるが今は採らない → 保持して次の機会を待つ（hold）。
         return _BargeInDecision("hold"), decision, cands, latency_ms
-    chosen = next(c for c in cands if c.id == decision.candidate_id)
+    chosen = next((c for c in cands if c.id == decision.candidate_id), None)
+    if chosen is None:
+        # Controller/LLM が候補に無い ID を返した → クラッシュせず今回は見送る (T5)。
+        print(f"# [diag] controller: 不正な candidate_id={decision.candidate_id}"
+              f"（バージイン見送り）", flush=True)
+        return _BargeInDecision("hold"), decision, cands, latency_ms
     if chosen.kind == "fact":
         return (_BargeInDecision("fact", fact=chosen.payload.get("fact")),
                 decision, cands, latency_ms)
@@ -864,7 +869,12 @@ def _controller_normal_decision(
                 return (_NormalTriggerDecision(
                     "skip_invite", invite_target=pending.invite), decision, cands, latency_ms)
         return _NormalTriggerDecision("none"), decision, cands, latency_ms
-    chosen = next(c for c in cands if c.id == decision.candidate_id)
+    chosen = next((c for c in cands if c.id == decision.candidate_id), None)
+    if chosen is None:
+        # Controller/LLM が候補に無い ID を返した → クラッシュせず今回は見送る (T5)。
+        print(f"# [diag] controller: 不正な candidate_id={decision.candidate_id}"
+              f"（通常レーン見送り）", flush=True)
+        return _NormalTriggerDecision("none"), decision, cands, latency_ms
     if chosen.kind == "conversation":
         return (_NormalTriggerDecision("conversation", f"沈黙{silence_elapsed:.1f}秒"),
                 decision, cands, latency_ms)
