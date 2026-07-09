@@ -90,7 +90,11 @@ def test_start_after_close_clears_stop_and_active_speakers(monkeypatch) -> None:
     assert provider._active_starts == {}
 
 
-def test_send_audio_uses_pyannote_float_payload() -> None:
+def test_send_audio_buffers_until_100ms_chunk_boundary() -> None:
+    """Live-1は16kHz mono pcm_f32leの100ms固定チャンク(1600サンプル)を要求するため、
+    provider内部でその境界まで送信を保留する必要がある(仕様: docs.pyannote.ai/
+    tutorials/streaming-real-time)。"""
+
     class WS:
         def __init__(self) -> None:
             self.sent: list[bytes] = []
@@ -102,9 +106,34 @@ def test_send_audio_uses_pyannote_float_payload() -> None:
     provider = PyannoteStreamingDiarizationProvider("k")
     provider._ws = ws
 
+    # 2サンプルだけでは100ms(1600サンプル)に満たないため、まだ送信されない。
     provider.send_audio(struct.pack("<hh", 0, 32767))
+    assert ws.sent == []
+
+    # 残り1598サンプル分を追加すると、ちょうど1600サンプル=6400バイトが1回で送られる。
+    provider.send_audio(struct.pack("<1598h", *([0] * 1598)))
 
     assert len(ws.sent) == 1
+    assert len(ws.sent[0]) == 1600 * 4
     got = np.frombuffer(ws.sent[0], dtype="<f4")
     assert got[0] == 0.0
     assert 0.9999 < got[1] < 1.0
+
+
+def test_send_audio_flushes_multiple_full_chunks_at_once() -> None:
+    class WS:
+        def __init__(self) -> None:
+            self.sent: list[bytes] = []
+
+        def send(self, payload: bytes) -> None:
+            self.sent.append(payload)
+
+    ws = WS()
+    provider = PyannoteStreamingDiarizationProvider("k")
+    provider._ws = ws
+
+    # 3200サンプル分(200ms)を一度に渡すと、6400バイトのチャンクが2回送られる。
+    provider.send_audio(struct.pack("<3200h", *([0] * 3200)))
+
+    assert len(ws.sent) == 2
+    assert all(len(p) == 1600 * 4 for p in ws.sent)
