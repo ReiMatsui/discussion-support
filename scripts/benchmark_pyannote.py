@@ -703,11 +703,29 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return ap
 
 
+def _load_dotenv_fallback() -> None:
+    """プロジェクトルートの .env から未設定の環境変数のみ読み込む（export不要にする）。"""
+    import os
+
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    if not env_path.exists():
+        return
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key, value = key.strip(), value.strip().strip('"').strip("'")
+        if key and value and key not in os.environ:
+            os.environ[key] = value
+
+
 def resolve_api_key(cli_value: str | None) -> str | None:
     import os
 
     if cli_value:
         return cli_value
+    _load_dotenv_fallback()
     return os.environ.get("PYANNOTEAI_API_KEY") or os.environ.get("PYANNOTE_API_KEY")
 
 
