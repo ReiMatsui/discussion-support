@@ -42,6 +42,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import signal
@@ -159,6 +160,22 @@ def stream_live(
 
     collected: list[DiarizationEvent] = []
     interrupted = False
+    # サーバ都合の切断 (1011等) に備えた自動再接続。新セッションはタイムスタンプが
+    # 0 に戻るため、再接続時点の音声内位置を session_base_ms として加算補正する。
+    max_reconnects = 3
+    reconnects = 0
+    session_base_ms = 0
+
+    def _shift(ev: DiarizationEvent) -> DiarizationEvent:
+        if session_base_ms == 0:
+            return ev
+        return DiarizationEvent(
+            start_ms=ev.start_ms + session_base_ms,
+            end_ms=(ev.end_ms + session_base_ms) if ev.end_ms is not None else None,
+            speaker=f"S{reconnects}_{ev.speaker}",  # セッション跨ぎでラベル空間が変わるため区別
+            source=ev.source,
+            confidence=ev.confidence,
+        )
 
     def _on_sigint(signum: object, frame: object) -> None:
         raise _Interrupted()
@@ -171,13 +188,36 @@ def stream_live(
         while offset < len(data):
             chunk_start_wall = time.monotonic()
             chunk = data[offset : offset + _CHUNK_BYTES]
+            try:
+                provider.send_audio(chunk)
+            except Exception as exc:  # ConnectionClosed 等
+                print(
+                    f"\n接続が切断されました ({type(exc).__name__}: {exc})。",
+                    file=sys.stderr,
+                )
+                for ev in provider.drain_events():
+                    collected.append(_shift(ev))
+                if reconnects >= max_reconnects:
+                    print("再接続上限に達したため部分結果で終了します。", file=sys.stderr)
+                    break
+                reconnects += 1
+                session_base_ms = chunk_idx * _CHUNK_MS
+                print(
+                    f"新セッションで再接続します ({reconnects}/{max_reconnects}回目、"
+                    f"音声内位置 {fmt_mmss(session_base_ms)} から再開)...",
+                    file=sys.stderr,
+                )
+                provider = PyannoteStreamingDiarizationProvider(api_key)
+                provider.start()
+                # ペーシング基準を再接続後の位置に合わせてリセット
+                start_wall = time.monotonic() - chunk_idx * (_CHUNK_MS / 1000.0)
+                continue  # このチャンクは新セッションで再送
             offset += _CHUNK_BYTES
             chunk_idx += 1
-            provider.send_audio(chunk)
 
             for ev in provider.drain_events():
-                collected.append(ev)
-                _print_event(ev)
+                collected.append(_shift(ev))
+                _print_event(_shift(ev))
 
             # 実時間ペーシング: このチャンクの再生時間ぶん経過するまで待つ
             target_wall = start_wall + chunk_idx * (_CHUNK_MS / 1000.0)
@@ -199,9 +239,10 @@ def stream_live(
         signal.signal(signal.SIGINT, prev_handler)
 
     print("ストリーミング終了。残りの確定イベントを待機中(close)...")
-    provider.close()
+    with contextlib.suppress(Exception):  # 既に切断済みなら close は失敗してよい
+        provider.close()
     for ev in provider.drain_events():
-        collected.append(ev)
+        collected.append(_shift(ev))
         _print_event(ev)
 
     # サーバがend_of_stream受理後もクローズ待ちの間に来たactive(未確定)分は
