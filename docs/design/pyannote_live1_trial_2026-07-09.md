@@ -125,3 +125,74 @@ pyannoteAIの正確な単価はダッシュボードの契約プラン依存だ�
 1. 本ドキュメントの手順で最低3セッションをベンチマーク実行し、`transcripts/*.pyannote_bench.json` を確認。
 2. 一致率が低いセッションの `mismatches` を数件、実音声で聴取確認（どちらが正しいかの一次判定）。
 3. 結果を踏まえ、乗り換え/併用/現状維持を判断し、必要なら `--diarization pyannote` のライブ本番投入計画（上記4節）に進む。
+
+## 7. Live-1 実測手順（2026-07-09追記）
+
+上記4節の「1. WSメッセージパースが現行API仕様と一致しているか」を確認するため、
+`src/das/asr/live/_pyannote_diarization.py` を pyannoteAI Live-1 の正式仕様
+（`docs.pyannote.ai/tutorials/streaming-real-time` および
+`docs.pyannote.ai/api-reference/{create-stream,streaming}`）に合わせて更新した
+（16kHz mono pcm_f32le・100ms固定チャンク送信、`end_of_stream` 終了シーケンス、
+`error` イベントのログ出力）。既存の録音wavを実際にWSへ流して実測するための
+スクリプトを `scripts/test_pyannote_live.py` として新規追加した。
+
+### 7.1 実行コマンド例
+
+```bash
+# transcripts/2026-06-25_1554.wav + .turns.jsonl を解決し、先頭5分だけ実時間で流す
+uv run python scripts/test_pyannote_live.py --session 2026-06-25_1554
+
+# 先頭2分だけ（動作確認を素早く回したい時）
+uv run python scripts/test_pyannote_live.py --session 2026-06-25_1554 --head-minutes 2
+
+# wavを直接指定
+uv run python scripts/test_pyannote_live.py --wav transcripts/2026-06-25_1554.wav
+```
+
+標準出力に受信イベントが `[mm:ss] SPEAKER_XX ...` 形式で逐次表示され、終了時に
+`transcripts/<session>.pyannote_live.json`（確定した話者区間一覧）を保存し、
+流した範囲の `turns.jsonl` と突き合わせたサマリ（`scripts/benchmark_pyannote.py`
+の `compare_session` 等を再利用）を表示する。Ctrl-C で安全に中断でき、
+その場合は `end_of_stream` を送ってサーバの残り確定イベントを受け切ってから
+接続を閉じる（送信済みぶんまでの結果は保存・比較される）。
+
+### 7.2 実時間制約と頭出し推奨
+
+Live-1 はサーバ側が「実時間 + 最大5秒バッファ」までしか先行受信を許容しない
+仕様のため、本スクリプトは100msチャンクをwall-clockで100ms間隔にペーシングして
+送信する。**録音時間分だけ実時間がかかる**（26分のセッションなら26分待つ）ため、
+動作確認や一次スクリーニングでは既定の `--head-minutes 5`（先頭5分のみ）を
+推奨する。長時間セッションでの声紋ドリフト耐性など、頭出し5分では判断できない
+観点を確認したい場合のみ `--head-minutes` を伸ばすか `0`（全編）を指定する。
+
+### 7.3 費用目安
+
+Live-1もバッチ (`/diarize`) と同様の秒数課金体系で、目安は**概ね
+€0.17〜0.20/時間**（最低20秒/セッション課金、詳細は5節参照）。頭出し5分の
+実測なら1回あたり数セント程度に収まる想定。
+
+### 7.4 バッチベンチのモデルは再実行不要（調査結果）
+
+`scripts/benchmark_pyannote.py` が使っているバッチ diarizationモデル
+（既定 `precision-2`）は、2026-07-09時点の `docs.pyannote.ai/models` 確認でも
+引き続き最新・最高精度モデルだった。すなわち**過去に実行済みのバッチベンチ結果は
+モデル陳腐化が理由の再実行は不要**（3節「使い方」参照）。今回の作業対象は
+あくまでLive-1（ストリーミング）側のプロトコル実装確認・実測であり、バッチ側の
+やり直しではない。
+
+### 7.5 判定の見方
+
+`compare_session` が返す指標の読み方は3節と同じ（ターン単位一致率・話者数一致・
+`未確定`区間の解消状況）。Live-1実測では追加で次を確認する:
+
+- **境界タイミングの遅延**: ストリーミングは确定イベント（`diarization_speaker_end`）
+  がバッチより数百ms〜数秒遅れて届く特性があるため、`overlap_ratio` が低い
+  不一致が頭出し範囲の終端付近に集中していないか確認する（範囲外に及ぶターンは
+  `clip_turns_to_range` で比較対象から自動除外しているが、境界直前のターンは
+  残るため誤差として出うる）。
+- **頭出し5分での話者数**: セッション全体の話者数と、先頭5分だけの話者数は
+  一致しないことがある（後半から参加する話者がいる等）。`speaker_count_matches`
+  が不一致でも、単に「まだ登場していない」だけの可能性がある点に注意する。
+- バッチとの精度同等性そのものを厳密に検証したい場合は、`--head-minutes 0`
+  （全編）で1〜2セッション流し、`scripts/benchmark_pyannote.py` の同一セッション
+  結果と一致率・話者マッピングを見比べる。

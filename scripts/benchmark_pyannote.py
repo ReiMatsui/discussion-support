@@ -31,6 +31,14 @@ pyannoteAI API 要点（2026-07 時点 docs.pyannote.ai 調べ）:
     バッチ API のみを叩く。Live-1 との精度同等性の確認が目的なので、まずバッチで
     現行比較を行う）。
 
+モデルについて（2026-07-09 Live-1調査で再確認）:
+  docs.pyannote.ai/models を確認した結果、バッチ diarization の最新・最高精度モデルは
+  引き続き ``precision-2``（Community-1 比 +28% 精度、既定モデル）であり、本スクリプトが
+  これまで使っていたモデル指定（既定 ``precision-2`` 相当）は最新のままだった。
+  = 前回実行分もモデル自体は最新だったので、モデル変更に起因する再実行は不要。
+  ただし従来は ``--model`` 未指定時にAPI側の既定へ委ねていた（サーバ内部で変わる可能性が
+  ある）ため、本改修で ``--model`` の既定値を ``precision-2`` に明示指定するよう変更した。
+
 環境変数:
   PYANNOTEAI_API_KEY  既存コード（src/das/asr/live/_bootstrap.py）が使っている名前。
                        本スクリプトはこちらを優先して読む。
@@ -683,9 +691,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument("--max-speakers", type=int, default=None)
     ap.add_argument(
         "--model",
-        default=None,
+        default="precision-2",
         choices=["precision-2", "community-1"],
-        help="pyannoteAI diarizationモデル（省略時APIの既定=precision-2）",
+        help="pyannoteAI diarizationモデル（既定: precision-2。2026-07-09時点で"
+        "docs.pyannote.ai/models 記載の最新・最高精度モデル。APIのデフォルトも"
+        "precision-2だが、将来のサーバ既定変更に左右されないよう明示指定する）",
     )
     ap.add_argument(
         "--unknown-label",
