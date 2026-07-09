@@ -882,6 +882,11 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
                 reconnect_attempts = 0
                 if status == "finished":
                     break
+    except KeyboardInterrupt:
+        # Ctrl+C はトレースバックを出さず、UIの停止ボタンと同じ扱いで安全に終了する
+        # （ブラウザタブを閉じてしまった場合も、タブを開き直すか Ctrl+C で停止できる）。
+        print("\n# Ctrl+C を受信。議事録を保存して安全に終了します…", flush=True)
+        state.stop.set()
     finally:
         with _contextlib.suppress(Exception):
             if state.stt_ws is not None:
