@@ -367,7 +367,9 @@ _PROMPT_CONVERSATION = """\
 簡潔に、日本語で返答してください（15秒以内に収まる長さ）。
 会議の文脈を踏まえた上で、役に立つ回答を心がけてください。"""
 
-REALTIME_MODEL = os.environ.get("OPENAI_REALTIME_MODEL", "gpt-realtime-2")
+# 2026-07: gpt-realtime-2.1 に更新 (割り込み挙動・無音/ノイズ処理の改善)。
+# 問題があれば環境変数 OPENAI_REALTIME_MODEL=gpt-realtime-2 で即ロールバック可。
+REALTIME_MODEL = os.environ.get("OPENAI_REALTIME_MODEL", "gpt-realtime-2.1")
 
 
 def realtime_url(model: str | None = None) -> str:
