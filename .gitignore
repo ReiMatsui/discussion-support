@@ -77,3 +77,4 @@ live_transcriber.html
 # ドキュメント成果物（別管理）
 *.docx
 *.pptx
+*.log
