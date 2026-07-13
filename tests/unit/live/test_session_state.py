@@ -95,6 +95,54 @@ def test_constrain_after_label_release_with_max_speakers():
     assert s.disp_name("#3") == "参加者B"    # 解放された B を再利用
 
 
+class _FakePyannoteProvider:
+    """pyannote provider をhysteresis判定用に模したダミー(.name==\"pyannote\")."""
+
+    name = "pyannote"
+
+
+class _FakeOtherProvider:
+    """pyannote以外のprovider（AssemblyAI等）を模したダミー."""
+
+    name = "assemblyai"
+
+
+def test_key_for_diarization_speaker_hysteresis_below_threshold_stays_unsure():
+    """pyannote使用時、累積発話が3秒未満の新規ラベルは@diar:Nを発行せずUNSURE_SPEAKERのまま."""
+    s = _make_state()
+    s.diarization_provider = _FakePyannoteProvider()
+    assert s.key_for_diarization_speaker("pyannote", "SPEAKER_00", duration_ms=1000) == "?"
+    assert s.key_for_diarization_speaker("pyannote", "SPEAKER_00", duration_ms=1500) == "?"
+    # 累計2.5秒 < 3.0秒 なのでまだ@diar:Nは発行されない
+    assert "pyannote:SPEAKER_00" not in s.diarization_speaker_keys
+
+
+def test_key_for_diarization_speaker_hysteresis_above_threshold_registers_participant():
+    """累積発話が3秒に達したら@diar:Nを新規発行し、以後は安定して同じキーを返す."""
+    s = _make_state()
+    s.diarization_provider = _FakePyannoteProvider()
+    assert s.key_for_diarization_speaker("pyannote", "SPEAKER_00", duration_ms=1500) == "?"
+    key = s.key_for_diarization_speaker("pyannote", "SPEAKER_00", duration_ms=1600)
+    assert key.startswith("@diar:")
+    # 一度確定したら、以後は同じ生ラベルに対して同じキーを安定して返す
+    assert s.key_for_diarization_speaker("pyannote", "SPEAKER_00", duration_ms=50) == key
+
+
+def test_key_for_diarization_speaker_no_hysteresis_for_non_pyannote_provider():
+    """pyannote以外のproviderでは従来どおり即時に@diar:Nを発行する（挙動を変えない）."""
+    s = _make_state()
+    s.diarization_provider = _FakeOtherProvider()
+    key = s.key_for_diarization_speaker("assemblyai", "A", duration_ms=10)
+    assert key.startswith("@diar:")
+
+
+def test_key_for_diarization_speaker_no_hysteresis_without_provider():
+    """diarization_provider未設定（従来のデフォルト）でも即時発行する."""
+    s = _make_state()
+    key = s.key_for_diarization_speaker("stt", "A", duration_ms=10)
+    assert key.startswith("@diar:")
+
+
 def test_reset_drains_summarize_requests():
     """会議リセットで整理介入の要求キューも drain される（C3）."""
     s = _make_state()

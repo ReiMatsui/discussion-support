@@ -379,6 +379,12 @@ def realtime_url(model: str | None = None) -> str:
 REALTIME_URL = realtime_url()
 AGENT_SPEAKER = "ファシリテーター"   # recordsに使うスピーカーキー
 UNSURE_SPEAKER = "?"   # 短い発話で話者を確定できないときのキー（表示は「未確定」）
+# pyannote Live-1 のようにセッション序盤でラベルが揺れる（一人の発話が複数の
+# 生ラベルに分裂する）providerに対して、新しい外部diarizationラベルを即座に
+# 「参加者」として恒久登録しない猶予（ヒステリシス）。同一ラベルの累積発話が
+# この秒数に達するまでは @diar:N を新規発行せず UNSURE_SPEAKER（未確定）に
+# 留める。SessionState.key_for_diarization_speaker 参照。
+PYANNOTE_PARTICIPANT_HYSTERESIS_S = 3.0
 # =====================================================================
 # タイミング定数（介入・割り込みロジック）
 # ---------------------------------------------------------------------

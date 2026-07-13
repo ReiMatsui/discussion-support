@@ -243,7 +243,10 @@ class RecvLoop:
                     sp_id = resolved.speaker
                 else:
                     rec_extra["diarization_raw_speaker"] = resolved.speaker
-                    sp_id = s.key_for_diarization_speaker(resolved.source, resolved.speaker)
+                    sp_id = s.key_for_diarization_speaker(
+                        resolved.source, resolved.speaker,
+                        duration_ms=self.cur_end - self.cur_ms,
+                    )
                 rec_extra["speaker_source"] = resolved.source
                 rec_extra["speaker_confidence"] = round(resolved.confidence, 3)
                 rec_extra["speaker_reason"] = resolved.reason
@@ -256,7 +259,9 @@ class RecvLoop:
                   and voiceprint_speaker is None
                   and sp_id != UNSURE_SPEAKER):
                 rec_extra["stt_raw_speaker"] = resolved.speaker
-                sp_id = s.key_for_stt_fallback_speaker(resolved.speaker)
+                sp_id = s.key_for_stt_fallback_speaker(
+                    resolved.speaker, duration_ms=self.cur_end - self.cur_ms
+                )
                 rec_extra["speaker_source"] = "stt_fallback"
                 rec_extra["speaker_confidence"] = 0.0
                 rec_extra["speaker_reason"] = "diarization_no_confident_overlap_stt_fallback"

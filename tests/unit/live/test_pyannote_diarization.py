@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import struct
+from typing import Any
 
 import numpy as np
 
@@ -118,6 +119,77 @@ def test_send_audio_buffers_until_100ms_chunk_boundary() -> None:
     got = np.frombuffer(ws.sent[0], dtype="<f4")
     assert got[0] == 0.0
     assert 0.9999 < got[1] < 1.0
+
+
+def test_parse_message_discards_degenerate_zero_length_segment() -> None:
+    """start と end が同時刻(区間長0)の縮退セグメントは下流に流さない."""
+    provider = PyannoteStreamingDiarizationProvider("k")
+
+    start = {
+        "type": "diarization_speaker_start",
+        "data": {"timestamp": 1.25, "speaker": "SPEAKER_00"},
+    }
+    end_same_ts = {
+        "type": "diarization_speaker_end",
+        "data": {"timestamp": 1.25, "speaker": "SPEAKER_00"},
+    }
+
+    assert provider._parse_message(json.dumps(start)) is None
+    assert provider._parse_message(json.dumps(end_same_ts)) is None
+    # 破棄後は active_starts からも取り除かれている
+    assert provider.active_events() == []
+
+
+def test_parse_message_discards_end_without_matching_start() -> None:
+    """対応する speaker_start が無い speaker_end は縮退セグメント化を避けて破棄する."""
+    provider = PyannoteStreamingDiarizationProvider("k")
+
+    end_without_start = {
+        "type": "diarization_speaker_end",
+        "data": {"timestamp": 2.0, "speaker": "SPEAKER_01"},
+    }
+
+    assert provider._parse_message(json.dumps(end_without_start)) is None
+
+
+def test_max_speakers_stored_but_not_sent_to_create_stream_api(monkeypatch) -> None:
+    """Live-1のPOST /v1/liveはボディにプロパティを持たないため、max_speakersを
+    指定してもAPIリクエストボディは常に空({})のまま送られる（配線だけ用意）."""
+    captured: dict[str, Any] = {}
+
+    class Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def read(self) -> bytes:
+            return b'{"url":"ws://example"}'
+
+    class WS:
+        def recv(self) -> str:
+            raise RuntimeError("stop")
+
+        def send(self, payload) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    def fake_urlopen(req, *a, **k):
+        captured["data"] = req.data
+        return Resp()
+
+    provider = PyannoteStreamingDiarizationProvider("k", max_speakers=3)
+    provider._stop.set()
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("websockets.sync.client.connect", lambda *a, **k: WS())
+
+    provider.start()
+
+    assert provider.max_speakers == 3
+    assert captured["data"] == b"{}"
 
 
 def test_send_audio_flushes_multiple_full_chunks_at_once() -> None:

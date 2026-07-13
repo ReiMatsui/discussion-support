@@ -565,8 +565,15 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
         pyannote_key = os.environ.get("PYANNOTEAI_API_KEY")
         if not pyannote_key:
             raise SystemExit("環境変数 PYANNOTEAI_API_KEY を設定してください")
-        diarizer = PyannoteStreamingDiarizationProvider(pyannote_key)
-        print("# 話者分離: pyannoteAI streaming を使用", flush=True)
+        diarizer = PyannoteStreamingDiarizationProvider(
+            pyannote_key,
+            max_speakers=args.diarization_max_speakers,
+        )
+        hint = (
+            f" max_speakers={args.diarization_max_speakers}"
+            if args.diarization_max_speakers else ""
+        )
+        print(f"# 話者分離: pyannoteAI streaming を使用{hint}", flush=True)
     elif args.diarization == "assemblyai":
         assemblyai_key = os.environ.get("ASSEMBLYAI_API_KEY")
         if not assemblyai_key:

@@ -224,3 +224,69 @@ Live-1もバッチ (`/diarize`) と同様の秒数課金体系で、目安は**�
 (2) 抑揚の大きい独話でクラスタが分裂しやすい、(3) イベントタイムスタンプと録音タイムラインの整合ずれの可能性。
 → **凍結判定を実地でも確認**。現行（フラグなし）運用を継続。
 再開時の必須対応: SpeakerResolver 側に「新ラベルは N 秒/累積発話量の様子見をしてから参加者化する」ヒステリシスを入れること（縮退セグメント対策・再接続対応と合わせて）。
+
+### 8.2 フェア再検証用の最適化実装（2026-07-13追記）
+
+8.1 で確認した「単独発話が複数参加者に分裂する」問題に対し、ブランチ
+`try/pyannote-live1` 上で以下を実装した（`--diarization pyannote` 使用時のみ
+影響。Soniox/AssemblyAI経路の挙動は変えない）。
+
+1. **参加者化ヒステリシス**（`_constants.PYANNOTE_PARTICIPANT_HYSTERESIS_S`
+   既定3.0秒、`SessionState.key_for_diarization_speaker` /
+   `key_for_stt_fallback_speaker`）: pyannote provider使用時のみ、生ラベル
+   （`source:speaker`）ごとの累積発話msが閾値に達するまで `@diar:N` を新規発行
+   せず `UNSURE_SPEAKER`（未確定）に留める。閾値到達後は通常どおり `@diar:N`
+   を発行し、以後同じ生ラベルには安定して同じキーを返す（既に登録済みの
+   ラベルの遡及付け替えは行わない）。他providerは従来どおり即時登録。
+2. **縮退セグメント（start==end）対策**（`_pyannote_diarization.py`
+   `_parse_message`）: (a) 対応する `speaker_start` が無い `speaker_end` は
+   区間を再構成できないため破棄しログに残す、(b) `end_ms <= start_ms` と
+   なるペアも破棄する。従来はフォールバックで `end` の timestamp を
+   start扱いにしており、0ms区間を量産していた（下流の `DiarizationEvent.closed()`
+   自体はこれを弾くため実害は限定的だったが、`drain_events()` 経由の生ログ・
+   統計には混入していた）。
+3. **自動再接続**（`_pyannote_diarization.py` `auto_reconnect`/
+   `max_reconnects`引数、既定 有効/3回）: `send_audio()` 中の送信失敗を検知
+   すると新しいLive-1セッションを作り直し、タイムスタンプに送信済み累計msを
+   オフセット加算して連続タイムラインに補正する。再接続後のラベルは
+   `R{epoch}:` を前置して旧セッションのラベルと衝突しないようにする。再接続
+   直後にラベル空間が変わっても、上記ヒステリシスが新ラベルの即時参加者化を
+   抑えるため、既存参加者が別の `@diar:N` に一時的に分裂するリスクは
+   「猶予期間中はUNSURE扱いになる」形で緩和される（ただし猶予後は新しい
+   `@diar:N` として確定するため、頻繁な再接続が起きるセッションでは同一人物に
+   複数の参加者IDが割り当たり得る点は残存の既知限界）。
+4. **話者数ヒント配線**（`_bootstrap.py`）: `PyannoteStreamingDiarizationProvider`
+   生成時に `max_speakers=args.diarization_max_speakers` を渡すよう配線した
+   （AssemblyAI経路と同じ形に統一）。ただし `POST /v1/live` のボディスキーマは
+   プロパティを持たない `object` 型であり、pyannoteAI側には送信されない
+   （2026-07-09時点のAPI仕様確認済み、`_pyannote_diarization.py` docstring
+   参照）。セッションレベルでの人間話者数抑制は既存の
+   `SessionState.constrain_human_speaker_key` / `VoiceProfiles.set_max_human_speakers`
+   経路が引き続き機能する。
+
+追加テスト: `tests/unit/live/test_pyannote_diarization.py`
+（縮退セグメント非emit2種、`max_speakers`保持とAPI非送信の確認）、
+`tests/unit/live/test_session_state.py`（ヒステリシス閾値未満/到達後の挙動、
+非pyannote providerでの従来挙動維持）。
+
+**再検証コマンド**:
+
+```bash
+# バッチ再検証（話者数ヒントあり）
+uv run python scripts/benchmark_pyannote.py --session 2026-06-25_1554 --num-speakers 4
+
+# ライブ単独発話テスト（一人で話し続け、偽参加者が出ないか確認）
+uv run python -m das.asr.live --diarization pyannote --diarization-max-speakers 2
+```
+
+**期待される結果**:
+- ライブ単独発話テストで、ヒステリシス猶予（3秒）を過ぎても参加者が1人の
+  ままであること（8.1で観測された参加者A/B/D/Eへの分裂が再発しないこと）。
+  再接続が発生した場合は再接続直後の3秒程度だけ未確定表示が続くのは想定内。
+- バッチ再検証の一致率が実装前（27.9%/27.4%、本ドキュメント冒頭参照）から
+  改善するかは、あくまで参考値として記録する（バッチ側のロジックは今回
+  変更していないため大きな変化は想定していない。変化があれば
+  `--num-speakers` 指定の効果、または比較対象セッションの差によるものと
+  考えられる）。
+- 縮退セグメント対策・自動再接続はいずれもログ（`logger.warning`）で動作が
+  追跡できるため、再検証時は標準エラー出力も合わせて確認すること。

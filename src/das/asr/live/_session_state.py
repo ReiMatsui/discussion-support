@@ -27,6 +27,7 @@ from ._constants import (
     HTML_PALETTE,
     HTML_TMPL,
     PALETTE,
+    PYANNOTE_PARTICIPANT_HYSTERESIS_S,
     RESET,
     SR,
     UNSURE_SPEAKER,
@@ -86,6 +87,9 @@ class SessionState:
         self.diarization_events: list[DiarizationEvent] = []
         self.diarization_lock = threading.Lock()
         self.diarization_speaker_keys: dict[str, str] = {}
+        # 参加者化ヒステリシス用: まだ @diar:N を発行していないラベルの累積発話ms。
+        # pyannote provider 使用時のみ参照される（他providerは従来どおり即時登録）。
+        self.diarization_pending_ms: dict[str, int] = {}
         self.anonymous_labels: dict[str, str] = {}
         self._DIARIZATION_KEEP_MS = 10 * 60 * 1000
 
@@ -339,22 +343,56 @@ class SessionState:
             return UNSURE_SPEAKER
         return key
 
-    def key_for_diarization_speaker(self, source: str, speaker: str) -> str:
+    def _uses_pyannote_hysteresis(self) -> bool:
+        """新規ラベルの参加者化にヒステリシスを適用するか.
+
+        pyannote Live-1 はセッション序盤にラベルが揺れ、一人の発話が
+        SPEAKER_00/01/02... に分裂することが実地の検証（Live-1試行,
+        docs/design/pyannote_live1_trial_2026-07-09.md）で確認された。
+        即座に @diar:N を発行すると偽参加者が量産されるため、pyannote
+        provider使用時のみ猶予を設ける。Soniox/AssemblyAI経路の挙動は
+        変えない（従来どおり即時登録）。
+        """
+        provider = self.diarization_provider
+        return provider is not None and getattr(provider, "name", None) == "pyannote"
+
+    def key_for_diarization_speaker(
+        self, source: str, speaker: str, duration_ms: int = 0
+    ) -> str:
         """外部diarizationの生ラベルを、表示用の安定した内部キーに変換する.
 
         pyannote の ``SPEAKER_00`` は実名でもUI向けラベルでもなく、provider内部の
         未登録クラスタIDにすぎない。recordsには内部キーを入れ、表示は参加者A/Bに統一する。
+
+        ``duration_ms`` はこの発話の長さ（ms）。pyannote provider使用時のみ、
+        同一の生ラベル（source:speaker）の累積発話が
+        ``PYANNOTE_PARTICIPANT_HYSTERESIS_S`` 秒に達するまでは @diar:N を
+        発行せず UNSURE_SPEAKER を返す（未確定のまま扱う）。達した時点で
+        @diar:N を新規発行するが、それまでに UNSURE_SPEAKER として記録済みの
+        過去レコードの遡及的な付け替えは行わない（records は speaker_source /
+        diarization_raw_speaker で追跡可能なため事後分析は可能だが、
+        RecvLoop.flush() の二段階構成 [resolve→append] をまたぐ安全な
+        rename配線が低コストにできなかったため今回は見送り。未確定のまま
+        UIに残る）。
         """
         raw = f"{source}:{speaker}"
-        if raw not in self.diarization_speaker_keys:
-            idx = len(self.diarization_speaker_keys) + 1
-            key = f"@diar:{idx}"
-            self.diarization_speaker_keys[raw] = key
+        if raw in self.diarization_speaker_keys:
+            return self.diarization_speaker_keys[raw]
+        if self._uses_pyannote_hysteresis():
+            threshold_ms = int(PYANNOTE_PARTICIPANT_HYSTERESIS_S * 1000)
+            pending = self.diarization_pending_ms.get(raw, 0) + max(0, duration_ms)
+            if pending < threshold_ms:
+                self.diarization_pending_ms[raw] = pending
+                return UNSURE_SPEAKER
+            self.diarization_pending_ms.pop(raw, None)
+        idx = len(self.diarization_speaker_keys) + 1
+        key = f"@diar:{idx}"
+        self.diarization_speaker_keys[raw] = key
         return self.diarization_speaker_keys[raw]
 
-    def key_for_stt_fallback_speaker(self, speaker: str) -> str:
+    def key_for_stt_fallback_speaker(self, speaker: str, duration_ms: int = 0) -> str:
         """外部diarizationが薄い時のSTTラベルも表示用の内部キーへ正規化する."""
-        return self.key_for_diarization_speaker("stt", speaker)
+        return self.key_for_diarization_speaker("stt", speaker, duration_ms)
 
     def key_for_label(self, sp) -> str:
         if str(sp).strip().lower() in {"", "none", "null", "unknown", "uu", UNSURE_SPEAKER}:
@@ -755,6 +793,7 @@ class SessionState:
             self.partial_text = ""
             self.partial_speaker = ""
             self.diarization_speaker_keys = {}
+            self.diarization_pending_ms = {}
         with self.diarization_lock:
             self.diarization_events = []
         if self.tracker is not None:
