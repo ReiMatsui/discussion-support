@@ -28,6 +28,7 @@ from das.asr.live._constants import (
     _TRIAGE_PROMPT,
     OPENAI_API,
 )
+from das.asr.live._cluster_naming import ClusterVoiceNamer
 from das.asr.live._diarization import SpeakerResolver
 from das.asr.live._pyannote_diarization import PyannoteStreamingDiarizationProvider
 from das.asr.live._recv_loop import RecvLoop
@@ -85,6 +86,11 @@ class LiveArgs:
     soniox_endpoint: bool = True
     diarization: str = "none"  # none / pyannote / assemblyai
     diarization_max_speakers: int | None = None
+    # ハイブリッド構成（docs/design/pyannote_live1_trial_2026-07-09.md §9）:
+    # --diarization pyannote と併用時のみ有効。pyannoteの生クラスタ単位で
+    # 声紋照合し、名前を確定する（3役分業: Soniox=文字起こし/pyannote=クラスタ
+    # リング/声紋照合=クラスタ単位の名前付け）。tracker(声紋)が無効なら無視される。
+    vp_cluster_naming: bool = False
     setup: bool = True
     port: int = 8231
     agent: bool = True
@@ -575,6 +581,9 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
         )
         print(f"# 話者分離: pyannoteAI streaming を使用{hint}", flush=True)
     elif args.diarization == "assemblyai":
+        if args.vp_cluster_naming:
+            print("# 注意: --vp-cluster-naming は --diarization pyannote 専用です"
+                  "（AssemblyAI併用時は無視されます）", flush=True)
         assemblyai_key = os.environ.get("ASSEMBLYAI_API_KEY")
         if not assemblyai_key:
             raise SystemExit("環境変数 ASSEMBLYAI_API_KEY を設定してください")
@@ -588,12 +597,27 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
         )
         print(f"# 話者分離: AssemblyAI streaming を使用{hint}", flush=True)
 
+    # --- ハイブリッド構成: pyannoteクラスタ単位の声紋名前付け ---
+    # (docs/design/pyannote_live1_trial_2026-07-09.md §9)。--diarization pyannote
+    # かつ --vp-cluster-naming 指定時、かつ声紋照合(tracker)が有効な時だけ生成する。
+    # tracker が無い（--no-vp や依存未導入）場合は照合しようがないため無視する。
+    cluster_namer = None
+    if args.diarization == "pyannote" and args.vp_cluster_naming:
+        if tracker is not None:
+            cluster_namer = ClusterVoiceNamer(tracker)
+            print("# 話者名前付け: pyannoteクラスタ単位の声紋照合ハイブリッド構成を使用"
+                  "（docs/design/pyannote_live1_trial_2026-07-09.md §9）", flush=True)
+        else:
+            print("# 注意: --vp-cluster-naming は声紋照合(tracker)が無効なため無視されます"
+                  "（--no-vp解除 or 依存導入が必要）", flush=True)
+
     state = SessionState(args=args, started=started, out_path=out_path,
                          html_path=html_path, diag_path=diag_path,
                          turns_path=turns_path, wav_path=wav_path,
                          tracker=tracker, serve=_serve,
                          diarization_provider=diarizer,
-                         speaker_resolver=SpeakerResolver())
+                         speaker_resolver=SpeakerResolver(),
+                         cluster_namer=cluster_namer)
     state.stt_backend = backend
     state.waiting_to_start = bool(args.setup and _serve and not args.wav and not args.simulate)
 

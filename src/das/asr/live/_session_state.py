@@ -33,6 +33,7 @@ from ._constants import (
     UNSURE_SPEAKER,
     fmt_ts,
 )
+from ._cluster_naming import ClusterVoiceNamer
 from ._diarization import DiarizationEvent, DiarizationProvider, SpeakerResolver
 from ._participation import participation_stats
 from ._voice_profiles import VoiceProfiles
@@ -54,7 +55,8 @@ class SessionState:
     def __init__(self, *, args, started, out_path, html_path, diag_path,
                  turns_path, wav_path, tracker=None, serve=True,
                  diarization_provider: DiarizationProvider | None = None,
-                 speaker_resolver: SpeakerResolver | None = None):
+                 speaker_resolver: SpeakerResolver | None = None,
+                 cluster_namer: ClusterVoiceNamer | None = None):
         self.args = args
         self.stt_backend = None
         self.started = started
@@ -90,6 +92,11 @@ class SessionState:
         # 参加者化ヒステリシス用: まだ @diar:N を発行していないラベルの累積発話ms。
         # pyannote provider 使用時のみ参照される（他providerは従来どおり即時登録）。
         self.diarization_pending_ms: dict[str, int] = {}
+        # ハイブリッド構成（docs/design/pyannote_live1_trial_2026-07-09.md §9）:
+        # pyannoteクラスタ単位の声紋照合による名前付け。--vp-cluster-naming
+        # 指定時のみ _bootstrap.py が生成して渡す。None なら従来どおり
+        # key_for_diarization_speaker の匿名キー付与のみで完結する。
+        self.cluster_namer: ClusterVoiceNamer | None = cluster_namer
         self.anonymous_labels: dict[str, str] = {}
         self._DIARIZATION_KEEP_MS = 10 * 60 * 1000
 
@@ -796,6 +803,8 @@ class SessionState:
             self.diarization_pending_ms = {}
         with self.diarization_lock:
             self.diarization_events = []
+        if self.cluster_namer is not None:
+            self.cluster_namer.reset()
         if self.tracker is not None:
             self.tracker.reset_session()
         with self.topics_lock:

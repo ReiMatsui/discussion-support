@@ -13,8 +13,14 @@ if TYPE_CHECKING:
 
 import contextlib
 
-from ._constants import _BACKCHANNEL_RE, RESET, UNSURE_SPEAKER, fmt_ts
-from ._diarization import TimeSegment
+from ._constants import (
+    _BACKCHANNEL_RE,
+    PYANNOTE_CLUSTER_OVERLAP_MIN_RATIO,
+    RESET,
+    UNSURE_SPEAKER,
+    fmt_ts,
+)
+from ._diarization import TimeSegment, has_overlapping_speakers
 from ._ui import _print_line
 from ._voice_profiles import _best_text_similarity
 
@@ -241,19 +247,59 @@ class RecvLoop:
             if resolved.source != "stt":
                 if resolved.source == "voiceprint":
                     sp_id = resolved.speaker
+                    rec_extra["speaker_source"] = resolved.source
+                    rec_extra["speaker_confidence"] = round(resolved.confidence, 3)
+                    rec_extra["speaker_reason"] = resolved.reason
                 else:
                     rec_extra["diarization_raw_speaker"] = resolved.speaker
-                    sp_id = s.key_for_diarization_speaker(
-                        resolved.source, resolved.speaker,
-                        duration_ms=self.cur_end - self.cur_ms,
-                    )
-                rec_extra["speaker_source"] = resolved.source
-                rec_extra["speaker_confidence"] = round(resolved.confidence, 3)
-                rec_extra["speaker_reason"] = resolved.reason
+                    # --- ハイブリッド構成: pyannoteクラスタ単位の声紋名前付け ---
+                    # (docs/design/pyannote_live1_trial_2026-07-09.md §8.4/§9)。
+                    # s.cluster_namer は --vp-cluster-naming 指定時のみ設定される。
+                    # 未設定なら以下は素通りし、従来どおり key_for_diarization_speaker
+                    # による匿名キー付与だけで完結する（Soniox単独/他provider配線は不変）。
+                    raw_cluster = f"{resolved.source}:{resolved.speaker}"
+                    cluster_overlap = False
+                    cluster_name = None
+                    if s.cluster_namer is not None:
+                        cluster_overlap = has_overlapping_speakers(
+                            diarization_events, self.cur_ms, self.cur_end,
+                            min_ratio=PYANNOTE_CLUSTER_OVERLAP_MIN_RATIO,
+                        )
+                        cluster_name = s.cluster_namer.observe(
+                            raw_cluster, wav, overlapped=cluster_overlap)
+                    if cluster_name is not None:
+                        # クラスタの累積声紋が確定名に達した。以後このクラスタの発話は
+                        # この名前に帰属する。過去にこのクラスタへ既に匿名キー
+                        # (@diar:N)を発行済みだった場合、既存の rekey 機構で過去分も
+                        # まとめて確定名へ付け替える（設計点4: 低コストな遡及リネーム）。
+                        prior_key = s.diarization_speaker_keys.get(raw_cluster)
+                        if prior_key is not None and prior_key != cluster_name:
+                            s.rekey(prior_key, cluster_name)
+                        sp_id = cluster_name
+                        rec_extra["speaker_source"] = "cluster_voiceprint"
+                        rec_extra["speaker_confidence"] = 1.0
+                        rec_extra["speaker_reason"] = "pyannote_cluster_voiceprint_confirmed"
+                    elif cluster_overlap:
+                        # 重複発話（複数の生クラスタが同時にこの区間を占める）区間は
+                        # 声が混ざり声紋があてにならないため、安全側で未確定にする
+                        # （設計点5）。
+                        sp_id = UNSURE_SPEAKER
+                        rec_extra["speaker_source"] = "cluster_overlap"
+                        rec_extra["speaker_confidence"] = 0.0
+                        rec_extra["speaker_reason"] = "multiple_diarization_speakers_overlap"
+                    else:
+                        sp_id = s.key_for_diarization_speaker(
+                            resolved.source, resolved.speaker,
+                            duration_ms=self.cur_end - self.cur_ms,
+                        )
+                        rec_extra["speaker_source"] = resolved.source
+                        rec_extra["speaker_confidence"] = round(resolved.confidence, 3)
+                        rec_extra["speaker_reason"] = resolved.reason
                 if self.args.vp_debug and resolved.source != "voiceprint":
                     _print_line(
                         f"# diarization: {s.disp_name(sp_id)} ({resolved.speaker})"
-                        f" conf={resolved.confidence:.2f} {resolved.reason}"
+                        f" conf={rec_extra.get('speaker_confidence', resolved.confidence):.2f}"
+                        f" {rec_extra.get('speaker_reason', resolved.reason)}"
                     )
             elif (s.diarization_provider is not None
                   and voiceprint_speaker is None

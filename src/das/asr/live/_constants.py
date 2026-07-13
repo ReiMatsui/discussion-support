@@ -385,6 +385,18 @@ UNSURE_SPEAKER = "?"   # 短い発話で話者を確定できないときのキ�
 # この秒数に達するまでは @diar:N を新規発行せず UNSURE_SPEAKER（未確定）に
 # 留める。SessionState.key_for_diarization_speaker 参照。
 PYANNOTE_PARTICIPANT_HYSTERESIS_S = 3.0
+# --- pyannote + 声紋照合ハイブリッド構成（クラスタ単位の名前付け, 2026-07-13） ---
+# docs/design/pyannote_live1_trial_2026-07-09.md §8.4/§9 参照。pyannoteの生
+# クラスタ(SPEAKER_XX)ごとに音声を蓄積し、この秒数に達したら声紋照合を試みる
+# （ClusterVoiceNamer, ``_cluster_naming.py``）。閾値未満・照合confidence不足の
+# 間は未確定のまま蓄積を続け、再照合のたびに確度が上がる想定。
+PYANNOTE_CLUSTER_NAMING_MIN_SEC = 5.0
+# クラスタ音声バッファの上限（際限ない保持を防ぐ。古い分から捨てて直近の音声を使う）。
+PYANNOTE_CLUSTER_NAMING_MAX_BUFFER_SEC = 20.0
+# 重複発話（同時に複数の生クラスタが閾値以上を占める）区間は、声が混ざり声紋が
+# あてにならないため安全側で未確定にする。この比率以上を占める話者が2人以上いれば
+# 重複発話とみなす。
+PYANNOTE_CLUSTER_OVERLAP_MIN_RATIO = 0.2
 # =====================================================================
 # タイミング定数（介入・割り込みロジック）
 # ---------------------------------------------------------------------

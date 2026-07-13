@@ -473,6 +473,30 @@ class VoiceProfiles:
         self._note(kind, label=sp, **info)
         return key
 
+    def match_profile(self, wav: np.ndarray) -> tuple[str, float] | None:
+        """副作用なしのクラスタ単位声紋照合（pyannoteハイブリッド構成用）.
+
+        classify() と異なり sp_map/pool/own_sims 等の状態を一切変更しない。
+        pyannote Live-1 のクラスタ音声（複数発話を束ねた長尺）を渡し、現在
+        アクティブな登録プロファイルの中で最も近いものを返す。即時判定と同じ
+        条件（しきい値＋2位とのmargin）を満たさなければ None（confidence不足
+        で未確定のまま蓄積を続ける、の判断は呼び出し側=ClusterVoiceNamer が行う）。
+        """
+        with self._lock:
+            if wav.size < SR * self.min_sec:
+                return None
+            emb = self._embed(wav)
+            if emb is None:
+                return None
+            active = self._active_human()
+            ranked = self._rank_active(emb, active)
+            if ranked is None:
+                return None
+            cand, sim, second = ranked
+            if sim >= self._person_th(cand, self.thresh) and sim - second >= self.margin:
+                return cand, sim
+            return None
+
     def enroll(self, label: str, name: str) -> str | None:
         """「1=名前」「人物2=名前」: 話者に名前を付ける（声の登録 or 既存人物のリネーム）.
 

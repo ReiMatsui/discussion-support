@@ -331,6 +331,92 @@ pyannote側の成績に伝播する構造だった。**生ラベルの一貫性*
 可能（裁定者の確信度問題を回避）。現時点では設計判断には不要と判断。
 
 ## 9. ハイブリッド構成の設計（2026-07-13 確定）
+### 9.1 実装済み・使い方（2026-07-13追記）
+
+上記設計を `try/pyannote-live1` ブランチに実装した。3役分業を次のように配線している:
+
+1. **pyannoteクラスタ音声の蓄積**: `_recv_loop.py` の `RecvLoop.flush()` で、
+   外部diarization解決（`SpeakerResolver.resolve()`）の結果が
+   pyannote等の外部diarization由来（`resolved.source != "stt"` かつ非voiceprint）
+   のとき、その発話区間の音声（`tracker.classify()`用に既に切り出し済みの
+   `asr_pcm_buf` スライス、既存の時刻アラインメントを流用）を、生クラスタキー
+   `"{source}:{speaker}"`（例: `pyannote:SPEAKER_00`）単位で
+   `ClusterVoiceNamer`（新規 `_cluster_naming.py`）に渡す。
+2. **閾値到達→照合→名前確定**: `ClusterVoiceNamer.observe()` がクラスタ音声を
+   蓄積し、累積が `PYANNOTE_CLUSTER_NAMING_MIN_SEC`（既定5.0秒、
+   `_constants.py`）に達するたび `VoiceProfiles.match_profile()`
+   （新規追加。副作用なしの単発照合API、`classify()`と違いsp_map/pool等を
+   変更しない）で照合する。confidenceが十分（即時判定と同じ
+   しきい値＋2位margin条件）ならそのクラスタ→名前を確定し、以後そのクラスタの
+   発話は確定名にそのまま帰属する（再照合しない）。不足なら未確定のまま
+   バッファを維持し、次に閾値へ達した時点で再照合する。バッファ上限は
+   `PYANNOTE_CLUSTER_NAMING_MAX_BUFFER_SEC`（既定20秒、古い分から破棄）。
+3. **遡及リネーム**: クラスタが初めて名前確定した時点で、そのクラスタに
+   `key_for_diarization_speaker` が既に発行済みの `@diar:N` があれば、
+   既存の `SessionState.rekey()` 機構でその場で過去レコードもまとめて確定名へ
+   付け替える（設計時に想定した「低コストでできれば実施」を実現。ヒステリシス
+   側の遡及リネーム（`_session_state.py`のdocstring参照）とは別経路）。
+4. **重複発話の安全側未確定化**: `_diarization.has_overlapping_speakers()`
+   （新規関数）が、発話区間を2人以上の生クラスタが
+   `PYANNOTE_CLUSTER_OVERLAP_MIN_RATIO`（既定0.2）以上占めているかを判定する。
+   重複ありと判定された区間は (a) クラスタ音声バッファに蓄積しない
+   （`observe(..., overlapped=True)`、声が混ざり声紋が汚染されるのを防ぐ）、
+   (b) 発話の帰属自体も `UNSURE_SPEAKER`（未確定）に落とす
+   （`speaker_source="cluster_overlap"`）。
+5. **クラスタ分裂・pyannote切断への頑健性**: `ClusterVoiceNamer` は生クラスタ
+   キーごとに独立して蓄積・確定するだけの単純な辞書なので、分裂しても
+   分裂後の各クラスタが同じ人物へ照合されるだけで無害。再接続後は
+   provider側が新ラベルに `R{epoch}:` を前置する（`_pyannote_diarization.py`）
+   ため、本機構からは「新しいクラスタキー」として自然に扱われる
+   （＋既存の参加者化ヒステリシスが揺れを吸収）。
+6. **Soniox単独モードへの影響なし**: `state.cluster_namer` は
+   `--vp-cluster-naming` 指定時のみ生成される（`_bootstrap.py`）。未設定時は
+   上記ロジックを素通りし、従来どおり `key_for_diarization_speaker` の匿名キー
+   付与だけで完結する。pyannote切断時も同様に、cluster_namerが未確定を返す
+   限り、フォールバック経路（従来の外部diarizationフォールバック→STTラベル）
+   がそのまま機能する。
+
+**起動コマンド**:
+
+```bash
+# ハイブリッド構成（pyannoteクラスタ + 声紋照合の名前付け）
+uv run python -m das.asr.live --diarization pyannote --vp-cluster-naming
+
+# 話者数ヒントも併用する場合
+uv run python -m das.asr.live --diarization pyannote --vp-cluster-naming \
+  --diarization-max-speakers 4
+```
+
+`--vp-cluster-naming` は `--diarization pyannote` 専用（他providerでは警告を出して
+無視）で、かつ声紋照合（`tracker`、`--no-vp`未指定・依存導入済み）が有効な時だけ
+機能する（無効なら警告を出して無視）。
+
+**調整可能な定数**（`_constants.py`）:
+- `PYANNOTE_CLUSTER_NAMING_MIN_SEC`（既定5.0秒）: クラスタの累積音声がこの秒数に
+  達したら声紋照合を試みる閾値。
+- `PYANNOTE_CLUSTER_NAMING_MAX_BUFFER_SEC`（既定20秒）: クラスタ音声バッファの
+  上限（超過分は古い方から破棄）。
+- `PYANNOTE_CLUSTER_OVERLAP_MIN_RATIO`（既定0.2）: 重複発話とみなす、各話者の
+  区間占有比率の下限（これ以上を占める話者が2人以上いれば重複発話扱い）。
+
+**テスト**: `tests/unit/live/test_cluster_naming.py`（蓄積→閾値到達→照合→確定、
+confidence不足時の未確定維持・再照合、重複発話区間のスキップ、クラスタ分裂の
+独立性、バッファ上限）、`tests/unit/live/test_diarization.py`
+（`has_overlapping_speakers`の単体テスト、`RecvLoop.flush()`経由の配線: 名前確定と
+遡及リネーム、未確定時のフォールバック、重複区間の未確定化、
+cluster_namer未設定時の既存挙動維持）。
+
+**残課題**:
+- 実セッションでの効果検証（本ドキュメント7〜8節のバッチ/ライブ実測と同様の
+  盲検裁定）は未実施。閾値（5秒・重複比率0.2）は設計時の見積もりであり、
+  実データでの再チューニングが必要になる可能性がある。
+- pyannote Live-1 のサーバ切断(1011)は運用リスクとして残存（8節参照）。本実装は
+  切断時に既存の外部diarizationフォールバック/STTラベルへ自然に落ちるが、
+  クラスタ確定情報は再接続後にリセットされる（再蓄積からやり直し）。
+- 名前確定後のクラスタに対する継続的な品質モニタリング（誤確定の検知・
+  取り消し機構）は未実装。現状は一度確定したら再照合しない設計。
+
+### 9.2 当初設計メモ（実装前, 2026-07-13）
 
 3役分業: Soniox=文字起こし（現行）／pyannote Live-1=話者クラスタリング／声紋照合=クラスタ単位の名前付け。
 
