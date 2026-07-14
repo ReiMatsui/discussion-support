@@ -79,15 +79,21 @@ def test_matching_voice_still_follows_registered_person():
     assert vp.classify(_LONG, "2", count=True) == "松井"
 
 
-def test_anonymous_person_keeps_same_label_on_moderate_match():
-    """自動登録済み人物は、同じSTTラベルの低信頼発話を近ければ継続表示する."""
+def test_anonymous_person_moderate_match_falls_to_placeholder():
+    """匿名人物への「低信頼追従」（本人しきい値未満の弱い一致での継続）は廃止.
+
+    旧仕様は、匿名prev(人物1)へ本人しきい値-0.12の弱い一致(sim≈0.43)で継続表示
+    していたが、実測正解率0%(n=2, transcripts/2026-07-14_1729 GT評価)・前話者追従
+    全般が3人会話でランダム未満だったため、ユーザー判断で全モード廃止(2026-07-14)。
+    本人しきい値を満たさない声は #ラベルに落ち、遡及リネームで後から確定する。
+    """
     vp = _tracker(_unit(0.90, 0.43, 0))
     vp.profiles = {"人物1": _unit(0, 1, 0)}
     vp._active_keys = {"人物1"}
     vp.sp_map = {"2": "人物1"}
 
-    assert vp.classify(_LONG, "2", count=True, chars=20) == "人物1"
-    assert vp.last["kind"] == "低信頼追従"
+    assert vp.classify(_LONG, "2", count=True, chars=20) == "#2"
+    assert vp.last["kind"] == "蓄積中"   # 人物1へは寄せず、通常の蓄積経路へ
 
 
 def _closed_roster_tracker(emb: np.ndarray) -> VoiceProfiles:

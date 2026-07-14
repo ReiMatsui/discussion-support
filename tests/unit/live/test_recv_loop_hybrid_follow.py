@@ -1,11 +1,16 @@
-"""ハイブリッド構成での前話者追従の抑制（flush配線）のテスト.
+"""前話者追従の全モード廃止後の flush 配線テスト.
 
 実測（transcripts/2026-07-14_1729, GT81発話）で声紋一致92%(n=13)に対し
-相槌追従28%(n=32)・低信頼追従0%(n=2)と、3人の掛け合いでは追従が害だったため、
-cluster_namer 有効時は「相槌追従/低信頼追従」を帰属根拠として信用せず、
-「声紋一致 > pyannoteクラスタ(名寄せ済み) > 未確定」の優先度に倒す。
-cluster_namer 無し（Soniox単独・pyannote単独）の追従挙動は不変であること
-（1対1会話で有効な設計を壊さない）も回帰として固定する。
+相槌追従28%(n=32)・低信頼追従0%(n=2)と、3人の掛け合いでは追従がランダム未満で
+害だった＋相槌は聞き手が打つ＝直前話者とは別人が多い、というユーザー判断により、
+前話者追従は全モードで帰属根拠から外した（2026-07-14）。抑制は
+VoiceProfiles._classify に一本化され（kind「相槌未確定」で未確定を返す）、
+かつて RecvLoop.flush にあったハイブリッド限定の _HYBRID_UNTRUSTED_FOLLOW_KINDS
+による二重の抑制は撤去した。ここでは flush 側の残る責務を固定する:
+- tracker が返す未確定はどのモードでもそのまま records に載る（追従復活なし）
+- 未確定発話に pyannote クラスタが重なればクラスタ帰属が勝つ（ハイブリッドの
+  優先度「声紋一致 > pyannoteクラスタ > 未確定」は tracker 側の廃止だけで成立）
+- 未確定は stt_fallback として参加者化されない
 """
 from __future__ import annotations
 
@@ -102,58 +107,59 @@ def _flush(state, *, text="これは検証用の発言です", ms=1000, end=3000
     return state
 
 
-def test_hybrid_backchannel_follow_not_adopted(tmp_path):
-    """ハイブリッド時、相槌追従の結果は採用されず未確定に倒す."""
-    state = _make_state(tmp_path, tracker=_Tracker("相槌追従", "松井"),
+def test_tracker_unsure_passes_through_hybrid(tmp_path):
+    """ハイブリッド時、trackerの相槌未確定はそのまま未確定として記録される.
+
+    追従の抑制は VoiceProfiles 側で完結しており、flush 側で追従を復活させる
+    経路が無いこと（stt_fallback で参加者化されないこと）を固定する。
+    """
+    state = _make_state(tmp_path, tracker=_Tracker("相槌未確定", "?"),
                         namer=_Namer(), resolver=_SttResolver())
 
     _flush(state)
 
     rec = state.records[-1]
-    assert rec["speaker"] == "?"                    # 追従の「松井」を信用しない
-    assert rec["speaker_source"] == "hybrid_follow_suppressed"
-    assert rec["speaker_reason"] == "untrusted_previous_speaker_follow"
+    assert rec["speaker"] == "?"
+    assert "speaker_source" not in rec       # stt_fallback として参加者化されない
 
 
-def test_hybrid_low_confidence_follow_not_adopted(tmp_path):
-    """ハイブリッド時、低信頼追従（匿名prevへの弱い継続）も未確定に倒す."""
-    state = _make_state(tmp_path, tracker=_Tracker("低信頼追従", "人物1"),
-                        namer=_Namer(), resolver=_SttResolver())
+def test_tracker_unsure_passes_through_non_hybrid(tmp_path):
+    """非ハイブリッド（cluster_namer無し）でも同じく未確定のまま記録される.
+
+    旧仕様（追従がハイブリッド限定で抑制され、非ハイブリッドでは「松井」に
+    追従）はユーザー判断で全モード廃止（実測正解率28%・3人会話）。
+    """
+    state = _make_state(tmp_path, tracker=_Tracker("相槌未確定", "?"),
+                        namer=None, resolver=_SttResolver())
 
     _flush(state)
 
-    assert state.records[-1]["speaker"] == "?"
+    rec = state.records[-1]
+    assert rec["speaker"] == "?"
+    assert "speaker_source" not in rec
 
 
-def test_hybrid_follow_defers_to_pyannote_cluster(tmp_path):
-    """ハイブリッド時、追従発話にpyannoteクラスタが重なればクラスタ帰属が勝つ."""
-    state = _make_state(tmp_path, tracker=_Tracker("相槌追従", "松井"),
+def test_unsure_defers_to_pyannote_cluster(tmp_path):
+    """未確定に倒した発話にpyannoteクラスタが重なれば、クラスタ帰属が勝つ."""
+    state = _make_state(tmp_path, tracker=_Tracker("相槌未確定", "?"),
                         namer=_Namer(), resolver=_PyannoteResolver("SPEAKER_00"))
 
     _flush(state)
 
     rec = state.records[-1]
     assert rec["speaker"] == "@diar:1"              # クラスタ由来キーに帰属
-    assert rec["speaker_source"] == "pyannote"      # 抑制の痕跡は上書きされる
+    assert rec["speaker_source"] == "pyannote"
 
 
-def test_hybrid_accumulating_kind_not_suppressed(tmp_path):
-    """蓄積中（声紋判定前の長い発話）は抑制対象外＝従来どおり（対象は追従2種のみ）."""
+def test_accumulating_kind_keeps_label_placeholder(tmp_path):
+    """蓄積中（声紋判定前の長い発話）の #ラベルは従来どおり記録される（回帰）.
+
+    #ラベルへの継続はSTTラベルベースの機構（遡及リネームの土台）であって
+    「追従」ではないため、廃止の対象外。
+    """
     state = _make_state(tmp_path, tracker=_Tracker("蓄積中", "#1"),
                         namer=_Namer(), resolver=_SttResolver())
 
     _flush(state)
 
     assert state.records[-1]["speaker"] == "#1"
-
-
-def test_non_hybrid_backchannel_follow_still_adopted(tmp_path):
-    """cluster_namer無し（非ハイブリッド）では従来どおり追従が効く（回帰）."""
-    state = _make_state(tmp_path, tracker=_Tracker("相槌追従", "松井"),
-                        namer=None, resolver=_SttResolver())
-
-    _flush(state)
-
-    rec = state.records[-1]
-    assert rec["speaker"] == "松井"                 # 1対1会話等で有効な既存設計は不変
-    assert "speaker_source" not in rec

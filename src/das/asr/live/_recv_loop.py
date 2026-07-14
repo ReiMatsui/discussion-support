@@ -25,14 +25,15 @@ from ._ui import _print_line
 from ._voice_profiles import _best_text_similarity
 
 _VOICEPRINT_RELIABLE_KINDS = {"声紋一致", "補正", "自動登録", "合流"}
-# ハイブリッド構成（cluster_namer有効）で帰属根拠として信用しない「前話者追従」系の
-# 判定。実測（transcripts/2026-07-14_1729, GT81発話）で声紋一致92%(n=13)に対し
-# 相槌追従28%(n=32)・低信頼追従0%(n=2)と、3人の掛け合いではランダム未満で害だった。
-# ハイブリッドの帰属優先度を「声紋一致 > pyannoteクラスタ(名寄せ済み) > 未確定」に
-# し、「直前の話者と同じだろう」という推測を経路から外す（該当発話はpyannoteの
-# クラスタ帰属に任せ、それも無ければ未確定に倒す）。Soniox単独・pyannote単独
-# （cluster_namer無し）の追従挙動は不変（1対1会話等では追従が有効な設計のため）。
-_HYBRID_UNTRUSTED_FOLLOW_KINDS = {"相槌追従", "低信頼追従"}
+# 「前話者追従」（声紋で判定できない発話を直前の確定人物へ根拠なしで寄せる推測）は
+# 2026-07-14 に全モードで廃止した。実測（transcripts/2026-07-14_1729, GT81発話）で
+# 声紋一致92%(n=13)に対し相槌追従28%(n=32)・低信頼追従0%(n=2)と、3人の掛け合いでは
+# ランダム未満で害だった＋相槌は聞き手が打つ＝直前話者とは別人が多い（ユーザー判断）。
+# 抑制は VoiceProfiles._classify 側に一本化（kind「相槌未確定」で UNSURE を返す）。
+# かつてここにあったハイブリッド限定の _HYBRID_UNTRUSTED_FOLLOW_KINDS による抑制は
+# 冗長になったため撤去（二重実装を残さない）。ハイブリッドの帰属優先度
+# 「声紋一致 > pyannoteクラスタ(名寄せ済み) > 未確定」は tracker が UNSURE を
+# 返すことで従来どおり成立する（UNSURE は stt_fallback の参加者化もしない）。
 _UNKNOWN_STT_SPEAKERS = {"", "none", "null", "unknown", "uu", UNSURE_SPEAKER}
 RecvStatus = Literal["ok", "finished", "disconnected"]
 
@@ -287,17 +288,6 @@ class RecvLoop:
             sp_id = _stt_speaker_key(self.cur_speaker)
             rec_extra: dict[str, object] = {}
             d = None
-        if (s.cluster_namer is not None and d is not None
-                and d.get("kind") in _HYBRID_UNTRUSTED_FOLLOW_KINDS):
-            # ハイブリッド構成では前話者追従を帰属根拠にしない（冒頭の定数コメント
-            # 参照）。ここで未確定に倒すことで、下のresolverはstt_fallbackとして
-            # 追従結果を参加者化せず、pyannoteクラスタの帰属（名寄せ・クラスタ声紋
-            # 確定を含む）だけが残る。tracker内部のsp_map（ラベル連続性）は保持
-            # されるので、以後の確信ある声紋一致・遡及リネームには影響しない。
-            sp_id = UNSURE_SPEAKER
-            rec_extra["speaker_source"] = "hybrid_follow_suppressed"
-            rec_extra["speaker_confidence"] = 0.0
-            rec_extra["speaker_reason"] = "untrusted_previous_speaker_follow"
         if (self.cur_ms is not None and self.cur_end is not None
                 and self.cur_end > self.cur_ms):
             voiceprint_speaker = None

@@ -75,11 +75,18 @@ def test_short_turn_closed_roster_marks_unsure():
     assert vp.sp_map["1"] == "B"       # マッピングは保持（次の確信発話の連続性）
 
 
-def test_short_turn_skipped_for_backchannel():
-    """相槌(count=False)は短い厳格照合も通さず、直前に追従（課題④と両立）."""
-    vp = _tracker(_unit(1, 0, 0))            # 声はAだが…
+def test_short_turn_skipped_for_backchannel_marks_unsure():
+    """相槌(count=False)は短い厳格照合を通さず、直前の確定人物にも追従しない.
+
+    旧仕様は直前のBへ追従だったが、前話者追従は実測正解率28%（3人会話・n=32,
+    transcripts/2026-07-14_1729 GT評価）でランダム未満だったため、ユーザー判断で
+    全モード廃止（2026-07-14）。未確定を返し、sp_map は保持する。
+    """
+    vp = _tracker(_unit(1, 0, 0))            # 声はAだが相槌なので照合しない
     vp.sp_map["1"] = "B"
-    assert vp.classify(_SHORT, "1", count=False) == "B"  # 相槌では動かさない
+    assert vp.classify(_SHORT, "1", count=False) == "?"
+    assert vp.last["kind"] == "相槌未確定"
+    assert vp.sp_map["1"] == "B"             # マッピングは保持（連続性の回復用）  # 相槌では動かさない
 
 
 def test_short_turn_needs_two_known_speakers():
@@ -111,7 +118,8 @@ def test_short_turn_hybrid_keeps_strict_threshold():
     vp.profiles = {"A": _unit(1, 0, 0)}
     vp._active_keys = {"A"}
     vp.hybrid = True
-    # 当たらないだけで誤りは増やさない: tracker単体としては従来どおり追従に落ちる
-    # （ハイブリッドでの追従抑制は RecvLoop.flush 側で未確定に倒す）。
+    # 当たらないだけで誤りは増やさない: prev が無いので #ラベルのプレースホルダに
+    # 落ちる（確定人物への追従は全モード廃止済みだが、#ラベル継続はSTTラベル
+    # ベースの機構＝遡及リネームの土台なので維持）。
     assert vp.classify(_SHORT, "1", count=True) == "#1"
     assert vp.last["kind"] == "相槌追従"
