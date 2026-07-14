@@ -61,3 +61,27 @@
 - ブランチ try/pyannote-live1 で作業、1機能=1コミット、テスト必須
 - 挙動を変える箇所には設計根拠コメント（本ドキュメント参照の形式）
 - 完了したら本ドキュメントに結果を追記し、検証プロトコルのコマンドをユーザーに提示
+
+## 7. 実装結果（2026-07-14、Claude Fable 5 追記）
+
+§3 を実装完了。コミット:
+
+- `6dc5a65` feat(live): クラスタ間名寄せ（未照合クラスタを既存クラスタの声紋埋め込みへ統合）
+- `e13e50e` feat(live): flush配線にクラスタ名寄せを反映（遡及統合＋max-speakers超過時の最近傍統合）
+
+実装の要点:
+
+- **名寄せ（§3-1）**: ClusterVoiceNamer に `_embeddings`（canonicalクラスタ→代表埋め込み）と
+  `_aliases`（吸収→canonical）を追加。`observe()` で match_profile 不成立時に
+  `tracker.embed()`（新設の公開API、`_embed` へ委譲）で埋め込みを取り、他クラスタと
+  コサイン比較、`tracker.dedupe` 閾値以上で統合。新規定数ゼロ（§3-4）。
+- **昇格の厳格化（§3-2）**: `_recv_loop.py` の匿名キー発行を `_merged_diarization_speaker_key()`
+  経由に変更（cluster_namer 有効時のみ）。名寄せ成立クラスタは canonical のキーへ帰属。
+  `--diarization-max-speakers` 到達時は `nearest_cluster()`（閾値なし最近傍）の既存キーへ統合、
+  不可なら従来どおり constrain で未確定。判定用に `SessionState.human_slot_budget_exhausted()` を新設。
+- **遡及統合（§3-3）**: 吸収側に発行済みの @diar:N があれば既存 `rekey()` で過去レコードごと
+  canonical キーへ付け替え。声紋確定名への昇格時も raw/canonical 両キーを rekey し
+  `diarization_speaker_keys` を確定名へ更新（古い @diar:N の復活防止）。
+- 既存モード（Soniox単独、pyannote単独）は `cluster_namer is None` 分岐で完全に従来コード。
+- テスト13件追加（test_cluster_naming.py 7件、test_recv_loop_cluster_merge.py 6件、新規）。
+  sandbox 検証で live スイート含む全テストパス。実機での `uv run pytest -q` は §4-1 で確認のこと。
