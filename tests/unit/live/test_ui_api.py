@@ -558,14 +558,24 @@ def test_save_writes_legacy_html_without_server(tmp_path):
 # --- 課題①: 認識途中(partial)の配信 -----------------------------------------
 
 def test_show_partial_updates_state_and_snapshot():
-    """show_partial が partial を保持し、api_snapshot に載る（課題①）."""
+    """show_partial が partial を保持し、api_snapshot に載る（課題①）.
+
+    バグ修正（2026-07-14）: partial 表示はラベル文字を新規割当てしない
+    （幻キーがスロットを消費する問題の修正。peek_disp_name 参照）。
+    flush 済みでラベルを持つ話者は従来どおりその文字で表示される。
+    """
     s = _make_state()
     s.records = [{"speaker": "#1", "text": "x", "ms": 0, "end_ms": 100}]
+    s.disp_name("#1")   # flush（本表示）で割当て済みの状況
     s.show_partial("1", "いまここを認識中")
     assert s.partial_text == "いまここを認識中"
     snap = s.api_snapshot()
     assert snap["partial"]["text"] == "いまここを認識中"
     assert snap["partial"]["speaker"] == "参加者A"
+    # 未割当てキーの partial は中立表示「?」（文字を消費しない、許容仕様）
+    s.show_partial("2", "こちらは新規の声")
+    assert s.api_snapshot()["partial"]["speaker"] == "?"
+    assert "#2" not in s.anonymous_labels
     # 空文字でクリアされる
     s.show_partial("1", "")
     assert s.api_snapshot()["partial"] == {"speaker": "", "text": ""}

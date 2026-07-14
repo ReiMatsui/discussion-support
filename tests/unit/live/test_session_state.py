@@ -95,6 +95,35 @@ def test_constrain_after_label_release_with_max_speakers():
     assert s.disp_name("#3") == "参加者B"    # 解放された B を再利用
 
 
+def test_peek_disp_name_is_read_only():
+    """peek_disp_name は割当てを行わない: 未割当てキーは「?」、辞書は不変."""
+    s = _make_state()
+    assert s.peek_disp_name("#1") == "?"        # 未割当て → 中立表示
+    assert s.anonymous_labels == {}             # 副作用なし
+    assert s.disp_name("#1") == "参加者A"       # 本表示（flush経路）は従来どおり割当て
+    assert s.peek_disp_name("#1") == "参加者A"  # 既割当てはその文字を返す
+
+
+def test_show_partial_phantom_key_does_not_consume_label_slot():
+    """partial 表示だけのSTTラベル（幻キー）が文字とスロットを消費しない.
+
+    バグ修正（2026-07-14 実セッション）: show_partial が disp_name（新規割当て）を
+    呼んでいたため、議事録に一度も現れない partial 限りの幻キーが「参加者B」の
+    文字と max_speakers スロットを恒久的に占有した
+    (docs/design/handoff_2026-07-14_unregistered_speakers.md 参照)。
+    """
+    s = _make_state()
+    s.args = SimpleNamespace(diarization_max_speakers=2)
+    s.show_partial("7", "話している途中のテキスト")   # 幻ラベル: flush に到達しない
+    assert s.anonymous_labels == {}                    # 文字を消費しない
+    assert s.partial_speaker == "?"                    # 中立表示（許容仕様）
+    # 幻キーがスロットを食わないので、後続の実参加者2人は従来どおり通る
+    assert s.constrain_human_speaker_key("#1") == "#1"
+    assert s.disp_name("#1") == "参加者A"
+    assert s.constrain_human_speaker_key("#2") == "#2"
+    assert s.disp_name("#2") == "参加者B"
+
+
 def test_rekey_migrates_display_name_and_cleans_old_entry():
     """rekey は names も colors と同じ流儀で移行し、old 側の残留を掃除する（F7）."""
     s = _make_state()

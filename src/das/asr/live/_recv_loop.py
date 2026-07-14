@@ -367,8 +367,12 @@ class RecvLoop:
                         rec_extra["speaker_confidence"] = round(resolved.confidence, 3)
                         rec_extra["speaker_reason"] = resolved.reason
                 if self.args.vp_debug and resolved.source != "voiceprint":
+                    # peek_disp_name（割当てなし）: この時点の sp_id は constrain 前で、
+                    # 未確定に落ちる可能性がある。debug 表示のために disp_name で
+                    # ラベル文字を先食いすると幻キーがスロットを消費する
+                    # (docs/design/handoff_2026-07-14_unregistered_speakers.md 参照)。
                     _print_line(
-                        f"# diarization: {s.disp_name(sp_id)} ({resolved.speaker})"
+                        f"# diarization: {s.peek_disp_name(sp_id)} ({resolved.speaker})"
                         f" conf={rec_extra.get('speaker_confidence', resolved.confidence):.2f}"
                         f" {rec_extra.get('speaker_reason', resolved.reason)}"
                     )

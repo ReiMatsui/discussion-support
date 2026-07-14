@@ -245,6 +245,27 @@ class SessionState:
             return self._anonymous_label_for(key)
         return key
 
+    def peek_disp_name(self, key) -> str:
+        """割当てを行わない読み取り専用の表示名取得.
+
+        disp_name は未割当ての匿名キーに新しいラベル文字を割り当てる副作用を持つ。
+        partial（認識途中）表示のためだけに呼ぶと、flush まで到達しない一時的な
+        STTラベル（幻キー）がラベル文字とスロットを恒久的に消費してしまう
+        （2026-07-14 実セッション: 議事録に一度も現れない幻キーが「参加者B」を
+        占有、docs/design/handoff_2026-07-14_unregistered_speakers.md 参照）。
+        表示のみの経路（show_partial / vp_debug の途中経過出力）はこちらを使う。
+        未割当てなら中立表示「?」を返し、辞書は変更しない。
+        """
+        key = str(key)
+        if key == UNSURE_SPEAKER:
+            return "未確定"
+        name = self.names.get(key)
+        if name and not self._is_system_anonymous_name(name):
+            return name
+        if self._is_anonymous_speaker_key(key) or self._is_system_anonymous_name(key) or name:
+            return self.anonymous_labels.get(key, "?")
+        return key
+
     @staticmethod
     def _is_system_anonymous_name(name: str | None) -> bool:
         if not name:
@@ -1067,7 +1088,9 @@ class SessionState:
         t = text.strip()
         prev = self.partial_text
         self.partial_text = t
-        self.partial_speaker = self.disp_name(self.key_for_label(sp)) if t else ""
+        # peek_disp_name（割当てなし）を使う: partial 限りの幻キーにラベル文字を
+        # 割り当てない。本表示（flush→records）の disp_name は従来どおり割当てあり。
+        self.partial_speaker = self.peek_disp_name(self.key_for_label(sp)) if t else ""
         # M6: 長い発話の途中では STT 確定レコードが来ず「喋っている最中に沈黙が
         # 伸びる」ため、pause 判定を満たした介入が発話に被さり得る。partial の受信
         # でも沈黙タイマーを更新し、発話中を「沈黙」と誤認しないようにする。
