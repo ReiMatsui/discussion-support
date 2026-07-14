@@ -104,6 +104,27 @@ def test_anonymous_person_weak_match_keeps_label_continuation():
     assert vp.last["kind"] == "蓄積中"   # 蓄積は並行して進む（ラベル継続で返答）
 
 
+def test_medium_turn_requires_strict_threshold():
+    """min_sec〜strict_sec の中尺発話は、短発話と同じ厳格しきい値でのみ即時判定.
+
+    実測（eval/replay_attribution.py, 2026-07-14_142016）: 5秒超の照合は6/6正解
+    に対し1〜2.5秒は誤一致が集中（1.1s sim=0.43, 2.0s sim=0.49 が別人に一致し、
+    ラベルの人物対応を破壊）。埋め込みの信頼性は発話長に依存するため、
+    基準しきい値(thresh)で信じるのは strict_sec 以上の発話のみ。
+    """
+    emb = _unit(0.55, float(np.sqrt(1 - 0.55 ** 2)), 0)   # 松井とのsim=0.55
+    vp = _tracker(emb)                 # thresh=0.5, short_bonus=0.05
+    vp.short_bonus = 0.08
+    vp.sp_map = {}
+    # 1.6s（< strict_sec=3.0）: 0.55 < 0.5+0.08 → 即時判定せず蓄積へ
+    assert vp.classify(_LONG, "2", count=True, chars=20) == "#2"
+    assert vp.last["kind"] == "蓄積中"
+    # 3.2s（>= strict_sec）: 0.55 >= 0.5 → 基準しきい値で即時判定
+    long_wav = np.ones(int(SR * 3.2), dtype=np.float32)
+    assert vp.classify(long_wav, "2", count=True, chars=20) == "松井"
+    assert vp.last["kind"] == "声紋一致"
+
+
 def _closed_roster_tracker(emb: np.ndarray) -> VoiceProfiles:
     """登録済み A/B/C を持つ名簿確定(auto=False)トラッカー（4次元・直交声紋）."""
     vp = _tracker(emb)

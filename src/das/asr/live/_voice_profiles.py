@@ -103,6 +103,9 @@ class VoiceProfiles:
     # margin×short_margin_mult）のまま＝当たりにくいだけで誤りは増やさない。
     hybrid = False
 
+    # 厳格照合を要求する発話長の上限秒数（クラス既定値。__init__ 経由でインスタンス化）。
+    strict_sec = 3.0
+
     # モデル別の既定しきい値（実音声プールで校正済み。スコアのスケールが違う）
     # resemblyzer: 軽量・依存少。同一/別人の分布に重なりあり（分離マージン-0.06）
     # ecapa: ほぼ完全分離(+0.01)＋10倍速。混合音声を成分話者と強くマッチさせる癖
@@ -153,8 +156,17 @@ class VoiceProfiles:
         # 短い発話の取り違え安定化（2人会話の短いラリー対策）。min_sec 未満でも、
         # 既知の2人以上を「厳格に」区別できるときだけ声紋で割り当てを正す。
         self.short_floor = 0.45        # 厳格照合する下限秒数（これ未満は声が短すぎるので追従）
-        self.short_bonus = 0.05        # 採用閾値を本人閾値からどれだけ引き上げるか
+        self.short_bonus = 0.08        # 採用閾値を本人閾値からどれだけ引き上げるか
+        # （0.05→0.08, 2026-07-14: 2.0s発話の誤一致 sim=0.49 が本人しきい値0.42+0.05
+        #   をすり抜けラベルの人物対応を破壊。正しい一致は全て0.60以上で影響なし）
         self.short_margin_mult = 2.0   # 要求する2位とのmargin倍率
+        # 厳格照合を要求する上限秒数。min_sec〜strict_sec の中尺発話も、短発話と同じ
+        # 厳格条件（+short_bonus, margin×short_margin_mult）でしか即時判定しない。
+        # 実測(eval/replay_attribution.py, 2026-07-14_142016): 5秒超の照合は6/6正解に
+        # 対し、1〜2.5秒は誤一致が集中（1.1s sim=0.43, 2.0s sim=0.49 の2件が別人に
+        # 一致し、ラベルの人物対応を壊して遡及リネームまで阻害）。埋め込みの信頼性は
+        # 発話長に強く依存するため、基準しきい値で信じるのは strict_sec 以上のみ。
+        self.strict_sec = self.strict_sec   # クラス既定値を実体化（テスト・調整用）
         # 新規人物の自動登録は「発話数」ではなく「声ごとのクリーンな発声の累積文字数」で
         # 判定する。声紋の質は本質的に発声の総量で決まり、文字数はその良い代理（長いだけで
         # 無音・雑音の区間を弾く）。連続して長く話す人も、短く何度も話す人も同じ原理で確定。
@@ -433,7 +445,11 @@ class VoiceProfiles:
                 if ranked is not None:
                     cand, sim, second = ranked
                     info.update(sim=round(sim, 3), second=round(second, 3), name=cand, prev=prev)
-                    if sim >= self._person_th(cand, th) and sim - second >= self.margin:
+                    strict = wav.size < SR * self.strict_sec
+                    need_th = (self._person_th(cand, th)
+                               + (self.short_bonus if strict else 0.0))
+                    need_mg = self.margin * (self.short_margin_mult if strict else 1.0)
+                    if sim >= need_th and sim - second >= need_mg:
                         self.sp_map[sp] = cand
                         h = self.own_sims.setdefault(cand, [])
                         h.append(sim)
