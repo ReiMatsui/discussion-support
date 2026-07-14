@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import shlex
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -87,10 +88,39 @@ def listen_soniox(
     top_k: int = typer.Option(5, "--top-k", help="リンク候補の embedding top-k (混合)"),
     top_k_per_source: int = typer.Option(0, "--top-k-per-source", help="source 別 top-k (0=混合)"),
     skip_docs: bool = typer.Option(False, "--skip-docs", help="ドキュメントの事前 AF 化をスキップ"),
+    wav: Path | None = typer.Option(
+        None,
+        "--wav",
+        help="実マイクの代わりに WAV ファイルで擬似ライブ入力する",
+    ),
+    diarization: str | None = typer.Option(
+        None,
+        "--diarization",
+        help="外部話者分離の供給源 (none|pyannote|assemblyai)",
+    ),
+    vp_cluster_naming: bool = typer.Option(
+        False,
+        "--vp-cluster-naming",
+        help="pyannote の生クラスタ単位で声紋照合して名前を確定する"
+        " (--diarization pyannote 専用)",
+    ),
+    max_speakers: int | None = typer.Option(
+        None,
+        "--max-speakers",
+        help="想定話者数のヒント (文字起こし側の --diarization-max-speakers に転送)",
+    ),
+    hybrid: bool = typer.Option(
+        False,
+        "--hybrid",
+        help="推奨構成のショートハンド (= --diarization pyannote --vp-cluster-naming)。"
+        "登録者ゼロでも話者ラベルの一貫性を保つ推奨構成"
+        " (docs/design/handoff_2026-07-14_unregistered_speakers.md)",
+    ),
     soniox_args: str = typer.Option(
         "",
         "--soniox-args",
-        help="文字起こし側へ渡す追加引数 (空白区切り。例: '--stt speechmatics')",
+        help="文字起こし側へ渡す追加引数 (空白区切り。例: '--stt speechmatics')。"
+        "上記の第一級オプションと重複した場合はこちらが優先される",
     ),
     min_utt_chars: int = typer.Option(
         7,
@@ -104,6 +134,10 @@ def listen_soniox(
     ),
 ) -> None:
     """Soniox+声紋プロファイルで「誰が何を」をライブ取得し、統合 AF 構築＋ライブ介入を行う。
+
+    使用例:
+      das listen-soniox --hybrid --max-speakers 3   (推奨: ハイブリッド話者帰属)
+      das listen-soniox --hybrid --wav meeting.wav  (録音ファイルで擬似ライブ)
 
     speaker-attribution 由来の話者特定つき文字起こし (das.asr.live) を
     別スレッドで走らせ、確定発話を Orchestrator.run_live に流す。
@@ -120,11 +154,53 @@ def listen_soniox(
             top_k=top_k,
             top_k_per_source=top_k_per_source if top_k_per_source > 0 else None,
             skip_docs=skip_docs,
-            soniox_args=soniox_args,
+            soniox_argv=_build_soniox_argv(
+                wav=wav,
+                diarization=diarization,
+                vp_cluster_naming=vp_cluster_naming,
+                max_speakers=max_speakers,
+                hybrid=hybrid,
+                soniox_args=soniox_args,
+            ),
             min_utt_chars=min_utt_chars,
             facilitate_interval=facilitate_interval,
         )
     )
+
+
+def _build_soniox_argv(
+    *,
+    wav: Path | None = None,
+    diarization: str | None = None,
+    vp_cluster_naming: bool = False,
+    max_speakers: int | None = None,
+    hybrid: bool = False,
+    soniox_args: str = "",
+) -> list[str]:
+    """第一級オプションを文字起こし側 (das.asr.live, click) の argv に合成する。
+
+    click は同一オプションが複数回渡されると最後の値を採用する (後勝ち。
+    is_flag は冪等)。互換用の ``--soniox-args`` を末尾に置くことで、
+    第一級オプションと重複した場合は ``--soniox-args`` 側が優先される。
+    ``soniox_args`` は shlex で分割するため、クォートすれば空白を含む
+    パス等も安全に渡せる。
+    """
+    argv: list[str] = []
+    if hybrid:
+        # 推奨構成 (ハイブリッド話者帰属) の糖衣。
+        # docs/design/handoff_2026-07-14_unregistered_speakers.md
+        argv += ["--diarization", "pyannote", "--vp-cluster-naming"]
+    if wav is not None:
+        argv += ["--wav", str(wav)]
+    if diarization is not None:
+        argv += ["--diarization", diarization]
+    if vp_cluster_naming and not hybrid:
+        argv.append("--vp-cluster-naming")
+    if max_speakers is not None:
+        argv += ["--diarization-max-speakers", str(max_speakers)]
+    if soniox_args:
+        argv += shlex.split(soniox_args)
+    return argv
 
 
 # --- 実体 --------------------------------------------------------------
@@ -138,7 +214,7 @@ async def _run_listen_soniox_async(
     top_k: int,
     top_k_per_source: int | None,
     skip_docs: bool,
-    soniox_args: str,
+    soniox_argv: list[str],
     min_utt_chars: int = 7,
     facilitate_interval: float = 3.0,
 ) -> None:
@@ -184,7 +260,7 @@ async def _run_listen_soniox_async(
         loop.call_soon_threadsafe(queue.put_nowait, (speaker, text))
 
     _live_mod.ON_UTTERANCE = _on_utt
-    argv = ["--no-open"] + (soniox_args.split() if soniox_args else [])
+    argv = ["--no-open", *soniox_argv]
 
     def _runner() -> None:
         try:
