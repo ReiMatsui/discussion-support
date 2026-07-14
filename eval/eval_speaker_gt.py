@@ -44,21 +44,37 @@ def load(gt_path: str, session_override: str | None = None):
     return gt, gt_turns, turns, diag, session
 
 
-def gt_code_by_overlap(t, gt_turns, labels):
-    """新ランの発話 t に、時間重なり最大のGT発話のラベルを割り当てる.
+def gt_timeline(gt_turns, labels):
+    """GTを話者→時間区間リストのタイムラインに変換する.
 
-    同一音声を --wav で再実行したラン用（区切り揺れを吸収）。重なりが発話長の
-    3割未満なら突合不能として None。
+    区間単位のGTは特定の区切りに紐づくため、別の区切りのランを採点するには
+    「誰がいつ喋っていたか」の時間表現に直すのが正しい（区切りが違う発話に
+    単一の正解を押し付けない）。
     """
-    best, best_ov = None, 0
+    tl: dict[str, list[tuple[int, int]]] = {}
     for g in gt_turns:
-        ov = min(t["end_ms"], g["end_ms"]) - max(t["ms"], g["ms"])
-        if ov > best_ov:
-            best, best_ov = g, ov
-    dur = max(1, t["end_ms"] - t["ms"])
-    if best is None or best_ov < dur * 0.3:
+        c = labels.get(str(g["turn_id"])) or labels.get(g["turn_id"])
+        if c in ("S1", "S2", "S3"):
+            tl.setdefault(c, []).append((g["ms"], g["end_ms"]))
+    return tl
+
+
+def gt_code_by_timeline(t, tl):
+    """発話 t の時間帯で支配的（80%以上）なGT話者を返す.
+
+    ラベル済み時間が発話長の3割未満なら None（正解範囲外）、
+    支配的話者がいなければ "MULTI"（複数人が混在する区間＝単一正解を
+    割り当てられないため採点対象外として件数報告のみ）。
+    """
+    s, e = t["ms"], t["end_ms"]
+    dur = max(1, e - s)
+    ovs = {c: sum(max(0, min(e, b) - max(s, a)) for a, b in ivs)
+           for c, ivs in tl.items()}
+    total = sum(ovs.values())
+    if total < dur * 0.3:
         return None
-    return labels.get(str(best["turn_id"])) or labels.get(best["turn_id"])
+    c, top = max(ovs.items(), key=lambda x: x[1])
+    return c if top >= total * 0.8 else "MULTI"
 
 
 def main(gt_path: str, session_override: str | None = None) -> None:
@@ -67,12 +83,17 @@ def main(gt_path: str, session_override: str | None = None) -> None:
     names = gt.get("speaker_names", {})
     same_session = session == gt["session"]
 
+    tl = gt_timeline(gt_turns, labels) if not same_session else None
     rows = []  # (turn_id, sys_label, gt_code)
+    n_uncovered = 0
     for t in turns:
         if same_session:
             code = labels.get(str(t["turn_id"])) or labels.get(t["turn_id"])
         else:
-            code = gt_code_by_overlap(t, gt_turns, labels)
+            code = gt_code_by_timeline(t, tl)
+            if code is None:
+                n_uncovered += 1
+                continue
         if code:
             rows.append((t["turn_id"], t["speaker"], code))
     if not rows:
@@ -82,9 +103,10 @@ def main(gt_path: str, session_override: str | None = None) -> None:
     n_multi = sum(1 for _, _, g in rows if g == "MULTI")
     n_unk = sum(1 for _, _, g in rows if g == "UNK")
 
-    src = "" if same_session else f"（GT元: {gt['session']} から時間突合）"
+    src = "" if same_session else (f"（GT元: {gt['session']} タイムライン突合、"
+                                   f"正解範囲外 {n_uncovered} 件除外）")
     print(f"= セッション {session}{src}: GT付き {len(rows)}/{len(turns)} 発話"
-          f"（単独話者 {len(single)}、複数人 {n_multi}、不明 {n_unk}）\n")
+          f"（単独話者 {len(single)}、複数人混在 {n_multi}、不明 {n_unk}）\n")
 
     # --- 混同行列（単独話者のみ） ---
     sys_labels = sorted({s for _, s, _ in single})
