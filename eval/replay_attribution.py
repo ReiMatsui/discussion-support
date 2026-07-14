@@ -45,7 +45,7 @@ from das.asr.live._voice_profiles import VoiceProfiles  # noqa: E402
 # CLI/sweep で上書きできる VoiceProfiles のパラメータ。
 # ctor: __init__ 引数、attr: 生成後に setattr する運用チューニング値。
 _CTOR_PARAMS = {"thresh", "margin", "min_sec", "consist", "dedupe"}
-_ATTR_PARAMS = {"short_floor", "short_bonus", "short_margin_mult",
+_ATTR_PARAMS = {"short_floor", "short_bonus", "short_margin_mult", "strict_sec",
                 "enroll_min_total_chars", "enroll_win_sec", "enroll_consist_bonus"}
 _ALL_PARAMS = sorted(_CTOR_PARAMS | _ATTR_PARAMS)
 
@@ -116,7 +116,8 @@ def reset_tracker(vp: VoiceProfiles, params: dict, *,
     d_th, d_dd, d_cs = VoiceProfiles.DEFAULTS[vp.model]
     vp.thresh, vp.dedupe, vp.consist = d_th, d_dd, d_cs
     vp.margin, vp.min_sec = 0.05, 1.0
-    vp.short_floor, vp.short_bonus, vp.short_margin_mult = 0.45, 0.05, 2.0
+    vp.short_floor, vp.short_bonus, vp.short_margin_mult = 0.45, 0.08, 2.0
+    vp.strict_sec = 3.0
     vp.enroll_min_total_chars = 45
     vp.enroll_win_sec = 1.5
     vp.enroll_consist_bonus = 0.08
@@ -170,7 +171,9 @@ def replay(vp: VoiceProfiles, items: list[dict], audio: np.ndarray) -> list[dict
             pred = UNSURE_SPEAKER
         recent.append((it["ms"], it["end_ms"], it["label"]))
         del recent[:-12]
-        results.append({**it, "pred": pred, "kind": d.get("kind"), "bc": is_bc})
+        results.append({**it, "pred": pred, "kind": d.get("kind"), "bc": is_bc,
+                        "sim": d.get("sim"), "second": d.get("second"),
+                        "cand": d.get("name")})
     return results
 
 
@@ -300,6 +303,8 @@ def build_argparser() -> argparse.ArgumentParser:
                    help="短発話照合のしきい値上乗せ")
     p.add_argument("--short-margin-mult", type=float, default=None,
                    help="短発話照合のmargin倍率")
+    p.add_argument("--strict-sec", type=float, default=None,
+                   help="厳格照合を要求する発話長の上限秒数")
     p.add_argument("--enroll-min-total-chars", type=float, default=None,
                    help="自動登録に必要な累積文字数")
     p.add_argument("--enroll-win-sec", type=float, default=None,
@@ -355,8 +360,12 @@ def main(argv: list[str] | None = None) -> None:
         for r in results:
             dur = (r["end_ms"] - r["ms"]) / 1000
             mark = "bc " if r["bc"] else ""
+            sim = "" if r["sim"] is None else (
+                f" sim={r['sim']:.2f}/"
+                + ("--" if r["second"] is None else f"{r['second']:.2f}")
+                + f"→{r['cand']}")
             print(f"[{r['ms']/1000:6.1f}s {dur:4.1f}s] gt={r['gt'] or '--'} "
-                  f"pred={r['pred']:<8} kind={r['kind']} {mark}"
+                  f"pred={r['pred']:<8} kind={r['kind']}{sim} {mark}"
                   f"{r['text'][:30]}")
         print()
     summarize(results)
