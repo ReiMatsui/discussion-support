@@ -39,6 +39,50 @@ def _stt_speaker_key(speaker) -> str:
     return "#" + str(speaker)
 
 
+def _merged_diarization_speaker_key(s: SessionState, raw_cluster: str,
+                                    source: str, speaker: str,
+                                    *, duration_ms: int) -> str:
+    """クラスタ間名寄せを反映した匿名キー解決（s.cluster_namer 有効時のみ呼ぶ）.
+
+    設計: docs/design/handoff_2026-07-14_unregistered_speakers.md §3。
+    - 名寄せ成立済み (canonical != raw): 新規参加者を作らず canonical のキーへ
+      帰属させる。吸収側に別キーが発行済みなら rekey で過去レコードごと遡及統合
+      する（§3 の3）。どちらも未キーなら canonical の source/speaker で
+      key_for_diarization_speaker を呼び、ヒステリシスの pending を canonical に
+      集約する。
+    - 名寄せ不成立: 参加人数上限まで人間スロットが埋まっている場合のみ、最近傍
+      クラスタの既存キーへ統合を試みる（§3 の2: 昇格の厳格化）。それも不可なら
+      従来どおり key_for_diarization_speaker へ（最終的に
+      constrain_human_speaker_key で未確定に落ちる＝既存挙動）。
+    """
+    namer = s.cluster_namer
+    canonical = namer.canonical_cluster(raw_cluster)
+    if canonical != raw_cluster:
+        canonical_key = s.diarization_speaker_keys.get(canonical)
+        absorbed_key = s.diarization_speaker_keys.pop(raw_cluster, None)
+        if canonical_key is not None:
+            if absorbed_key is not None and absorbed_key != canonical_key:
+                # 吸収側に既に @diar:N を発行済み → 過去レコードごと遡及統合。
+                s.rekey(absorbed_key, canonical_key)
+            return canonical_key
+        if absorbed_key is not None:
+            # canonical 側が未キーなら吸収側の発行済みキーを canonical へ付け替えて
+            # 再利用する（過去レコードのキーを安定に保つ）。
+            s.diarization_speaker_keys[canonical] = absorbed_key
+            return absorbed_key
+        c_source, _, c_speaker = canonical.partition(":")
+        return s.key_for_diarization_speaker(c_source, c_speaker,
+                                             duration_ms=duration_ms)
+    if (raw_cluster not in s.diarization_speaker_keys
+            and s.human_slot_budget_exhausted()):
+        nearest = namer.nearest_cluster(raw_cluster)
+        if nearest is not None:
+            nearest_key = s.diarization_speaker_keys.get(nearest)
+            if nearest_key is not None:
+                return nearest_key
+    return s.key_for_diarization_speaker(source, speaker, duration_ms=duration_ms)
+
+
 class RecvLoop:
     """STTからのトークンストリームを処理し、発話を確定(flush)してrecordsに追加する.
 
@@ -272,9 +316,17 @@ class RecvLoop:
                         # この名前に帰属する。過去にこのクラスタへ既に匿名キー
                         # (@diar:N)を発行済みだった場合、既存の rekey 機構で過去分も
                         # まとめて確定名へ付け替える（設計点4: 低コストな遡及リネーム）。
-                        prior_key = s.diarization_speaker_keys.get(raw_cluster)
-                        if prior_key is not None and prior_key != cluster_name:
-                            s.rekey(prior_key, cluster_name)
+                        # クラスタ間名寄せで吸収されたクラスタはキーが canonical 側で
+                        # 管理されるため、raw/canonical 両方のキーを確定名へ統合する
+                        # (docs/design/handoff_2026-07-14_unregistered_speakers.md §3)。
+                        # 統合後は diarization_speaker_keys も確定名に付け替え、
+                        # 以後の最近傍統合が古い @diar:N を復活させないようにする。
+                        _canonical = s.cluster_namer.canonical_cluster(raw_cluster)
+                        for _cluster in {raw_cluster, _canonical}:
+                            prior_key = s.diarization_speaker_keys.get(_cluster)
+                            if prior_key is not None and prior_key != cluster_name:
+                                s.rekey(prior_key, cluster_name)
+                                s.diarization_speaker_keys[_cluster] = cluster_name
                         sp_id = cluster_name
                         rec_extra["speaker_source"] = "cluster_voiceprint"
                         rec_extra["speaker_confidence"] = 1.0
@@ -288,10 +340,20 @@ class RecvLoop:
                         rec_extra["speaker_confidence"] = 0.0
                         rec_extra["speaker_reason"] = "multiple_diarization_speakers_overlap"
                     else:
-                        sp_id = s.key_for_diarization_speaker(
-                            resolved.source, resolved.speaker,
-                            duration_ms=self.cur_end - self.cur_ms,
-                        )
+                        if s.cluster_namer is not None:
+                            # クラスタ間名寄せを反映したキー解決（遡及統合・
+                            # max-speakers超過時の最近傍統合を含む。§3 参照）。
+                            # cluster_namer が無い場合は下の従来コードのままで、
+                            # Soniox単独/pyannote単独の挙動は一切変えない。
+                            sp_id = _merged_diarization_speaker_key(
+                                s, raw_cluster, resolved.source, resolved.speaker,
+                                duration_ms=self.cur_end - self.cur_ms,
+                            )
+                        else:
+                            sp_id = s.key_for_diarization_speaker(
+                                resolved.source, resolved.speaker,
+                                duration_ms=self.cur_end - self.cur_ms,
+                            )
                         rec_extra["speaker_source"] = resolved.source
                         rec_extra["speaker_confidence"] = round(resolved.confidence, 3)
                         rec_extra["speaker_reason"] = resolved.reason

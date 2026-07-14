@@ -316,6 +316,18 @@ class SessionState:
                     slots.add(slot)
         return len(slots)
 
+    def human_slot_budget_exhausted(self) -> bool:
+        """参加人数上限(diarization_max_speakers)まで人間スロットが埋まっているか.
+
+        クラスタ間名寄せの「昇格の厳格化」用
+        （docs/design/handoff_2026-07-14_unregistered_speakers.md §3 の2）:
+        上限到達後は新規の参加者Xを増やさず、最近傍クラスタへの統合を優先する
+        判断に使う。上限未設定なら常に False（従来挙動）。
+        """
+        max_speakers = self._max_human_speakers()
+        return (max_speakers is not None
+                and self._known_human_slot_count() >= max_speakers)
+
     def constrain_human_speaker_key(self, key) -> str:
         """参加人数上限を超える新規匿名話者を「未確定」に落とす.
 

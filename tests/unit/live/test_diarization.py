@@ -567,6 +567,14 @@ class _FakeClusterNamer:
         self.calls.append((raw_cluster, overlapped))
         return self.name
 
+    # クラスタ間名寄せ（handoff_2026-07-14 §3）の追加インターフェース。
+    # このフェイクでは名寄せなし（canonical=自分自身・最近傍なし）として振る舞う。
+    def canonical_cluster(self, raw_cluster: str) -> str:
+        return raw_cluster
+
+    def nearest_cluster(self, raw_cluster: str, exclude=None) -> str | None:
+        return None
+
 
 def _make_cluster_naming_state(cluster_namer):
     import datetime
