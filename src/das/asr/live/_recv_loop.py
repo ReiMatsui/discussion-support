@@ -25,11 +25,13 @@ from ._ui import _print_line
 from ._voice_profiles import _best_text_similarity
 
 _VOICEPRINT_RELIABLE_KINDS = {"声紋一致", "補正", "自動登録", "合流"}
-# 「前話者追従」（声紋で判定できない発話を直前の確定人物へ根拠なしで寄せる推測）は
-# 2026-07-14 に全モードで廃止した。実測（transcripts/2026-07-14_1729, GT81発話）で
-# 声紋一致92%(n=13)に対し相槌追従28%(n=32)・低信頼追従0%(n=2)と、3人の掛け合いでは
-# ランダム未満で害だった＋相槌は聞き手が打つ＝直前話者とは別人が多い（ユーザー判断）。
-# 抑制は VoiceProfiles._classify 側に一本化（kind「相槌未確定」で UNSURE を返す）。
+# 声紋で判定できない発話は VoiceProfiles._classify が「ラベル継続」（そのSTTラベル
+# の、声紋照合の成功で確定した現在の対応先）を返す（2026-07-14 再設計。照合失敗で
+# 対応を破棄する旧仕様は同一人物を #ラベルと人物Nに分裂させ、オフライン再生評価
+# eval/replay_attribution.py で 1:1帰属精度44%→継続化を含む再設計で79%）。
+# ラベル継続・蓄積中は _VOICEPRINT_RELIABLE_KINDS に含めない＝Resolver 上は
+# 高信頼の声紋判定として扱わない。相槌レコードの最終表示を未確定へ落とす規則は
+# 本ファイル flush 側にある（相槌は聞き手が打つ＝直前話者とは別人が多い）。
 # かつてここにあったハイブリッド限定の _HYBRID_UNTRUSTED_FOLLOW_KINDS による抑制は
 # 冗長になったため撤去（二重実装を残さない）。ハイブリッドの帰属優先度
 # 「声紋一致 > pyannoteクラスタ(名寄せ済み) > 未確定」は tracker が UNSURE を

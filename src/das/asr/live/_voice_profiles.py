@@ -384,11 +384,15 @@ class VoiceProfiles:
         overlapped=True の発話は声が混ざっていて声紋がデタラメになるため、
         声での判定をスキップして直前の対応を維持する。
         count=False（相槌など）の発話は声紋の照合そのものをスキップする。
-        声紋で判定できない発話を「同一ラベルの直前の確定人物」に寄せる推測
-        （前話者追従）は全モードで廃止（2026-07-14, 実測正解率28% n=32 で
-        3人会話ではランダム未満・ユーザー判断）: 直前が確定済み人物なら
-        未確定(UNSURE_SPEAKER)を返す。ラベルのプレースホルダ(#ラベル)への
-        継続はSTTラベルベースの既存機構（遡及リネームの土台）なので維持する。
+        声紋で判定できない発話は「ラベル継続」: そのSTTラベルの現在の対応先
+        （声紋で裏付けられた人物、まだ無ければ #ラベルのプレースホルダ）を
+        そのまま返す（2026-07-14, eval/replay_attribution.py での再設計）。
+        一度でも照合に外れたらラベルの人物対応を破棄して #ラベルへ落とす旧仕様は、
+        中尺発話の声紋が不安定な実会話で対応が壊れ続け（同一人物が #ラベルと
+        人物Nに分裂、1:1帰属精度44%）、継続に変えるだけで54%に改善した。
+        ラベル継続の対応先は必ず声紋照合の成功（一致・登録・合流）でしか
+        書き換わらないため、「声の証拠に基づく最後の対応を維持する」機構であり、
+        根拠なしに直前話者へ寄せる旧「前話者追従」（実測28%で廃止）とは異なる。
         enroll=False（エコー窓中の人間発話など）は照合・補正は行うが、声紋の蓄積・
         人物登録には使わない。エコー窓直後に集中する返答が声紋補正なしのラベル追従に
         落ちるのを防ぎつつ、漏れ込んだAI音声で匿名話者が育つのは防ぐ（P2-2）。
@@ -437,19 +441,16 @@ class VoiceProfiles:
                         self._note("補正" if (prev is not None and not prev.startswith("#")
                                               and prev != cand) else "声紋一致", label=sp, **info)
                         return cand
-                # 既知の誰にも確信を持って一致しなかった。直前が「確定済みの人」でも、
-                # 声紋がその人と一致しないなら追従せず「未確定」に落とす。これにより
-                # 新規話者の登録直前の発話が登録済みの人として表示されるのを防ぎ、
-                # 登録時の遡及リネーム(#ラベル→人物N)で後からまとめて確定できる。
-                # 旧「低信頼追従」（匿名prevへ本人しきい値-0.12の弱い一致で継続）は
-                # 廃止（2026-07-14）: 実測正解率0%(n=2)・ユーザー判断で全モードで
-                # 帰属根拠から外した。本人しきい値を満たす一致だけが prev を維持する
-                # （＝証拠つき継続。満たさなければ #ラベルへ落ちて遡及リネーム待ち）。
-                if prev is not None and not prev.startswith("#"):
-                    pv = active.get(prev)
-                    prev_sim = float(np.dot(pv, emb)) if pv is not None else -1.0
-                    if pv is None or prev_sim < self._person_th(prev, th):
-                        prev = None
+                # 既知の誰にも確信を持って一致しなかった → ラベル継続。ラベルの
+                # 現在の対応（直近の声紋照合成功で決まった人物 or #ラベル）を維持する。
+                # 旧仕様は「その人物と再一致しなければ prev を破棄して #ラベルへ」
+                # だったが、実測（eval/replay_attribution.py, 2026-07-14_142016）では
+                # 中尺発話の声紋が本人でもしきい値に届かず（本人一致 0.17〜0.45）、
+                # 一度の不一致で人物対応が壊れて同一人物が #ラベルと人物Nに分裂し、
+                # 1:1帰属精度44%の主因になっていた。継続化で54%（他の変更と合わせ79%）。
+                # 対応先のプロファイルが消えている（remap等）場合だけは継続を断つ。
+                if prev is not None and not prev.startswith("#") and prev not in active:
+                    prev = None
                 # 登録: 発話数ではなく「声ごとのクリーンな発声の累積文字数」で確定する。
                 # 長い発話は窓分割して複数サンプル化（連続発話でも登録が進み、内部一貫性も確認）。
                 kind = "蓄積中" if (enroll and self.auto and chars > 0) else "未確定"
@@ -472,6 +473,8 @@ class VoiceProfiles:
                 ranked = self._rank_active(emb, active) if emb is not None else None
                 if ranked is not None:
                     cand, sim, second = ranked
+                    info.update(sim=round(sim, 3), second=round(second, 3),
+                                name=cand, short=True)
                     strict_th = self._person_th(cand, self.thresh) + self.short_bonus
                     if (sim >= strict_th
                             and sim - second >= self.margin * self.short_margin_mult):
@@ -481,22 +484,19 @@ class VoiceProfiles:
                                    label=sp, sim=round(sim, 3), second=round(second, 3),
                                    name=cand, prev=prev, short=True)
                         return cand
-                # 厳格に決められない短い発話は、確定済みの人へ誤って追従せず未確定にする。
-                # 開いた名簿でも閉じた名簿でも同じ扱い（証拠の無い決めつけ＝誤った確信付与を
-                # 避ける）。sp_map は保持し、次の確信ある発話で連続性を回復する。
+                # 厳格に決められない短い発話はラベル継続（そのラベルの現在の人物対応を
+                # 維持）。対応先は声紋照合の成功でしか書き換わらないため根拠なしの
+                # 決めつけではない（classify docstring の実測根拠を参照）。
                 if prev is not None and not prev.startswith("#"):
-                    self._note("未確定", label=sp, prev=prev, short=True)
-                    return UNSURE_SPEAKER
-        # 声紋で決められない発話（相槌・短発話・声紋計算不可の短経路）の扱い:
-        # 旧「相槌追従」＝直前の確定人物へ根拠なしで寄せる推測は全モードで廃止
-        # （2026-07-14, 実測正解率28% n=32・3人会話ではランダム未満／相槌は聞き手が
-        # 打つ＝直前話者とは別人のことが多い、というユーザー判断）。直前が確定済み
-        # 人物なら未確定を返す。sp_map は保持し、次の確信ある声紋一致で連続性を回復
-        # する。#ラベル（未確定プレースホルダ）への継続はSTTラベルベースの機構
-        # （自動登録時の遡及リネーム #ラベル→人物N の土台）なので従来どおり維持。
+                    self._note("ラベル継続", label=sp, prev=prev, short=True)
+                    return prev
+        # 声紋で決められない発話（相槌・短発話・声紋計算不可の短経路）はラベル継続:
+        # そのラベルの現在の対応（声紋照合の成功で確定した人物 or #ラベル）を返す。
+        # なお相槌テキストの最終的な表示は呼び出し側（RecvLoop.flush）が未確定に
+        # 落とす規則を持つ（相槌は聞き手が打つ＝直前話者と別人のことが多い）。
         if kind == "相槌追従" and prev is not None and not prev.startswith("#"):
-            self._note("相槌未確定", label=sp, prev=prev, **info)
-            return UNSURE_SPEAKER
+            self._note("ラベル継続", label=sp, prev=prev, **info)
+            return prev
         key = prev if prev is not None else "#" + sp
         # 閉じた名簿（名簿を確定, auto=False）: 許すのは「登録済みのアクティブな名前付き
         # プロファイルへの継続」だけ。未知/匿名(#ラベル・人物N)は新規参加者を作らず未確定に
@@ -704,7 +704,7 @@ class VoiceProfiles:
                          f"/ラベル間{np.median(self.diff_sims):.2f}")
         if self.counts:
             order = ["声紋一致", "補正", "自動登録", "合流", "蓄積中", "未確定",
-                     "相槌未確定", "相槌追従", "重なりスキップ", "声紋計算不可"]
+                     "ラベル継続", "相槌追従", "重なりスキップ", "声紋計算不可"]
             parts.append("判定内訳: " + " / ".join(
                 f"{k}{self.counts[k]}" for k in order if self.counts.get(k)))
         return "、".join(parts) or "判定なし"
