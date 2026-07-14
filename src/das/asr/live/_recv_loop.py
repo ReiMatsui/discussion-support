@@ -389,11 +389,19 @@ class RecvLoop:
         if self.cur_ms is not None and self.cur_end is not None:
             self.recent_segs.append((self.cur_ms, self.cur_end, label))
             del self.recent_segs[:-12]
+        # constrain 後に records へ入る最終キーを先に計算し、diag へ併記する。
+        # 従来の diag は constrain 前の key しか持たず、「resolver は正しいキーを
+        # 選んだのに constrain で未確定に落ちた」事象の切り分けができなかった
+        # (docs/design/handoff_2026-07-14_unregistered_speakers.md 参照)。
+        # 既存フィールド（key 等）は変えず final_key を追加のみ（diag 消費側の互換維持）。
+        final_sp_id = s.constrain_human_speaker_key(
+            UNSURE_SPEAKER if _is_backchannel else sp_id)
         if tracker is not None and tracker.last is not None:
             try:
                 with open(s.diag_path, "a", encoding="utf-8") as f:
                     f.write(json.dumps({"ms": self.cur_ms, "end": self.cur_end, "label": label,
-                                        "key": sp_id, **tracker.last},
+                                        "key": sp_id, "final_key": final_sp_id,
+                                        **tracker.last},
                                        ensure_ascii=False, default=str) + "\n")
             except OSError:
                 pass
@@ -414,7 +422,7 @@ class RecvLoop:
             # 直前の人に追従させず未確定にする。bcフラグでUIでは薄く折りたたむ。
             sp_id = UNSURE_SPEAKER
             rec_extra["bc"] = True
-        sp_id = s.constrain_human_speaker_key(sp_id)
+        sp_id = final_sp_id   # constrain 済み（diag の final_key と同一値）
         with s.state_lock:
             s.records.append({"ms": self.cur_ms, "end_ms": self.cur_end,
                               "speaker": sp_id, "text": self.cur_text.strip(),

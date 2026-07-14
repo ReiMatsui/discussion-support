@@ -231,6 +231,31 @@ def test_merge_carries_absorbed_pending_into_canonical(tmp_path):
     assert state.diarization_pending_ms == {}   # 吸収側の残留なし
 
 
+def test_diag_records_final_key_after_constrain(tmp_path):
+    """diag に constrain 後の最終キー(final_key)が追記される（既存フィールドは不変）.
+
+    従来は constrain 前の key しか記録されず、「resolver は正しいキーを選んだのに
+    constrain で未確定に落ちた」事象（2026-07-14 実セッション）の切り分けが
+    diag からできなかった。final_key は追加のみで、diag 消費側の互換性を保つ。
+    """
+    namer = _Namer(nearest=None)
+    state = _make_state(tmp_path, namer=namer, speaker="SPEAKER_05", max_speakers=1)
+    state.key_for_diarization_speaker("pyannote", "SPEAKER_00")   # @diar:1
+    state.records = [{"ms": 0, "end_ms": 500, "speaker": "@diar:1", "text": "既存参加者"}]
+    state.disp_name("@diar:1")   # スロット1を占有 → 新キーは constrain で未確定へ
+
+    _flush(state)
+
+    import json
+    with open(state.diag_path, encoding="utf-8") as f:
+        events = [json.loads(line) for line in f if '"final_key"' in line]
+    assert events, "final_key を含む diag 行が無い"
+    ev = events[-1]
+    assert ev["key"] == "@diar:2"     # constrain 前（resolver/名寄せの出力）は従来どおり
+    assert ev["final_key"] == "?"     # constrain で未確定へ落ちたことが diag から読める
+    assert state.records[-1]["speaker"] == ev["final_key"]   # records と一致
+
+
 def test_cluster_namer_last_match_written_to_diag_once(tmp_path):
     """名寄せイベントが diag に1行書かれ、消費されて重複出力しない（F6）."""
     namer = _Namer()
