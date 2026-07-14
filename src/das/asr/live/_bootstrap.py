@@ -605,6 +605,10 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
     if args.diarization == "pyannote" and args.vp_cluster_naming:
         if tracker is not None:
             cluster_namer = ClusterVoiceNamer(tracker)
+            # ハイブリッド時のみ、短発話(short_floor〜min_sec)の声紋照合を既知1人
+            # でも試みる（VoiceProfiles.hybrid のコメント参照。実測: 声紋一致92%
+            # vs 前話者追従28%, transcripts/2026-07-14_1729 GT評価）。
+            tracker.set_hybrid(True)
             print("# 話者名前付け: pyannoteクラスタ単位の声紋照合ハイブリッド構成を使用"
                   "（docs/design/pyannote_live1_trial_2026-07-09.md §9）", flush=True)
         else:

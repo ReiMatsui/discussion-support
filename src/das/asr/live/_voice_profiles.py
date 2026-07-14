@@ -93,6 +93,16 @@ class VoiceProfiles:
 
     ANON = re.compile(r"^人物\d+$")
 
+    # ハイブリッド構成（pyannoteクラスタ×声紋照合, ClusterVoiceNamer有効）フラグ。
+    # クラス属性の既定値 False により、Soniox単独・pyannote単独の既存挙動は不変。
+    # True のとき短発話(short_floor〜min_sec)の厳格声紋照合を「既知1人」でも試みる
+    # （通常は取り違え防止のため既知2人以上が条件）。実測（transcripts/2026-07-14_1729,
+    # GT81発話）で声紋一致92%(n=13)に対し前話者追従は28%(n=32)と、3人会話では
+    # 追従が害になるため、当たる機構＝声紋照合の射程を短発話にも広げる。
+    # 照合しきい値は既存の短発話用厳格運用（本人しきい値+short_bonus,
+    # margin×short_margin_mult）のまま＝当たりにくいだけで誤りは増やさない。
+    hybrid = False
+
     # モデル別の既定しきい値（実音声プールで校正済み。スコアのスケールが違う）
     # resemblyzer: 軽量・依存少。同一/別人の分布に重なりあり（分離マージン-0.06）
     # ecapa: ほぼ完全分離(+0.01)＋10倍速。混合音声を成分話者と強くマッチさせる癖
@@ -325,6 +335,10 @@ class VoiceProfiles:
     def set_max_human_speakers(self, value: int | None) -> None:
         self.max_human_speakers = value
 
+    def set_hybrid(self, value: bool) -> None:
+        """ハイブリッド構成（ClusterVoiceNamer有効）を宣言する（クラス属性参照）."""
+        self.hybrid = bool(value)
+
     def _note(self, kind: str, **info) -> None:
         self.counts[kind] = self.counts.get(kind, 0) + 1
         self.last = {"kind": kind, **info}
@@ -445,8 +459,12 @@ class VoiceProfiles:
         elif count and wav.size >= SR * self.short_floor:
             # 短い発話の取り違え安定化: 既知の2人以上を厳格に区別できるときだけ正す。
             # 登録・蓄積はしない（声が短く不安定なため、登録に混ぜると精度が落ちる）。
+            # ハイブリッド構成(hybrid=True)では既知1人でも照合を試みる。声紋一致92%
+            # に対し前話者追従28%（transcripts/2026-07-14_1729 GT評価）のため、
+            # 登録済みプロファイルが1人しか居ない蓄積期でも「声紋で当てられる短発話」
+            # を追従に落とさない。しきい値は同じ厳格運用（誤爆は増やさない）。
             active = self._active_human()
-            if len(active) >= 2:
+            if len(active) >= 2 or (self.hybrid and active):
                 emb = self._embed(wav)
                 ranked = self._rank_active(emb, active) if emb is not None else None
                 if ranked is not None:

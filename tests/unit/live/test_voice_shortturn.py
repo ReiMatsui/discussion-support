@@ -88,3 +88,30 @@ def test_short_turn_needs_two_known_speakers():
     vp.profiles = {"A": _unit(1, 0, 0)}
     vp._active_keys = {"A"}
     assert vp.classify(_SHORT, "1", count=True) == "#1"  # prevなし→素のラベル
+
+
+def test_short_turn_hybrid_matches_single_known_speaker():
+    """ハイブリッド時は既知1人でも短発話を声紋照合し、当たれば声紋一致にする.
+
+    実測（transcripts/2026-07-14_1729 GT評価）で声紋一致92% vs 前話者追従28%。
+    蓄積期（登録1人）の短発話を追従に落とさず、当たる機構＝声紋照合に回す。
+    """
+    vp = _tracker(_unit(1, 0, 0))            # 明確にA
+    vp.profiles = {"A": _unit(1, 0, 0)}
+    vp._active_keys = {"A"}
+    vp.hybrid = True
+    assert vp.classify(_SHORT, "1", count=True) == "A"
+    assert vp.last["kind"] == "声紋一致"
+    assert vp.pool == []                     # 登録・蓄積はしない（既存どおり）
+
+
+def test_short_turn_hybrid_keeps_strict_threshold():
+    """ハイブリッドでも照合しきい値は既存の厳格運用のまま（弱い一致は拾わない）."""
+    vp = _tracker(_unit(1, 2, 0))            # A(1,0,0)とはsim≈0.45 < 厳格しきい値
+    vp.profiles = {"A": _unit(1, 0, 0)}
+    vp._active_keys = {"A"}
+    vp.hybrid = True
+    # 当たらないだけで誤りは増やさない: tracker単体としては従来どおり追従に落ちる
+    # （ハイブリッドでの追従抑制は RecvLoop.flush 側で未確定に倒す）。
+    assert vp.classify(_SHORT, "1", count=True) == "#1"
+    assert vp.last["kind"] == "相槌追従"
