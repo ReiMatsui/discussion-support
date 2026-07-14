@@ -155,7 +155,7 @@ def test_unmerged_cluster_over_max_speakers_without_nearest_falls_back(tmp_path)
     """最近傍が取れなければ従来どおり（constrainで未確定へ落ちる＝既存挙動）."""
     namer = _Namer(nearest=None)
     state = _make_state(tmp_path, namer=namer, speaker="SPEAKER_05", max_speakers=1)
-    state.diarization_speaker_keys = {"pyannote:SPEAKER_00": "@diar:1"}
+    state.key_for_diarization_speaker("pyannote", "SPEAKER_00")   # @diar:1
     state.records = [{"ms": 0, "end_ms": 500, "speaker": "@diar:1", "text": "既存参加者"}]
     state.disp_name("@diar:1")
 
@@ -173,3 +173,20 @@ def test_unmerged_cluster_under_limit_issues_new_key(tmp_path):
 
     assert state.diarization_speaker_keys == {"pyannote:SPEAKER_01": "@diar:1"}
     assert state.records[-1]["speaker"] == "@diar:1"
+
+
+def test_new_key_stays_unique_after_merge_shrinks_key_map(tmp_path):
+    """名寄せの pop で keys が縮んでも、次の新規昇格キーは再利用されない（単調採番）."""
+    namer = _Namer(aliases={"pyannote:SPEAKER_01": "pyannote:SPEAKER_00"})
+    state = _make_state(tmp_path, namer=namer, speaker="SPEAKER_01")
+    state.key_for_diarization_speaker("pyannote", "SPEAKER_00")   # @diar:1
+    state.key_for_diarization_speaker("pyannote", "SPEAKER_01")   # @diar:2
+
+    _flush(state)   # 名寄せ成立: SPEAKER_01 が pop され @diar:2 → @diar:1 に遡及統合
+
+    assert state.records[-1]["speaker"] == "@diar:1"
+    state.speaker_resolver = _Resolver("SPEAKER_05")   # 別人の新クラスタが昇格
+    _flush(state)
+    # len ベース採番なら使用中の @diar:2 が再発行され別人が混在していた（F1回帰）。
+    assert state.diarization_speaker_keys["pyannote:SPEAKER_05"] == "@diar:3"
+    assert state.records[-1]["speaker"] == "@diar:3"

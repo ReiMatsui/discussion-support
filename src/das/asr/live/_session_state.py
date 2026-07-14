@@ -92,6 +92,11 @@ class SessionState:
         # 参加者化ヒステリシス用: まだ @diar:N を発行していないラベルの累積発話ms。
         # pyannote provider 使用時のみ参照される（他providerは従来どおり即時登録）。
         self.diarization_pending_ms: dict[str, int] = {}
+        # @diar:N の採番用の単調増加カウンタ。クラスタ間名寄せは
+        # diarization_speaker_keys の吸収側エントリを pop して辞書を縮めるため、
+        # len ベースの採番だと使用中の @diar:N を別人へ再発行してしまう
+        # （docs/design/handoff_2026-07-14_unregistered_speakers.md §3 参照）。
+        self.diarization_key_seq = 0
         # ハイブリッド構成（docs/design/pyannote_live1_trial_2026-07-09.md §9）:
         # pyannoteクラスタ単位の声紋照合による名前付け。--vp-cluster-naming
         # 指定時のみ _bootstrap.py が生成して渡す。None なら従来どおり
@@ -404,8 +409,10 @@ class SessionState:
                 self.diarization_pending_ms[raw] = pending
                 return UNSURE_SPEAKER
             self.diarization_pending_ms.pop(raw, None)
-        idx = len(self.diarization_speaker_keys) + 1
-        key = f"@diar:{idx}"
+        # len ベースの採番は名寄せの pop で辞書が縮むと使用中キーを再発行するため、
+        # 単調増加カウンタで採番する（名寄せ無しなら len+1 と同値＝従来挙動不変）。
+        self.diarization_key_seq += 1
+        key = f"@diar:{self.diarization_key_seq}"
         self.diarization_speaker_keys[raw] = key
         return self.diarization_speaker_keys[raw]
 
@@ -813,6 +820,7 @@ class SessionState:
             self.partial_speaker = ""
             self.diarization_speaker_keys = {}
             self.diarization_pending_ms = {}
+            self.diarization_key_seq = 0
         with self.diarization_lock:
             self.diarization_events = []
         if self.cluster_namer is not None:

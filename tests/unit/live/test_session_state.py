@@ -95,6 +95,18 @@ def test_constrain_after_label_release_with_max_speakers():
     assert s.disp_name("#3") == "参加者B"    # 解放された B を再利用
 
 
+def test_diarization_key_seq_never_reissues_key_after_pop():
+    """名寄せで keys が pop されても、使用中の @diar:N を別人へ再発行しない（F1）."""
+    s = _make_state()
+    assert s.key_for_diarization_speaker("pyannote", "A") == "@diar:1"
+    assert s.key_for_diarization_speaker("pyannote", "B") == "@diar:2"
+    assert s.key_for_diarization_speaker("pyannote", "C") == "@diar:3"
+    # クラスタ間名寄せ相当: B が A に吸収されエントリが pop される
+    s.diarization_speaker_keys.pop("pyannote:B")
+    # len ベース採番なら使用中の @diar:3 を再発行していた（キー衝突の回帰）
+    assert s.key_for_diarization_speaker("pyannote", "D") == "@diar:4"
+
+
 class _FakePyannoteProvider:
     """pyannote provider をhysteresis判定用に模したダミー(.name==\"pyannote\")."""
 
