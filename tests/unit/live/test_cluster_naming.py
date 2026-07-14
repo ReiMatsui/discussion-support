@@ -239,3 +239,34 @@ def test_nearest_cluster_returns_none_without_embedding():
     namer = ClusterVoiceNamer(tracker, min_sec=5.0)
 
     assert namer.nearest_cluster("pyannote:SPEAKER_00") is None
+
+
+def test_confirmed_cluster_saves_embedding_and_serves_as_merge_target():
+    """確定経路でも代表埋め込みが保存され、以後の名寄せ先として機能する（F4）."""
+    tracker = _FakeTracker([("田中", 0.8)], embed_map={0.1: _V1, 0.2: _V2})
+    namer = ClusterVoiceNamer(tracker, min_sec=5.0)
+
+    assert namer.observe("pyannote:SPEAKER_00", _wav(5.0, 0.1)) == "田中"   # 即確定
+    # 確定クラスタの埋め込みが保存されているので、類似クラスタは名寄せで即帰属する
+    assert namer.observe("pyannote:SPEAKER_01", _wav(5.0, 0.2)) == "田中"
+    assert namer.canonical_cluster("pyannote:SPEAKER_01") == "pyannote:SPEAKER_00"
+
+
+def test_zero_norm_embedding_is_guarded_and_not_stored():
+    """全ゼロwav（ゼロノルム埋め込み）は None に落ち、代表埋め込みに NaN が入らない（F5）."""
+    import threading
+
+    from das.asr.live._voice_profiles import VoiceProfiles
+
+    vp = VoiceProfiles.__new__(VoiceProfiles)
+    vp._lock = threading.RLock()
+    vp.embed_ms = []
+    vp.min_sec = 1.0
+    vp.dedupe = 0.72
+    vp._embed_raw = lambda wav: np.zeros(8)   # 無音等でモデルがゼロベクトルを返す想定
+
+    assert vp.embed(_wav(2.0)) is None        # NaN 正規化ではなく None ガード
+
+    namer = ClusterVoiceNamer(vp, min_sec=5.0)
+    assert namer.observe("pyannote:SPEAKER_00", _wav(5.0)) is None
+    assert namer._embeddings == {}            # NaN 入りの代表埋め込みを保存しない

@@ -229,3 +229,24 @@ def test_merge_carries_absorbed_pending_into_canonical(tmp_path):
     assert state.diarization_speaker_keys == {"pyannote:SPEAKER_00": "@diar:1"}
     assert state.records[-1]["speaker"] == "@diar:1"
     assert state.diarization_pending_ms == {}   # 吸収側の残留なし
+
+
+def test_cluster_namer_last_match_written_to_diag_once(tmp_path):
+    """名寄せイベントが diag に1行書かれ、消費されて重複出力しない（F6）."""
+    namer = _Namer()
+    state = _make_state(tmp_path, namer=namer, speaker="SPEAKER_01")
+    namer.last_match = {"kind": "クラスタ名寄せ", "raw": "pyannote:SPEAKER_01",
+                        "canonical": "pyannote:SPEAKER_00", "sim": 0.9}
+
+    _flush(state)
+    _flush(state)   # 2回目は last_match が消費済みなので書かれない
+
+    import json
+    with open(state.diag_path, encoding="utf-8") as f:
+        events = [json.loads(line) for line in f
+                  if '"cluster_naming"' in line]
+    assert len(events) == 1
+    assert events[0]["type"] == "cluster_naming"
+    assert events[0]["kind"] == "クラスタ名寄せ"
+    assert events[0]["canonical"] == "pyannote:SPEAKER_00"
+    assert namer.last_match is None

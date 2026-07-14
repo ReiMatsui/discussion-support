@@ -505,6 +505,10 @@ class SessionState:
                     r["speaker"] = new
             if old in self.colors:
                 self.colors.setdefault(new, self.colors.pop(old))
+            if old in self.names:
+                # 表示名も colors と同じ流儀で移行する（new に既に名前があれば
+                # old 側は捨てる）。残留させると古いキーの names が溜まり続ける。
+                self.names.setdefault(new, self.names.pop(old))
             if old in self.anonymous_labels:
                 if self._displays_real_name(new):
                     # 実名に統合された → old の文字を解放（引き継がない）。後続の

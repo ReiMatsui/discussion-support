@@ -95,6 +95,17 @@ def test_constrain_after_label_release_with_max_speakers():
     assert s.disp_name("#3") == "参加者B"    # 解放された B を再利用
 
 
+def test_rekey_migrates_display_name_and_cleans_old_entry():
+    """rekey は names も colors と同じ流儀で移行し、old 側の残留を掃除する（F7）."""
+    s = _make_state()
+    s.names["#1"] = "田中"
+    s.rekey("#1", "#2")
+    assert s.names == {"#2": "田中"}         # 移行される（new 側に名前が無い場合）
+    s.names["#3"] = "鈴木"
+    s.rekey("#3", "#2")
+    assert s.names == {"#2": "田中"}         # new 側に名前があれば old 側は捨てる
+
+
 def test_diarization_key_seq_never_reissues_key_after_pop():
     """名寄せで keys が pop されても、使用中の @diar:N を別人へ再発行しない（F1）."""
     s = _make_state()

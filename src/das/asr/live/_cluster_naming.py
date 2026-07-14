@@ -208,7 +208,12 @@ class ClusterVoiceNamer:
             return None
         name, _confidence = match
         self._confirmed[raw_cluster] = name
+        # 確定クラスタは以後の未照合クラスタの名寄せ先として引き続き有用なので、
+        # 確定時にも代表埋め込みを保存する（§3 参照）。match_profile は副作用なし
+        # APIで内部の埋め込みを取り出せないため、ここで embed を1回だけ呼ぶ
+        # （クラスタの確定は一度きりなので追加コストは限定的）。
+        emb = self.tracker.embed(concat)
+        if emb is not None:
+            self._embeddings[raw_cluster] = emb
         self._buffers.pop(raw_cluster, None)
-        # 代表埋め込み(self._embeddings)は確定後も保持する: 確定クラスタは以後の
-        # 未照合クラスタの名寄せ先として引き続き有用（§3 参照）。
         return name

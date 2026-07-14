@@ -353,7 +353,15 @@ class VoiceProfiles:
             return None
         self.embed_ms.append((time.perf_counter() - t0) * 1000)
         emb = np.asarray(emb, dtype=np.float64)
-        return emb / np.linalg.norm(emb)
+        norm = float(np.linalg.norm(emb))
+        if norm == 0.0 or not np.isfinite(norm):
+            # 全ゼロ・非有限の埋め込み（無音区間やモデルの異常出力）は正規化で
+            # NaN に化け、以後の内積比較を全て壊す。従来は NaN 伝播で照合不成立に
+            # 落ちるだけだったが、クラスタ間名寄せは埋め込みを代表として保存する
+            # (docs/design/handoff_2026-07-14_unregistered_speakers.md §3) ため、
+            # ここで None に落として保存経路に NaN が入らないようにする。
+            return None
+        return emb / norm
 
     def classify(self, wav: np.ndarray, sp, overlapped: bool = False,
                  count: bool = True, chars: int = 0, enroll: bool = True) -> str:

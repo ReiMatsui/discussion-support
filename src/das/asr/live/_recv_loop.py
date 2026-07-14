@@ -393,6 +393,18 @@ class RecvLoop:
                                        ensure_ascii=False, default=str) + "\n")
             except OSError:
                 pass
+        # 名寄せ・クラスタ確定イベントを diag に残し、実地検証で観測可能にする
+        # (docs/design/handoff_2026-07-14_unregistered_speakers.md §4-2)。
+        # 書いたら消費（None化）して同一イベントの重複出力を防ぐ。
+        # cluster_namer が無い経路（従来モード）は不変。
+        _namer_diag = getattr(s.cluster_namer, "last_match", None)
+        if _namer_diag is not None:
+            s.cluster_namer.last_match = None
+            with contextlib.suppress(OSError), \
+                    open(s.diag_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps({"ms": self.cur_ms, "end": self.cur_end,
+                                    "type": "cluster_naming", **_namer_diag},
+                                   ensure_ascii=False, default=str) + "\n")
         if _is_backchannel:
             # 相槌は、話している人とは別人の可能性が高い（Aの話中にBが「はい」）。
             # 直前の人に追従させず未確定にする。bcフラグでUIでは薄く折りたたむ。
