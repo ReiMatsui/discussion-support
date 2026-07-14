@@ -64,18 +64,82 @@ class ClusterVoiceNamer:
         self.max_buffer_sec = max_buffer_sec
         self._buffers: dict[str, list[np.ndarray]] = {}
         self._confirmed: dict[str, str] = {}   # raw_cluster -> 確定名
+        # クラスタ間名寄せ（docs/design/handoff_2026-07-14_unregistered_speakers.md §3）:
+        # 登録者ゼロでもラベルの一貫性を保つため、未照合クラスタ同士を声紋埋め込みで
+        # 比較し、似ていれば新規参加者を作らず既存クラスタ(canonical)へ統合する。
+        self._embeddings: dict[str, np.ndarray] = {}   # canonical -> 代表埋め込み(L2正規化)
+        self._aliases: dict[str, str] = {}             # 吸収された raw_cluster -> canonical
         # 診断用（直近の照合試行の結果。UI/デバッグログでの可視化用途）。
         self.last_match: dict[str, object] | None = None
 
     def confirmed_name(self, raw_cluster: str) -> str | None:
         """既にこのクラスタに確定済みの名前があれば返す（無ければNone）."""
-        return self._confirmed.get(raw_cluster)
+        return self._confirmed.get(self.canonical_cluster(raw_cluster))
+
+    def canonical_cluster(self, raw_cluster: str) -> str:
+        """名寄せ（エイリアス）を解決した正規のクラスタキーを返す（無ければそのまま）.
+
+        呼び出し側（_recv_loop.py）が匿名キーの発行・統合をこのキーで行うことで、
+        吸収されたクラスタの発話が canonical 側の参加者に帰属する
+        （docs/design/handoff_2026-07-14_unregistered_speakers.md §3 参照）。
+        """
+        seen: set[str] = set()
+        while raw_cluster in self._aliases and raw_cluster not in seen:
+            seen.add(raw_cluster)
+            raw_cluster = self._aliases[raw_cluster]
+        return raw_cluster
+
+    def nearest_cluster(self, raw_cluster: str,
+                        exclude: set[str] | None = None) -> str | None:
+        """自クラスタの代表埋め込みに最も近い他クラスタ(canonical)を返す（閾値なし）.
+
+        ``--diarization-max-speakers`` の上限到達後、新規参加者を増やさず
+        最も近い既存参加者へ統合するための探索用
+        （docs/design/handoff_2026-07-14_unregistered_speakers.md §3 の2）。
+        自クラスタの埋め込みが未計算、または比較対象が無ければ None。
+        """
+        key = self.canonical_cluster(raw_cluster)
+        emb = self._embeddings.get(key)
+        if emb is None:
+            return None
+        best, best_sim = None, -1.0
+        for other, other_emb in self._embeddings.items():
+            if other == key or (exclude is not None and other in exclude):
+                continue
+            sim = float(np.dot(emb, other_emb))
+            if sim > best_sim:
+                best, best_sim = other, sim
+        return best
 
     def reset(self) -> None:
         """会議リセット時に蓄積・確定状態をクリアする."""
         self._buffers.clear()
         self._confirmed.clear()
+        self._embeddings.clear()
+        self._aliases.clear()
         self.last_match = None
+
+    def _trim_buffer(self, buf: list[np.ndarray]) -> int:
+        """バッファを max_buffer_sec に収まるよう古い方から捨て、総サンプル数を返す."""
+        total = sum(a.size for a in buf)
+        max_samples = int(self.max_buffer_sec * SR)
+        while total > max_samples and len(buf) > 1:
+            total -= buf.pop(0).size
+        return total
+
+    def _merge_cluster(self, absorbed: str, canonical: str) -> None:
+        """absorbed を canonical へ名寄せする（バッファ統合＋エイリアス登録）.
+
+        以後 absorbed 宛の音声は canonical のバッファに蓄積される
+        （docs/design/handoff_2026-07-14_unregistered_speakers.md §3 参照）。
+        """
+        self._aliases[absorbed] = canonical
+        moved = self._buffers.pop(absorbed, None)
+        if moved:
+            buf = self._buffers.setdefault(canonical, [])
+            buf.extend(moved)
+            self._trim_buffer(buf)
+        self._embeddings.pop(absorbed, None)
 
     def observe(
         self, raw_cluster: str, wav: np.ndarray, *, overlapped: bool = False
@@ -90,6 +154,9 @@ class ClusterVoiceNamer:
         既に確定済みのクラスタであれば overlapped でも確定名をそのまま返す
         （重複区間の全体としての帰属を未確定にするかどうかは呼び出し側の責務）。
         """
+        # 名寄せ済みクラスタの音声は canonical のバッファに蓄積する（シンプルさ優先。
+        # docs/design/handoff_2026-07-14_unregistered_speakers.md §3 参照）。
+        raw_cluster = self.canonical_cluster(raw_cluster)
         confirmed = self._confirmed.get(raw_cluster)
         if confirmed is not None:
             return confirmed
@@ -97,10 +164,7 @@ class ClusterVoiceNamer:
             return None
         buf = self._buffers.setdefault(raw_cluster, [])
         buf.append(np.asarray(wav, dtype=np.float32))
-        total_samples = sum(a.size for a in buf)
-        max_samples = int(self.max_buffer_sec * SR)
-        while total_samples > max_samples and len(buf) > 1:
-            total_samples -= buf.pop(0).size
+        total_samples = self._trim_buffer(buf)
         if total_samples < int(self.min_sec * SR):
             return None
         concat = np.concatenate(buf) if len(buf) > 1 else buf[0]
@@ -111,9 +175,35 @@ class ClusterVoiceNamer:
             "match": match,
         }
         if match is None:
+            # 登録プロファイルとの照合は不成立。ここでクラスタ間名寄せを試みる
+            # （docs/design/handoff_2026-07-14_unregistered_speakers.md §3）:
+            # 登録者ゼロでも、既存クラスタの代表埋め込みと tracker.dedupe 以上に
+            # 似ていれば「同一人物のクラスタ分裂」とみなし、新規参加者を作らず
+            # 既存クラスタ(canonical)へ統合する。
+            emb = self.tracker.embed(concat)
+            if emb is not None:
+                best, best_sim = None, -1.0
+                for other, other_emb in self._embeddings.items():
+                    if other == raw_cluster:
+                        continue
+                    sim = float(np.dot(emb, other_emb))
+                    if sim > best_sim:
+                        best, best_sim = other, sim
+                if best is not None and best_sim >= self.tracker.dedupe:
+                    self._merge_cluster(raw_cluster, best)
+                    self.last_match = {"kind": "クラスタ名寄せ", "raw": raw_cluster,
+                                       "canonical": best, "sim": round(best_sim, 3)}
+                    # canonical が確定済みならその名前で帰属できる。未確定なら None を
+                    # 返し、呼び出し側が canonical_cluster() で匿名キーを解決する。
+                    return self._confirmed.get(best)
+                # 名寄せも不成立: 次回の名寄せ先候補として代表埋め込みを最新の
+                # concat で更新しておく（音声が増えるほど代表性が上がる想定）。
+                self._embeddings[raw_cluster] = emb
             # confidence不足。バッファは維持し、次の観測でさらに蓄積してから再照合する。
             return None
         name, _confidence = match
         self._confirmed[raw_cluster] = name
         self._buffers.pop(raw_cluster, None)
+        # 代表埋め込み(self._embeddings)は確定後も保持する: 確定クラスタは以後の
+        # 未照合クラスタの名寄せ先として引き続き有用（§3 参照）。
         return name

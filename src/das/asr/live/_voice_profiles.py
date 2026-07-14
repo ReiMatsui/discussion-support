@@ -473,6 +473,17 @@ class VoiceProfiles:
         self._note(kind, label=sp, **info)
         return key
 
+    def embed(self, wav: np.ndarray) -> np.ndarray | None:
+        """音声のL2正規化済み声紋埋め込みを返す（副作用なしの公開API）.
+
+        ClusterVoiceNamer のクラスタ間名寄せ（登録者ゼロでもラベルの一貫性を
+        保つための、未照合クラスタ同士の統合判定）用。実体は ``_embed`` への
+        委譲のみで、プロファイル・履歴などの内部状態は一切変更しない。
+        設計: docs/design/handoff_2026-07-14_unregistered_speakers.md §3 参照。
+        """
+        with self._lock:
+            return self._embed(wav)
+
     def match_profile(self, wav: np.ndarray) -> tuple[str, float] | None:
         """副作用なしのクラスタ単位声紋照合（pyannoteハイブリッド構成用）.
 

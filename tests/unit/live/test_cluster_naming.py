@@ -11,12 +11,16 @@ from das.asr.live._constants import SR
 
 
 class _FakeTracker:
-    """VoiceProfiles.match_profile だけを模したスタブ（副作用なしの照合API）."""
+    """VoiceProfiles の照合API（match_profile / embed / dedupe）を模したスタブ."""
 
-    def __init__(self, results):
+    def __init__(self, results, embed_map=None, dedupe=0.72):
         # results: 呼び出しごとに順に返す (name, conf) | None のリスト
         self._results = list(results)
         self.calls: list[int] = []   # 呼び出しごとの音声サンプル数（照合が試みられた回数の記録）
+        # embed_map: wav先頭サンプル値(round 3桁) -> 正規化ベクトル。
+        # 未指定なら embed は常に None（埋め込み計算不可の環境を模す）。
+        self._embed_map = dict(embed_map or {})
+        self.dedupe = dedupe   # クラスタ間名寄せの閾値（VoiceProfiles.dedupe 相当）
 
     def match_profile(self, wav):
         self.calls.append(wav.size)
@@ -24,9 +28,20 @@ class _FakeTracker:
             return None
         return self._results.pop(0)
 
+    def embed(self, wav):
+        if not self._embed_map or wav.size == 0:
+            return None
+        return self._embed_map.get(round(float(wav[0]), 3))
 
-def _wav(seconds: float) -> np.ndarray:
-    return np.zeros(int(seconds * SR), dtype=np.float32)
+
+def _wav(seconds: float, fill: float = 0.0) -> np.ndarray:
+    return np.full(int(seconds * SR), fill, dtype=np.float32)
+
+
+# クラスタ間名寄せ用の決め打ち正規化ベクトル（v1・v2は類似 0.9、v3は直交）
+_V1 = np.array([1.0, 0.0, 0.0])
+_V2 = np.array([0.9, np.sqrt(1 - 0.81), 0.0])
+_V3 = np.array([0.0, 1.0, 0.0])
 
 
 def test_observe_stays_unconfirmed_below_threshold():
@@ -134,3 +149,93 @@ def test_independent_clusters_do_not_share_buffers_or_confirmations():
 
     assert name_a == "田中"
     assert name_b == "田中"   # 分裂しても同じ人物へ照合されるだけで無害
+
+
+# --- クラスタ間名寄せ（登録者ゼロ対策, handoff_2026-07-14 §3） -------------
+
+
+def test_similar_unmatched_clusters_are_merged():
+    """未照合2クラスタが類似埋め込みなら名寄せされ、2つ目は新規参加者にならない."""
+    tracker = _FakeTracker([], embed_map={0.1: _V1, 0.2: _V2})
+    namer = ClusterVoiceNamer(tracker, min_sec=5.0)
+
+    assert namer.observe("pyannote:SPEAKER_00", _wav(5.0, 0.1)) is None   # 代表埋め込み登録
+    assert namer.observe("pyannote:SPEAKER_01", _wav(5.0, 0.2)) is None   # 類似→名寄せ
+
+    assert namer.canonical_cluster("pyannote:SPEAKER_01") == "pyannote:SPEAKER_00"
+    assert namer.canonical_cluster("pyannote:SPEAKER_00") == "pyannote:SPEAKER_00"
+    assert namer.last_match == {"kind": "クラスタ名寄せ", "raw": "pyannote:SPEAKER_01",
+                                "canonical": "pyannote:SPEAKER_00", "sim": 0.9}
+
+
+def test_dissimilar_clusters_stay_independent():
+    """非類似（閾値未満）なら名寄せせず、各クラスタは独立を保つ."""
+    tracker = _FakeTracker([], embed_map={0.1: _V1, 0.3: _V3})
+    namer = ClusterVoiceNamer(tracker, min_sec=5.0)
+
+    namer.observe("pyannote:SPEAKER_00", _wav(5.0, 0.1))
+    namer.observe("pyannote:SPEAKER_01", _wav(5.0, 0.3))
+
+    assert namer.canonical_cluster("pyannote:SPEAKER_01") == "pyannote:SPEAKER_01"
+
+
+def test_absorbed_cluster_accumulates_into_canonical():
+    """名寄せ後、吸収側raw_clusterでのobserveはcanonicalのバッファへ蓄積される."""
+    tracker = _FakeTracker([None, None, ("田中", 0.8)], embed_map={0.1: _V1, 0.2: _V2})
+    namer = ClusterVoiceNamer(tracker, min_sec=5.0)
+    namer.observe("pyannote:SPEAKER_00", _wav(5.0, 0.1))      # 照合1回目(None)→埋め込み登録
+    namer.observe("pyannote:SPEAKER_01", _wav(5.0, 0.2))      # 照合2回目(None)→名寄せ成立
+
+    # 吸収側キーでの追加音声も canonical に積まれ、確定は canonical 側に付く
+    name = namer.observe("pyannote:SPEAKER_01", _wav(1.0, 0.2))
+
+    assert name == "田中"
+    assert namer.confirmed_name("pyannote:SPEAKER_00") == "田中"
+    assert namer.confirmed_name("pyannote:SPEAKER_01") == "田中"   # エイリアス経由でも見える
+
+
+def test_merge_into_confirmed_canonical_returns_confirmed_name():
+    """canonicalが確定済みなら、名寄せ成立時にその確定名が即返る."""
+    tracker = _FakeTracker([None, ("田中", 0.8), None], embed_map={0.1: _V1, 0.2: _V2})
+    namer = ClusterVoiceNamer(tracker, min_sec=5.0)
+    namer.observe("pyannote:SPEAKER_00", _wav(5.0, 0.1))   # 照合不成立→埋め込み登録
+    assert namer.observe("pyannote:SPEAKER_00", _wav(0.5, 0.1)) == "田中"   # 確定
+
+    name = namer.observe("pyannote:SPEAKER_01", _wav(5.0, 0.2))   # 類似→確定済みへ名寄せ
+
+    assert name == "田中"
+    assert namer.canonical_cluster("pyannote:SPEAKER_01") == "pyannote:SPEAKER_00"
+
+
+def test_reset_clears_aliases_and_embeddings():
+    """resetで名寄せ状態（aliases/embeddings）もクリアされる."""
+    tracker = _FakeTracker([], embed_map={0.1: _V1, 0.2: _V2})
+    namer = ClusterVoiceNamer(tracker, min_sec=5.0)
+    namer.observe("pyannote:SPEAKER_00", _wav(5.0, 0.1))
+    namer.observe("pyannote:SPEAKER_01", _wav(5.0, 0.2))
+    assert namer.canonical_cluster("pyannote:SPEAKER_01") == "pyannote:SPEAKER_00"
+
+    namer.reset()
+
+    assert namer.canonical_cluster("pyannote:SPEAKER_01") == "pyannote:SPEAKER_01"
+    assert namer.nearest_cluster("pyannote:SPEAKER_00") is None   # 埋め込みも消えている
+
+
+def test_nearest_cluster_returns_best_even_below_threshold():
+    """nearest_clusterは閾値未満でも最近傍を返す（max-speakers超過時の統合用）."""
+    tracker = _FakeTracker([], embed_map={0.1: _V1, 0.3: _V3})
+    namer = ClusterVoiceNamer(tracker, min_sec=5.0)
+    namer.observe("pyannote:SPEAKER_00", _wav(5.0, 0.1))
+    namer.observe("pyannote:SPEAKER_01", _wav(5.0, 0.3))   # 直交（sim=0 < dedupe）→独立
+
+    assert namer.nearest_cluster("pyannote:SPEAKER_00") == "pyannote:SPEAKER_01"
+    assert namer.nearest_cluster("pyannote:SPEAKER_01",
+                                 exclude={"pyannote:SPEAKER_00"}) is None
+
+
+def test_nearest_cluster_returns_none_without_embedding():
+    """自クラスタの埋め込みが未計算ならnearest_clusterはNone."""
+    tracker = _FakeTracker([])
+    namer = ClusterVoiceNamer(tracker, min_sec=5.0)
+
+    assert namer.nearest_cluster("pyannote:SPEAKER_00") is None
