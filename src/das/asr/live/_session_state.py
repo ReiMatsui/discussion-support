@@ -416,6 +416,20 @@ class SessionState:
         self.diarization_speaker_keys[raw] = key
         return self.diarization_speaker_keys[raw]
 
+    def merge_diarization_pending(self, absorbed: str, canonical: str) -> None:
+        """名寄せで吸収された生ラベルのヒステリシス累積を canonical へ合算する.
+
+        クラスタ間名寄せ（docs/design/handoff_2026-07-14_unregistered_speakers.md §3）
+        で absorbed→canonical の統合が成立した時点で呼ぶ。同一人物の発話量なので、
+        吸収側に溜まっていた pending を canonical へ引き継ぎ、クラスタ分裂で
+        ヒステリシスが二重に課されて参加者化が不当に遅れるのを防ぐ。
+        canonical が既にキー発行済みなら pending は不要なので捨てるだけでよい。
+        """
+        carried = self.diarization_pending_ms.pop(absorbed, 0)
+        if carried and canonical not in self.diarization_speaker_keys:
+            self.diarization_pending_ms[canonical] = (
+                self.diarization_pending_ms.get(canonical, 0) + carried)
+
     def key_for_stt_fallback_speaker(self, speaker: str, duration_ms: int = 0) -> str:
         """外部diarizationが薄い時のSTTラベルも表示用の内部キーへ正規化する."""
         return self.key_for_diarization_speaker("stt", speaker, duration_ms)

@@ -90,12 +90,15 @@ class ClusterVoiceNamer:
         return raw_cluster
 
     def nearest_cluster(self, raw_cluster: str,
-                        exclude: set[str] | None = None) -> str | None:
-        """自クラスタの代表埋め込みに最も近い他クラスタ(canonical)を返す（閾値なし）.
+                        exclude: set[str] | None = None,
+                        ) -> tuple[str, float] | None:
+        """自クラスタの代表埋め込みに最も近い他クラスタ(canonical)と類似度を返す.
 
         ``--diarization-max-speakers`` の上限到達後、新規参加者を増やさず
         最も近い既存参加者へ統合するための探索用
         （docs/design/handoff_2026-07-14_unregistered_speakers.md §3 の2）。
+        統合してよいかの判断（類似度の下限 = tracker.dedupe）は呼び出し側が行う
+        ため、ここでは閾値をかけず ``(canonical, 類似度)`` を返す。
         自クラスタの埋め込みが未計算、または比較対象が無ければ None。
         """
         key = self.canonical_cluster(raw_cluster)
@@ -109,7 +112,9 @@ class ClusterVoiceNamer:
             sim = float(np.dot(emb, other_emb))
             if sim > best_sim:
                 best, best_sim = other, sim
-        return best
+        if best is None:
+            return None
+        return best, best_sim
 
     def reset(self) -> None:
         """会議リセット時に蓄積・確定状態をクリアする."""

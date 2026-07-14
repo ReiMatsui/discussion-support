@@ -51,13 +51,17 @@ def _merged_diarization_speaker_key(s: SessionState, raw_cluster: str,
       key_for_diarization_speaker を呼び、ヒステリシスの pending を canonical に
       集約する。
     - 名寄せ不成立: 参加人数上限まで人間スロットが埋まっている場合のみ、最近傍
-      クラスタの既存キーへ統合を試みる（§3 の2: 昇格の厳格化）。それも不可なら
-      従来どおり key_for_diarization_speaker へ（最終的に
-      constrain_human_speaker_key で未確定に落ちる＝既存挙動）。
+      クラスタの既存キーへ統合を試みる（§3 の2: 昇格の厳格化）。ただし類似度が
+      tracker.dedupe（既存人物への合流しきい値）未満なら「全く似ていない新話者」
+      なので統合しない。それも不可なら従来どおり key_for_diarization_speaker へ
+      （最終的に constrain_human_speaker_key で未確定に落ちる＝安全側の既存挙動）。
     """
     namer = s.cluster_namer
     canonical = namer.canonical_cluster(raw_cluster)
     if canonical != raw_cluster:
+        # 吸収側に溜まっていたヒステリシス pending を canonical へ合算する
+        # （同一人物なので分裂で参加者化が二重に遅れないようにする。§3 参照）。
+        s.merge_diarization_pending(raw_cluster, canonical)
         canonical_key = s.diarization_speaker_keys.get(canonical)
         absorbed_key = s.diarization_speaker_keys.pop(raw_cluster, None)
         if canonical_key is not None:
@@ -77,9 +81,14 @@ def _merged_diarization_speaker_key(s: SessionState, raw_cluster: str,
             and s.human_slot_budget_exhausted()):
         nearest = namer.nearest_cluster(raw_cluster)
         if nearest is not None:
-            nearest_key = s.diarization_speaker_keys.get(nearest)
-            if nearest_key is not None:
-                return nearest_key
+            nearest_cluster, nearest_sim = nearest
+            # 下限閾値には tracker.dedupe（既存人物への合流しきい値）を流用する。
+            # 無条件の最近傍統合だと類似度0.0でも既存参加者に張り付くため、
+            # dedupe 未満は統合せず従来経路へ（constrain で未確定＝安全側）。
+            if nearest_sim >= namer.tracker.dedupe:
+                nearest_key = s.diarization_speaker_keys.get(nearest_cluster)
+                if nearest_key is not None:
+                    return nearest_key
     return s.key_for_diarization_speaker(source, speaker, duration_ms=duration_ms)
 
 

@@ -48,9 +48,14 @@ class _Resolver:
 class _Namer:
     """ClusterVoiceNamer の名寄せ結果だけを模したフェイク."""
 
-    def __init__(self, aliases=None, nearest=None) -> None:
+    def __init__(self, aliases=None, nearest=None, nearest_sim=1.0,
+                 dedupe=0.72) -> None:
         self._aliases = dict(aliases or {})
         self._nearest = nearest
+        self._nearest_sim = nearest_sim
+        # 最近傍統合の下限閾値は VoiceProfiles.dedupe を流用する（F2）。
+        self.tracker = SimpleNamespace(dedupe=dedupe)
+        self.last_match = None
 
     def observe(self, raw_cluster, wav, *, overlapped=False):
         return None   # 声紋名前付けは常に未確定（名寄せ経路の検証に集中する）
@@ -59,7 +64,9 @@ class _Namer:
         return self._aliases.get(raw_cluster, raw_cluster)
 
     def nearest_cluster(self, raw_cluster, exclude=None):
-        return self._nearest
+        if self._nearest is None:
+            return None
+        return self._nearest, self._nearest_sim
 
 
 class _FakePyannoteProvider:
@@ -164,6 +171,20 @@ def test_unmerged_cluster_over_max_speakers_without_nearest_falls_back(tmp_path)
     assert state.records[-1]["speaker"] == "?"   # UNSURE_SPEAKER（上限超過の既存挙動）
 
 
+def test_unmerged_cluster_over_max_speakers_below_dedupe_stays_unsure(tmp_path):
+    """最近傍でも類似度が dedupe 未満なら統合せず、未確定に落とす（安全側）."""
+    namer = _Namer(nearest="pyannote:SPEAKER_00", nearest_sim=0.3)
+    state = _make_state(tmp_path, namer=namer, speaker="SPEAKER_05", max_speakers=1)
+    state.key_for_diarization_speaker("pyannote", "SPEAKER_00")   # @diar:1
+    state.records = [{"ms": 0, "end_ms": 500, "speaker": "@diar:1", "text": "既存参加者"}]
+    state.disp_name("@diar:1")
+
+    _flush(state)
+
+    # 全く似ていない声は既存参加者に張り付かせず、従来経路（constrainで未確定）へ
+    assert state.records[-1]["speaker"] == "?"
+
+
 def test_unmerged_cluster_under_limit_issues_new_key(tmp_path):
     """名寄せ不成立でも上限未達なら従来どおり新規キーを発行する."""
     namer = _Namer()
@@ -190,3 +211,21 @@ def test_new_key_stays_unique_after_merge_shrinks_key_map(tmp_path):
     # len ベース採番なら使用中の @diar:2 が再発行され別人が混在していた（F1回帰）。
     assert state.diarization_speaker_keys["pyannote:SPEAKER_05"] == "@diar:3"
     assert state.records[-1]["speaker"] == "@diar:3"
+
+
+def test_merge_carries_absorbed_pending_into_canonical(tmp_path):
+    """名寄せ成立時、吸収側のヒステリシス pending が canonical に合算される（F3）."""
+    namer = _Namer()
+    state = _make_state(tmp_path, namer=namer, speaker="SPEAKER_01")
+    state.diarization_provider = _FakePyannoteProvider()   # ヒステリシス有効(3s)
+
+    _flush(state)   # 2秒発話: 閾値未満なので未確定のまま pending に蓄積
+    assert state.records[-1]["speaker"] == "?"
+    assert state.diarization_pending_ms == {"pyannote:SPEAKER_01": 2000}
+
+    namer._aliases["pyannote:SPEAKER_01"] = "pyannote:SPEAKER_00"   # 名寄せ成立
+    _flush(state)   # 2秒発話: 引き継いだ 2000ms と合算し 4000ms >= 3000ms で昇格
+
+    assert state.diarization_speaker_keys == {"pyannote:SPEAKER_00": "@diar:1"}
+    assert state.records[-1]["speaker"] == "@diar:1"
+    assert state.diarization_pending_ms == {}   # 吸収側の残留なし

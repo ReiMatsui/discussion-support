@@ -221,14 +221,14 @@ def test_reset_clears_aliases_and_embeddings():
     assert namer.nearest_cluster("pyannote:SPEAKER_00") is None   # 埋め込みも消えている
 
 
-def test_nearest_cluster_returns_best_even_below_threshold():
-    """nearest_clusterは閾値未満でも最近傍を返す（max-speakers超過時の統合用）."""
+def test_nearest_cluster_returns_best_with_similarity():
+    """nearest_clusterは閾値をかけず (最近傍, 類似度) を返す（統合可否は呼び出し側）."""
     tracker = _FakeTracker([], embed_map={0.1: _V1, 0.3: _V3})
     namer = ClusterVoiceNamer(tracker, min_sec=5.0)
     namer.observe("pyannote:SPEAKER_00", _wav(5.0, 0.1))
     namer.observe("pyannote:SPEAKER_01", _wav(5.0, 0.3))   # 直交（sim=0 < dedupe）→独立
 
-    assert namer.nearest_cluster("pyannote:SPEAKER_00") == "pyannote:SPEAKER_01"
+    assert namer.nearest_cluster("pyannote:SPEAKER_00") == ("pyannote:SPEAKER_01", 0.0)
     assert namer.nearest_cluster("pyannote:SPEAKER_01",
                                  exclude={"pyannote:SPEAKER_00"}) is None
 
