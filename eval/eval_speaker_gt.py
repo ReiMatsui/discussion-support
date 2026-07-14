@@ -3,9 +3,14 @@
 
 使い方:
     uv run python eval/eval_speaker_gt.py eval/gt_2026-07-14_142016.json
+    uv run python eval/eval_speaker_gt.py eval/gt_2026-07-14_142016.json 2026-07-14_180000
 
 GT は eval/gt_annotator_*.html で作成した JSON（labels: {turn_id: S1|S2|S3|MULTI|UNK}）。
 対応する transcripts/<session>.turns.jsonl / .diag.jsonl を自動で読む。
+
+第2引数に別セッション名を渡すと、同じ音声を --wav で再実行したランを評価できる:
+GTの発話区間（元セッションの ms〜end_ms）と新ランの発話を時間重なりで突合するため、
+発話の区切りが多少揺れても再アノテーション不要（同一音声タイムラインが前提）。
 
 出力: 混同行列、システムラベルの純度、GT話者ごとの分裂状況、未確定率、
 最適1:1対応での帰属精度、名寄せイベントのタイムライン。
@@ -22,25 +27,52 @@ from pathlib import Path
 UNSURE = "未確定"
 
 
-def load(gt_path: str):
+def load(gt_path: str, session_override: str | None = None):
     gt = json.loads(Path(gt_path).read_text(encoding="utf-8"))
-    session = gt["session"]
-    base = Path(__file__).resolve().parent.parent / "transcripts" / session
-    turns = [json.loads(l) for l in open(f"{base}.turns.jsonl", encoding="utf-8")]
-    diag_path = Path(f"{base}.diag.jsonl")
+    root = Path(__file__).resolve().parent.parent / "transcripts"
+
+    def read_turns(session):
+        return [json.loads(l)
+                for l in open(root / f"{session}.turns.jsonl", encoding="utf-8")]
+
+    gt_turns = read_turns(gt["session"])  # GTのturn_id→時間区間の定義元
+    session = session_override or gt["session"]
+    turns = gt_turns if session == gt["session"] else read_turns(session)
+    diag_path = root / f"{session}.diag.jsonl"
     diag = ([json.loads(l) for l in open(diag_path, encoding="utf-8")]
             if diag_path.exists() else [])
-    return gt, turns, diag
+    return gt, gt_turns, turns, diag, session
 
 
-def main(gt_path: str) -> None:
-    gt, turns, diag = load(gt_path)
+def gt_code_by_overlap(t, gt_turns, labels):
+    """新ランの発話 t に、時間重なり最大のGT発話のラベルを割り当てる.
+
+    同一音声を --wav で再実行したラン用（区切り揺れを吸収）。重なりが発話長の
+    3割未満なら突合不能として None。
+    """
+    best, best_ov = None, 0
+    for g in gt_turns:
+        ov = min(t["end_ms"], g["end_ms"]) - max(t["ms"], g["ms"])
+        if ov > best_ov:
+            best, best_ov = g, ov
+    dur = max(1, t["end_ms"] - t["ms"])
+    if best is None or best_ov < dur * 0.3:
+        return None
+    return labels.get(str(best["turn_id"])) or labels.get(best["turn_id"])
+
+
+def main(gt_path: str, session_override: str | None = None) -> None:
+    gt, gt_turns, turns, diag, session = load(gt_path, session_override)
     labels: dict[str, str] = gt["labels"]
     names = gt.get("speaker_names", {})
+    same_session = session == gt["session"]
 
     rows = []  # (turn_id, sys_label, gt_code)
     for t in turns:
-        code = labels.get(str(t["turn_id"])) or labels.get(t["turn_id"])
+        if same_session:
+            code = labels.get(str(t["turn_id"])) or labels.get(t["turn_id"])
+        else:
+            code = gt_code_by_overlap(t, gt_turns, labels)
         if code:
             rows.append((t["turn_id"], t["speaker"], code))
     if not rows:
@@ -50,7 +82,8 @@ def main(gt_path: str) -> None:
     n_multi = sum(1 for _, _, g in rows if g == "MULTI")
     n_unk = sum(1 for _, _, g in rows if g == "UNK")
 
-    print(f"= セッション {gt['session']}: GT付き {len(rows)}/{len(turns)} 発話"
+    src = "" if same_session else f"（GT元: {gt['session']} から時間突合）"
+    print(f"= セッション {session}{src}: GT付き {len(rows)}/{len(turns)} 発話"
           f"（単独話者 {len(single)}、複数人 {n_multi}、不明 {n_unk}）\n")
 
     # --- 混同行列（単独話者のみ） ---
@@ -120,6 +153,6 @@ def main(gt_path: str) -> None:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
+    if len(sys.argv) not in (2, 3):
         sys.exit(__doc__)
-    main(sys.argv[1])
+    main(sys.argv[1], sys.argv[2] if len(sys.argv) == 3 else None)
