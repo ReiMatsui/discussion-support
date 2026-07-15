@@ -35,6 +35,19 @@ def load(gt_path: str, session_override: str | None = None):
         return [json.loads(l)
                 for l in open(root / f"{session}.turns.jsonl", encoding="utf-8")]
 
+    if gt.get("kind") == "timeline":
+        # タイムライン形式GT（eval/fetch_callhome_jpn.py 等が生成）:
+        # 発話区間ラベルでなく「誰がいつ喋ったか」を直接持つ。採点対象の
+        # セッション名は第2引数で必ず指定する。
+        if not session_override:
+            sys.exit("タイムライン形式GTでは採点対象セッション名を指定してください")
+        session = session_override
+        turns = read_turns(session)
+        diag_path = root / f"{session}.diag.jsonl"
+        diag = ([json.loads(l) for l in open(diag_path, encoding="utf-8")]
+                if diag_path.exists() else [])
+        return gt, None, turns, diag, session
+
     gt_turns = read_turns(gt["session"])  # GTのturn_id→時間区間の定義元
     session = session_override or gt["session"]
     turns = gt_turns if session == gt["session"] else read_turns(session)
@@ -79,11 +92,21 @@ def gt_code_by_timeline(t, tl):
 
 def main(gt_path: str, session_override: str | None = None) -> None:
     gt, gt_turns, turns, diag, session = load(gt_path, session_override)
-    labels: dict[str, str] = gt["labels"]
     names = gt.get("speaker_names", {})
-    same_session = session == gt["session"]
+    is_timeline_gt = gt.get("kind") == "timeline"
+    same_session = (not is_timeline_gt) and session == gt["session"]
 
-    tl = gt_timeline(gt_turns, labels) if not same_session else None
+    if is_timeline_gt:
+        gt_codes = list(gt["speakers"])
+        tl = {}
+        for seg in gt["timeline"]:
+            tl.setdefault(seg["speaker"], []).append(
+                (seg["start_ms"], seg["end_ms"]))
+    else:
+        gt_codes = ["S1", "S2", "S3"]
+        labels: dict[str, str] = gt["labels"]
+        tl = gt_timeline(gt_turns, labels) if not same_session else None
+
     rows = []  # (turn_id, sys_label, gt_code)
     n_uncovered = 0
     for t in turns:
@@ -99,18 +122,19 @@ def main(gt_path: str, session_override: str | None = None) -> None:
     if not rows:
         sys.exit("GTラベルとturnsが突合できません")
 
-    single = [(i, s, g) for i, s, g in rows if g in ("S1", "S2", "S3")]
+    single = [(i, s, g) for i, s, g in rows if g in gt_codes]
     n_multi = sum(1 for _, _, g in rows if g == "MULTI")
     n_unk = sum(1 for _, _, g in rows if g == "UNK")
 
-    src = "" if same_session else (f"（GT元: {gt['session']} タイムライン突合、"
-                                   f"正解範囲外 {n_uncovered} 件除外）")
+    src = ("" if same_session else
+           (f"（GT元: {gt['session']} タイムライン突合、"
+            f"正解範囲外 {n_uncovered} 件除外）"))
     print(f"= セッション {session}{src}: GT付き {len(rows)}/{len(turns)} 発話"
           f"（単独話者 {len(single)}、複数人混在 {n_multi}、不明 {n_unk}）\n")
 
     # --- 混同行列（単独話者のみ） ---
     sys_labels = sorted({s for _, s, _ in single})
-    gts = ["S1", "S2", "S3"]
+    gts = gt_codes
     conf = {s: Counter() for s in sys_labels}
     for _, s, g in single:
         conf[s][g] += 1
@@ -142,7 +166,7 @@ def main(gt_path: str, session_override: str | None = None) -> None:
     # --- 最適1:1対応での帰属精度（未確定は常に不正解扱い） ---
     real = [s for s in sys_labels if s != UNSURE]
     best_acc, best_map = 0.0, {}
-    for k in range(min(3, len(real)) + 1):
+    for k in range(min(len(gts), len(real)) + 1):
         for perm in permutations(real, k):
             for gsel in permutations(gts, k):
                 m = dict(zip(perm, gsel))
