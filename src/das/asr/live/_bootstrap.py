@@ -501,6 +501,23 @@ def check_fact_correction(utterances: list[dict], api_key: str, model: str) -> d
     return result
 
 
+def vp_cluster_naming_disabled_warning(
+        diarization: str, vp_cluster_naming: bool) -> str | None:
+    """--vp-cluster-naming が効かない構成なら警告文を返す（有効構成なら None）.
+
+    クラスタ単位の声紋名前付けは pyannote クラスタが前提のため、それ以外の
+    diarization では機能しない。従来は assemblyai 併用時のみ警告し、
+    --diarization none（既定）では黙って無効化されていた（2026-07-15 レビュー
+    F6。例: --hybrid --soniox-args "--diarization none" では、後勝ちで
+    diarization だけが none に上書きされ、ユーザーはハイブリッド構成のつもりの
+    まま気づけない）。diarization の値に依らず警告する。
+    """
+    if vp_cluster_naming and diarization != "pyannote":
+        return ("# 注意: --vp-cluster-naming は --diarization pyannote 専用のため無効です"
+                f"（--diarization {diarization} では無視されます）")
+    return None
+
+
 # ---------------------------------------------------------------------------
 # メインのセッション起動
 # ---------------------------------------------------------------------------
@@ -567,6 +584,9 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
     # --- SessionState ---
     wav_path = os.path.splitext(out_path)[0] + ".wav"
     diarizer = None
+    warning = vp_cluster_naming_disabled_warning(args.diarization, args.vp_cluster_naming)
+    if warning:
+        print(warning, flush=True)
     if args.diarization == "pyannote":
         pyannote_key = os.environ.get("PYANNOTEAI_API_KEY")
         if not pyannote_key:
@@ -581,9 +601,6 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
         )
         print(f"# 話者分離: pyannoteAI streaming を使用{hint}", flush=True)
     elif args.diarization == "assemblyai":
-        if args.vp_cluster_naming:
-            print("# 注意: --vp-cluster-naming は --diarization pyannote 専用です"
-                  "（AssemblyAI併用時は無視されます）", flush=True)
         assemblyai_key = os.environ.get("ASSEMBLYAI_API_KEY")
         if not assemblyai_key:
             raise SystemExit("環境変数 ASSEMBLYAI_API_KEY を設定してください")
