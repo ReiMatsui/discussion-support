@@ -35,6 +35,8 @@
 """
 from __future__ import annotations
 
+import threading
+
 import numpy as np
 
 from ._constants import (
@@ -71,10 +73,18 @@ class ClusterVoiceNamer:
         self._aliases: dict[str, str] = {}             # 吸収された raw_cluster -> canonical
         # 診断用（直近の照合試行の結果。UI/デバッグログでの可視化用途）。
         self.last_match: dict[str, object] | None = None
+        # 軽量ロック（2026-07-15 レビュー F7）: observe/canonical_cluster 等は
+        # recvスレッドから、reset は UI起点の reset_for_new_meeting（入力スレッド）
+        # から呼ばれ、_aliases/_buffers/_confirmed の複合更新が無防備だった。
+        # 呼び出し頻度は発話単位なので性能影響は無視できる。公開メソッドが内部で
+        # canonical_cluster を呼ぶ（confirmed_name→canonical 等）ため再入可能な
+        # RLock を使う。
+        self._lock = threading.RLock()
 
     def confirmed_name(self, raw_cluster: str) -> str | None:
         """既にこのクラスタに確定済みの名前があれば返す（無ければNone）."""
-        return self._confirmed.get(self.canonical_cluster(raw_cluster))
+        with self._lock:
+            return self._confirmed.get(self.canonical_cluster(raw_cluster))
 
     def canonical_cluster(self, raw_cluster: str) -> str:
         """名寄せ（エイリアス）を解決した正規のクラスタキーを返す（無ければそのまま）.
@@ -83,11 +93,12 @@ class ClusterVoiceNamer:
         吸収されたクラスタの発話が canonical 側の参加者に帰属する
         （docs/design/handoff_2026-07-14_unregistered_speakers.md §3 参照）。
         """
-        seen: set[str] = set()
-        while raw_cluster in self._aliases and raw_cluster not in seen:
-            seen.add(raw_cluster)
-            raw_cluster = self._aliases[raw_cluster]
-        return raw_cluster
+        with self._lock:
+            seen: set[str] = set()
+            while raw_cluster in self._aliases and raw_cluster not in seen:
+                seen.add(raw_cluster)
+                raw_cluster = self._aliases[raw_cluster]
+            return raw_cluster
 
     def nearest_cluster(self, raw_cluster: str,
                         exclude: set[str] | None = None,
@@ -101,28 +112,30 @@ class ClusterVoiceNamer:
         ため、ここでは閾値をかけず ``(canonical, 類似度)`` を返す。
         自クラスタの埋め込みが未計算、または比較対象が無ければ None。
         """
-        key = self.canonical_cluster(raw_cluster)
-        emb = self._embeddings.get(key)
-        if emb is None:
-            return None
-        best, best_sim = None, -1.0
-        for other, other_emb in self._embeddings.items():
-            if other == key or (exclude is not None and other in exclude):
-                continue
-            sim = float(np.dot(emb, other_emb))
-            if sim > best_sim:
-                best, best_sim = other, sim
-        if best is None:
-            return None
-        return best, best_sim
+        with self._lock:
+            key = self.canonical_cluster(raw_cluster)
+            emb = self._embeddings.get(key)
+            if emb is None:
+                return None
+            best, best_sim = None, -1.0
+            for other, other_emb in self._embeddings.items():
+                if other == key or (exclude is not None and other in exclude):
+                    continue
+                sim = float(np.dot(emb, other_emb))
+                if sim > best_sim:
+                    best, best_sim = other, sim
+            if best is None:
+                return None
+            return best, best_sim
 
     def reset(self) -> None:
         """会議リセット時に蓄積・確定状態をクリアする."""
-        self._buffers.clear()
-        self._confirmed.clear()
-        self._embeddings.clear()
-        self._aliases.clear()
-        self.last_match = None
+        with self._lock:
+            self._buffers.clear()
+            self._confirmed.clear()
+            self._embeddings.clear()
+            self._aliases.clear()
+            self.last_match = None
 
     def _trim_buffer(self, buf: list[np.ndarray]) -> int:
         """バッファを max_buffer_sec に収まるよう古い方から捨て、総サンプル数を返す."""
@@ -159,6 +172,12 @@ class ClusterVoiceNamer:
         既に確定済みのクラスタであれば overlapped でも確定名をそのまま返す
         （重複区間の全体としての帰属を未確定にするかどうかは呼び出し側の責務）。
         """
+        with self._lock:
+            return self._observe(raw_cluster, wav, overlapped=overlapped)
+
+    def _observe(
+        self, raw_cluster: str, wav: np.ndarray, *, overlapped: bool = False
+    ) -> str | None:
         # 名寄せ済みクラスタの音声は canonical のバッファに蓄積する（シンプルさ優先。
         # docs/design/handoff_2026-07-14_unregistered_speakers.md §3 参照）。
         raw_cluster = self.canonical_cluster(raw_cluster)
