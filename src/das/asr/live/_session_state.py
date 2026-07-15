@@ -373,13 +373,20 @@ class SessionState:
         if tracker is not None and not getattr(tracker, "auto", True):
             roster = set(tracker.active_profile_names())
             return key if key in roster else UNSURE_SPEAKER
-        # 声紋トラッカーに実在プロファイルがあるキー（自動登録の「人物N」等）は
-        # スロット選別の対象外として通す。登録数は tracker.set_max_human_speakers
-        # が上限管理しており、ここで匿名ラベル文字の辞書順スロットで二重に絞ると、
-        # 声紋一致で確定済みの人物がラベル文字の巡り合わせ（例: 人物2=参加者D）
-        # だけで全発話が未確定に落ちる（2026-07-14 実セッションで確認、
+        # 声紋トラッカーで「アクティブな人間プロファイル」と裏付けられたキー
+        # （自動登録の「人物N」、有効化済みの実名）はスロット選別の対象外として通す。
+        # 登録数は tracker.set_max_human_speakers が上限管理しており、ここで匿名
+        # ラベル文字の辞書順スロットで二重に絞ると、声紋一致で確定済みの人物が
+        # ラベル文字の巡り合わせ（例: 人物2=参加者D）だけで全発話が未確定に落ちる
+        # （2026-07-14 実セッションで確認、
         # docs/design/handoff_2026-07-14_unregistered_speakers.md 参照）。
-        if tracker is not None and key in getattr(tracker, "profiles", {}):
+        # 判定は tracker.profiles 全体ではなくアクティブ集合（is_active_human）に
+        # 限定する: profiles には deactivate 済み・voices.json 残留の非アクティブ
+        # プロファイルも含まれ、それまで素通しすると上限選別の穴になる
+        # （2026-07-15 レビュー F4。素通しの本来の意図＝実在が裏付けられた人物の
+        # 保護、は維持）。
+        is_active_human = getattr(tracker, "is_active_human", None)
+        if is_active_human is not None and is_active_human(key):
             return key
         if not (self._is_anonymous_speaker_key(key) or self._is_system_anonymous_name(key)):
             return key
