@@ -2627,15 +2627,50 @@ def _run_from_mic(state: SessionState, device):
     state.audio_q.put(None)
 
 
+def _load_wav_mono_16k(path: str) -> "np.ndarray":
+    """音声ファイルをモノラル float32 の SR(16kHz) 配列で読む.
+
+    従来は librosa を使っていたが、librosa はどの依存グループにも宣言されて
+    おらず --wav が常に ModuleNotFoundError で死んでいた。主用途（本システムが
+    録音した transcripts/*.wav の再入力）は PCM WAV なので標準ライブラリ wave で
+    依存ゼロで読み、レート違いは線形補間で SR に合わせる。PCM 以外の形式のみ
+    torchaudio（soniox extra で導入済み）にフォールバックする。
+    """
+    import wave
+    try:
+        with wave.open(path, "rb") as w:
+            n_ch = w.getnchannels()
+            width = w.getsampwidth()
+            sr = w.getframerate()
+            raw = w.readframes(w.getnframes())
+        if width == 2:
+            y = np.frombuffer(raw, dtype="<i2").astype("float32") / 32768.0
+        elif width == 4:
+            y = np.frombuffer(raw, dtype="<i4").astype("float32") / 2147483648.0
+        else:
+            raise wave.Error(f"unsupported sample width: {width}")
+        if n_ch > 1:
+            y = y.reshape(-1, n_ch).mean(axis=1)
+    except wave.Error:
+        import torchaudio
+        t, sr = torchaudio.load(path)
+        y = t.mean(dim=0).numpy().astype("float32")
+    if sr != SR:
+        # 線形補間による簡易リサンプル（STT入力用途には十分）
+        n_out = int(round(len(y) * SR / sr))
+        y = np.interp(np.linspace(0, len(y) - 1, n_out),
+                      np.arange(len(y)), y).astype("float32")
+    return y
+
+
 def _run_from_wav(state: SessionState, args):
     """WAVファイルを擬似ライブで送信する.
 
     Reactive WAV: agentが発話中はWAV再生・ASR送信を一時停止し、
     介入終了後に自動再開する。
     """
-    import librosa
     agent = state.agent
-    y, _ = librosa.load(args.wav, sr=SR)
+    y = _load_wav_mono_16k(args.wav)
     step = int(SR * 0.12)
     out = mic = None
     if args.play or args.join:

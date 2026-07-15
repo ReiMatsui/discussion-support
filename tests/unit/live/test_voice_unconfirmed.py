@@ -1,8 +1,10 @@
-"""新規話者の登録直前の発話を「未確定」として扱うテスト.
+"""未確定ラベルの蓄積・自動登録・ラベル継続のテスト.
 
-Sonioxが新しい声を既存ラベル（登録済みの人）に混ぜて出すと、声紋が一致しない
-のに直前の人へ追従してしまう。声紋が prev と一致しないときは未確定(#ラベル)に
-落とし、登録時に遡及リネームでまとめて確定できることを検証する。
+新しいラベルの発話は #ラベルに蓄積され、登録時に遡及リネームでまとめて確定する。
+一度声紋照合の成功で人物に結び付いたラベルは、照合に失敗した発話でも対応を
+維持する（ラベル継続。2026-07-14, eval/replay_attribution.py での再設計:
+不一致で対応を破棄する旧仕様は同一人物を #ラベルと人物Nに分裂させ
+1:1帰属精度44%、継続化で54%→他の変更と合わせ79%）。
 """
 from __future__ import annotations
 
@@ -56,16 +58,22 @@ def _tracker(emb: np.ndarray) -> VoiceProfiles:
 _LONG = np.ones(int(SR * 1.6), dtype=np.float32)
 
 
-def test_new_voice_not_shown_as_registered_person():
-    """登録済みラベルに混ざった別人の声は、松井ではなく未確定(#2)になる."""
-    vp = _tracker(_unit(0, 1, 0))      # 松井と全く違う声
-    assert vp.classify(_LONG, "2", count=True) == "#2"
-    assert vp.sp_map["2"] == "#2"      # マッピングも未確定に更新
+def test_mismatching_voice_keeps_label_person():
+    """人物に結び付いたラベルは、照合に失敗した発話でも対応を維持（ラベル継続）.
+
+    旧仕様は #2 に落としていたが、実会話では中尺発話の声紋が本人でもしきい値に
+    届かず（eval/replay_attribution.py: 本人一致 0.17〜0.45）、一度の不一致で
+    同一人物が #ラベルと人物に分裂して 1:1帰属精度44% の主因になっていた。
+    """
+    vp = _tracker(_unit(0, 1, 0))      # 松井と一致しない声
+    assert vp.classify(_LONG, "2", count=True) == "松井"   # ラベル継続
+    assert vp.sp_map["2"] == "松井"    # マッピングは維持
 
 
 def test_registration_retroactively_renames_unconfirmed():
-    """別人の声が累積して人物登録されると、#2→人物Nの遡及リネームが出る."""
+    """未確定ラベルの声が累積して人物登録されると、#2→人物Nの遡及リネームが出る."""
     vp = _tracker(_unit(0, 1, 0))
+    vp.sp_map = {}                     # ラベル2はまだ誰にも結び付いていない
     assert vp.classify(_LONG, "2", count=True, chars=20) == "#2"   # 20
     assert vp.classify(_LONG, "2", count=True, chars=20) == "#2"   # 40
     assert vp.classify(_LONG, "2", count=True, chars=20) == "人物1"  # 60 >= 45
@@ -79,15 +87,42 @@ def test_matching_voice_still_follows_registered_person():
     assert vp.classify(_LONG, "2", count=True) == "松井"
 
 
-def test_anonymous_person_keeps_same_label_on_moderate_match():
-    """自動登録済み人物は、同じSTTラベルの低信頼発話を近ければ継続表示する."""
+def test_anonymous_person_weak_match_keeps_label_continuation():
+    """匿名人物(人物1)に結び付いたラベルも、弱い一致の発話で対応を壊さない.
+
+    しきい値を満たさない発話は帰属根拠を「そのラベルの現在の対応」に置く
+    （ラベル継続）。対応先は声紋照合の成功でしか書き換わらないため、
+    照合失敗のたびに #ラベルへ落とす旧仕様（同一人物の分裂＝帰属精度44%の主因）
+    より一貫性が高い。蓄積(pool)は並行して進み、別人なら自動登録で分離される。
+    """
     vp = _tracker(_unit(0.90, 0.43, 0))
     vp.profiles = {"人物1": _unit(0, 1, 0)}
     vp._active_keys = {"人物1"}
     vp.sp_map = {"2": "人物1"}
 
     assert vp.classify(_LONG, "2", count=True, chars=20) == "人物1"
-    assert vp.last["kind"] == "低信頼追従"
+    assert vp.last["kind"] == "蓄積中"   # 蓄積は並行して進む（ラベル継続で返答）
+
+
+def test_medium_turn_requires_strict_threshold():
+    """min_sec〜strict_sec の中尺発話は、短発話と同じ厳格しきい値でのみ即時判定.
+
+    実測（eval/replay_attribution.py, 2026-07-14_142016）: 5秒超の照合は6/6正解
+    に対し1〜2.5秒は誤一致が集中（1.1s sim=0.43, 2.0s sim=0.49 が別人に一致し、
+    ラベルの人物対応を破壊）。埋め込みの信頼性は発話長に依存するため、
+    基準しきい値(thresh)で信じるのは strict_sec 以上の発話のみ。
+    """
+    emb = _unit(0.55, float(np.sqrt(1 - 0.55 ** 2)), 0)   # 松井とのsim=0.55
+    vp = _tracker(emb)                 # thresh=0.5, short_bonus=0.05
+    vp.short_bonus = 0.08
+    vp.sp_map = {}
+    # 1.6s（< strict_sec=3.0）: 0.55 < 0.5+0.08 → 即時判定せず蓄積へ
+    assert vp.classify(_LONG, "2", count=True, chars=20) == "#2"
+    assert vp.last["kind"] == "蓄積中"
+    # 3.2s（>= strict_sec）: 0.55 >= 0.5 → 基準しきい値で即時判定
+    long_wav = np.ones(int(SR * 3.2), dtype=np.float32)
+    assert vp.classify(long_wav, "2", count=True, chars=20) == "松井"
+    assert vp.last["kind"] == "声紋一致"
 
 
 def _closed_roster_tracker(emb: np.ndarray) -> VoiceProfiles:
@@ -129,11 +164,16 @@ def test_closed_roster_does_not_autoenroll_unknown():
     assert vp.pool == []
 
 
-def test_closed_roster_unknown_does_not_inherit_registered_label():
-    """STTが登録者と同じ生ラベルを別人に再利用しても、登録者を継がず未確定にする."""
-    vp = _closed_roster_tracker(_unit(0, 0, 0, 1))   # Aと全く違う声
+def test_closed_roster_label_continuation_keeps_registered_person():
+    """閉じた名簿でも、登録者Aに結び付いたラベルは照合失敗の発話でAを維持する.
+
+    閉じた名簿ポリシーは「登録済みのアクティブな名前付きプロファイルへの継続
+    だけを許す」。Aは声紋照合の成功でラベルに結び付いた登録者なので継続対象
+    （未知・匿名への継続は従来どおり未確定に落ちる）。
+    """
+    vp = _closed_roster_tracker(_unit(0, 0, 0, 1))   # Aと一致しない声
     vp.sp_map = {"2": "A"}                            # ラベル2は直前までA
-    assert vp.classify(_LONG, "2", count=True, chars=60) == UNSURE_SPEAKER
+    assert vp.classify(_LONG, "2", count=True, chars=60) == "A"
 
 
 def test_closed_roster_overlapped_speech_does_not_inherit_registered_label():
@@ -166,6 +206,7 @@ def test_enroll_false_does_not_autoenroll_new_person():
 def test_enroll_true_still_accumulates_and_registers():
     """enroll=True（通常）は従来どおり蓄積して人物Nを自動登録する（回帰）."""
     vp = _tracker(_unit(0, 1, 0))
+    vp.sp_map = {}                     # ラベル2はまだ誰にも結び付いていない
     vp.n_anon = 0
     assert vp.classify(_LONG, "2", count=True, enroll=True, chars=20) == "#2"
     assert vp.classify(_LONG, "2", count=True, enroll=True, chars=20) == "#2"

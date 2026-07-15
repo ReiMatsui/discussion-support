@@ -165,6 +165,37 @@ class SpeakerResolver:
         )
 
 
+def has_overlapping_speakers(
+    events: Iterable[DiarizationEvent],
+    start_ms: int,
+    end_ms: int,
+    *,
+    min_ratio: float = 0.2,
+) -> bool:
+    """発話区間 [start_ms, end_ms) を、複数の話者クラスタが同時に占めているか判定する.
+
+    pyannote+声紋照合のハイブリッド構成（docs/design/pyannote_live1_trial_2026-07-09.md
+    §8.4/§9）で「重複発話区間は安全側で未確定にする」ために使う。混ざった声で
+    クラスタ音声バッファを汚さないよう、蓄積前にこの判定でスキップする。
+    ``min_ratio`` 以上を占める話者が2人以上いれば重複発話とみなす（相槌程度の
+    薄い重なりは対象外）。
+    """
+    duration = max(end_ms - start_ms, 1)
+    if duration <= 0:
+        return False
+    totals: defaultdict[str, int] = defaultdict(int)
+    for event in events:
+        seg = event.closed(fallback_end_ms=end_ms)
+        if seg is None:
+            continue
+        ov = max(0, min(seg.end_ms, end_ms) - max(seg.start_ms, start_ms))
+        if ov <= 0:
+            continue
+        totals[event.speaker] += ov
+    substantial = [sp for sp, ov in totals.items() if ov / duration >= min_ratio]
+    return len(substantial) >= 2
+
+
 @dataclass(frozen=True)
 class DiarizationScore:
     """話者分離評価の集計結果."""

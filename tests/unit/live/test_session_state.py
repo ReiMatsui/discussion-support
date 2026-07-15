@@ -95,6 +95,106 @@ def test_constrain_after_label_release_with_max_speakers():
     assert s.disp_name("#3") == "参加者B"    # 解放された B を再利用
 
 
+def test_peek_disp_name_is_read_only():
+    """peek_disp_name は割当てを行わない: 未割当てキーは「?」、辞書は不変."""
+    s = _make_state()
+    assert s.peek_disp_name("#1") == "?"        # 未割当て → 中立表示
+    assert s.anonymous_labels == {}             # 副作用なし
+    assert s.disp_name("#1") == "参加者A"       # 本表示（flush経路）は従来どおり割当て
+    assert s.peek_disp_name("#1") == "参加者A"  # 既割当てはその文字を返す
+
+
+def test_show_partial_phantom_key_does_not_consume_label_slot():
+    """partial 表示だけのSTTラベル（幻キー）が文字とスロットを消費しない.
+
+    バグ修正（2026-07-14 実セッション）: show_partial が disp_name（新規割当て）を
+    呼んでいたため、議事録に一度も現れない partial 限りの幻キーが「参加者B」の
+    文字と max_speakers スロットを恒久的に占有した
+    (docs/design/handoff_2026-07-14_unregistered_speakers.md 参照)。
+    """
+    s = _make_state()
+    s.args = SimpleNamespace(diarization_max_speakers=2)
+    s.show_partial("7", "話している途中のテキスト")   # 幻ラベル: flush に到達しない
+    assert s.anonymous_labels == {}                    # 文字を消費しない
+    assert s.partial_speaker == "?"                    # 中立表示（許容仕様）
+    # 幻キーがスロットを食わないので、後続の実参加者2人は従来どおり通る
+    assert s.constrain_human_speaker_key("#1") == "#1"
+    assert s.disp_name("#1") == "参加者A"
+    assert s.constrain_human_speaker_key("#2") == "#2"
+    assert s.disp_name("#2") == "参加者B"
+
+
+def test_rekey_migrates_display_name_and_cleans_old_entry():
+    """rekey は names も colors と同じ流儀で移行し、old 側の残留を掃除する（F7）."""
+    s = _make_state()
+    s.names["#1"] = "田中"
+    s.rekey("#1", "#2")
+    assert s.names == {"#2": "田中"}         # 移行される（new 側に名前が無い場合）
+    s.names["#3"] = "鈴木"
+    s.rekey("#3", "#2")
+    assert s.names == {"#2": "田中"}         # new 側に名前があれば old 側は捨てる
+
+
+def test_diarization_key_seq_never_reissues_key_after_pop():
+    """名寄せで keys が pop されても、使用中の @diar:N を別人へ再発行しない（F1）."""
+    s = _make_state()
+    assert s.key_for_diarization_speaker("pyannote", "A") == "@diar:1"
+    assert s.key_for_diarization_speaker("pyannote", "B") == "@diar:2"
+    assert s.key_for_diarization_speaker("pyannote", "C") == "@diar:3"
+    # クラスタ間名寄せ相当: B が A に吸収されエントリが pop される
+    s.diarization_speaker_keys.pop("pyannote:B")
+    # len ベース採番なら使用中の @diar:3 を再発行していた（キー衝突の回帰）
+    assert s.key_for_diarization_speaker("pyannote", "D") == "@diar:4"
+
+
+class _FakePyannoteProvider:
+    """pyannote provider をhysteresis判定用に模したダミー(.name==\"pyannote\")."""
+
+    name = "pyannote"
+
+
+class _FakeOtherProvider:
+    """pyannote以外のprovider（AssemblyAI等）を模したダミー."""
+
+    name = "assemblyai"
+
+
+def test_key_for_diarization_speaker_hysteresis_below_threshold_stays_unsure():
+    """pyannote使用時、累積発話が3秒未満の新規ラベルは@diar:Nを発行せずUNSURE_SPEAKERのまま."""
+    s = _make_state()
+    s.diarization_provider = _FakePyannoteProvider()
+    assert s.key_for_diarization_speaker("pyannote", "SPEAKER_00", duration_ms=1000) == "?"
+    assert s.key_for_diarization_speaker("pyannote", "SPEAKER_00", duration_ms=1500) == "?"
+    # 累計2.5秒 < 3.0秒 なのでまだ@diar:Nは発行されない
+    assert "pyannote:SPEAKER_00" not in s.diarization_speaker_keys
+
+
+def test_key_for_diarization_speaker_hysteresis_above_threshold_registers_participant():
+    """累積発話が3秒に達したら@diar:Nを新規発行し、以後は安定して同じキーを返す."""
+    s = _make_state()
+    s.diarization_provider = _FakePyannoteProvider()
+    assert s.key_for_diarization_speaker("pyannote", "SPEAKER_00", duration_ms=1500) == "?"
+    key = s.key_for_diarization_speaker("pyannote", "SPEAKER_00", duration_ms=1600)
+    assert key.startswith("@diar:")
+    # 一度確定したら、以後は同じ生ラベルに対して同じキーを安定して返す
+    assert s.key_for_diarization_speaker("pyannote", "SPEAKER_00", duration_ms=50) == key
+
+
+def test_key_for_diarization_speaker_no_hysteresis_for_non_pyannote_provider():
+    """pyannote以外のproviderでは従来どおり即時に@diar:Nを発行する（挙動を変えない）."""
+    s = _make_state()
+    s.diarization_provider = _FakeOtherProvider()
+    key = s.key_for_diarization_speaker("assemblyai", "A", duration_ms=10)
+    assert key.startswith("@diar:")
+
+
+def test_key_for_diarization_speaker_no_hysteresis_without_provider():
+    """diarization_provider未設定（従来のデフォルト）でも即時発行する."""
+    s = _make_state()
+    key = s.key_for_diarization_speaker("stt", "A", duration_ms=10)
+    assert key.startswith("@diar:")
+
+
 def test_reset_drains_summarize_requests():
     """会議リセットで整理介入の要求キューも drain される（C3）."""
     s = _make_state()

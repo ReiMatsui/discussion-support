@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>話者正解アノテーション — 2026-07-14_142016</title>
+<style>
+  :root { --bg:#fafafa; --card:#fff; --border:#ddd; --accent:#2563eb; --done:#16a34a; }
+  body { font-family: -apple-system, "Hiragino Sans", sans-serif; margin:0; background:var(--bg); color:#222; }
+  header { position:sticky; top:0; background:var(--card); border-bottom:1px solid var(--border); padding:10px 16px; z-index:10; }
+  header h1 { font-size:15px; margin:0 0 8px; }
+  .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:6px; }
+  .row label { font-size:12px; color:#555; }
+  input[type=text] { padding:4px 8px; border:1px solid var(--border); border-radius:6px; font-size:13px; width:100px; }
+  input[type=number] { padding:4px 6px; border:1px solid var(--border); border-radius:6px; font-size:13px; width:60px; }
+  button { padding:6px 12px; border:1px solid var(--border); border-radius:8px; background:#fff; cursor:pointer; font-size:13px; }
+  button:hover { background:#f0f4ff; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  button.playing { background:#dc2626; color:#fff; border-color:#dc2626; }
+  #progress { font-size:13px; color:#555; }
+  #list { max-width:860px; margin:12px auto 120px; padding:0 12px; }
+  .turn { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:10px 14px; margin-bottom:8px;
+          display:flex; gap:12px; align-items:center; }
+  .turn.current { border-color:var(--accent); box-shadow:0 0 0 2px #2563eb33; background:#f0f6ff; }
+  .turn.labeled { border-left:5px solid var(--done); }
+  .tid { font-size:11px; color:#888; width:70px; flex-shrink:0; }
+  .txt { flex:1; font-size:14px; line-height:1.5; }
+  .sys { font-size:11px; color:#999; display:none; }
+  body.showsys .sys { display:block; }
+  .gt { font-weight:600; font-size:13px; width:72px; text-align:center; flex-shrink:0;
+        border-radius:6px; padding:3px 0; background:#eee; color:#666; }
+  .gt.set { background:#dcfce7; color:#166534; }
+  .btns { display:flex; gap:4px; flex-shrink:0; }
+  .btns button { padding:4px 8px; font-size:12px; }
+  footer { position:fixed; bottom:0; left:0; right:0; background:var(--card); border-top:1px solid var(--border);
+           padding:10px 16px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .kbd { font-size:11px; color:#888; margin-left:auto; }
+  #dropzone { border:2px dashed var(--border); border-radius:8px; padding:4px 10px; font-size:12px; color:#777; }
+  #timeinfo { font-variant-numeric:tabular-nums; font-size:12px; color:#555; min-width:90px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>話者正解アノテーション — transcripts/2026-07-14_142016（82発話・約3.8分）</h1>
+  <div class="row">
+    <span id="dropzone">① 音声: <input type="file" id="wav" accept=".wav,audio/*">（transcripts/2026-07-14_142016.wav を選択）</span>
+    <label>話者名: <input type="text" id="n1" value="話者1"></label>
+    <label><input type="text" id="n2" value="話者2"></label>
+    <label><input type="text" id="n3" value="話者3"></label>
+    <label><input type="checkbox" id="showsys"> システムのラベルも表示</label>
+  </div>
+  <div class="row">
+    <button id="cont" class="primary">▶ 連続再生（推奨）</button>
+    <span id="timeinfo">0:00.0</span>
+    <label>ズレ補正 <input type="number" id="offset" value="0" step="0.5"> 秒
+      （表示より音が<b>遅れて</b>聞こえるならプラスに）</label>
+    <label>個別再生の余白 <input type="number" id="pad" value="0.7" step="0.1" min="0"> 秒</label>
+    <label>速度 <input type="number" id="rate" value="1.0" step="0.25" min="0.5" max="2"></label>
+    <span id="progress"></span>
+  </div>
+</header>
+<div id="list"></div>
+<footer>
+  <button class="primary" id="export">② 正解をJSONで保存</button>
+  <button id="clear">全クリア</button>
+  <span id="status" style="font-size:12px;color:#555"></span>
+  <span class="kbd">キー: <b>1/2/3</b>=話者 <b>0</b>=不明 <b>9</b>=複数人 <b>Space</b>=連続再生/停止
+    <b>←</b>=3秒戻す <b>→</b>=3秒送る <b>Enter</b>=この行だけ再生 <b>↑↓</b>=行移動</span>
+</footer>
+<script>
+const TURNS = [{"turn_id": 1, "ms": 1200, "end_ms": 6120, "speaker": "参加者A", "text": "俺たちの親友、ホチの初恋の相手の新女性が来てくれました。"}, {"turn_id": 2, "ms": 9060, "end_ms": 9840, "speaker": "未確定", "text": "ベテランチです。"}, {"turn_id": 3, "ms": 9960, "end_ms": 10320, "speaker": "未確定", "text": "カメです。"}, {"turn_id": 4, "ms": 10500, "end_ms": 11040, "speaker": "参加者A", "text": "そして。"}, {"turn_id": 5, "ms": 11220, "end_ms": 11880, "speaker": "未確定", "text": "セイラです。"}, {"turn_id": 6, "ms": 12540, "end_ms": 24600, "speaker": "参加者A", "text": "こんにちは。朱色だ。今、モザイクになってると思うんですけども、よく動画に出てくるホチという人物の初恋の女性で、僕たちの一行年下の代の神戸女学園を卒業した朱色さんです。"}, {"turn_id": 7, "ms": 26100, "end_ms": 27120, "speaker": "参加者A", "text": "よろしくお願いします。"}, {"turn_id": 8, "ms": 27300, "end_ms": 37680, "speaker": "参加者A", "text": "はい。本日の企画、ホチは朱色のことを好きだったとは決して認めないけど、たぶんさすがに客観的に話を聞いたら初恋の人なので、判定してあげよう。"}, {"turn_id": 9, "ms": 39180, "end_ms": 39720, "speaker": "未確定", "text": "イエーイ。"}, {"turn_id": 10, "ms": 40560, "end_ms": 45360, "speaker": "未確定", "text": "絶対違う。ほんとに。これだけは初っ端から私は否定したいです。"}, {"turn_id": 11, "ms": 45600, "end_ms": 47280, "speaker": "参加者A", "text": "というスタンスで。ありがとうございます。"}, {"turn_id": 12, "ms": 47460, "end_ms": 48240, "speaker": "参加者A", "text": "ありがとうございます。"}, {"turn_id": 13, "ms": 48960, "end_ms": 56520, "speaker": "参加者A", "text": "助かります。助かります。で、僕らも高校生の時からTwitterはもうどっぷりやってましたから、もちろんめっちゃ仲いいわけじゃないけど、お互いまあ知ってると。"}, {"turn_id": 14, "ms": 56700, "end_ms": 57840, "speaker": "参加者A", "text": "もちろんフォローはしてましたよ。"}, {"turn_id": 15, "ms": 57960, "end_ms": 69240, "speaker": "参加者A", "text": "そうそう。でもホチと朱色が空中リプで深夜にイチャイチャイチャイチャして、朱色のアイコンはその時ね、趣味が鉱山植物を見ることですから、鉱山植物ですわ。"}, {"turn_id": 16, "ms": 69360, "end_ms": 70200, "speaker": "未確定", "text": "すごいな、これ。"}, {"turn_id": 17, "ms": 70440, "end_ms": 70920, "speaker": "参加者A", "text": "すごい。"}, {"turn_id": 18, "ms": 71820, "end_ms": 74280, "speaker": "参加者A", "text": "どんな花やったかと当時のアイコンは。"}, {"turn_id": 19, "ms": 74400, "end_ms": 76920, "speaker": "未確定", "text": "私、ミネオスエキソっていう花が。"}, {"turn_id": 20, "ms": 77100, "end_ms": 77880, "speaker": "参加者A", "text": "ミネウスユキソ。"}, {"turn_id": 21, "ms": 78060, "end_ms": 78720, "speaker": "未確定", "text": "すごい好きで。"}, {"turn_id": 22, "ms": 78900, "end_ms": 79440, "speaker": "参加者A", "text": "ミネリウタ。"}, {"turn_id": 23, "ms": 81180, "end_ms": 81960, "speaker": "未確定", "text": "感情は一緒。"}, {"turn_id": 24, "ms": 82140, "end_ms": 82920, "speaker": "未確定", "text": "家変なやつやな。"}, {"turn_id": 25, "ms": 84000, "end_ms": 86280, "speaker": "参加者A", "text": "元祖変な家やな。キノコみたいな家。"}, {"turn_id": 26, "ms": 87480, "end_ms": 88920, "speaker": "参加者A", "text": "俺、あれ見に行ったことあるからな。"}, {"turn_id": 27, "ms": 89040, "end_ms": 89640, "speaker": "未確定", "text": "わざわざ。"}, {"turn_id": 28, "ms": 90000, "end_ms": 91200, "speaker": "参加者A", "text": "知ってる？ミネリウタの家。"}, {"turn_id": 29, "ms": 91380, "end_ms": 92280, "speaker": "未確定", "text": "ちょっと知らないですけど。"}, {"turn_id": 30, "ms": 92520, "end_ms": 96600, "speaker": "参加者C", "text": "法政大学お笑いサークルHOSのみんなからミネリウタの家の見方を教えてくれた。"}, {"turn_id": 31, "ms": 97920, "end_ms": 98760, "speaker": "参加者A", "text": "真ん中から。"}, {"turn_id": 32, "ms": 99060, "end_ms": 102960, "speaker": "参加者C", "text": "真ん中の道から行くか、右の道から行くかで、見え方変わってる。"}, {"turn_id": 33, "ms": 104280, "end_ms": 104880, "speaker": "未確定", "text": "2度楽しめる。"}, {"turn_id": 34, "ms": 105540, "end_ms": 107160, "speaker": "参加者A", "text": "ゾウの絵描いてある定規みたいなね。"}, {"turn_id": 35, "ms": 107340, "end_ms": 108360, "speaker": "未確定", "text": "面白いな。"}, {"turn_id": 36, "ms": 108660, "end_ms": 110640, "speaker": "未確定", "text": "まず画像の家しか知らなかった。"}, {"turn_id": 37, "ms": 110820, "end_ms": 111720, "speaker": "未確定", "text": "え？梅津ちゃん？"}, {"turn_id": 38, "ms": 111840, "end_ms": 112440, "speaker": "未確定", "text": "あ、そう。"}, {"turn_id": 39, "ms": 112860, "end_ms": 113640, "speaker": "未確定", "text": "ちょっとこれは。"}, {"turn_id": 40, "ms": 114300, "end_ms": 116640, "speaker": "未確定", "text": "これもさ、こういうところがな、やっぱ初恋。"}, {"turn_id": 41, "ms": 116820, "end_ms": 118920, "speaker": "参加者A", "text": "はいはいはいはい。ありがとうございます。初恋ポイント。"}, {"turn_id": 42, "ms": 119100, "end_ms": 120480, "speaker": "未確定", "text": "ホチにツッコミしろを与えてたんや。"}, {"turn_id": 43, "ms": 120660, "end_ms": 120960, "speaker": "未確定", "text": "そうやな。"}, {"turn_id": 44, "ms": 121080, "end_ms": 123480, "speaker": "未確定", "text": "こういうのばっかりツッコまれてた、確かに。"}, {"turn_id": 45, "ms": 123660, "end_ms": 131160, "speaker": "参加者A", "text": "で、まあ最初にね、たぶん誰やねんっていうのはあると思うんで、経歴というか、どういう人生を送ってきて、今どういう状態かちょっと聞いてもいいですか。"}, {"turn_id": 46, "ms": 131280, "end_ms": 148920, "speaker": "未確定", "text": "さっきも紹介してもらいましたけど、ホチさんとかオマツさんたちの引っ越したの代で、神戸女学園に中学から入ってます。中学はバドミントン部で、しばらく部活だけやってたんですけど、そのぐらいの頃からスマートフォンを手に入れて、"}, {"turn_id": 47, "ms": 151980, "end_ms": 158280, "speaker": "未確定", "text": "中学を引退したぐらいでTwitterを始め、そこでちょっと学外の交流ができてしまう。"}, {"turn_id": 48, "ms": 158520, "end_ms": 159000, "speaker": "未確定", "text": "交流ね。"}, {"turn_id": 49, "ms": 159180, "end_ms": 164760, "speaker": "未確定", "text": "その流れで、ちょっとだんだんだんだん音ゲー界隈とか。"}, {"turn_id": 50, "ms": 165360, "end_ms": 169560, "speaker": "参加者A", "text": "ができて、例えば誰？音ゲー界隈は。"}, {"turn_id": 51, "ms": 169800, "end_ms": 172920, "speaker": "未確定", "text": "同じラインやったら、柑橘さん。"}, {"turn_id": 52, "ms": 174660, "end_ms": 176400, "speaker": "参加者A", "text": "ホチのプロ野球スピリッツ日本一。"}, {"turn_id": 53, "ms": 177060, "end_ms": 177720, "speaker": "未確定", "text": "どうなんですか。"}, {"turn_id": 54, "ms": 177900, "end_ms": 178800, "speaker": "参加者A", "text": "はい。アマチュア無線部。"}, {"turn_id": 55, "ms": 178920, "end_ms": 180240, "speaker": "未確定", "text": "そうですか。あと誰かな。"}, {"turn_id": 56, "ms": 180420, "end_ms": 181560, "speaker": "参加者C", "text": "日野県上本町校。"}, {"turn_id": 57, "ms": 181680, "end_ms": 181920, "speaker": "未確定", "text": "誰かな。"}, {"turn_id": 58, "ms": 182100, "end_ms": 183240, "speaker": "参加者A", "text": "お父さんのことさんずけで呼ぶ。"}, {"turn_id": 59, "ms": 184620, "end_ms": 185280, "speaker": "参加者A", "text": "柑橘。"}, {"turn_id": 60, "ms": 187140, "end_ms": 188160, "speaker": "参加者A", "text": "で、ペインフっていう人。"}, {"turn_id": 61, "ms": 188460, "end_ms": 194880, "speaker": "未確定", "text": "あー、ペインフルさんもいましたね。そういう人たちと仲良くて、いわゆるオパサーの姫みたいな、たぶん。"}, {"turn_id": 62, "ms": 195060, "end_ms": 196680, "speaker": "未確定", "text": "自分で言える。"}, {"turn_id": 63, "ms": 197160, "end_ms": 197520, "speaker": "未確定", "text": "いいね。"}, {"turn_id": 64, "ms": 197820, "end_ms": 198960, "speaker": "参加者A", "text": "大人やな、こんな。"}, {"turn_id": 65, "ms": 199140, "end_ms": 199320, "speaker": "未確定", "text": "うん。"}, {"turn_id": 66, "ms": 199440, "end_ms": 200280, "speaker": "未確定", "text": "もう27歳ですから。"}, {"turn_id": 67, "ms": 200460, "end_ms": 201720, "speaker": "参加者A", "text": "当時は言えへんかったやろうけど。"}, {"turn_id": 68, "ms": 201900, "end_ms": 203400, "speaker": "未確定", "text": "認めたくなかったですけど。"}, {"turn_id": 69, "ms": 203580, "end_ms": 208440, "speaker": "参加者A", "text": "完全に姫やった。正直。みんなうっすら朱色のこと好きという状態。"}, {"turn_id": 70, "ms": 208620, "end_ms": 209040, "speaker": "未確定", "text": "うんうん。"}, {"turn_id": 71, "ms": 209160, "end_ms": 213840, "speaker": "未確定", "text": "ランドワンに今日行きますって言って、どうしたら。"}, {"turn_id": 72, "ms": 215580, "end_ms": 216480, "speaker": "未確定", "text": "奈良坂。"}, {"turn_id": 73, "ms": 217260, "end_ms": 218760, "speaker": "未確定", "text": "ほんとに。"}, {"turn_id": 74, "ms": 218820, "end_ms": 219960, "speaker": "未確定", "text": "多い時15人ぐらい。"}, {"turn_id": 75, "ms": 221340, "end_ms": 222000, "speaker": "参加者A", "text": "すごい。"}, {"turn_id": 76, "ms": 222300, "end_ms": 222960, "speaker": "参加者A", "text": "ウメラ？"}, {"turn_id": 77, "ms": 223080, "end_ms": 223560, "speaker": "参加者A", "text": "キモい。"}, {"turn_id": 78, "ms": 223680, "end_ms": 224640, "speaker": "未確定", "text": "そうなんじゃない？はい。"}, {"turn_id": 79, "ms": 224940, "end_ms": 225240, "speaker": "未確定", "text": "サンラ？"}, {"turn_id": 80, "ms": 225360, "end_ms": 225480, "speaker": "未確定", "text": "そう。"}, {"turn_id": 81, "ms": 225720, "end_ms": 227760, "speaker": "未確定", "text": "ウメラ。ジェネがたまに発見。"}, {"turn_id": 82, "ms": 228360, "end_ms": 228600, "speaker": "未確定", "text": "はい。"}];
+const SESSION = "2026-07-14_142016";
+const KEY = "gt_" + SESSION;
+let labels = {};
+try { labels = JSON.parse(localStorage.getItem(KEY) || "{}"); } catch(e) {}
+let cur = 0, audio = null, stopTimer = null, continuous = false;
+
+const list = document.getElementById("list");
+const num = id => parseFloat(document.getElementById(id).value) || 0;
+function spName(code){
+  if (code === "S1") return document.getElementById("n1").value || "話者1";
+  if (code === "S2") return document.getElementById("n2").value || "話者2";
+  if (code === "S3") return document.getElementById("n3").value || "話者3";
+  if (code === "MULTI") return "複数人";
+  if (code === "UNK") return "不明";
+  return "—";
+}
+function fmt(ms){ const s = ms/1000; return Math.floor(s/60)+":"+String((s%60).toFixed(1)).padStart(4,"0"); }
+
+function render(){
+  list.innerHTML = "";
+  TURNS.forEach((t,i)=>{
+    const div = document.createElement("div");
+    div.className = "turn" + (i===cur?" current":"") + (labels[t.turn_id]?" labeled":"");
+    div.innerHTML = `
+      <div class="tid">#${t.turn_id}<br>${fmt(t.ms)}</div>
+      <div class="txt">${t.text}<div class="sys">システム: ${t.speaker}</div></div>
+      <div class="gt ${labels[t.turn_id]?"set":""}">${spName(labels[t.turn_id])}</div>
+      <div class="btns">
+        <button data-i="${i}" data-c="S1">1</button>
+        <button data-i="${i}" data-c="S2">2</button>
+        <button data-i="${i}" data-c="S3">3</button>
+        <button data-i="${i}" data-c="MULTI">複</button>
+        <button data-i="${i}" data-c="UNK">?</button>
+        <button data-i="${i}" data-c="PLAY">▶</button>
+      </div>`;
+    div.addEventListener("click", e => {
+      if (e.target.tagName === "BUTTON") {
+        const c = e.target.dataset.c;
+        if (c === "PLAY") { stopContinuous(); select(parseInt(e.target.dataset.i)); playOne(); }
+        else assign(parseInt(e.target.dataset.i), c);
+      } else select(i);
+    });
+    list.appendChild(div);
+  });
+  const done = TURNS.filter(t=>labels[t.turn_id]).length;
+  document.getElementById("progress").textContent = `進捗: ${done} / ${TURNS.length}`;
+}
+// render() は全再構築で重いので、ハイライト移動だけ軽量に行う
+function highlight(i, scroll=true){
+  if (i === cur && list.children[cur]?.classList.contains("current")) return;
+  list.children[cur]?.classList.remove("current");
+  cur = Math.max(0, Math.min(TURNS.length-1, i));
+  const el = list.children[cur];
+  el.classList.add("current");
+  if (scroll) el.scrollIntoView({block:"center", behavior:"smooth"});
+}
+function select(i, scroll=true){ highlight(i, scroll); }
+function updateRow(i){
+  const t = TURNS[i], el = list.children[i];
+  el.classList.toggle("labeled", !!labels[t.turn_id]);
+  const gt = el.querySelector(".gt");
+  gt.textContent = spName(labels[t.turn_id]);
+  gt.classList.toggle("set", !!labels[t.turn_id]);
+  const done = TURNS.filter(x=>labels[x.turn_id]).length;
+  document.getElementById("progress").textContent = `進捗: ${done} / ${TURNS.length}`;
+}
+function assign(i, code){
+  labels[TURNS[i].turn_id] = code;
+  localStorage.setItem(KEY, JSON.stringify(labels));
+  updateRow(i);
+  if (continuous) return;          // 連続再生中: 音声は止めず、追従に任せる
+  select(i+1);
+  playOne();
+}
+
+// --- 再生 ---
+function ensureAudio(){
+  if (!audio) document.getElementById("status").textContent = "先に wav を選択してください";
+  return !!audio;
+}
+// 個別再生: 前後に余白を付け、次の発話の頭までは食い込んでも再生する
+function playOne(){
+  if (!ensureAudio()) return;
+  stopContinuous();
+  const t = TURNS[cur], pad = num("pad"), off = num("offset");
+  clearTimeout(stopTimer);
+  audio.playbackRate = num("rate");
+  audio.currentTime = Math.max(0, t.ms/1000 + off - pad);
+  audio.play();
+  const dur = (t.end_ms - t.ms)/1000 + pad*2;
+  stopTimer = setTimeout(()=>audio.pause(), dur*1000 / audio.playbackRate);
+}
+// 連続再生: 流しっぱなしで currentTime に該当する発話を自動ハイライト
+function startContinuous(fromCur=true){
+  if (!ensureAudio()) return;
+  clearTimeout(stopTimer);
+  continuous = true;
+  audio.playbackRate = num("rate");
+  if (fromCur) audio.currentTime = Math.max(0, TURNS[cur].ms/1000 + num("offset") - 0.3);
+  audio.play();
+  const b = document.getElementById("cont");
+  b.textContent = "⏸ 停止"; b.classList.add("playing");
+}
+function stopContinuous(){
+  if (!continuous) return;
+  continuous = false;
+  audio && audio.pause();
+  const b = document.getElementById("cont");
+  b.textContent = "▶ 連続再生（推奨）"; b.classList.remove("playing");
+}
+function turnAt(sec){
+  // offset 補正後の再生位置に「鳴っている or 直近に始まった」発話を返す
+  const ms = (sec - num("offset")) * 1000;
+  let best = 0;
+  for (let i = 0; i < TURNS.length; i++){
+    if (TURNS[i].ms <= ms + 200) best = i; else break;
+  }
+  return best;
+}
+let lastFollow = 0;
+function onTime(){
+  document.getElementById("timeinfo").textContent = fmt(audio.currentTime*1000);
+  if (!continuous) return;
+  const now = performance.now();
+  if (now - lastFollow < 150) return;
+  lastFollow = now;
+  highlight(turnAt(audio.currentTime));
+}
+
+document.getElementById("wav").addEventListener("change", e=>{
+  const f = e.target.files[0];
+  if (!f) return;
+  audio = new Audio(URL.createObjectURL(f));
+  audio.addEventListener("timeupdate", onTime);
+  audio.addEventListener("ended", stopContinuous);
+  document.getElementById("status").textContent = "音声OK: " + f.name + " — 「▶ 連続再生」でどうぞ";
+});
+document.getElementById("cont").addEventListener("click", ()=> continuous ? stopContinuous() : startContinuous());
+document.getElementById("showsys").addEventListener("change", e=>{
+  document.body.classList.toggle("showsys", e.target.checked);
+});
+["n1","n2","n3"].forEach(id=>document.getElementById(id).addEventListener("input", render));
+document.getElementById("rate").addEventListener("input", ()=>{ if (audio) audio.playbackRate = num("rate"); });
+document.getElementById("export").addEventListener("click", ()=>{
+  const done = TURNS.filter(t=>labels[t.turn_id]).length;
+  const out = {
+    session: SESSION,
+    created: new Date().toISOString(),
+    speaker_names: {S1: spName("S1"), S2: spName("S2"), S3: spName("S3")},
+    labeled: done, total: TURNS.length,
+    labels: labels
+  };
+  const blob = new Blob([JSON.stringify(out, null, 1)], {type:"application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `gt_${SESSION}.json`;
+  a.click();
+  document.getElementById("status").textContent = `保存しました（${done}/${TURNS.length}件）。eval/ フォルダに置いてください`;
+});
+document.getElementById("clear").addEventListener("click", ()=>{
+  if (confirm("全てのラベルを消しますか？")) { labels = {}; localStorage.removeItem(KEY); render(); }
+});
+document.addEventListener("keydown", e=>{
+  if (e.target.tagName === "INPUT") return;
+  if (e.key === "1") assign(cur, "S1");
+  else if (e.key === "2") assign(cur, "S2");
+  else if (e.key === "3") assign(cur, "S3");
+  else if (e.key === "9") assign(cur, "MULTI");
+  else if (e.key === "0") assign(cur, "UNK");
+  else if (e.key === " ") { e.preventDefault(); if (!ensureAudio()) return;
+    continuous ? stopContinuous() : startContinuous(); }
+  else if (e.key === "Enter") { e.preventDefault(); playOne(); }
+  else if (e.key === "ArrowLeft") { e.preventDefault(); if (audio) audio.currentTime = Math.max(0, audio.currentTime - 3); }
+  else if (e.key === "ArrowRight") { e.preventDefault(); if (audio) audio.currentTime += 3; }
+  else if (e.key === "ArrowDown") { e.preventDefault(); stopContinuous(); select(cur+1); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); stopContinuous(); select(cur-1); }
+});
+render();
+</script>
+</body>
+</html>

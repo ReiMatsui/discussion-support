@@ -11,6 +11,7 @@ from das.asr.live._diarization import (
     DiarizationEvent,
     SpeakerResolver,
     TimeSegment,
+    has_overlapping_speakers,
     score_diarization,
 )
 from das.asr.live._recv_loop import RecvLoop
@@ -514,3 +515,196 @@ def test_recv_loop_offsets_stt_timestamps_after_reconnect() -> None:
     assert loop.run(WS()) == "finished"  # type: ignore[arg-type]
     assert state.records[0]["ms"] == 12100
     assert state.records[0]["end_ms"] == 12800
+
+
+# --- has_overlapping_speakers（pyannoteハイブリッド構成の重複発話検出）--------
+
+def test_has_overlapping_speakers_false_for_single_speaker() -> None:
+    events = [DiarizationEvent(900, 3100, "SPEAKER_00", "pyannote")]
+    assert has_overlapping_speakers(events, 1000, 3000) is False
+
+
+def test_has_overlapping_speakers_true_when_two_speakers_substantially_overlap() -> None:
+    events = [
+        DiarizationEvent(1000, 3000, "SPEAKER_00", "pyannote"),
+        DiarizationEvent(1000, 2000, "SPEAKER_01", "pyannote"),
+    ]
+    assert has_overlapping_speakers(events, 1000, 3000) is True
+
+
+def test_has_overlapping_speakers_ignores_thin_overlap_below_min_ratio() -> None:
+    """相槌程度の薄い重なり(min_ratio未満)は重複発話とみなさない."""
+    events = [
+        DiarizationEvent(1000, 3000, "SPEAKER_00", "pyannote"),
+        DiarizationEvent(2950, 3000, "SPEAKER_01", "pyannote"),  # 50ms/2000ms = 2.5%
+    ]
+    assert has_overlapping_speakers(events, 1000, 3000, min_ratio=0.2) is False
+
+
+# --- pyannoteハイブリッド構成: クラスタ単位声紋名前付け (RecvLoop配線) ---------
+# 設計: docs/design/pyannote_live1_trial_2026-07-09.md §8.4/§9
+
+class _ClusterNamingTracker:
+    """STTラベル単位のclassify()は使わせず、常にUNSURE_SPEAKERへ落として
+    外部diarizationの解決結果（cluster_namer経由）だけをテストする最小スタブ."""
+
+    def __init__(self) -> None:
+        self.last = None
+
+    def classify(self, *args: object, **kwargs: object) -> str:
+        return UNSURE_SPEAKER
+
+
+class _FakeClusterNamer:
+    """ClusterVoiceNamer自体のロジックはtest_cluster_naming.pyで検証済みのため、
+    ここではRecvLoop側の配線（sp_id決定・rekey・rec_extra）だけを見る。"""
+
+    def __init__(self, name: str | None) -> None:
+        self.name = name
+        self.calls: list[tuple[str, bool]] = []
+
+    def observe(self, raw_cluster: str, wav, *, overlapped: bool = False) -> str | None:
+        self.calls.append((raw_cluster, overlapped))
+        return self.name
+
+    # クラスタ間名寄せ（handoff_2026-07-14 §3）の追加インターフェース。
+    # このフェイクでは名寄せなし（canonical=自分自身・最近傍なし）として振る舞う。
+    def canonical_cluster(self, raw_cluster: str) -> str:
+        return raw_cluster
+
+    def nearest_cluster(self, raw_cluster: str, exclude=None) -> str | None:
+        return None
+
+
+def _make_cluster_naming_state(cluster_namer):
+    import datetime
+
+    class Args:
+        lang = "ja"
+        vp_debug = False
+
+    state = SessionState(  # type: ignore[no-untyped-call]
+        args=Args(),
+        started=datetime.datetime(2026, 1, 1),
+        out_path="/tmp/o.md",
+        html_path="/tmp/o.html",
+        diag_path="/tmp/o.diag",
+        turns_path="/tmp/o.turns",
+        wav_path="/tmp/o.wav",
+        tracker=_ClusterNamingTracker(),  # type: ignore[arg-type]
+        serve=False,
+        cluster_namer=cluster_namer,
+    )
+    state.save = lambda *a, **k: None  # type: ignore[method-assign]
+    state.asr_pcm_buf = bytearray(b"\0" * 16000 * 2 * 3)
+    return state, Args
+
+
+def test_recv_loop_cluster_naming_confirms_name_and_retroactively_renames() -> None:
+    """クラスタが確定名に達したら以後その名前に帰属し、過去の@diar:Nも遡及リネームする
+    （設計点4: 既存rekey機構を使った低コストな遡及リネーム）."""
+    class Backend:
+        def parse_message(self, raw, lang):
+            return raw
+
+    namer = _FakeClusterNamer(name="田中")
+    state, Args = _make_cluster_naming_state(namer)
+    state.diarization_events = [DiarizationEvent(900, 3100, "SPEAKER_00", "pyannote")]
+    # 過去にこのクラスタへ既に@diar:1が発行済み、という状況を再現する。
+    state.diarization_speaker_keys["pyannote:SPEAKER_00"] = "@diar:1"
+    state.records.append({"ms": 0, "end_ms": 900, "speaker": "@diar:1", "text": "前の発話"})
+
+    loop = RecvLoop(state, Args(), Backend())  # type: ignore[arg-type]
+    loop.cur_speaker = "1"  # type: ignore[assignment]
+    loop.cur_text = "これはテストです"
+    loop.cur_ms = 1000
+    loop.cur_end = 3000
+
+    loop.flush()  # type: ignore[no-untyped-call]
+
+    assert namer.calls == [("pyannote:SPEAKER_00", False)]
+    # 過去のレコードも遡及リネームされる。
+    assert state.records[0]["speaker"] == "田中"
+    new_rec = state.records[1]
+    assert new_rec["speaker"] == "田中"
+    assert new_rec["speaker_source"] == "cluster_voiceprint"
+    assert new_rec["speaker_confidence"] == 1.0
+    assert new_rec["speaker_reason"] == "pyannote_cluster_voiceprint_confirmed"
+
+
+def test_recv_loop_cluster_naming_falls_back_when_unconfirmed() -> None:
+    """confidence不足でクラスタが未確定の間は、従来どおりkey_for_diarization_speaker
+    の匿名キー付与にフォールバックする（挙動を壊さない）."""
+    class Backend:
+        def parse_message(self, raw, lang):
+            return raw
+
+    namer = _FakeClusterNamer(name=None)
+    state, Args = _make_cluster_naming_state(namer)
+    state.diarization_events = [DiarizationEvent(900, 3100, "SPEAKER_00", "pyannote")]
+
+    loop = RecvLoop(state, Args(), Backend())  # type: ignore[arg-type]
+    loop.cur_speaker = "1"  # type: ignore[assignment]
+    loop.cur_text = "これはテストです"
+    loop.cur_ms = 1000
+    loop.cur_end = 3000
+
+    loop.flush()  # type: ignore[no-untyped-call]
+
+    assert namer.calls == [("pyannote:SPEAKER_00", False)]
+    rec = state.records[0]
+    assert rec["speaker"] == "@diar:1"
+    assert rec["speaker_source"] == "pyannote"
+    assert rec["speaker_reason"] == "diarization_overlap_1.00"
+
+
+def test_recv_loop_cluster_naming_marks_overlap_region_as_unsure() -> None:
+    """重複発話（複数クラスタが同時にこの区間を占める）は安全側で未確定にする
+    （設計点5）。クラスタバッファも汚染しないため observe には overlapped=True で渡す."""
+    class Backend:
+        def parse_message(self, raw, lang):
+            return raw
+
+    namer = _FakeClusterNamer(name=None)
+    state, Args = _make_cluster_naming_state(namer)
+    state.diarization_events = [
+        DiarizationEvent(1000, 3000, "SPEAKER_00", "pyannote"),
+        DiarizationEvent(1000, 2000, "SPEAKER_01", "pyannote"),
+    ]
+
+    loop = RecvLoop(state, Args(), Backend())  # type: ignore[arg-type]
+    loop.cur_speaker = "1"  # type: ignore[assignment]
+    loop.cur_text = "これはテストです"
+    loop.cur_ms = 1000
+    loop.cur_end = 3000
+
+    loop.flush()  # type: ignore[no-untyped-call]
+
+    assert namer.calls == [("pyannote:SPEAKER_00", True)]
+    rec = state.records[0]
+    assert rec["speaker"] == UNSURE_SPEAKER
+    assert rec["speaker_source"] == "cluster_overlap"
+    assert rec["speaker_confidence"] == 0.0
+    assert rec["speaker_reason"] == "multiple_diarization_speakers_overlap"
+
+
+def test_recv_loop_without_cluster_namer_keeps_legacy_behavior() -> None:
+    """cluster_namer未設定（従来のpyannote単独モード）は挙動が変わらない."""
+    class Backend:
+        def parse_message(self, raw, lang):
+            return raw
+
+    state, Args = _make_cluster_naming_state(None)
+    state.diarization_events = [DiarizationEvent(900, 3100, "SPEAKER_00", "pyannote")]
+
+    loop = RecvLoop(state, Args(), Backend())  # type: ignore[arg-type]
+    loop.cur_speaker = "1"  # type: ignore[assignment]
+    loop.cur_text = "これはテストです"
+    loop.cur_ms = 1000
+    loop.cur_end = 3000
+
+    loop.flush()  # type: ignore[no-untyped-call]
+
+    rec = state.records[0]
+    assert rec["speaker"] == "@diar:1"
+    assert rec["speaker_source"] == "pyannote"

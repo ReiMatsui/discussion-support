@@ -27,6 +27,19 @@ docs.pyannote.ai/api-reference/{create-stream,streaming} (AsyncAPI) で
     ログに出すよう変更）。
   - 話者数: 最大8人まで同時追跡（`data.speaker` は "SPEAKER_00".."SPEAKER_07"
     相当のセッション内固定ラベル）。
+  - 話者数ヒント: ``POST /v1/live`` の body スキーマは
+    ``application/json`` の ``object`` 型で、プロパティは一切定義されて
+    いない（2026-07-09時点、docs.pyannote.ai/api-reference/create-stream
+    のOpenAPIスキーマで確認。``maxSpeakers``/``numSpeakers`` 等は存在しない）。
+    つまり Live-1 は話者数ヒントを受け付けない仕様であり、本provider内で
+    最大話者数を指定しても pyannoteAI 側には送れない。以下の
+    ``max_speakers`` 引数はこの事実を踏まえた上での「配線だけ用意」で
+    あり、API へは送信されない（将来 API が対応した場合に備えたプレース
+    ホルダ、および将来ローカルでのクラスタ数制限に使うためのフック）。
+    実際にセッション内の人間話者数を抑制したい場合は、既存の
+    ``--diarization-max-speakers`` → ``SessionState.constrain_human_speaker_key``
+    /``VoiceProfiles.set_max_human_speakers`` の経路（_bootstrap.py）が
+    セッションレベルで機能する。
 """
 from __future__ import annotations
 
@@ -58,13 +71,46 @@ class PyannoteStreamingDiarizationProvider:
     入力側の共通形式は既存のライブ処理に合わせて 16kHz PCM16 bytes とし、
     pyannoteAI Live-1 が要求する 16kHz mono float32 little-endian・100ms固定
     チャンクに内部変換して送る。
+
+    自動再接続:
+      サーバ切断（close code 1011 等）は scripts/test_pyannote_live.py で
+      先行実装・検証済みだったロジック（新セッション作成＋タイムスタンプ
+      オフセット補正）を本体に移植したもの。``send_audio()`` 中に送信が
+      失敗した場合、``max_reconnects`` 回まで自動的に新しい Live-1 セッション
+      を作り直し、そのセッション内タイムスタンプに「これまでに送信できた
+      音声の累計ms」を加算して連続したタイムラインに補正する
+      （``_session_base_ms``）。
+      pyannoteAI のセッション内話者ラベル(SPEAKER_00等)は新セッションでは
+      ラベル空間が変わる（同じ人が別ラベルになりうる）ため、再接続後の
+      ラベルには ``R{epoch}:`` を前置して衝突を避ける
+      （``_label_epoch``、epoch=0は前置なし）。この「再接続直後に新しい
+      ラベルが出現する」挙動は、SessionState側の参加者化ヒステリシス
+      (``PYANNOTE_PARTICIPANT_HYSTERESIS_S``, 既定3.0秒。
+      ``_session_state.py`` の ``key_for_diarization_speaker`` 参照)が
+      吸収する設計。再接続直後の短い揺れでは偽参加者を作らず、既存参加者の
+      発話が3秒以上そのラベルに乗り続けた場合のみ新規参加者として確定する。
     """
 
     _CREATE_URL = "https://api.pyannote.ai/v1/live"
 
-    def __init__(self, api_key: str, *, create_url: str | None = None) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        create_url: str | None = None,
+        max_speakers: int | None = None,
+        max_reconnects: int = 3,
+        auto_reconnect: bool = True,
+    ) -> None:
         self.api_key = api_key
         self.create_url = create_url or self._CREATE_URL
+        # Live-1 の `POST /v1/live` はボディにプロパティを持たない(objectのみ)
+        # ため話者数ヒントを送る手段が無い。ここでの保持は将来API対応時の
+        # フックであり、現状はAPI呼び出しに一切反映されない
+        # （クラスdocstring冒頭「話者数ヒント」節を参照）。
+        self.max_speakers = max_speakers
+        self.max_reconnects = max_reconnects
+        self.auto_reconnect = auto_reconnect
         self.stream_id: str | None = None
         self._ws: Any = None
         self._events: queue.Queue[DiarizationEvent] = queue.Queue()
@@ -72,17 +118,29 @@ class PyannoteStreamingDiarizationProvider:
         self._stop = threading.Event()
         self._active_starts: dict[str, int] = {}
         self._pcm_buf = bytearray()
+        self._reconnects = 0
+        self._session_base_ms = 0
+        self._label_epoch = 0
+        self._sent_audio_ms = 0
 
     @property
     def name(self) -> str:
         return "pyannote"
 
     def start(self) -> None:
-        from websockets.sync.client import connect
-
         self._stop.clear()
         self._active_starts.clear()
         self._pcm_buf.clear()
+        self._reconnects = 0
+        self._session_base_ms = 0
+        self._label_epoch = 0
+        self._sent_audio_ms = 0
+        self._connect()
+
+    def _connect(self) -> None:
+        """新しい Live-1 セッションを作成しWS接続する（初回start/再接続共通）."""
+        from websockets.sync.client import connect
+
         req = urllib.request.Request(self.create_url, data=b"{}", method="POST")
         req.add_header("Authorization", f"Bearer {self.api_key}")
         req.add_header("Content-Type", "application/json")
@@ -94,12 +152,48 @@ class PyannoteStreamingDiarizationProvider:
         self._reader = threading.Thread(target=self._read_loop, daemon=True)
         self._reader.start()
 
+    def _handle_disconnect(self, exc: Exception) -> None:
+        """送信失敗を検知した際に自動再接続を試みる（再接続数上限あり）."""
+        logger.warning("pyannote Live-1: 送信中に切断を検知しました (%s)。", exc)
+        if not self.auto_reconnect or self._reconnects >= self.max_reconnects:
+            logger.error(
+                "pyannote Live-1: 再接続を行いません（auto_reconnect=%s, %d/%d回）。",
+                self.auto_reconnect, self._reconnects, self.max_reconnects,
+            )
+            self._ws = None
+            return
+        with contextlib.suppress(Exception):
+            if self._ws is not None:
+                self._ws.close()
+        if self._reader is not None:
+            self._reader.join(timeout=1.0)
+        self._reconnects += 1
+        # これまでに送信できた音声の累計msをオフセットとして次セッションに引き継ぐ。
+        self._session_base_ms += self._sent_audio_ms
+        self._sent_audio_ms = 0
+        self._label_epoch += 1
+        self._active_starts.clear()
+        self._stop.clear()
+        try:
+            self._connect()
+            logger.warning(
+                "pyannote Live-1: 新セッションで再接続しました (%d/%d回目、"
+                "音声内位置 %dms から再開、ラベルepoch=%d)。",
+                self._reconnects, self.max_reconnects,
+                self._session_base_ms, self._label_epoch,
+            )
+        except Exception:
+            logger.exception("pyannote Live-1: 再接続に失敗しました。")
+            self._ws = None
+
     def send_audio(self, pcm16k: bytes) -> None:
         """16kHz mono PCM16 bytes を受け取り、Live-1 仕様の100ms固定 f32le
         チャンク(6400バイト)に再分割して送信する。
 
         呼び出し元のチャンク境界（マイク100ms / WAVシミュレーション120ms等）
         は仕様の100ms固定と一致しないことがあるため、内部バッファで吸収する。
+        送信中にサーバ切断を検知した場合、``auto_reconnect`` が有効なら
+        新セッションを作って同じチャンクを送り直す（自動再接続）。
         """
         if self._ws is None:
             return
@@ -108,8 +202,16 @@ class PyannoteStreamingDiarizationProvider:
             chunk = bytes(self._pcm_buf[:_CHUNK_BYTES_PCM16])
             del self._pcm_buf[:_CHUNK_BYTES_PCM16]
             payload = pcm16_to_pyannote_f32(chunk)
-            if payload:
+            if not payload:
+                continue
+            try:
                 self._ws.send(payload)
+            except Exception as exc:
+                self._handle_disconnect(exc)
+                if self._ws is None:
+                    raise
+                self._ws.send(payload)
+            self._sent_audio_ms += _CHUNK_MS
 
     def drain_events(self) -> list[DiarizationEvent]:
         events: list[DiarizationEvent] = []
@@ -177,15 +279,42 @@ class PyannoteStreamingDiarizationProvider:
         if typ not in {"diarization_speaker_start", "diarization_speaker_end"}:
             return None
         data = msg.get("data") or {}
-        speaker = data.get("speaker")
+        raw_speaker = data.get("speaker")
         timestamp = data.get("timestamp")
-        if not isinstance(speaker, str) or not isinstance(timestamp, int | float):
+        if not isinstance(raw_speaker, str) or not isinstance(timestamp, int | float):
             return None
-        ms = int(float(timestamp) * 1000)
+        # 再接続後(epoch>0)はラベル空間が変わるため前置して衝突を避ける。
+        # クラスdocstring「自動再接続」節参照。
+        speaker = raw_speaker if self._label_epoch == 0 else f"R{self._label_epoch}:{raw_speaker}"
+        ms = int(float(timestamp) * 1000) + self._session_base_ms
         if typ == "diarization_speaker_start":
             self._active_starts[speaker] = ms
             return None
-        start_ms = self._active_starts.pop(speaker, ms)
+        # diarization_speaker_end。仕様(streaming-real-time)上は
+        # start/end が必ず対で来る想定だが、実測ではサーバ側の重複end送信・
+        # 再接続直後の取りこぼし等で「対応するstartが無いend」が届くことが
+        # あった。以前の実装は `pop(speaker, ms)` で end の timestamp 自体を
+        # フォールバックのstartに使っており、start_ms == end_ms の縮退
+        # セグメント（0ms区間）を量産していた（DiarizationEvent.closed()は
+        # end<=startを弾くため下流には影響しないが、drain_events()経由で
+        # 生ログ・統計に混入し、イベントペアリングの不整合を隠していた）。
+        # 対応するstartが無いendは実区間を再構成できないため、ここで
+        # ログを残した上で捨てる（Noneを返す）。
+        if speaker not in self._active_starts:
+            logger.warning(
+                "pyannote Live-1: speaker=%s の speaker_end (ts=%.3fs) に対応する"
+                " speaker_start がありません。縮退セグメント化を避けるため破棄します。",
+                speaker, timestamp if isinstance(timestamp, int | float) else -1.0,
+            )
+            return None
+        start_ms = self._active_starts.pop(speaker)
+        if ms <= start_ms:
+            logger.warning(
+                "pyannote Live-1: speaker=%s の区間が非正 (start_ms=%d end_ms=%d)。"
+                " 縮退セグメントとして破棄します。",
+                speaker, start_ms, ms,
+            )
+            return None
         return DiarizationEvent(
             start_ms=start_ms,
             end_ms=ms,

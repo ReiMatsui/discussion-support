@@ -27,11 +27,13 @@ from ._constants import (
     HTML_PALETTE,
     HTML_TMPL,
     PALETTE,
+    PYANNOTE_PARTICIPANT_HYSTERESIS_S,
     RESET,
     SR,
     UNSURE_SPEAKER,
     fmt_ts,
 )
+from ._cluster_naming import ClusterVoiceNamer
 from ._diarization import DiarizationEvent, DiarizationProvider, SpeakerResolver
 from ._participation import participation_stats
 from ._voice_profiles import VoiceProfiles
@@ -53,7 +55,8 @@ class SessionState:
     def __init__(self, *, args, started, out_path, html_path, diag_path,
                  turns_path, wav_path, tracker=None, serve=True,
                  diarization_provider: DiarizationProvider | None = None,
-                 speaker_resolver: SpeakerResolver | None = None):
+                 speaker_resolver: SpeakerResolver | None = None,
+                 cluster_namer: ClusterVoiceNamer | None = None):
         self.args = args
         self.stt_backend = None
         self.started = started
@@ -86,6 +89,19 @@ class SessionState:
         self.diarization_events: list[DiarizationEvent] = []
         self.diarization_lock = threading.Lock()
         self.diarization_speaker_keys: dict[str, str] = {}
+        # 参加者化ヒステリシス用: まだ @diar:N を発行していないラベルの累積発話ms。
+        # pyannote provider 使用時のみ参照される（他providerは従来どおり即時登録）。
+        self.diarization_pending_ms: dict[str, int] = {}
+        # @diar:N の採番用の単調増加カウンタ。クラスタ間名寄せは
+        # diarization_speaker_keys の吸収側エントリを pop して辞書を縮めるため、
+        # len ベースの採番だと使用中の @diar:N を別人へ再発行してしまう
+        # （docs/design/handoff_2026-07-14_unregistered_speakers.md §3 参照）。
+        self.diarization_key_seq = 0
+        # ハイブリッド構成（docs/design/pyannote_live1_trial_2026-07-09.md §9）:
+        # pyannoteクラスタ単位の声紋照合による名前付け。--vp-cluster-naming
+        # 指定時のみ _bootstrap.py が生成して渡す。None なら従来どおり
+        # key_for_diarization_speaker の匿名キー付与のみで完結する。
+        self.cluster_namer: ClusterVoiceNamer | None = cluster_namer
         self.anonymous_labels: dict[str, str] = {}
         self._DIARIZATION_KEEP_MS = 10 * 60 * 1000
 
@@ -229,6 +245,27 @@ class SessionState:
             return self._anonymous_label_for(key)
         return key
 
+    def peek_disp_name(self, key) -> str:
+        """割当てを行わない読み取り専用の表示名取得.
+
+        disp_name は未割当ての匿名キーに新しいラベル文字を割り当てる副作用を持つ。
+        partial（認識途中）表示のためだけに呼ぶと、flush まで到達しない一時的な
+        STTラベル（幻キー）がラベル文字とスロットを恒久的に消費してしまう
+        （2026-07-14 実セッション: 議事録に一度も現れない幻キーが「参加者B」を
+        占有、docs/design/handoff_2026-07-14_unregistered_speakers.md 参照）。
+        表示のみの経路（show_partial / vp_debug の途中経過出力）はこちらを使う。
+        未割当てなら中立表示「?」を返し、辞書は変更しない。
+        """
+        key = str(key)
+        if key == UNSURE_SPEAKER:
+            return "未確定"
+        name = self.names.get(key)
+        if name and not self._is_system_anonymous_name(name):
+            return name
+        if self._is_anonymous_speaker_key(key) or self._is_system_anonymous_name(key) or name:
+            return self.anonymous_labels.get(key, "?")
+        return key
+
     @staticmethod
     def _is_system_anonymous_name(name: str | None) -> bool:
         if not name:
@@ -305,6 +342,18 @@ class SessionState:
                     slots.add(slot)
         return len(slots)
 
+    def human_slot_budget_exhausted(self) -> bool:
+        """参加人数上限(diarization_max_speakers)まで人間スロットが埋まっているか.
+
+        クラスタ間名寄せの「昇格の厳格化」用
+        （docs/design/handoff_2026-07-14_unregistered_speakers.md §3 の2）:
+        上限到達後は新規の参加者Xを増やさず、最近傍クラスタへの統合を優先する
+        判断に使う。上限未設定なら常に False（従来挙動）。
+        """
+        max_speakers = self._max_human_speakers()
+        return (max_speakers is not None
+                and self._known_human_slot_count() >= max_speakers)
+
     def constrain_human_speaker_key(self, key) -> str:
         """参加人数上限を超える新規匿名話者を「未確定」に落とす.
 
@@ -324,6 +373,14 @@ class SessionState:
         if tracker is not None and not getattr(tracker, "auto", True):
             roster = set(tracker.active_profile_names())
             return key if key in roster else UNSURE_SPEAKER
+        # 声紋トラッカーに実在プロファイルがあるキー（自動登録の「人物N」等）は
+        # スロット選別の対象外として通す。登録数は tracker.set_max_human_speakers
+        # が上限管理しており、ここで匿名ラベル文字の辞書順スロットで二重に絞ると、
+        # 声紋一致で確定済みの人物がラベル文字の巡り合わせ（例: 人物2=参加者D）
+        # だけで全発話が未確定に落ちる（2026-07-14 実セッションで確認、
+        # docs/design/handoff_2026-07-14_unregistered_speakers.md 参照）。
+        if tracker is not None and key in getattr(tracker, "profiles", {}):
+            return key
         if not (self._is_anonymous_speaker_key(key) or self._is_system_anonymous_name(key)):
             return key
         max_speakers = self._max_human_speakers()
@@ -339,22 +396,72 @@ class SessionState:
             return UNSURE_SPEAKER
         return key
 
-    def key_for_diarization_speaker(self, source: str, speaker: str) -> str:
+    def _uses_pyannote_hysteresis(self) -> bool:
+        """新規ラベルの参加者化にヒステリシスを適用するか.
+
+        pyannote Live-1 はセッション序盤にラベルが揺れ、一人の発話が
+        SPEAKER_00/01/02... に分裂することが実地の検証（Live-1試行,
+        docs/design/pyannote_live1_trial_2026-07-09.md）で確認された。
+        即座に @diar:N を発行すると偽参加者が量産されるため、pyannote
+        provider使用時のみ猶予を設ける。Soniox/AssemblyAI経路の挙動は
+        変えない（従来どおり即時登録）。
+        """
+        provider = self.diarization_provider
+        return provider is not None and getattr(provider, "name", None) == "pyannote"
+
+    def key_for_diarization_speaker(
+        self, source: str, speaker: str, duration_ms: int = 0
+    ) -> str:
         """外部diarizationの生ラベルを、表示用の安定した内部キーに変換する.
 
         pyannote の ``SPEAKER_00`` は実名でもUI向けラベルでもなく、provider内部の
         未登録クラスタIDにすぎない。recordsには内部キーを入れ、表示は参加者A/Bに統一する。
+
+        ``duration_ms`` はこの発話の長さ（ms）。pyannote provider使用時のみ、
+        同一の生ラベル（source:speaker）の累積発話が
+        ``PYANNOTE_PARTICIPANT_HYSTERESIS_S`` 秒に達するまでは @diar:N を
+        発行せず UNSURE_SPEAKER を返す（未確定のまま扱う）。達した時点で
+        @diar:N を新規発行するが、それまでに UNSURE_SPEAKER として記録済みの
+        過去レコードの遡及的な付け替えは行わない（records は speaker_source /
+        diarization_raw_speaker で追跡可能なため事後分析は可能だが、
+        RecvLoop.flush() の二段階構成 [resolve→append] をまたぐ安全な
+        rename配線が低コストにできなかったため今回は見送り。未確定のまま
+        UIに残る）。
         """
         raw = f"{source}:{speaker}"
-        if raw not in self.diarization_speaker_keys:
-            idx = len(self.diarization_speaker_keys) + 1
-            key = f"@diar:{idx}"
-            self.diarization_speaker_keys[raw] = key
+        if raw in self.diarization_speaker_keys:
+            return self.diarization_speaker_keys[raw]
+        if self._uses_pyannote_hysteresis():
+            threshold_ms = int(PYANNOTE_PARTICIPANT_HYSTERESIS_S * 1000)
+            pending = self.diarization_pending_ms.get(raw, 0) + max(0, duration_ms)
+            if pending < threshold_ms:
+                self.diarization_pending_ms[raw] = pending
+                return UNSURE_SPEAKER
+            self.diarization_pending_ms.pop(raw, None)
+        # len ベースの採番は名寄せの pop で辞書が縮むと使用中キーを再発行するため、
+        # 単調増加カウンタで採番する（名寄せ無しなら len+1 と同値＝従来挙動不変）。
+        self.diarization_key_seq += 1
+        key = f"@diar:{self.diarization_key_seq}"
+        self.diarization_speaker_keys[raw] = key
         return self.diarization_speaker_keys[raw]
 
-    def key_for_stt_fallback_speaker(self, speaker: str) -> str:
+    def merge_diarization_pending(self, absorbed: str, canonical: str) -> None:
+        """名寄せで吸収された生ラベルのヒステリシス累積を canonical へ合算する.
+
+        クラスタ間名寄せ（docs/design/handoff_2026-07-14_unregistered_speakers.md §3）
+        で absorbed→canonical の統合が成立した時点で呼ぶ。同一人物の発話量なので、
+        吸収側に溜まっていた pending を canonical へ引き継ぎ、クラスタ分裂で
+        ヒステリシスが二重に課されて参加者化が不当に遅れるのを防ぐ。
+        canonical が既にキー発行済みなら pending は不要なので捨てるだけでよい。
+        """
+        carried = self.diarization_pending_ms.pop(absorbed, 0)
+        if carried and canonical not in self.diarization_speaker_keys:
+            self.diarization_pending_ms[canonical] = (
+                self.diarization_pending_ms.get(canonical, 0) + carried)
+
+    def key_for_stt_fallback_speaker(self, speaker: str, duration_ms: int = 0) -> str:
         """外部diarizationが薄い時のSTTラベルも表示用の内部キーへ正規化する."""
-        return self.key_for_diarization_speaker("stt", speaker)
+        return self.key_for_diarization_speaker("stt", speaker, duration_ms)
 
     def key_for_label(self, sp) -> str:
         if str(sp).strip().lower() in {"", "none", "null", "unknown", "uu", UNSURE_SPEAKER}:
@@ -427,6 +534,10 @@ class SessionState:
                     r["speaker"] = new
             if old in self.colors:
                 self.colors.setdefault(new, self.colors.pop(old))
+            if old in self.names:
+                # 表示名も colors と同じ流儀で移行する（new に既に名前があれば
+                # old 側は捨てる）。残留させると古いキーの names が溜まり続ける。
+                self.names.setdefault(new, self.names.pop(old))
             if old in self.anonymous_labels:
                 if self._displays_real_name(new):
                     # 実名に統合された → old の文字を解放（引き継がない）。後続の
@@ -755,8 +866,12 @@ class SessionState:
             self.partial_text = ""
             self.partial_speaker = ""
             self.diarization_speaker_keys = {}
+            self.diarization_pending_ms = {}
+            self.diarization_key_seq = 0
         with self.diarization_lock:
             self.diarization_events = []
+        if self.cluster_namer is not None:
+            self.cluster_namer.reset()
         if self.tracker is not None:
             self.tracker.reset_session()
         with self.topics_lock:
@@ -973,7 +1088,9 @@ class SessionState:
         t = text.strip()
         prev = self.partial_text
         self.partial_text = t
-        self.partial_speaker = self.disp_name(self.key_for_label(sp)) if t else ""
+        # peek_disp_name（割当てなし）を使う: partial 限りの幻キーにラベル文字を
+        # 割り当てない。本表示（flush→records）の disp_name は従来どおり割当てあり。
+        self.partial_speaker = self.peek_disp_name(self.key_for_label(sp)) if t else ""
         # M6: 長い発話の途中では STT 確定レコードが来ず「喋っている最中に沈黙が
         # 伸びる」ため、pause 判定を満たした介入が発話に被さり得る。partial の受信
         # でも沈黙タイマーを更新し、発話中を「沈黙」と誤認しないようにする。

@@ -368,6 +368,31 @@ def test_open_roster_still_allows_anonymous_within_cap():
     assert s.constrain_human_speaker_key("@diar:1") == "@diar:1"
 
 
+def test_voiceprint_profile_key_survives_constrain_regardless_of_label_letter():
+    """声紋プロファイル済みキー（人物N）はラベル文字の辞書順スロット選別で落とさない.
+
+    バグ修正（2026-07-14 実セッション）: 自動登録済みの「人物2」のラベルが
+    「参加者D」（4番目の文字）だったため、max_speakers=3 のスロット選別
+    （sorted(labels)[:max] の文字辞書順）から漏れ、声紋一致（sim 0.75-0.85）にも
+    かかわらず全25発話が未確定に落ちた。登録数の上限は tracker 側の
+    set_max_human_speakers が管理するため、constrain で二重に絞らない
+    (docs/design/handoff_2026-07-14_unregistered_speakers.md 参照)。
+    """
+    s = _make_state()
+    tr = _FakeTracker(auto=True)
+    tr.profiles = {"人物1": 1, "人物2": 1, "人物3": 1}
+    s.tracker = tr
+    s.set_diarization_max_speakers(3)
+    # 幻キー #4 が先に文字を消費し、人物2 が4番目の文字（参加者D）になった状況
+    s.anonymous_labels = {"人物1": "参加者A", "#4": "参加者B",
+                          "人物3": "参加者C", "人物2": "参加者D"}
+
+    assert s.constrain_human_speaker_key("人物2") == "人物2"   # 声紋確定キーは通す
+    assert s.constrain_human_speaker_key("人物1") == "人物1"
+    # プロファイルの無い匿名キーは従来どおり上限で未確定に落ちる
+    assert s.constrain_human_speaker_key("@diar:9") == UNSURE_SPEAKER
+
+
 def test_http_rename_without_tracker():
     """/rename（声紋なし）で表示名が更新される（SPAのリネームフロー）."""
     s = _make_state()
@@ -533,14 +558,24 @@ def test_save_writes_legacy_html_without_server(tmp_path):
 # --- 課題①: 認識途中(partial)の配信 -----------------------------------------
 
 def test_show_partial_updates_state_and_snapshot():
-    """show_partial が partial を保持し、api_snapshot に載る（課題①）."""
+    """show_partial が partial を保持し、api_snapshot に載る（課題①）.
+
+    バグ修正（2026-07-14）: partial 表示はラベル文字を新規割当てしない
+    （幻キーがスロットを消費する問題の修正。peek_disp_name 参照）。
+    flush 済みでラベルを持つ話者は従来どおりその文字で表示される。
+    """
     s = _make_state()
     s.records = [{"speaker": "#1", "text": "x", "ms": 0, "end_ms": 100}]
+    s.disp_name("#1")   # flush（本表示）で割当て済みの状況
     s.show_partial("1", "いまここを認識中")
     assert s.partial_text == "いまここを認識中"
     snap = s.api_snapshot()
     assert snap["partial"]["text"] == "いまここを認識中"
     assert snap["partial"]["speaker"] == "参加者A"
+    # 未割当てキーの partial は中立表示「?」（文字を消費しない、許容仕様）
+    s.show_partial("2", "こちらは新規の声")
+    assert s.api_snapshot()["partial"]["speaker"] == "?"
+    assert "#2" not in s.anonymous_labels
     # 空文字でクリアされる
     s.show_partial("1", "")
     assert s.api_snapshot()["partial"] == {"speaker": "", "text": ""}

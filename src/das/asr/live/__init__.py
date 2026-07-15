@@ -86,6 +86,10 @@ def post_system(text: str) -> None:
               help="外部話者分離の供給源")
 @click.option("--diarization-max-speakers", type=int, default=None,
               help="外部話者分離に渡す最大話者数ヒント（AssemblyAI等）")
+@click.option("--vp-cluster-naming", is_flag=True,
+              help="pyannoteハイブリッド構成: pyannoteの生クラスタ単位で声紋照合し"
+                   "名前を確定する（--diarization pyannote専用。声紋照合が"
+                   "有効な時のみ機能。docs/design/pyannote_live1_trial_2026-07-09.md §9）")
 @click.option("--port", type=int, default=8231, help="UIサーバーのポート番号（0で無効）")
 @click.option("--agent/--no-agent", default=True,
               help="AIファシリテーターを有効化（OPENAI_API_KEY必要）")

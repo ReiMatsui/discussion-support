@@ -93,6 +93,19 @@ class VoiceProfiles:
 
     ANON = re.compile(r"^人物\d+$")
 
+    # ハイブリッド構成（pyannoteクラスタ×声紋照合, ClusterVoiceNamer有効）フラグ。
+    # クラス属性の既定値 False により、Soniox単独・pyannote単独の既存挙動は不変。
+    # True のとき短発話(short_floor〜min_sec)の厳格声紋照合を「既知1人」でも試みる
+    # （通常は取り違え防止のため既知2人以上が条件）。実測（transcripts/2026-07-14_1729,
+    # GT81発話）で声紋一致92%(n=13)に対し前話者追従は28%(n=32)と、3人会話では
+    # 追従が害になるため、当たる機構＝声紋照合の射程を短発話にも広げる。
+    # 照合しきい値は既存の短発話用厳格運用（本人しきい値+short_bonus,
+    # margin×short_margin_mult）のまま＝当たりにくいだけで誤りは増やさない。
+    hybrid = False
+
+    # 厳格照合を要求する発話長の上限秒数（クラス既定値。__init__ 経由でインスタンス化）。
+    strict_sec = 3.0
+
     # モデル別の既定しきい値（実音声プールで校正済み。スコアのスケールが違う）
     # resemblyzer: 軽量・依存少。同一/別人の分布に重なりあり（分離マージン-0.06）
     # ecapa: ほぼ完全分離(+0.01)＋10倍速。混合音声を成分話者と強くマッチさせる癖
@@ -143,8 +156,17 @@ class VoiceProfiles:
         # 短い発話の取り違え安定化（2人会話の短いラリー対策）。min_sec 未満でも、
         # 既知の2人以上を「厳格に」区別できるときだけ声紋で割り当てを正す。
         self.short_floor = 0.45        # 厳格照合する下限秒数（これ未満は声が短すぎるので追従）
-        self.short_bonus = 0.05        # 採用閾値を本人閾値からどれだけ引き上げるか
+        self.short_bonus = 0.08        # 採用閾値を本人閾値からどれだけ引き上げるか
+        # （0.05→0.08, 2026-07-14: 2.0s発話の誤一致 sim=0.49 が本人しきい値0.42+0.05
+        #   をすり抜けラベルの人物対応を破壊。正しい一致は全て0.60以上で影響なし）
         self.short_margin_mult = 2.0   # 要求する2位とのmargin倍率
+        # 厳格照合を要求する上限秒数。min_sec〜strict_sec の中尺発話も、短発話と同じ
+        # 厳格条件（+short_bonus, margin×short_margin_mult）でしか即時判定しない。
+        # 実測(eval/replay_attribution.py, 2026-07-14_142016): 5秒超の照合は6/6正解に
+        # 対し、1〜2.5秒は誤一致が集中（1.1s sim=0.43, 2.0s sim=0.49 の2件が別人に
+        # 一致し、ラベルの人物対応を壊して遡及リネームまで阻害）。埋め込みの信頼性は
+        # 発話長に強く依存するため、基準しきい値で信じるのは strict_sec 以上のみ。
+        self.strict_sec = self.strict_sec   # クラス既定値を実体化（テスト・調整用）
         # 新規人物の自動登録は「発話数」ではなく「声ごとのクリーンな発声の累積文字数」で
         # 判定する。声紋の質は本質的に発声の総量で決まり、文字数はその良い代理（長いだけで
         # 無音・雑音の区間を弾く）。連続して長く話す人も、短く何度も話す人も同じ原理で確定。
@@ -325,6 +347,10 @@ class VoiceProfiles:
     def set_max_human_speakers(self, value: int | None) -> None:
         self.max_human_speakers = value
 
+    def set_hybrid(self, value: bool) -> None:
+        """ハイブリッド構成（ClusterVoiceNamer有効）を宣言する（クラス属性参照）."""
+        self.hybrid = bool(value)
+
     def _note(self, kind: str, **info) -> None:
         self.counts[kind] = self.counts.get(kind, 0) + 1
         self.last = {"kind": kind, **info}
@@ -353,7 +379,15 @@ class VoiceProfiles:
             return None
         self.embed_ms.append((time.perf_counter() - t0) * 1000)
         emb = np.asarray(emb, dtype=np.float64)
-        return emb / np.linalg.norm(emb)
+        norm = float(np.linalg.norm(emb))
+        if norm == 0.0 or not np.isfinite(norm):
+            # 全ゼロ・非有限の埋め込み（無音区間やモデルの異常出力）は正規化で
+            # NaN に化け、以後の内積比較を全て壊す。従来は NaN 伝播で照合不成立に
+            # 落ちるだけだったが、クラスタ間名寄せは埋め込みを代表として保存する
+            # (docs/design/handoff_2026-07-14_unregistered_speakers.md §3) ため、
+            # ここで None に落として保存経路に NaN が入らないようにする。
+            return None
+        return emb / norm
 
     def classify(self, wav: np.ndarray, sp, overlapped: bool = False,
                  count: bool = True, chars: int = 0, enroll: bool = True) -> str:
@@ -361,8 +395,16 @@ class VoiceProfiles:
 
         overlapped=True の発話は声が混ざっていて声紋がデタラメになるため、
         声での判定をスキップして直前の対応を維持する。
-        count=False（相槌など）の発話は声紋の照合そのものをスキップし、既存の
-        割り当てに追従するだけにする（課題④）。
+        count=False（相槌など）の発話は声紋の照合そのものをスキップする。
+        声紋で判定できない発話は「ラベル継続」: そのSTTラベルの現在の対応先
+        （声紋で裏付けられた人物、まだ無ければ #ラベルのプレースホルダ）を
+        そのまま返す（2026-07-14, eval/replay_attribution.py での再設計）。
+        一度でも照合に外れたらラベルの人物対応を破棄して #ラベルへ落とす旧仕様は、
+        中尺発話の声紋が不安定な実会話で対応が壊れ続け（同一人物が #ラベルと
+        人物Nに分裂、1:1帰属精度44%）、継続に変えるだけで54%に改善した。
+        ラベル継続の対応先は必ず声紋照合の成功（一致・登録・合流）でしか
+        書き換わらないため、「声の証拠に基づく最後の対応を維持する」機構であり、
+        根拠なしに直前話者へ寄せる旧「前話者追従」（実測28%で廃止）とは異なる。
         enroll=False（エコー窓中の人間発話など）は照合・補正は行うが、声紋の蓄積・
         人物登録には使わない。エコー窓直後に集中する返答が声紋補正なしのラベル追従に
         落ちるのを防ぎつつ、漏れ込んだAI音声で匿名話者が育つのは防ぐ（P2-2）。
@@ -403,7 +445,11 @@ class VoiceProfiles:
                 if ranked is not None:
                     cand, sim, second = ranked
                     info.update(sim=round(sim, 3), second=round(second, 3), name=cand, prev=prev)
-                    if sim >= self._person_th(cand, th) and sim - second >= self.margin:
+                    strict = wav.size < SR * self.strict_sec
+                    need_th = (self._person_th(cand, th)
+                               + (self.short_bonus if strict else 0.0))
+                    need_mg = self.margin * (self.short_margin_mult if strict else 1.0)
+                    if sim >= need_th and sim - second >= need_mg:
                         self.sp_map[sp] = cand
                         h = self.own_sims.setdefault(cand, [])
                         h.append(sim)
@@ -411,20 +457,16 @@ class VoiceProfiles:
                         self._note("補正" if (prev is not None and not prev.startswith("#")
                                               and prev != cand) else "声紋一致", label=sp, **info)
                         return cand
-                # 既知の誰にも確信を持って一致しなかった。直前が「確定済みの人」でも、
-                # 声紋がその人と一致しないなら追従せず「未確定」に落とす。これにより
-                # 新規話者の登録直前の発話が登録済みの人として表示されるのを防ぎ、
-                # 登録時の遡及リネーム(#ラベル→人物N)で後からまとめて確定できる。
-                if prev is not None and not prev.startswith("#"):
-                    pv = active.get(prev)
-                    prev_sim = float(np.dot(pv, emb)) if pv is not None else -1.0
-                    continuity_th = max(0.25, self._person_th(prev, th) - 0.12)
-                    if self.ANON.match(prev) and prev_sim >= continuity_th:
-                        self._note("低信頼追従", label=sp, sim=round(prev_sim, 3),
-                                   name=prev, prev=prev)
-                        return prev
-                    if pv is None or prev_sim < self._person_th(prev, th):
-                        prev = None
+                # 既知の誰にも確信を持って一致しなかった → ラベル継続。ラベルの
+                # 現在の対応（直近の声紋照合成功で決まった人物 or #ラベル）を維持する。
+                # 旧仕様は「その人物と再一致しなければ prev を破棄して #ラベルへ」
+                # だったが、実測（eval/replay_attribution.py, 2026-07-14_142016）では
+                # 中尺発話の声紋が本人でもしきい値に届かず（本人一致 0.17〜0.45）、
+                # 一度の不一致で人物対応が壊れて同一人物が #ラベルと人物Nに分裂し、
+                # 1:1帰属精度44%の主因になっていた。継続化で54%（他の変更と合わせ79%）。
+                # 対応先のプロファイルが消えている（remap等）場合だけは継続を断つ。
+                if prev is not None and not prev.startswith("#") and prev not in active:
+                    prev = None
                 # 登録: 発話数ではなく「声ごとのクリーンな発声の累積文字数」で確定する。
                 # 長い発話は窓分割して複数サンプル化（連続発話でも登録が進み、内部一貫性も確認）。
                 kind = "蓄積中" if (enroll and self.auto and chars > 0) else "未確定"
@@ -437,12 +479,18 @@ class VoiceProfiles:
         elif count and wav.size >= SR * self.short_floor:
             # 短い発話の取り違え安定化: 既知の2人以上を厳格に区別できるときだけ正す。
             # 登録・蓄積はしない（声が短く不安定なため、登録に混ぜると精度が落ちる）。
+            # ハイブリッド構成(hybrid=True)では既知1人でも照合を試みる。声紋一致92%
+            # に対し前話者追従28%（transcripts/2026-07-14_1729 GT評価）のため、
+            # 登録済みプロファイルが1人しか居ない蓄積期でも「声紋で当てられる短発話」
+            # を追従に落とさない。しきい値は同じ厳格運用（誤爆は増やさない）。
             active = self._active_human()
-            if len(active) >= 2:
+            if len(active) >= 2 or (self.hybrid and active):
                 emb = self._embed(wav)
                 ranked = self._rank_active(emb, active) if emb is not None else None
                 if ranked is not None:
                     cand, sim, second = ranked
+                    info.update(sim=round(sim, 3), second=round(second, 3),
+                                name=cand, short=True)
                     strict_th = self._person_th(cand, self.thresh) + self.short_bonus
                     if (sim >= strict_th
                             and sim - second >= self.margin * self.short_margin_mult):
@@ -452,13 +500,19 @@ class VoiceProfiles:
                                    label=sp, sim=round(sim, 3), second=round(second, 3),
                                    name=cand, prev=prev, short=True)
                         return cand
-                # 厳格に決められない短い発話は、確定済みの人へ誤って追従せず未確定にする。
-                # 開いた名簿でも閉じた名簿でも同じ扱い（証拠の無い決めつけ＝誤った確信付与を
-                # 避ける）。sp_map は保持し、次の確信ある発話で連続性を回復する。
+                # 厳格に決められない短い発話はラベル継続（そのラベルの現在の人物対応を
+                # 維持）。対応先は声紋照合の成功でしか書き換わらないため根拠なしの
+                # 決めつけではない（classify docstring の実測根拠を参照）。
                 if prev is not None and not prev.startswith("#"):
-                    self._note("未確定", label=sp, prev=prev, short=True)
-                    return UNSURE_SPEAKER
-        # 声紋で決められない（重なり/短い相槌/蓄積中）→ ラベルの直近判定に追従
+                    self._note("ラベル継続", label=sp, prev=prev, short=True)
+                    return prev
+        # 声紋で決められない発話（相槌・短発話・声紋計算不可の短経路）はラベル継続:
+        # そのラベルの現在の対応（声紋照合の成功で確定した人物 or #ラベル）を返す。
+        # なお相槌テキストの最終的な表示は呼び出し側（RecvLoop.flush）が未確定に
+        # 落とす規則を持つ（相槌は聞き手が打つ＝直前話者と別人のことが多い）。
+        if kind == "相槌追従" and prev is not None and not prev.startswith("#"):
+            self._note("ラベル継続", label=sp, prev=prev, **info)
+            return prev
         key = prev if prev is not None else "#" + sp
         # 閉じた名簿（名簿を確定, auto=False）: 許すのは「登録済みのアクティブな名前付き
         # プロファイルへの継続」だけ。未知/匿名(#ラベル・人物N)は新規参加者を作らず未確定に
@@ -472,6 +526,41 @@ class VoiceProfiles:
         self.sp_map[sp] = key
         self._note(kind, label=sp, **info)
         return key
+
+    def embed(self, wav: np.ndarray) -> np.ndarray | None:
+        """音声のL2正規化済み声紋埋め込みを返す（副作用なしの公開API）.
+
+        ClusterVoiceNamer のクラスタ間名寄せ（登録者ゼロでもラベルの一貫性を
+        保つための、未照合クラスタ同士の統合判定）用。実体は ``_embed`` への
+        委譲のみで、プロファイル・履歴などの内部状態は一切変更しない。
+        設計: docs/design/handoff_2026-07-14_unregistered_speakers.md §3 参照。
+        """
+        with self._lock:
+            return self._embed(wav)
+
+    def match_profile(self, wav: np.ndarray) -> tuple[str, float] | None:
+        """副作用なしのクラスタ単位声紋照合（pyannoteハイブリッド構成用）.
+
+        classify() と異なり sp_map/pool/own_sims 等の状態を一切変更しない。
+        pyannote Live-1 のクラスタ音声（複数発話を束ねた長尺）を渡し、現在
+        アクティブな登録プロファイルの中で最も近いものを返す。即時判定と同じ
+        条件（しきい値＋2位とのmargin）を満たさなければ None（confidence不足
+        で未確定のまま蓄積を続ける、の判断は呼び出し側=ClusterVoiceNamer が行う）。
+        """
+        with self._lock:
+            if wav.size < SR * self.min_sec:
+                return None
+            emb = self._embed(wav)
+            if emb is None:
+                return None
+            active = self._active_human()
+            ranked = self._rank_active(emb, active)
+            if ranked is None:
+                return None
+            cand, sim, second = ranked
+            if sim >= self._person_th(cand, self.thresh) and sim - second >= self.margin:
+                return cand, sim
+            return None
 
     def enroll(self, label: str, name: str) -> str | None:
         """「1=名前」「人物2=名前」: 話者に名前を付ける（声の登録 or 既存人物のリネーム）.
@@ -630,8 +719,8 @@ class VoiceProfiles:
             parts.append(f"部屋の声紋分布(参考): ラベル内{np.median(self.same_sims):.2f}"
                          f"/ラベル間{np.median(self.diff_sims):.2f}")
         if self.counts:
-            order = ["声紋一致", "補正", "自動登録", "合流", "蓄積中", "未確定", "相槌追従",
-                     "重なりスキップ", "声紋計算不可"]
+            order = ["声紋一致", "補正", "自動登録", "合流", "蓄積中", "未確定",
+                     "ラベル継続", "相槌追従", "重なりスキップ", "声紋計算不可"]
             parts.append("判定内訳: " + " / ".join(
                 f"{k}{self.counts[k]}" for k in order if self.counts.get(k)))
         return "、".join(parts) or "判定なし"
