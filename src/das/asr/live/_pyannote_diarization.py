@@ -122,6 +122,7 @@ class PyannoteStreamingDiarizationProvider:
         self._session_base_ms = 0
         self._label_epoch = 0
         self._sent_audio_ms = 0
+        self._started_once = False
 
     @property
     def name(self) -> str:
@@ -132,8 +133,20 @@ class PyannoteStreamingDiarizationProvider:
         self._active_starts.clear()
         self._pcm_buf.clear()
         self._reconnects = 0
-        self._session_base_ms = 0
-        self._label_epoch = 0
+        # ラベルepoch・タイムライン基点は start() でリセットしない（2026-07-15
+        # レビュー F3）。_bootstrap の STT切断復旧は同一インスタンスに対して
+        # provider.close(); provider.start() を行うため、epoch を 0 に戻すと
+        # 新セッションの SPEAKER_00 が旧セッションのラベル空間
+        # （ClusterVoiceNamer._confirmed / SessionState.diarization_speaker_keys の
+        # "pyannote:SPEAKER_00" 等）と衝突し、再起動後の別人が旧確定名へ即誤帰属
+        # し得る。再接続時（_handle_disconnect）と同様に epoch をインクリメント
+        # すれば、既存の R{epoch}: 前置（クラスdocstring「自動再接続」節）で旧キー
+        # と自然に区別され、_session_base_ms の引き継ぎでタイムラインも会議内で
+        # 単調のまま保たれる。初回 start のみ epoch=0（前置なし）で従来どおり。
+        if self._started_once:
+            self._label_epoch += 1
+            self._session_base_ms += self._sent_audio_ms
+        self._started_once = True
         self._sent_audio_ms = 0
         self._connect()
 
