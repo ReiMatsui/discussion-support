@@ -329,12 +329,62 @@ class VoiceProfiles:
                 samples.append((e, chars / n))
         return samples or [(emb, float(chars))]
 
+    def _purity_subset(self, embs: list[np.ndarray]) -> list[int]:
+        """最大の自己一貫部分集合のインデックスを返す（登録純度検査の中核）.
+
+        medoid（他との類似度合計が最大の埋め込み）を種に、medoidとの類似度分布を
+        1次元2クラス分割（クラス間分散最大の割線＝Otsu流）し、下側クラスタの平均が
+        上側クラスタの平均の半分未満なら「別の声の混入」とみなして上側だけ返す。
+        判定は分布の相対構造のみで行い、固定の類似度しきい値を持たない:
+        CallHome 0856 実測（8kHz電話、docs/design/
+        handoff_2026-07-14_unregistered_speakers.md §14）で話者内類似は
+        中央値0.38-0.65、話者間は中央値0.116・最大0.343と、話者間は話者内の
+        半分を下回る相対構造が確認されており、絶対値は帯域・マイクで動くが
+        この比は保たれる（16kHz会議録の実測でも同様）。単峰（混入なし）の
+        集合では下側平均が上側の半分を割らないため全採用のまま素通りする。
+        """
+        n = len(embs)
+        if n < 4:   # 分布を語れるサンプル数がない → 検査せず全採用
+            return list(range(n))
+        m = np.stack(embs)
+        sims = m @ m.T
+        med = int(np.argmax(sims.sum(axis=1)))   # medoid（最も「みんなに似ている」声）
+        others = [i for i in range(n) if i != med]
+        s = np.array([float(sims[med, i]) for i in others])
+        order = np.argsort(s)   # medoid類似度の昇順
+        sv = s[order]
+        best_k, best_score = 0, -1.0
+        for k in range(1, len(sv)):   # クラス間分散が最大の割線を探す
+            score = k * (len(sv) - k) * (sv[k:].mean() - sv[:k].mean()) ** 2
+            if score > best_score:
+                best_score, best_k = score, k
+        mu_lo = float(sv[:best_k].mean())
+        mu_hi = float(sv[best_k:].mean())
+        if mu_lo >= 0.5 * mu_hi:   # 下側も「同じ声」の揺らぎの範囲 → 単峰
+            return list(range(n))
+        return sorted([med] + [others[i] for i in order[best_k:]])
+
     def _enroll_accumulate(self, samples: list[tuple[np.ndarray, float]],
                            sp: str, prev, ecs: float) -> str | None:
         """サンプルを声ごとに貯め、一貫クラスタの累積文字数が閾値を超えたら登録.
 
         現在の声(anchor)と一貫する保留サンプルを集め、その累積文字数が閾値に達したら
         その人物を確定する。戻り値: 確定した人物キー、まだ足りなければ None。
+
+        コミット直前に純度検査（_purity_subset）を通す（二段構え）:
+        anchor一貫性(ecs)は「今の声に似ているか」の粗い前置フィルタだが、
+        電話会話等でSonioxのセグメント境界が甘いと1発話に両話者が混ざり、
+        窓埋め込みが両者の中間に落ちて ecs を通過する（CallHome 0856 実測:
+        自動登録プロファイルが両話者53-55%の混合になり帰属27%へ崩壊。
+        docs/design/handoff_2026-07-14_unregistered_speakers.md §14）。
+        そこでコミット時に集合全体のペアワイズ一貫性を検査し、
+        - 採用部分集合の累積文字数が enroll_min_total_chars に届けば
+          その部分集合のみでプロファイル作成（混入分は pool に残す＝
+          もう一方の話者の蓄積材料として生かす）
+        - 届かなければ登録を保留して蓄積継続（新しい閾値は導入せず、
+          既存の「クリーンな発声の累積文字数」条件をそのまま流用）
+        純度検査はコミット候補時のみ走るため、混入のない通常セッションの
+        登録タイミングは変わらない（二重検査による登録遅延なし）。
         """
         self.pool.extend(samples)
         if len(self.pool) > self._POOL_CAP:
@@ -347,6 +397,18 @@ class VoiceProfiles:
             return None
         embs = [self.pool[i][0] for i in idx]
         wts = [self.pool[i][1] for i in idx]
+        keep = self._purity_subset(embs)
+        if len(keep) < len(embs):
+            kept_total = sum(wts[i] for i in keep)
+            if kept_total < self.enroll_min_total_chars:
+                # 混入が激しくクリーン分が足りない → 保留して蓄積継続
+                self._note("純度保留", label=sp, n=len(embs), n_keep=len(keep),
+                           chars=round(kept_total))
+                return None
+            idx = [idx[i] for i in keep]
+            embs = [embs[i] for i in keep]
+            wts = [wts[i] for i in keep]
+            total = kept_total
         prof = self._weighted_mean(embs, wts)
         drop = set(idx)
         self.pool = [s for i, s in enumerate(self.pool) if i not in drop]
@@ -782,7 +844,7 @@ class VoiceProfiles:
             parts.append(f"部屋の声紋分布(参考): ラベル内{np.median(self.same_sims):.2f}"
                          f"/ラベル間{np.median(self.diff_sims):.2f}")
         if self.counts:
-            order = ["声紋一致", "補正", "自動登録", "合流", "蓄積中", "未確定",
+            order = ["声紋一致", "補正", "自動登録", "合流", "蓄積中", "純度保留", "未確定",
                      "ラベル継続", "相槌追従", "重なりスキップ", "声紋計算不可"]
             parts.append("判定内訳: " + " / ".join(
                 f"{k}{self.counts[k]}" for k in order if self.counts.get(k)))
