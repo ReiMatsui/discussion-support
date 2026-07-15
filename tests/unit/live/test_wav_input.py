@@ -54,3 +54,31 @@ def test_load_does_not_require_librosa(tmp_path):
     with mock.patch.dict(sys.modules, {"librosa": None}):
         y = _load_wav_mono_16k(str(p))
     assert len(y) == SR
+
+
+def test_load_empty_file_exits_with_conversion_hint(tmp_path):
+    """空ファイルはトレースバックではなく変換手順つきの SystemExit（F5）.
+
+    wave モジュールは空・ヘッダ途中のファイルで EOFError を裸で投げる。また
+    torchaudio フォールバックは環境によって不可（torchaudio 2.9+ のデコードは
+    torchcodec 必須で ImportError）のため、ユーザーが対処できるメッセージで
+    終了する（2026-07-15 レビュー、probe_wav.py で確認）。
+    """
+    import pytest
+
+    p = tmp_path / "empty.wav"
+    p.write_bytes(b"")
+    with pytest.raises(SystemExit) as e:
+        _load_wav_mono_16k(str(p))
+    assert "ffmpeg" in str(e.value)          # 変換手順（PCM WAV へ）を案内する
+
+
+def test_load_truncated_header_exits_with_conversion_hint(tmp_path):
+    """RIFFヘッダ途中で切れた破損ファイルも同様に明確なエラーで終了する（F5）."""
+    import pytest
+
+    p = tmp_path / "trunc.wav"
+    p.write_bytes(b"RIFF\x10\x00\x00\x00WAVE")
+    with pytest.raises(SystemExit) as e:
+        _load_wav_mono_16k(str(p))
+    assert "PCM WAV" in str(e.value)
