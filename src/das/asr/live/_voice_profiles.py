@@ -85,8 +85,8 @@ class VoiceProfiles:
       ② それ以外は3発話バッファ — 一貫した3発話を束ね「既存人物に合流(dedupe) or 新規人物N」
     しきい値は2層構造（厳しくする方向にのみ働き、最悪でも既定値の挙動に戻る）:
       1. モデル別既定値(DEFAULTS)
-      2. 人物別しきい値(その人物の一致sim中央値-0.12 = 新規性検出。中途半端な類似の
-         新しい声を既存人物に巻き取らない)。即時判定のみに適用
+      2. 人物別しきい値(その人物の一致sim下位35パーセンタイル-0.12 = 新規性検出。
+         中途半端な類似の新しい声を既存人物に巻き取らない)。即時判定のみに適用
     不変条件: 確定済みの人物キーは書き換えない（遡及置換は #ラベル→人物 の昇格のみ）。
     実名(enroll)のみ voices.json に永続化、匿名「人物N」はセッション限り。
     """
@@ -206,7 +206,14 @@ class VoiceProfiles:
         # （新規性検出）。同一再生チェーン等で別人が0.5前後の中途半端な類似を出しても、
         # 本人の典型(例:0.7台)に届かなければ巻き取らない。診断ログ解析(2026-06-11)で
         # 吸収帯0.45-0.59と本人帯0.67-0.82の分離を確認、検証で吸収率91%→0%。
-        self.own_sims: dict[str, list[float]] = {}   # 人物 -> 受理された一致simの履歴
+        # 履歴は「基準しきい値＋marginを満たした1位候補の生sim」を記録する
+        # （person_th 判定の手前で記録）。旧仕様の「受理された一致のみ記録」は、
+        # 記録条件に person_th 自身が入る自己参照＝選択バイアスで、しきい値が
+        # 単調に肥大するラチェットを生んだ（CallHome 0856 実測: 0.42→0.73、
+        # 正しい0.5-0.65帯の一致を全遮断し帰属29%。person_th 無効化で32.5%）。
+        # 記録条件を person_th と独立な固定基準にすることで分布が定常になり、
+        # ラチェットは構造的に起きない。
+        self.own_sims: dict[str, list[float]] = {}   # 人物 -> 基準通過した1位simの履歴
         # 事後回収（P3）: 匿名人物の受理一致の埋め込みを保持し、更新N回ごとに
         # 自己一貫性を検査。二峰性（登録が汚染され、プロファイルが両話者の一致を
         # 引き寄せている状態）を検出したら多数派クラスタで再構築する。
@@ -515,10 +522,30 @@ class VoiceProfiles:
         del self.diff_sims[:-120]
 
     def _person_th(self, name: str, base: float) -> float:
-        """人物別しきい値 = max(基準値, その人物の一致sim中央値 - 0.12)."""
+        """人物別しきい値 = max(基準値, その人物の一致sim下位35パーセンタイル - 0.12).
+
+        旧仕様は中央値-0.12。受理simのみの履歴（選択バイアス）と組み合わさると
+        「しきい値上昇→低め一致が記録されない→中央値上昇→さらに上昇」の
+        ラチェットになった（CallHome 0856 実測で 0.42→0.73 まで肥大し、
+        正しい 0.5-0.65 帯の一致を全遮断）。対策は二本立て:
+          1. 記録側: person_th と独立な基準（base+margin通過の生sim）で記録し
+             自己参照を断つ（own_sims の __init__ 註釈参照）
+          2. 統計側: 中央値でなく下位35パーセンタイルを使う。本人のsimは帯域・
+             マイクで絶対値が動く（8kHz電話 0.5-0.65 / 16kHz会議 0.67-0.82）ため
+             固定の上限は置けないが、下位分位なら「本人の一致の下端」に追従し、
+             分布の裾の揺らぎや別人混入の高値外れに引きずられにくい
+        いずれも相対設計（観測simの分位）なので 8k/16k どちらでも壊れない。
+        巻き取り防止の本来機能は維持: 本人が安定して高sim（例 0.7台）を出す
+        環境では p35-0.12 ≈ 0.58-0.61 となり、別人の 0.5 前後の中途半端な
+        類似は引き続き弾く。
+        分位の選定はオフライン再現4本の実測（2026-07-15）: p25 は両話者のsim帯が
+        重なる電話ペアで巻き取りが再発（0743: 62%→60.2%）、中央値はラチェットは
+        直っても 0856 の回復が鈍い（29%→30.5%）。p35 は 0856=32.9% / 0743=63.4%
+        / 0696=71.6% / YouTube 16kHz=78.9% と全データセットで基準線以上。
+        """
         h = self.own_sims.get(name, [])
         if len(h) >= 3:
-            return max(base, float(np.median(h)) - 0.12)
+            return max(base, float(np.percentile(h, 35)) - 0.12)
         return base
 
     def _embed(self, wav: np.ndarray) -> np.ndarray | None:
@@ -601,14 +628,19 @@ class VoiceProfiles:
                     cand, sim, second = ranked
                     info.update(sim=round(sim, 3), second=round(second, 3), name=cand, prev=prev)
                     strict = wav.size < SR * self.strict_sec
-                    need_th = (self._person_th(cand, th)
-                               + (self.short_bonus if strict else 0.0))
+                    bonus = self.short_bonus if strict else 0.0
+                    need_th = self._person_th(cand, th) + bonus
                     need_mg = self.margin * (self.short_margin_mult if strict else 1.0)
-                    if sim >= need_th and sim - second >= need_mg:
-                        self.sp_map[sp] = cand
+                    # 人物別しきい値の学習履歴は person_th 判定の手前で記録する
+                    # （基準しきい値＋margin という固定条件のみ）。受理後に記録
+                    # すると person_th 自身が記録条件に入り、選択バイアスで
+                    # しきい値がラチェットする（_person_th docstring 参照）。
+                    if sim >= th + bonus and sim - second >= need_mg:
                         h = self.own_sims.setdefault(cand, [])
                         h.append(sim)
                         del h[:-20]
+                    if sim >= need_th and sim - second >= need_mg:
+                        self.sp_map[sp] = cand
                         self._track_own_emb(cand, emb)   # 事後回収（P3）の監視材料
                         self._note("補正" if (prev is not None and not prev.startswith("#")
                                               and prev != cand) else "声紋一致", label=sp, **info)
