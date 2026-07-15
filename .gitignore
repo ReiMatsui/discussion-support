@@ -78,3 +78,8 @@ live_transcriber.html
 *.docx
 *.pptx
 *.log
+
+# 評価用コーパス（大容量・再取得可能。eval/fetch_callhome_jpn.py / eval/prep_sakura.py 参照）
+data/callhome/
+data/sakura/
+data/sakura_raw/
