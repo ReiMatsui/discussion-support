@@ -33,6 +33,7 @@ def _bare_tracker() -> VoiceProfiles:
     vp.n_anon = 0
     vp.min_sec = 1.0
     vp.auto = True
+    vp._active_keys = set()
     return vp
 
 
@@ -56,12 +57,18 @@ def test_backchannel_keeps_label_continuation():
     RecvLoop.flush 側が持つ（本メソッドはラベル状態の管理に徹する）。
     """
     vp = _bare_tracker()
+    # 「声紋照合で確定済み」＝アクティブな人間プロファイルが実在する状態を再現する
+    # （継続可否ガードの統一（2026-07-15 F1）により、対応先がアクティブでなければ
+    # 継続しない。旧テストのプロファイル無し状態は実運用で起こらない）。
+    prof = {"松井": np.array([1.0, 0.0])}
+    vp.profiles = dict(prof)
+    vp._active_keys = {"松井"}
     vp.sp_map["1"] = "松井"     # ラベル1は直前まで松井（声紋照合で確定済み）
     wav = np.ones(int(SR * 2), dtype=np.float32)
     assert vp.classify(wav, "1", overlapped=False, count=False) == "松井"
     assert vp.last["kind"] == "ラベル継続"   # diag には判定種別を残す
     assert vp.sp_map["1"] == "松井"          # マッピングは保持
-    assert vp.profiles == {}    # 相槌では声紋を触らない
+    assert vp.profiles.keys() == prof.keys()  # 相槌では声紋を触らない
 
 
 def test_backchannel_regex_matches_common_aizuchi():
@@ -69,3 +76,20 @@ def test_backchannel_regex_matches_common_aizuchi():
         assert _BACKCHANNEL_RE.match(t), t
     for t in ["それは違うと思います", "コストが高いです"]:
         assert not _BACKCHANNEL_RE.match(t), t
+
+
+def test_backchannel_after_ai_echo_is_unsure_not_ai_key():
+    """AI声紋一致直後の同ラベル相槌は __AI__ を継続せず未確定に落とす（F1）.
+
+    継続可否ガードの統一（2026-07-15）: "__AI__" を返すと _recv_loop の
+    startswith("__") エコー破棄で人間の相槌が本文ごと消える。相槌経路にも
+    メインパスと同じ _continuation_target 判定を適用する。
+    """
+    from das.asr.live._constants import UNSURE_SPEAKER
+    vp = _bare_tracker()
+    vp.profiles = {"__AI__": np.array([1.0, 0.0]), "松井": np.array([0.0, 1.0])}
+    vp._active_keys = {"__AI__", "松井"}
+    vp.sp_map["1"] = "__AI__"                # 直前にAI声紋一致
+    wav = np.ones(int(SR * 2), dtype=np.float32)
+    assert vp.classify(wav, "1", overlapped=False, count=False) == UNSURE_SPEAKER
+    assert vp.last["kind"] == "継続不可"

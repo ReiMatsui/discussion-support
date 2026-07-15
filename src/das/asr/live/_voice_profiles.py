@@ -167,6 +167,10 @@ class VoiceProfiles:
         # 一致し、ラベルの人物対応を壊して遡及リネームまで阻害）。埋め込みの信頼性は
         # 発話長に強く依存するため、基準しきい値で信じるのは strict_sec 以上のみ。
         self.strict_sec = self.strict_sec   # クラス既定値を実体化（テスト・調整用）
+        # ハイブリッドフラグもインスタンス属性として実体化（クラス属性の既定値 False
+        # を影にしない明示。set_hybrid がクラス属性を汚染しないことの保証を
+        # インスタンス側で完結させる。2026-07-15 レビュー F8）。
+        self.hybrid = self.hybrid
         # 新規人物の自動登録は「発話数」ではなく「声ごとのクリーンな発声の累積文字数」で
         # 判定する。声紋の質は本質的に発声の総量で決まり、文字数はその良い代理（長いだけで
         # 無音・雑音の区間を弾く）。連続して長く話す人も、短く何度も話す人も同じ原理で確定。
@@ -239,6 +243,36 @@ class VoiceProfiles:
         ai = {k for k in self._active_keys if k.startswith("__") and k.endswith("__")}
         return {k: v for k, v in self.profiles.items()
                 if k in self._active_keys and k not in ai}
+
+    def _continuation_target(self, prev) -> str | None:
+        """ラベル継続の対応先として使える人物キーを返す（継続不可なら None）.
+
+        継続を許すのは「現在アクティブな人間プロファイル」への対応だけ
+        （#プレースホルダは別経路。docs/design/handoff_2026-07-14_unregistered_speakers.md
+        のラベル継続設計を参照）。従来この判定はメインパス（中尺発話）にしか無く、
+        短発話・相槌のラベル継続が以下を素通しした（2026-07-15 レビューで確定）:
+          - AI声紋キー(__AI__等): sp_map に残った __AI__ を継続で返すと、
+            _recv_loop の startswith("__") エコー破棄が発動し、AIエコー直後の
+            人間の短発話・相槌が本文ごと消える実バグ。
+          - deactivate 済み・remap等で消えた人物、閉じた名簿の非アクティブ登録者:
+            実体の無い/照合対象外の対応先へ発話が帰属し続ける。
+        3経路（メイン・短発話・相槌）すべてこのヘルパで判定を統一する。
+        """
+        if prev is None or prev.startswith("#"):
+            return None
+        return prev if prev in self._active_human() else None
+
+    def is_active_human(self, key: str) -> bool:
+        """key が現在照合対象のアクティブな人間プロファイルか（人物N含む・AI声紋除く）.
+
+        SessionState.constrain_human_speaker_key の「声紋で実在が裏付けられた
+        キーはスロット選別の対象外」判定用の公開API。profiles 全体（inactive・
+        voices.json 残留分を含む）で判定すると、無効化済みプロファイルまで
+        参加人数上限を素通りする穴になる（2026-07-15 レビューで確定）ため、
+        アクティブ集合に限定する。
+        """
+        with self._lock:
+            return key in self._active_human()
 
     def _rank_active(self, emb: np.ndarray, active: dict):
         """active内で最も似た人物の (cand, sim, second) を返す（空ならNone）."""
@@ -348,7 +382,12 @@ class VoiceProfiles:
         self.max_human_speakers = value
 
     def set_hybrid(self, value: bool) -> None:
-        """ハイブリッド構成（ClusterVoiceNamer有効）を宣言する（クラス属性参照）."""
+        """ハイブリッド構成（ClusterVoiceNamer有効）を宣言する.
+
+        インスタンス属性 ``self.hybrid`` を設定する（__init__ で False に実体化
+        済み。クラス属性 ``VoiceProfiles.hybrid`` は既定値の定義であり、ここでは
+        書き換えない＝他インスタンスへ波及しない。2026-07-15 レビュー F8）。
+        """
         self.hybrid = bool(value)
 
     def _note(self, kind: str, **info) -> None:
@@ -418,6 +457,9 @@ class VoiceProfiles:
                   count: bool = True, chars: int = 0, enroll: bool = True) -> str:
         sp = str(sp)
         prev = self.sp_map.get(sp)
+        # kind 既定値 "相槌追従" は歴史的な名前で、実態は「ラベル継続 or #プレース
+        # ホルダ発行」（前話者追従は廃止済み）。diag/counts の集計キーとして
+        # 既存ログ・分析と互換を保つため改名しない（2026-07-15 レビュー F8）。
         kind, info = "相槌追従", {}
         if overlapped and wav.size >= SR * self.min_sec:
             kind = "重なりスキップ"
@@ -464,8 +506,10 @@ class VoiceProfiles:
                 # 中尺発話の声紋が本人でもしきい値に届かず（本人一致 0.17〜0.45）、
                 # 一度の不一致で人物対応が壊れて同一人物が #ラベルと人物Nに分裂し、
                 # 1:1帰属精度44%の主因になっていた。継続化で54%（他の変更と合わせ79%）。
-                # 対応先のプロファイルが消えている（remap等）場合だけは継続を断つ。
-                if prev is not None and not prev.startswith("#") and prev not in active:
+                # 対応先が継続不可（remap等で消えた・deactivate済み・AI声紋）の
+                # 場合だけは継続を断つ（判定は _continuation_target に統一。3経路共通）。
+                if (prev is not None and not prev.startswith("#")
+                        and self._continuation_target(prev) is None):
                     prev = None
                 # 登録: 発話数ではなく「声ごとのクリーンな発声の累積文字数」で確定する。
                 # 長い発話は窓分割して複数サンプル化（連続発話でも登録が進み、内部一貫性も確認）。
@@ -476,8 +520,12 @@ class VoiceProfiles:
                     target = self._enroll_accumulate(samples, sp, prev, ecs)
                     if target is not None:
                         return target
-        elif count and wav.size >= SR * self.short_floor:
+        elif count and not overlapped and wav.size >= SR * self.short_floor:
             # 短い発話の取り違え安定化: 既知の2人以上を厳格に区別できるときだけ正す。
+            # overlapped（重なり発話）は除外: 声が混ざった埋め込みは classify docstring
+            # のとおりデタラメで、中尺は「重なりスキップ」なのに短発話だけ照合・補正
+            # （sp_map 書き換え）まで走っていた（2026-07-15 レビューで確定）。重なりは
+            # 発話長によらず声での判定をせず、下のラベル継続へ落とす。
             # 登録・蓄積はしない（声が短く不安定なため、登録に混ぜると精度が落ちる）。
             # ハイブリッド構成(hybrid=True)では既知1人でも照合を試みる。声紋一致92%
             # に対し前話者追従28%（transcripts/2026-07-14_1729 GT評価）のため、
@@ -503,17 +551,32 @@ class VoiceProfiles:
                 # 厳格に決められない短い発話はラベル継続（そのラベルの現在の人物対応を
                 # 維持）。対応先は声紋照合の成功でしか書き換わらないため根拠なしの
                 # 決めつけではない（classify docstring の実測根拠を参照）。
-                if prev is not None and not prev.startswith("#"):
-                    self._note("ラベル継続", label=sp, prev=prev, short=True)
-                    return prev
+                # 継続可否は _continuation_target に統一（AI声紋・deactivate済み等は
+                # 継続せず、末尾の共通ガードで未確定へ落とす）。
+                cont = self._continuation_target(prev)
+                if cont is not None:
+                    self._note("ラベル継続", label=sp, prev=cont, short=True)
+                    return cont
         # 声紋で決められない発話（相槌・短発話・声紋計算不可の短経路）はラベル継続:
         # そのラベルの現在の対応（声紋照合の成功で確定した人物 or #ラベル）を返す。
         # なお相槌テキストの最終的な表示は呼び出し側（RecvLoop.flush）が未確定に
         # 落とす規則を持つ（相槌は聞き手が打つ＝直前話者と別人のことが多い）。
-        if kind == "相槌追従" and prev is not None and not prev.startswith("#"):
-            self._note("ラベル継続", label=sp, prev=prev, **info)
-            return prev
-        key = prev if prev is not None else "#" + sp
+        # 継続可否は _continuation_target に統一（メインパスと同じガード）。
+        if kind == "相槌追従":
+            cont = self._continuation_target(prev)
+            if cont is not None:
+                self._note("ラベル継続", label=sp, prev=cont, **info)
+                return cont
+        # 継続不可の人物対応（AI声紋 __AI__、deactivate 済み等）はプレースホルダにも
+        # 継続にも使えないため未確定へ落とす（2026-07-15 レビューで確定した実バグ:
+        # AI声紋一致で sp_map[sp]="__AI__" になった後の同ラベル短発話・相槌が
+        # __AI__ のまま返り、_recv_loop の startswith("__") エコー破棄で本文ごと
+        # 消えていた。人間の発話は捨てず「未確定」として表示に残す）。
+        if (prev is not None and not prev.startswith("#")
+                and self._continuation_target(prev) is None):
+            key, kind = UNSURE_SPEAKER, "継続不可"
+        else:
+            key = prev if prev is not None else "#" + sp
         # 閉じた名簿（名簿を確定, auto=False）: 許すのは「登録済みのアクティブな名前付き
         # プロファイルへの継続」だけ。未知/匿名(#ラベル・人物N)は新規参加者を作らず未確定に
         # する。重なり発話は声紋を信用できないので、登録者継続もさせない。
