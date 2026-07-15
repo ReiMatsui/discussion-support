@@ -234,12 +234,17 @@ def replay(vp: VoiceProfiles, items: list[dict], audio: np.ndarray) -> list[dict
             for r in results:
                 if r["pred"] == old:
                     r["pred"] = new
-        # RecvLoop.flush と同じ相槌の最終規則（相槌レコードは未確定に落とす）
+                if r["pred_raw"] == old:
+                    r["pred_raw"] = new
+        # RecvLoop.flush と同じ相槌の最終規則（相槌レコードは未確定に落とす）。
+        # 上書き前の予測は pred_raw に残す（相槌未確定ルールの妥当性採点用）。
+        pred_raw = pred
         if is_bc:
             pred = UNSURE_SPEAKER
         recent.append((it["ms"], it["end_ms"], it["label"]))
         del recent[:-12]
-        results.append({**it, "pred": pred, "kind": d.get("kind"), "bc": is_bc,
+        results.append({**it, "pred": pred, "pred_raw": pred_raw,
+                        "kind": d.get("kind"), "bc": is_bc,
                         "sim": d.get("sim"), "second": d.get("second"),
                         "cand": d.get("name")})
     return results
@@ -295,6 +300,21 @@ def summarize(results: list[dict], *, verbose: bool = True,
     print(f"\n== 最適1:1対応での帰属精度: {acc:.0%} ==")
     for s, g in mapping.items():
         print(f"  {s} = {g}")
+    # 相槌内訳（ヘッドラインは従来どおり全発話）。相槌判定は本体と同じ
+    # _BACKCHANNEL_RE（replay で bc として記録済み）。現行ルールでは相槌は
+    # 常に未確定（＝常に不正解）なので、相槌除き精度は「相槌未確定ルールの
+    # 妥当性」を数字で見るための参考値。対応表はヘッドラインと同一
+    # （相槌はどの対応でも正解に寄与しないため最適対応は変わらない）。
+    non_bc = [r for r in single if not r["bc"]]
+    if non_bc:
+        acc_nb = sum(1 for r in non_bc if mapping.get(r["pred"]) == r["gt"]) / len(non_bc)
+        n_bc = len(single) - len(non_bc)
+        bc_ok = sum(1 for r in single
+                    if r["bc"] and mapping.get(r["pred_raw"]) == r["gt"])
+        print(f"  相槌内訳: 全発話 {acc:.1%} (n={len(single)})"
+              f" ／ 相槌除き {acc_nb:.1%} (n={len(non_bc)})"
+              f" ／ 相槌 {n_bc}件（現行ルールで全件未確定。"
+              f"未確定に落とさなければ正解 {bc_ok}/{n_bc}）")
     unsure = sum(1 for r in single if r["pred"] == UNSURE_SPEAKER)
     wrong = sum(1 for r in single
                 if r["pred"] != UNSURE_SPEAKER and r["pred"] in mapping

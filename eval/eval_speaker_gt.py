@@ -24,6 +24,10 @@ from collections import Counter, defaultdict
 from itertools import permutations
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+
+from das.asr.live._constants import _BACKCHANNEL_RE  # noqa: E402  本体と同一の相槌判定
+
 UNSURE = "未確定"
 
 
@@ -107,7 +111,7 @@ def main(gt_path: str, session_override: str | None = None) -> None:
         labels: dict[str, str] = gt["labels"]
         tl = gt_timeline(gt_turns, labels) if not same_session else None
 
-    rows = []  # (turn_id, sys_label, gt_code)
+    rows = []  # (turn_id, sys_label, gt_code, is_backchannel)
     n_uncovered = 0
     for t in turns:
         if same_session:
@@ -118,13 +122,14 @@ def main(gt_path: str, session_override: str | None = None) -> None:
                 n_uncovered += 1
                 continue
         if code:
-            rows.append((t["turn_id"], t["speaker"], code))
+            bc = bool(_BACKCHANNEL_RE.match(t.get("text", "").strip()))
+            rows.append((t["turn_id"], t["speaker"], code, bc))
     if not rows:
         sys.exit("GTラベルとturnsが突合できません")
 
-    single = [(i, s, g) for i, s, g in rows if g in gt_codes]
-    n_multi = sum(1 for _, _, g in rows if g == "MULTI")
-    n_unk = sum(1 for _, _, g in rows if g == "UNK")
+    single = [(i, s, g, b) for i, s, g, b in rows if g in gt_codes]
+    n_multi = sum(1 for _, _, g, _ in rows if g == "MULTI")
+    n_unk = sum(1 for _, _, g, _ in rows if g == "UNK")
 
     src = ("" if same_session else
            (f"（GT元: {gt['session']} タイムライン突合、"
@@ -133,10 +138,10 @@ def main(gt_path: str, session_override: str | None = None) -> None:
           f"（単独話者 {len(single)}、複数人混在 {n_multi}、不明 {n_unk}）\n")
 
     # --- 混同行列（単独話者のみ） ---
-    sys_labels = sorted({s for _, s, _ in single})
+    sys_labels = sorted({s for _, s, _, _ in single})
     gts = gt_codes
     conf = {s: Counter() for s in sys_labels}
-    for _, s, g in single:
+    for _, s, g, _ in single:
         conf[s][g] += 1
     w = max(len(s) for s in sys_labels) + 2
     print("== 混同行列（行=システム, 列=正解） ==")
@@ -150,7 +155,7 @@ def main(gt_path: str, session_override: str | None = None) -> None:
     # --- GT話者ごとの分裂 ---
     print("\n== 正解話者ごとの行き先（分裂状況） ==")
     by_gt = defaultdict(Counter)
-    for _, s, g in single:
+    for _, s, g, _ in single:
         by_gt[g][s] += 1
     for g in gts:
         c = by_gt[g]
@@ -170,16 +175,28 @@ def main(gt_path: str, session_override: str | None = None) -> None:
         for perm in permutations(real, k):
             for gsel in permutations(gts, k):
                 m = dict(zip(perm, gsel))
-                acc = sum(1 for _, s, g in single if m.get(s) == g) / len(single)
+                acc = sum(1 for _, s, g, _ in single if m.get(s) == g) / len(single)
                 if acc > best_acc:
                     best_acc, best_map = acc, m
     print(f"\n== 最適1:1対応での帰属精度: {best_acc:.0%} ==")
     for s, g in best_map.items():
         print(f"  {s} = {names.get(g, g)}")
-    unsure_rate = sum(1 for _, s, _ in single if s == UNSURE) / len(single)
-    n_wrong = sum(1 for _, s, g in single
+    # 相槌内訳（ヘッドラインは従来どおり全発話）。相槌判定は本体と同じ
+    # _BACKCHANNEL_RE。現行ルール（相槌は未確定に落とす）の妥当性を数字で
+    # 見るための参考値で、対応表はヘッドラインの最適対応をそのまま使う。
+    non_bc = [(i, s, g) for i, s, g, b in single if not b]
+    if non_bc:
+        acc_nb = sum(1 for _, s, g in non_bc if best_map.get(s) == g) / len(non_bc)
+        n_bc = len(single) - len(non_bc)
+        bc_ok = sum(1 for _, s, g, b in single if b and best_map.get(s) == g)
+        bc_uns = sum(1 for _, s, _, b in single if b and s == UNSURE)
+        print(f"  相槌内訳: 全発話 {best_acc:.1%} (n={len(single)})"
+              f" ／ 相槌除き {acc_nb:.1%} (n={len(non_bc)})"
+              f" ／ 相槌 {n_bc}件（未確定 {bc_uns}、正解 {bc_ok}）")
+    unsure_rate = sum(1 for _, s, _, _ in single if s == UNSURE) / len(single)
+    n_wrong = sum(1 for _, s, g, _ in single
                   if s != UNSURE and s in best_map and best_map[s] != g)
-    n_unmapped = sum(1 for _, s, _ in single
+    n_unmapped = sum(1 for _, s, _, _ in single
                      if s != UNSURE and s not in best_map)
     print(f"  内訳: 未確定 {unsure_rate:.0%} ／ 誤帰属 {n_wrong/len(single):.0%}"
           f" ／ 対応外ラベル {n_unmapped/len(single):.0%}")
