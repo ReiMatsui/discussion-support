@@ -28,6 +28,7 @@ import itertools
 import json
 import os
 import sys
+import time
 import tempfile
 import wave
 from collections import Counter, defaultdict
@@ -148,7 +149,13 @@ def replay(vp: VoiceProfiles, items: list[dict], audio: np.ndarray) -> list[dict
     """発話を時系列に classify へ流し、[{pred, kind, ...}] を返す（遡及リネーム反映）."""
     results = []
     recent: list[tuple[int, int, str]] = []   # RecvLoop.recent_segs 相当
-    for it in items:
+    _t0 = time.monotonic()
+    for _idx, it in enumerate(items, 1):
+        if _idx % 20 == 0 or _idx == len(items):
+            _el = time.monotonic() - _t0
+            _eta = _el / _idx * (len(items) - _idx)
+            print(f"  ...{_idx}/{len(items)}発話 処理済み (経過{_el:.0f}s / 残り目安{_eta:.0f}s)",
+                  file=sys.stderr, flush=True)
         s, e = int(it["ms"] * SR / 1000), int(it["end_ms"] * SR / 1000)
         wav = audio[s:e]
         text = it["text"].strip()
