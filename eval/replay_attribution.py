@@ -17,6 +17,9 @@ STTラベルは元セッションの diag.jsonl の label（Sonioxの生ラベ�
     uv run python eval/replay_attribution.py --sweep thresh=0.38,0.42,0.46 \\
         --sweep short_bonus=0.03,0.05,0.08
     uv run python eval/replay_attribution.py --dump   # 発話ごとの判定を表示
+    # ライブランの実セグメンテーション＋実Sonioxラベル＋timeline形式GTで再生:
+    uv run python eval/replay_attribution.py --from-session 2026-07-15_1306 \\
+        --gt data/callhome/0856.gt.json --wav data/callhome/0856.wav
 
 指標は eval/eval_speaker_gt.py と同じ流儀（単独話者のみ・最適1:1対応での帰属精度・
 混同行列・未確定/誤帰属の内訳）に、判定機構（kind）別の正解率を加えたもの。
@@ -54,6 +57,14 @@ _ALL_PARAMS = sorted(_CTOR_PARAMS | _ATTR_PARAMS)
 # 入力の読み込み
 # ------------------------------------------------------------------
 
+def _read_audio(wav_path: Path) -> np.ndarray:
+    with wave.open(str(wav_path)) as w:
+        assert w.getnchannels() == 1 and w.getsampwidth() == 2, "16bitモノラル前提"
+        assert w.getframerate() == SR, f"サンプルレート{w.getframerate()} != {SR}"
+        pcm = np.frombuffer(w.readframes(w.getnframes()), dtype="<i2")
+    return pcm.astype(np.float32) / 32768.0   # RecvLoop.flush と同じ正規化
+
+
 def load_inputs(gt_path: Path, wav_path: Path | None):
     gt = json.loads(gt_path.read_text(encoding="utf-8"))
     session = gt["session"]
@@ -68,12 +79,7 @@ def load_inputs(gt_path: Path, wav_path: Path | None):
             diag = [json.loads(line) for line in f]
     # 元セッションの diag から、発話開始ms→Soniox生ラベルの対応を引く
     label_by_ms = {d["ms"]: str(d["label"]) for d in diag if "label" in d}
-    wav_path = wav_path or (root / f"{session}.wav")
-    with wave.open(str(wav_path)) as w:
-        assert w.getnchannels() == 1 and w.getsampwidth() == 2, "16bitモノラル前提"
-        assert w.getframerate() == SR, f"サンプルレート{w.getframerate()} != {SR}"
-        pcm = np.frombuffer(w.readframes(w.getnframes()), dtype="<i2")
-    audio = pcm.astype(np.float32) / 32768.0   # RecvLoop.flush と同じ正規化
+    audio = _read_audio(wav_path or (root / f"{session}.wav"))
     items = []
     for t in sorted(turns, key=lambda t: (t["ms"], t["turn_id"])):
         code = gt["labels"].get(str(t["turn_id"])) or gt["labels"].get(t["turn_id"])
@@ -85,6 +91,66 @@ def load_inputs(gt_path: Path, wav_path: Path | None):
             "gt": code,
         })
     return gt, items, audio
+
+
+def _gt_code_by_timeline(ms: int, end_ms: int,
+                         tl: dict[str, list[tuple[int, int]]]) -> str | None:
+    """発話の時間帯で支配的（80%以上）なGT話者を返す.
+
+    eval/eval_speaker_gt.py の gt_code_by_timeline と同じ規則（採点系の互換維持）:
+    GTラベル済み時間が発話長の3割未満なら None（正解範囲外＝採点対象外）、
+    支配的話者がいなければ "MULTI"（単一正解を割り当てられない）。
+    """
+    dur = max(1, end_ms - ms)
+    ovs = {c: sum(max(0, min(end_ms, b) - max(ms, a)) for a, b in ivs)
+           for c, ivs in tl.items()}
+    total = sum(ovs.values())
+    if total < dur * 0.3:
+        return None
+    c, top = max(ovs.items(), key=lambda x: x[1])
+    return c if top >= total * 0.8 else "MULTI"
+
+
+def load_session_inputs(session: str, gt_path: Path, wav_path: Path):
+    """ライブランの実セグメンテーション＋実Sonioxラベルで再生する入力を作る.
+
+    turns.jsonl ベースの load_inputs は GTアノテータ形式（labels: turn_id→S1..）
+    専用。こちらは transcripts/<session>.diag.jsonl の各行（label, ms, end）を
+    そのまま発話系列として使い、ライブで実際に起きたセグメント区切り・STTラベルの
+    揺れを忠実に再現する（CallHome実測 docs/design/
+    handoff_2026-07-14_unregistered_speakers.md §14 の失敗ランをオフラインで
+    再現・修正検証するためのモード）。テキストは同セッションの turns.jsonl から
+    発話開始msで突合（相槌判定・chars用）。GTは timeline形式
+    （eval/fetch_callhome_jpn.py が生成）を時間重なり（支配80%）で突合する。
+    前提: 再生wavとライブ録音が同一クロック（ライブはこのwavのスピーカー再生）。
+    """
+    gt = json.loads(gt_path.read_text(encoding="utf-8"))
+    if gt.get("kind") != "timeline":
+        sys.exit("--from-session は timeline形式GT（eval/fetch_callhome_jpn.py 生成）専用です")
+    root = ROOT / "transcripts"
+    with open(root / f"{session}.diag.jsonl", encoding="utf-8") as f:
+        diag = [json.loads(line) for line in f]
+    text_by_ms: dict[int, str] = {}
+    with open(root / f"{session}.turns.jsonl", encoding="utf-8") as f:
+        for line in f:
+            t = json.loads(line)
+            text_by_ms.setdefault(t["ms"], t.get("text", ""))
+    tl: dict[str, list[tuple[int, int]]] = {}
+    for seg in gt["timeline"]:
+        tl.setdefault(seg["speaker"], []).append((seg["start_ms"], seg["end_ms"]))
+    audio = _read_audio(wav_path)
+    items = []
+    utts = sorted((d for d in diag if "label" in d and "ms" in d and "end" in d),
+                  key=lambda d: d["ms"])
+    for i, d in enumerate(utts):
+        items.append({
+            "turn_id": i + 1,
+            "ms": d["ms"], "end_ms": d["end"],
+            "text": text_by_ms.get(d["ms"], ""),
+            "label": str(d["label"]),
+            "gt": _gt_code_by_timeline(d["ms"], d["end"], tl),
+        })
+    return gt, items, audio, list(gt["speakers"])
 
 
 # ------------------------------------------------------------------
@@ -181,12 +247,12 @@ def replay(vp: VoiceProfiles, items: list[dict], audio: np.ndarray) -> list[dict
 # 指標（eval/eval_speaker_gt.py と同じ流儀）
 # ------------------------------------------------------------------
 
-def best_mapping(single: list[dict]) -> tuple[float, dict]:
+def best_mapping(single: list[dict],
+                 gts: tuple[str, ...] = ("S1", "S2", "S3")) -> tuple[float, dict]:
     """最適1:1対応（未確定は常に不正解扱い）での帰属精度と対応表を返す."""
-    gts = ["S1", "S2", "S3"]
     real = sorted({r["pred"] for r in single if r["pred"] != UNSURE_SPEAKER})
     best_acc, best_map = 0.0, {}
-    for k in range(min(3, len(real)) + 1):
+    for k in range(min(len(gts), len(real)) + 1):
         for perm in permutations(real, k):
             for gsel in permutations(gts, k):
                 m = dict(zip(perm, gsel, strict=False))
@@ -196,20 +262,21 @@ def best_mapping(single: list[dict]) -> tuple[float, dict]:
     return best_acc, best_map
 
 
-def summarize(results: list[dict], *, verbose: bool = True) -> float:
-    single = [r for r in results if r["gt"] in ("S1", "S2", "S3")]
+def summarize(results: list[dict], *, verbose: bool = True,
+              gts: tuple[str, ...] = ("S1", "S2", "S3")) -> float:
+    single = [r for r in results if r["gt"] in gts]
     if not single:
         sys.exit("GTの単独話者発話がありません")
-    acc, mapping = best_mapping(single)
+    acc, mapping = best_mapping(single, gts)
     if not verbose:
         return acc
     n_multi = sum(1 for r in results if r["gt"] == "MULTI")
     n_unk = sum(1 for r in results if r["gt"] == "UNK")
-    print(f"= GT付き {len(results)} 発話（単独話者 {len(single)}、"
-          f"複数人 {n_multi}、不明 {n_unk}）\n")
+    n_none = sum(1 for r in results if r["gt"] is None)
+    print(f"= 全 {len(results)} 発話（単独話者 {len(single)}、"
+          f"複数人 {n_multi}、不明 {n_unk}、正解範囲外 {n_none}）\n")
 
     # 混同行列
-    gts = ["S1", "S2", "S3"]
     sys_labels = sorted({r["pred"] for r in single})
     conf = {s: Counter() for s in sys_labels}
     for r in single:
@@ -280,9 +347,12 @@ def build_argparser() -> argparse.ArgumentParser:
                     "（pyannoteクラスタは対象外＝声紋のみの上限性能）",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     p.add_argument("--gt", default=str(ROOT / "eval" / "gt_2026-07-14_142016.json"),
-                   help="GT JSON（gt_annotator で作成したもの）")
+                   help="GT JSON（gt_annotator 形式 or timeline形式）")
     p.add_argument("--wav", default=None,
                    help="wavパス（省略時は transcripts/<session>.wav）")
+    p.add_argument("--from-session", default=None, metavar="SESSION",
+                   help="ライブランの diag.jsonl（実セグメンテーション＋実Sonioxラベル）"
+                        "で再生する。--gt に timeline形式GT、--wav に音源wavが必須")
     p.add_argument("--model", default="redimnet",
                    choices=["redimnet", "ecapa", "resemblyzer"], help="声紋モデル")
     p.add_argument("--max-speakers", type=int, default=3,
@@ -328,7 +398,16 @@ def cli_params(args) -> dict:
 
 def main(argv: list[str] | None = None) -> None:
     args = build_argparser().parse_args(argv)
-    gt, items, audio = load_inputs(Path(args.gt), Path(args.wav) if args.wav else None)
+    gt_codes: tuple[str, ...] = ("S1", "S2", "S3")
+    if args.from_session:
+        if not args.wav:
+            sys.exit("--from-session には --wav が必須です")
+        gt, items, audio, codes = load_session_inputs(
+            args.from_session, Path(args.gt), Path(args.wav))
+        gt_codes = tuple(codes)
+    else:
+        gt, items, audio = load_inputs(Path(args.gt),
+                                       Path(args.wav) if args.wav else None)
     print(f"# セッション {gt['session']}: {len(items)}発話 / "
           f"音声 {audio.size/SR:.0f}s / モデル {args.model}"
           f" / max_speakers={args.max_speakers} hybrid={args.hybrid} auto={args.auto}")
@@ -344,7 +423,7 @@ def main(argv: list[str] | None = None) -> None:
             params = {**base, **combo}
             reset_tracker(vp, params, max_speakers=args.max_speakers,
                           hybrid=args.hybrid, auto=args.auto)
-            acc = summarize(replay(vp, items, audio), verbose=False)
+            acc = summarize(replay(vp, items, audio), verbose=False, gts=gt_codes)
             scored.append((acc, combo))
             print(f"  acc={acc:.1%}  "
                   + "  ".join(f"{k}={v}" for k, v in combo.items()))
@@ -368,7 +447,7 @@ def main(argv: list[str] | None = None) -> None:
                   f"pred={r['pred']:<8} kind={r['kind']}{sim} {mark}"
                   f"{r['text'][:30]}")
         print()
-    summarize(results)
+    summarize(results, gts=gt_codes)
 
 
 if __name__ == "__main__":
