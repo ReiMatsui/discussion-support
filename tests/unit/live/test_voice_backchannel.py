@@ -28,6 +28,8 @@ def _bare_tracker() -> VoiceProfiles:
     vp.pool = []
     vp.label_embs = {}
     vp.own_sims = {}
+    vp.own_embs = {}
+    vp._own_updates = {}
     vp.counts = {}
     vp.last = None
     vp.n_anon = 0

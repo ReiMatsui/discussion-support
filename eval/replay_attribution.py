@@ -194,6 +194,8 @@ def reset_tracker(vp: VoiceProfiles, params: dict, *,
     vp.n_anon = 0
     vp.same_sims, vp.diff_sims = [], []
     vp.own_sims = {}
+    vp.own_embs = {}
+    vp._own_updates = {}
     vp.counts = {}
     vp.last = None
     vp._active_keys = set()

@@ -33,6 +33,8 @@ def _tracker(emb: np.ndarray) -> VoiceProfiles:
     vp.same_sims = []
     vp.diff_sims = []
     vp.own_sims = {}
+    vp.own_embs = {}
+    vp._own_updates = {}
     vp.counts = {}
     vp.last = None
     vp.n_anon = 0

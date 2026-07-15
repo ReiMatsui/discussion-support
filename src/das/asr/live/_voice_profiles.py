@@ -178,6 +178,8 @@ class VoiceProfiles:
         self.enroll_win_sec = 1.5         # 長い発話を分割する窓の長さ（内部一貫性の確認用）
         self.enroll_consist_bonus = 0.08  # 一貫性しきい値(cs)への上乗せ（混入抑制）
         self._POOL_CAP = 24               # 保留サンプルの上限（古いものから捨てる）
+        self._REBUILD_EVERY = 8           # 受理一致N回ごとに汚染検査（P3・低頻度＝低コスト）
+        self._OWN_EMB_CAP = 16            # 人物ごとに保持する受理一致埋め込みの上限（P3）
         self.max_human_speakers: int | None = None
         self.profiles: dict[str, np.ndarray] = {}
         if os.path.exists(path):
@@ -205,6 +207,15 @@ class VoiceProfiles:
         # 本人の典型(例:0.7台)に届かなければ巻き取らない。診断ログ解析(2026-06-11)で
         # 吸収帯0.45-0.59と本人帯0.67-0.82の分離を確認、検証で吸収率91%→0%。
         self.own_sims: dict[str, list[float]] = {}   # 人物 -> 受理された一致simの履歴
+        # 事後回収（P3）: 匿名人物の受理一致の埋め込みを保持し、更新N回ごとに
+        # 自己一貫性を検査。二峰性（登録が汚染され、プロファイルが両話者の一致を
+        # 引き寄せている状態）を検出したら多数派クラスタで再構築する。
+        # 対象は自動登録の匿名「人物N」のみ: 実名プロファイルは単独発話の
+        # クリーンな音声から作られ（enroll_from_audio/enroll）、voices.json に
+        # 永続化もされるため、セッション中の照合履歴で書き換えない（安全側）。
+        # 過去レコードの遡及修正はしない（将来の帰属が直ればよい）。
+        self.own_embs: dict[str, list[np.ndarray]] = {}   # 人物 -> 受理一致の埋め込み
+        self._own_updates: dict[str, int] = {}            # 人物 -> 受理一致の累計回数
         self.embed_ms: list[float] = []                     # レイテンシ統計
         self.counts: dict[str, int] = {}                    # 判定種別の集計
         self.last: dict | None = None                       # 直近の判定内容（可視化用）
@@ -231,6 +242,8 @@ class VoiceProfiles:
             self.pool.clear()
             self.n_anon = 0
             self.own_sims.clear()
+            self.own_embs.clear()
+            self._own_updates.clear()
             self.last = None
             # AI声紋(__..__)と実名プロファイルは残し、匿名「人物N」だけ落とす。
             # ANON は「人物N」のみをカバーする（#ラベルは _active_keys に入らない）。
@@ -440,6 +453,44 @@ class VoiceProfiles:
                    rename=rename, chars=round(total_chars))
         return target
 
+    def _track_own_emb(self, name: str, emb: np.ndarray) -> None:
+        """受理された一致の埋め込みを蓄積し、N回ごとに汚染検査→多数派で再構築（P3）.
+
+        登録時の純度検査（_purity_subset）をすり抜けて混合プロファイルができた
+        場合、そのプロファイルは両話者の発話を引き寄せるため、受理一致の埋め込み
+        列が二峰性を持つ（プール内に相互類似度の低い2クラスタ）。これを検出したら
+        多数派クラスタの平均でプロファイルを再構築し、少数派は破棄する。
+        検査は _REBUILD_EVERY 回の受理ごと（16×16 の内積行列1回＝サブms級）。
+        再構築後は own_sims（人物別しきい値の履歴）もリセットし、新しい
+        プロファイルの一致分布を学び直す（汚染期の受理simでしきい値が
+        歪んだままになるのを防ぐ）。呼び出し元が classify の受理パス＝
+        min_sec 以上の発話のみで、短発話の不安定な埋め込みは混ぜない。
+        設計: docs/design/handoff_2026-07-14_unregistered_speakers.md §14
+        （CallHome 0856、登録材料の53-55%混合で帰属27%に崩壊）への事後回収層。
+        """
+        if not self.ANON.match(name):
+            return   # 実名プロファイルは書き換えない（__init__ の own_embs 註釈参照）
+        oe = self.own_embs.setdefault(name, [])
+        oe.append(emb)
+        del oe[:-self._OWN_EMB_CAP]
+        cnt = self._own_updates.get(name, 0) + 1
+        self._own_updates[name] = cnt
+        if cnt % self._REBUILD_EVERY or len(oe) < self._REBUILD_EVERY:
+            return
+        keep = self._purity_subset(oe)
+        # 単峰（健全）なら何もしない。二峰でも「多数派」と呼べる側が過半数に
+        # 届かなければ、どちらが本人か判定できないので書き換えない（安全側）。
+        if len(keep) >= len(oe) or len(keep) * 2 <= len(oe):
+            return
+        embs = [oe[i] for i in keep]
+        prof = np.mean(np.stack(embs), axis=0)
+        self.profiles[name] = prof / np.linalg.norm(prof)
+        self.own_embs[name] = embs
+        self.own_sims[name] = []
+        # 直近判定(last)は呼び出し元の一致noteに使われるため上書きせず、
+        # counts のみ記録する（diag の stats 経由で観測可能）。
+        self.counts["プロファイル再構築"] = self.counts.get("プロファイル再構築", 0) + 1
+
     def set_max_human_speakers(self, value: int | None) -> None:
         self.max_human_speakers = value
 
@@ -558,6 +609,7 @@ class VoiceProfiles:
                         h = self.own_sims.setdefault(cand, [])
                         h.append(sim)
                         del h[:-20]
+                        self._track_own_emb(cand, emb)   # 事後回収（P3）の監視材料
                         self._note("補正" if (prev is not None and not prev.startswith("#")
                                               and prev != cand) else "声紋一致", label=sp, **info)
                         return cand
@@ -741,6 +793,9 @@ class VoiceProfiles:
                 self.sp_map[k] = name
         if old in self.own_sims:
             self.own_sims[name] = self.own_sims.pop(old)
+        # 実名化されたら事後回収(P3)の監視対象から外れる（実名は書き換えない方針）
+        self.own_embs.pop(old, None)
+        self._own_updates.pop(old, None)
         if old != label:   # 「人物N=名前」のリネーム以外は、ラベル自体も対応づける
             self.sp_map[label] = name
         self._persist()
@@ -753,6 +808,8 @@ class VoiceProfiles:
                 return False
             self.profiles.pop(src, None)   # 残すと同じ声が再びsrcと判定されて復活してしまう
             self.own_sims.pop(src, None)
+            self.own_embs.pop(src, None)
+            self._own_updates.pop(src, None)
             for k, v in list(self.sp_map.items()):
                 if v == src:
                     self.sp_map[k] = dst
@@ -780,6 +837,8 @@ class VoiceProfiles:
                         self.profiles.pop(key)
                         self._active_keys.discard(key)
                         self.own_sims.pop(key, None)
+                        self.own_embs.pop(key, None)
+                        self._own_updates.pop(key, None)
                         for k, v in list(self.sp_map.items()):
                             if v == key:
                                 self.sp_map[k] = name
@@ -844,7 +903,8 @@ class VoiceProfiles:
             parts.append(f"部屋の声紋分布(参考): ラベル内{np.median(self.same_sims):.2f}"
                          f"/ラベル間{np.median(self.diff_sims):.2f}")
         if self.counts:
-            order = ["声紋一致", "補正", "自動登録", "合流", "蓄積中", "純度保留", "未確定",
+            order = ["声紋一致", "補正", "自動登録", "合流", "蓄積中", "純度保留",
+                     "プロファイル再構築", "未確定",
                      "ラベル継続", "相槌追従", "重なりスキップ", "声紋計算不可"]
             parts.append("判定内訳: " + " / ".join(
                 f"{k}{self.counts[k]}" for k in order if self.counts.get(k)))
