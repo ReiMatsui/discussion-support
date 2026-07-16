@@ -272,12 +272,21 @@ def test_zero_norm_embedding_is_guarded_and_not_stored():
     assert namer._embeddings == {}            # NaN 入りの代表埋め込みを保存しない
 
 
-def test_merge_sim_defaults_to_tracker_dedupe():
-    """merge_sim の既定は tracker.dedupe と同値（従来挙動の維持。review P4）."""
-    tracker = _FakeTracker([], dedupe=0.72)
-    namer = ClusterVoiceNamer(tracker, min_sec=5.0)
+def test_merge_sim_defaults_to_high_confidence_bar():
+    """merge_sim の既定は「取り消せない操作」共通の高確信バー（§15.10）.
 
-    assert namer.merge_sim == tracker.dedupe
+    dedupe(0.50相当)を流用していた頃、確定を0.70で堰き止めた結果、未確定の
+    クラスタが sim0.55 の名寄せで別話者へ吸収される抜け穴があった
+    （Chiba 0532, 2026-07-17_0027）。名寄せも確定と同じく不可逆なので、
+    既定は max(dedupe, PYANNOTE_CLUSTER_CONFIRM_MIN_SIM)。
+    """
+    from das.asr.live._constants import PYANNOTE_CLUSTER_CONFIRM_MIN_SIM
+
+    namer = ClusterVoiceNamer(_FakeTracker([], dedupe=0.50), min_sec=5.0)
+    assert namer.merge_sim == PYANNOTE_CLUSTER_CONFIRM_MIN_SIM   # 0.50 < 0.70
+
+    high = ClusterVoiceNamer(_FakeTracker([], dedupe=0.72), min_sec=5.0)
+    assert high.merge_sim == 0.72                                # dedupe が高ければそちら
 
 
 def test_merge_sim_is_independent_of_dedupe():
