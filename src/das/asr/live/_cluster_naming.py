@@ -58,10 +58,21 @@ class ClusterVoiceNamer:
         *,
         min_sec: float = PYANNOTE_CLUSTER_NAMING_MIN_SEC,
         max_buffer_sec: float = PYANNOTE_CLUSTER_NAMING_MAX_BUFFER_SEC,
+        merge_sim: float | None = None,
     ) -> None:
         self.tracker = tracker
         self.min_sec = min_sec
         self.max_buffer_sec = max_buffer_sec
+        # クラスタ間名寄せ・最近傍統合の類似度下限。従来は tracker.dedupe
+        # （3発話プロファイル同士の比較で校正された値）をそのまま流用していたが、
+        # ここで比較するのは 5〜20秒の連結音声の埋め込み同士であり文脈が異なる
+        # （docs/design/attribution_logic_review_2026-07.md C6/P4）。独立ノブに
+        # 分離して校正可能にする。既定値は従来と同じ tracker.dedupe（モデル別:
+        # redimnet 0.50 / ecapa 0.40 / resemblyzer 0.72）＝挙動不変。
+        # 校正方法: GT付きライブ再実験の diag（type: cluster_naming）に出る
+        # nearest_sim の分布（同一人物/別人）を見て決める。
+        self.merge_sim = float(merge_sim) if merge_sim is not None \
+            else float(tracker.dedupe)
         self._buffers: dict[str, list[np.ndarray]] = {}
         self._confirmed: dict[str, str] = {}   # raw_cluster -> 確定名
         # クラスタ間名寄せ（docs/design/handoff_2026-07-14_unregistered_speakers.md §3）:
@@ -199,7 +210,7 @@ class ClusterVoiceNamer:
             if emb is not None:
                 nearest = self._nearest_embedding(emb, self_key=raw_cluster)
                 best, best_sim = nearest if nearest is not None else (None, -1.0)
-                if best is not None and best_sim >= self.tracker.dedupe:
+                if best is not None and best_sim >= self.merge_sim:
                     self._merge_cluster(raw_cluster, best)
                     self.last_match = {"kind": "クラスタ名寄せ", "raw": raw_cluster,
                                        "canonical": best, "sim": round(best_sim, 3)}
@@ -208,6 +219,11 @@ class ClusterVoiceNamer:
                     return self._confirmed.get(best)
                 # 名寄せも不成立: 次回の名寄せ先候補として代表埋め込みを最新の
                 # concat で更新しておく（音声が増えるほど代表性が上がる想定）。
+                # 最近傍とその類似度は diag に残し、merge_sim の校正材料にする
+                # （不成立側の分布が見えないと閾値を調整できない。review P4）。
+                if best is not None:
+                    self.last_match["nearest"] = best
+                    self.last_match["nearest_sim"] = round(best_sim, 3)
                 self._embeddings[raw_cluster] = emb
             # confidence不足。バッファは維持し、次の観測でさらに蓄積してから再照合する。
             return None

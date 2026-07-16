@@ -270,3 +270,37 @@ def test_zero_norm_embedding_is_guarded_and_not_stored():
     namer = ClusterVoiceNamer(vp, min_sec=5.0)
     assert namer.observe("pyannote:SPEAKER_00", _wav(5.0)) is None
     assert namer._embeddings == {}            # NaN 入りの代表埋め込みを保存しない
+
+
+def test_merge_sim_defaults_to_tracker_dedupe():
+    """merge_sim の既定は tracker.dedupe と同値（従来挙動の維持。review P4）."""
+    tracker = _FakeTracker([], dedupe=0.72)
+    namer = ClusterVoiceNamer(tracker, min_sec=5.0)
+
+    assert namer.merge_sim == tracker.dedupe
+
+
+def test_merge_sim_is_independent_of_dedupe():
+    """merge_sim を上書きすると、dedupe と独立に名寄せの成立条件が変わる（review C6/P4）.
+
+    _V1/_V2 の類似度は 0.9: 既定（dedupe=0.72流用相当）なら統合されるが、
+    merge_sim=0.95 に上げると独立のまま（クラスタ間名寄せだけ厳格化できる）。
+    """
+    tracker = _FakeTracker([None, None], embed_map={0.1: _V1, 0.2: _V2}, dedupe=0.72)
+    namer = ClusterVoiceNamer(tracker, min_sec=5.0, merge_sim=0.95)
+
+    assert namer.observe("pyannote:SPEAKER_00", _wav(5.0, 0.1)) is None
+    assert namer.observe("pyannote:SPEAKER_01", _wav(5.0, 0.2)) is None   # sim0.9<0.95
+    assert namer.canonical_cluster("pyannote:SPEAKER_01") == "pyannote:SPEAKER_01"
+
+
+def test_unmerged_nearest_similarity_is_recorded_for_calibration():
+    """名寄せ不成立時も最近傍と類似度を last_match に残す（merge_sim 校正用。review P4）."""
+    tracker = _FakeTracker([None, None], embed_map={0.1: _V1, 0.3: _V3}, dedupe=0.72)
+    namer = ClusterVoiceNamer(tracker, min_sec=5.0)
+
+    namer.observe("pyannote:SPEAKER_00", _wav(5.0, 0.1))
+    namer.observe("pyannote:SPEAKER_01", _wav(5.0, 0.3))   # 直交 sim=0 → 不成立
+
+    assert namer.last_match["nearest"] == "pyannote:SPEAKER_00"
+    assert namer.last_match["nearest_sim"] == 0.0

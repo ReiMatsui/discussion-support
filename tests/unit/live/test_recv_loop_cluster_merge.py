@@ -53,8 +53,10 @@ class _Namer:
         self._aliases = dict(aliases or {})
         self._nearest = nearest
         self._nearest_sim = nearest_sim
-        # 最近傍統合の下限閾値は VoiceProfiles.dedupe を流用する（F2）。
+        # 最近傍統合の下限閾値は merge_sim（既定は dedupe と同値。review P4 で
+        # 文脈分離した独立ノブ）。
         self.tracker = SimpleNamespace(dedupe=dedupe)
+        self.merge_sim = dedupe
         self.last_match = None
 
     def observe(self, raw_cluster, wav, *, overlapped=False):
@@ -63,7 +65,7 @@ class _Namer:
     def canonical_cluster(self, raw_cluster):
         return self._aliases.get(raw_cluster, raw_cluster)
 
-    def nearest_cluster(self, raw_cluster, exclude=None):
+    def nearest_cluster(self, raw_cluster):
         if self._nearest is None:
             return None
         return self._nearest, self._nearest_sim
