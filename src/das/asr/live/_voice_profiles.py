@@ -514,8 +514,15 @@ class VoiceProfiles:
                     prev = None
                 # 登録: 発話数ではなく「声ごとのクリーンな発声の累積文字数」で確定する。
                 # 長い発話は窓分割して複数サンプル化（連続発話でも登録が進み、内部一貫性も確認）。
-                kind = "蓄積中" if (enroll and self.auto and chars > 0) else "未確定"
-                if enroll and self.auto and chars > 0:
+                # 不純ラベル（直近の照合成功が複数人物に割れている）の音声は登録・
+                # 蓄積に使わない: 混載ラベル由来のプロファイルが既存人物へ交互に
+                # 合流してプロファイル自体を汚染し、クラスタ照合まで巻き込む
+                # （Chiba 0532 実測: 同一ラベルから人物1へ11回/人物2へ4回の合流、
+                #  handoff §15.7-15.8）。
+                enrollable = (enroll and self.auto and chars > 0
+                              and self._label_pure(sp))
+                kind = "蓄積中" if enrollable else "未確定"
+                if enrollable:
                     ecs = cs + self.enroll_consist_bonus
                     samples = self._segment_samples(wav, emb, chars)
                     target = self._enroll_accumulate(samples, sp, prev, ecs)

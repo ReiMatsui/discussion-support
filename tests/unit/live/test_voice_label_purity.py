@@ -109,3 +109,25 @@ def test_short_utterance_continuation_also_gated():
         vp.classify(_LONG, "1", count=True)
     assert vp.classify(short, "1", count=True) == UNSURE_SPEAKER
     assert vp.last["kind"] == "ラベル不純"
+
+
+def test_impure_label_does_not_feed_enrollment():
+    """不純ラベルの音声は登録プールに入らない（プロファイル汚染の防止, §15.8）.
+
+    Chiba 0532 実測: 混載ラベル由来のプロファイルが人物1へ11回・人物2へ4回と
+    交互に合流し、プロファイル自体が2人分の声で汚染された。不純ラベルは
+    帰属だけでなく蓄積・登録からも外す。
+    """
+    vp = _tracker([_unit(1, 0, 0), _unit(0, 1, 0),
+                   _unit(1, 0, 0), _unit(0, 1, 0), _AMBIG, _AMBIG])
+    vp.auto = True   # 自動登録経路を有効化
+    vp.enroll_min_total_chars = 45
+    vp.enroll_win_sec = 1.5
+    vp.enroll_consist_bonus = 0.08
+    for _ in range(4):
+        vp.classify(_LONG, "1", count=True, chars=30)
+    assert not vp._label_pure("1")
+    pool_before = len(vp.pool)
+    vp.classify(_LONG, "1", count=True, chars=30)     # 不純ラベルの照合失敗発話
+    assert vp.last["kind"] == "ラベル不純"            # 蓄積中ではなく不純落ち
+    assert len(vp.pool) == pool_before                # プールに追加されない
