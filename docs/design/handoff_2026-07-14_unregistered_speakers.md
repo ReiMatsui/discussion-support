@@ -238,3 +238,101 @@ numSpeakers=3 指定）でこの録音を分離し、正解タイムラインで
 2. 帰属ロジック妥当性レビュー（別セッション、プロンプト作成済み）に本結果を入力として渡す
 3. Sakura（対面4人・試聴済みで音質OK）でも同経路で1本測定すれば、2話者/4人会話の両方で
    汎化データが揃う
+
+## 15. レビュー提案の実装 P5/P3/P4/P2（2026-07-16 追記、Claude Fable 5）
+
+docs/design/attribution_logic_review_2026-07.md（帰属ロジック徹底レビュー）の提案を
+低リスク順に実装した。回帰ゲートは各コミットで (1) テストスイート全パス
+（sandbox: live 548 + その他 309。フル `uv run pytest -q` は実機で要確認）、
+(2) replay_attribution.py 79%/未確定3%/誤帰属18%（GT=2026-07-14_142016、基準一致）。
+
+- `a54a52e` **P5 掃除（挙動不変）**: デッド行削除（flush の相槌 sp_id 上書き）、
+  nearest_cluster の未使用 exclude 引数削除、kind「相槌追従」→「照合なし」改名
+  （diag/stats の表示が変わる点に注意）、observe() 内の名寄せ探索を
+  _nearest_embedding に一本化、C7/C8/C12 の意図を docstring/コメントに固定。
+  レビューD2の confirmed_name() はテストが使う公開アクセサだったため維持。
+- `1b95262` **P3 短発話厳格化の一本化**: short_margin_mult（strict帯で margin×2）を
+  削除し「strict_sec 未満は採用閾値 +short_bonus」に簡約。replay の kind別内訳まで
+  ベースラインと完全一致（レビュー§3.2 の ablation どおり）。short_floor 経路と
+  hybrid フラグは実会話検証まで維持。
+- `f6192fc` **P4 dedupe の文脈分離**: ClusterVoiceNamer.merge_sim を新設
+  （既定 = tracker.dedupe と同値＝挙動不変）。名寄せ不成立時の最近傍と類似度を
+  diag（type: cluster_naming の nearest/nearest_sim）へ記録し、閾値校正を可能にした。
+  値の変更はしていない（校正は実走の sim 分布を見てから）。
+- `2faf6ff` **P2 rekey 一元化（C3/C11 修正）**: rekey が diarization_speaker_keys と
+  ClusterVoiceNamer._confirmed（新設 rename_confirmed）へ付け替えを伝搬。
+  「/rename 後にリネームした人物が旧名で復活し別人格に分裂する」バグを再現テスト
+  （test_rekey_propagation.py）ごと根絶。html_color を単調採番に変え、統合で他の
+  話者の色がずれる問題も修正。
+
+## 16. P1（匿名キー解決の状態機械統合）詳細設計 — 承認待ち
+
+### 16.1 解決する問題（レビュー C1/C2/C4/C10）
+
+現状の匿名キー解決は「発行してから constrain で落とす」順序のため:
+
+- スロット満杯後の新クラスタは、ヒステリシス3秒消化と同時に @diar:N が
+  **発行・恒久登録**され、constrain が毎回未確定に落とす（不可視キー）。以後
+  「raw 未キー」が前提の最近傍統合の対象外となり**永久に未確定**（C1）。
+  統合先の代表埋め込みが5秒蓄積を要する（C2）ため、初回発行の瞬間に統合が
+  成立することも実質ない。handoff §3-2「超過分は最近傍へ統合」は未達のまま。
+- 相槌もヒステリシス pending に加算され、相槌の積み上げだけで @diar:N が
+  発行され得る（C4）。
+- 最近傍統合が成立しても永続化されず、毎発話再計算で別participantへ振れ得る（C10）。
+
+### 16.2 新設計: 「発行前に判定する」1本の流れ
+
+対象は **cluster_namer 有効時（ハイブリッド構成）のみ**。Soniox単独・pyannote単独
+（cluster_namer なし）の経路はコードごと従来のまま（本節の変更を通らない）。
+
+_recv_loop._merged_diarization_speaker_key を以下の状態機械に置き換える:
+
+```
+未キー raw の解決（1発話ごと）:
+ 0. 相槌(_is_backchannel)・重なり(cluster_overlap) → pending に加算せず UNSURE
+    （C4。従来も record は UNSURE になるので表示上の挙動差はほぼ無し。
+     diag の key フィールドが UNSURE になる点だけ変わる）
+ 1. canonical = namer.canonical_cluster(raw)。名寄せ成立済みなら canonical の
+    キーへ（pending 合算・遡及 rekey 含め現行踏襲）
+ 2. canonical に既キーあり → それを返す（現行踏襲）
+ 3. pending += duration_ms。pending < 3000ms → UNSURE（現行踏襲）
+ 4. スロットに空きあり（not human_slot_budget_exhausted()）
+    → @diar:N を発行（pending 消化。現行と同じ採番）
+ 5. スロット満杯:
+    a. nearest_cluster() の sim >= namer.merge_sim かつ相手に既キーあり
+       → そのキーへ統合し **diarization_speaker_keys[raw] = nearest_key を
+         永続記録**（C10。以後この raw は 2. で即解決）
+    b. 不成立 → **キーを発行せず** UNSURE。pending は threshold で頭打ちにして
+       保持し、後続発話（相手の埋め込みが5秒蓄積で育った後）に 5a を再試行
+       （C1/C2 の解消点: 「発行できないときは待つ」）
+```
+
+constrain_human_speaker_key は最終ゲートとして現行のまま残す（closed roster・
+profiles 素通し・max 途中変更時の落とし）。通常フローでは「発行時点でスロット
+判定済み」のため、constrain が @diar を落とすのは max を会議中に減らした場合等に
+限られるようになる。辞書順スロット選別（C5）の廃止は本変更のスコープ外
+（実害経路が P1 でほぼ消えるため、実会話検証後に判断）。
+
+### 16.3 変更ファイルと規模
+
+- _recv_loop.py: _merged_diarization_speaker_key の順序再編（約30行）
+- _session_state.py: key_for_diarization_speaker に「発行せず pending 保持」を
+  指示する引数（allow_new=False 相当）を追加（約10行）。
+  相槌スキップは flush の呼び出し側で分岐
+- テスト: 状態遷移のユニットテスト新設（満杯時にキーを発行しない／埋め込みが
+  育ってからの後追い統合が成立し永続化される／相槌が pending に入らない／
+  max 未設定・cluster_namer なしは従来挙動）＋既存テストの期待値調整
+
+### 16.4 期待効果とリスク
+
+- 期待: 登録者ゼロ・スロット満杯での「永久未確定」が解消。CallHome 0696 の
+  未確定21%（§14）、YouTube 実地の未確定50%（§12）の一部回収。
+  handoff §3-2 の設計意図が初めて実際に機能する
+- リスク: 最近傍統合の誤統合が永続化される（従来は発動自体が稀だった）。
+  merge_sim は未校正（P4 で観測性は確保済み）のため、初期値のまま実走し
+  diag の nearest_sim 分布を見て調整する。誤統合の回復は fix/rename（P2 で
+  一貫性保証済み）で可能
+- 検証: replay には乗らない層のため、(1) ユニットテスト、(2) CallHome 0696 の
+  再測（§14 経路、基準67%・未確定21%）で before/after 比較
+
+**この設計で実装してよいか、ユーザーの承認を待つ（承認ゲート）。**
