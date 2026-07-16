@@ -77,8 +77,11 @@ class _Namer:
     def canonical_cluster(self, raw_cluster):
         return raw_cluster
 
-    def nearest_cluster(self, raw_cluster, exclude=None):
+    def nearest_cluster(self, raw_cluster):
         return None
+
+    def rename_confirmed(self, old, new):
+        return None   # rekey からの伝搬（review P2）。フェイクでは何もしない
 
 
 def _make_state(tmp_path, *, tracker, namer, resolver):

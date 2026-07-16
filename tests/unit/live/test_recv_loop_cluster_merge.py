@@ -65,6 +65,9 @@ class _Namer:
     def canonical_cluster(self, raw_cluster):
         return self._aliases.get(raw_cluster, raw_cluster)
 
+    def rename_confirmed(self, old, new):
+        return None   # rekey からの伝搬（review P2）。フェイクでは何もしない
+
     def nearest_cluster(self, raw_cluster):
         if self._nearest is None:
             return None

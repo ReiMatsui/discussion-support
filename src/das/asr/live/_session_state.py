@@ -73,6 +73,11 @@ class SessionState:
         # 発話記録
         self.names: dict[str, str] = {}
         self.colors: dict[str, str] = {}
+        # HTML色の安定インデックス（review C11/P2）。従来は list(colors).index(key)
+        # で色を決めていたため、rekey の pop で後続キー全員の色がずれた。
+        # 単調増加の採番を一度割り当てたら変えない（統合時は旧キーの番号を引き継ぐ）。
+        self.html_color_idx: dict[str, int] = {}
+        self.html_color_seq = 0
         self.records: list[dict] = []
         self.state_lock = threading.Lock()
         # 会議世代カウンタ（H2）。reset_for_new_meeting が state_lock 内で +1 する。
@@ -527,20 +532,47 @@ class SessionState:
     def html_color(self, key) -> str:
         """話者キーに対応する安定したHTML色（ブラウザ再読み込みでも一貫, 課題②）.
 
-        色は state.colors の登録順で決まる（サーバー側に保持）。再読み込みでは
-        サーバー状態が変わらないため色がぶれず、新しい会議でリセットされる。
+        色は初回登録時に採番する単調カウンタで決まる（サーバー側に保持）。
+        再読み込みではサーバー状態が変わらないため色がぶれず、新しい会議で
+        リセットされる。rekey（統合・リネーム）では旧キーの番号を引き継ぐため、
+        他の話者の色もずれない（旧実装は list(colors).index() だったため、
+        rekey の pop で後続キーの色が全部ずれた。review C11/P2）。
         """
         key = str(key)
-        self.color_of(key)  # 未登録なら登録順を確定
-        idx = list(self.colors).index(key)
-        return HTML_PALETTE[idx % len(HTML_PALETTE)]
+        self.color_of(key)  # ANSI 色の登録順も従来どおり確定させておく
+        if key not in self.html_color_idx:
+            self.html_color_idx[key] = self.html_color_seq
+            self.html_color_seq += 1
+        return HTML_PALETTE[self.html_color_idx[key] % len(HTML_PALETTE)]
 
     def rekey(self, old: str, new: str):
-        """表示キーの付け替え: recordsと色を一括移行."""
+        """表示キーの付け替え: records・色・台帳を一括移行する単一入口.
+
+        話者IDの台帳は records/colors/names のほかに diarization_speaker_keys
+        （外部クラスタ→表示キー）と ClusterVoiceNamer._confirmed（クラスタ→
+        確定名）があり、従来はここが更新されず、UI /rename・stdin fix の後に
+        旧キーがクラスタ経由で復活していた（docs/design/
+        attribution_logic_review_2026-07.md C3）。リネーム・統合の全経路
+        （UI /rename・/activate、stdin fix/enroll、クラスタ確定の遡及統合）は
+        必ず本メソッドを通るため、伝搬はここに一元化する（P2）。
+        """
         with self.state_lock:
             for r in self.records:
                 if r.get("speaker") == old:
                     r["speaker"] = new
+            # 外部diarizationクラスタの台帳。旧キーを指したままだと、以後の
+            # そのクラスタの発話が旧キー（削除済みの人物N等）で帰属される。
+            for cluster, k in self.diarization_speaker_keys.items():
+                if k == old:
+                    self.diarization_speaker_keys[cluster] = new
+            # クラスタ確定名。observe() が確定名を短絡で返すため、ここを
+            # 更新しないと旧名が永久に返り続ける（C3 の人格復活の本体）。
+            if self.cluster_namer is not None:
+                self.cluster_namer.rename_confirmed(old, new)
+            if old in self.html_color_idx:
+                # 統合先が未採番なら旧キーの色番号を引き継ぐ（同一人物の色を維持
+                # しつつ、他の話者の色をずらさない。review C11）。
+                self.html_color_idx.setdefault(new, self.html_color_idx.pop(old))
             if old in self.colors:
                 self.colors.setdefault(new, self.colors.pop(old))
             if old in self.names:
@@ -870,6 +902,8 @@ class SessionState:
             self.records = []
             self.names = {}
             self.colors = {}
+            self.html_color_idx = {}
+            self.html_color_seq = 0
             self.anonymous_labels = {}
             self.agent_cursor = 0
             self.partial_text = ""

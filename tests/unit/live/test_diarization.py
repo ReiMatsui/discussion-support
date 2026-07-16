@@ -572,8 +572,11 @@ class _FakeClusterNamer:
     def canonical_cluster(self, raw_cluster: str) -> str:
         return raw_cluster
 
-    def nearest_cluster(self, raw_cluster: str, exclude=None) -> str | None:
+    def nearest_cluster(self, raw_cluster: str) -> str | None:
         return None
+
+    def rename_confirmed(self, old: str, new: str) -> None:
+        return None   # rekey からの伝搬（review P2）。フェイクでは何もしない
 
 
 def _make_cluster_naming_state(cluster_namer):

@@ -87,6 +87,20 @@ class ClusterVoiceNamer:
         """既にこのクラスタに確定済みの名前があれば返す（無ければNone）."""
         return self._confirmed.get(self.canonical_cluster(raw_cluster))
 
+    def rename_confirmed(self, old: str, new: str) -> None:
+        """確定名 old を new に付け替える（SessionState.rekey からの伝搬用）.
+
+        UI /rename・stdin fix 等で表示キーが変わっても _confirmed が旧名の
+        ままだと、observe() の確定短絡が旧名を返し続け、リネームした人物が
+        別人格として復活する（docs/design/attribution_logic_review_2026-07.md
+        C3）。rekey を状態一貫性の単一入口とし、ここへ伝搬する（P2）。
+        """
+        if old == new:
+            return
+        for cluster, name in list(self._confirmed.items()):
+            if name == old:
+                self._confirmed[cluster] = new
+
     def canonical_cluster(self, raw_cluster: str) -> str:
         """名寄せ（エイリアス）を解決した正規のクラスタキーを返す（無ければそのまま）.
 
