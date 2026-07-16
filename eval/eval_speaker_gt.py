@@ -24,6 +24,21 @@ from collections import Counter, defaultdict
 from itertools import permutations
 from pathlib import Path
 
+try:
+    # 本体と同じ相槌判定を使う（uv run 実行なら das は import 可能）
+    from das.asr.live._constants import _BACKCHANNEL_RE
+except ImportError:   # スタンドアロン実行用フォールバック（本体と同期すること）
+    import re
+    _BACKCHANNEL_RE = re.compile(
+        r'^[\s、。,.!?！？]*'
+        r'(うん|ふん|ふーん|へー|ほー|おー|あー|えー'
+        r'|はい|ええ|そう|そっか|そうだね|そうですね|そうですか'
+        r'|なるほど|確かに|分かる|わかる|分かります|わかりました'
+        r'|了解|オッケー|OK)'
+        r'[\s、。,.!?！？うんはいええそっかなるほど確かに]*$',
+        re.IGNORECASE,
+    )
+
 UNSURE = "未確定"
 
 
@@ -140,25 +155,46 @@ def main(gt_path: str, session_override: str | None = None) -> None:
               f" ／ 未確定率: {c[UNSURE]/total:.0%}")
 
     # --- 最適1:1対応での帰属精度（未確定は常に不正解扱い） ---
-    real = [s for s in sys_labels if s != UNSURE]
-    best_acc, best_map = 0.0, {}
-    for k in range(min(3, len(real)) + 1):
-        for perm in permutations(real, k):
-            for gsel in permutations(gts, k):
-                m = dict(zip(perm, gsel))
-                acc = sum(1 for _, s, g in single if m.get(s) == g) / len(single)
-                if acc > best_acc:
-                    best_acc, best_map = acc, m
+    def best_mapping(subset):
+        real_ = sorted({s for _, s, _ in subset if s != UNSURE})
+        acc_, map_ = 0.0, {}
+        for k in range(min(3, len(real_)) + 1):
+            for perm in permutations(real_, k):
+                for gsel in permutations(gts, k):
+                    m = dict(zip(perm, gsel))
+                    a = sum(1 for _, s, g in subset if m.get(s) == g) / len(subset)
+                    if a > acc_:
+                        acc_, map_ = a, m
+        return acc_, map_
+
+    def breakdown(subset, mapping):
+        unsure = sum(1 for _, s, _ in subset if s == UNSURE) / len(subset)
+        wrong = sum(1 for _, s, g in subset
+                    if s != UNSURE and s in mapping and mapping[s] != g) / len(subset)
+        unmapped = sum(1 for _, s, _ in subset
+                       if s != UNSURE and s not in mapping) / len(subset)
+        return unsure, wrong, unmapped
+
+    best_acc, best_map = best_mapping(single)
     print(f"\n== 最適1:1対応での帰属精度: {best_acc:.0%} ==")
     for s, g in best_map.items():
         print(f"  {s} = {names.get(g, g)}")
-    unsure_rate = sum(1 for _, s, _ in single if s == UNSURE) / len(single)
-    n_wrong = sum(1 for _, s, g in single
-                  if s != UNSURE and s in best_map and best_map[s] != g)
-    n_unmapped = sum(1 for _, s, _ in single
-                     if s != UNSURE and s not in best_map)
-    print(f"  内訳: 未確定 {unsure_rate:.0%} ／ 誤帰属 {n_wrong/len(single):.0%}"
-          f" ／ 対応外ラベル {n_unmapped/len(single):.0%}")
+    unsure_rate, wrong_rate, unmapped_rate = breakdown(single, best_map)
+    print(f"  内訳: 未確定 {unsure_rate:.0%} ／ 誤帰属 {wrong_rate:.0%}"
+          f" ／ 対応外ラベル {unmapped_rate:.0%}")
+
+    # --- 相槌を除いた実質発話の実力（handoff §15.6） ---
+    # 1秒未満の相槌（うん・そっか等）は声紋では原理的に帰属困難で、音響情報
+    # だけでの回収は誤帰属を増やすことが実測済み（§15.5、2026-07-16の3ラン比較）。
+    # 議事録・介入判断への寄与も小さいため、実用判断は実質発話の値も併記する。
+    text_of = {t["turn_id"]: t.get("text", "") for t in turns}
+    substantive = [(i, s, g) for i, s, g in single
+                   if not _BACKCHANNEL_RE.match(text_of.get(i, "").strip())]
+    if substantive and len(substantive) < len(single):
+        s_acc, s_map = best_mapping(substantive)
+        s_unsure, s_wrong, s_unmapped = breakdown(substantive, s_map)
+        print(f"\n== 相槌除外（実質発話 {len(substantive)}件）: 精度 {s_acc:.0%}"
+              f" ／ 未確定 {s_unsure:.0%} ／ 誤帰属 {s_wrong:.0%} ==")
 
     # --- diag: 名寄せ・声紋イベント ---
     if diag:
