@@ -393,6 +393,14 @@ PYANNOTE_PARTICIPANT_HYSTERESIS_S = 3.0
 PYANNOTE_CLUSTER_NAMING_MIN_SEC = 5.0
 # クラスタ音声バッファの上限（際限ない保持を防ぐ。古い分から捨てて直近の音声を使う）。
 PYANNOTE_CLUSTER_NAMING_MAX_BUFFER_SEC = 20.0
+# クラスタ→人物の確定に要求する類似度の下限。match_profile の基準しきい値
+# （redimnet 0.42+margin）はクラスタ確定には緩すぎ、低確信の誤確定が一度起きると
+# 「確定後は再照合しない」設計により全発話を汚染する（Chiba 0532 実測:
+# sim0.54 の誤確定1回で誤帰属37件）。Chiba/YouTube 全6ランの確定イベント
+# 10件の実測分布（正: 0.72/0.76/0.77/0.81/0.91/0.92、誤: 0.54/0.58/0.62/0.62）
+# の分離帯で校正。redimnet の値（他モデルはスケールが異なるため要再校正。
+# handoff_2026-07-14_unregistered_speakers.md §15.9）。
+PYANNOTE_CLUSTER_CONFIRM_MIN_SIM = 0.65
 # 重複発話（同時に複数の生クラスタが閾値以上を占める）区間は、声が混ざり声紋が
 # あてにならないため安全側で未確定にする。この比率以上を占める話者が2人以上いれば
 # 重複発話とみなす。

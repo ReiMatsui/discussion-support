@@ -38,6 +38,7 @@ from __future__ import annotations
 import numpy as np
 
 from ._constants import (
+    PYANNOTE_CLUSTER_CONFIRM_MIN_SIM,
     PYANNOTE_CLUSTER_NAMING_MAX_BUFFER_SEC,
     PYANNOTE_CLUSTER_NAMING_MIN_SEC,
     SR,
@@ -59,10 +60,15 @@ class ClusterVoiceNamer:
         min_sec: float = PYANNOTE_CLUSTER_NAMING_MIN_SEC,
         max_buffer_sec: float = PYANNOTE_CLUSTER_NAMING_MAX_BUFFER_SEC,
         merge_sim: float | None = None,
+        confirm_min_sim: float = PYANNOTE_CLUSTER_CONFIRM_MIN_SIM,
     ) -> None:
         self.tracker = tracker
         self.min_sec = min_sec
         self.max_buffer_sec = max_buffer_sec
+        # クラスタ→人物の確定に要求する類似度の下限（_constants.py の校正根拠を
+        # 参照）。「確定後は再照合しない」設計のため、確定は一致の中でも特に
+        # 高確信のものに限る。下回った照合成功は確定せず蓄積を続ける。
+        self.confirm_min_sim = float(confirm_min_sim)
         # クラスタ間名寄せ・最近傍統合の類似度下限。従来は tracker.dedupe
         # （3発話プロファイル同士の比較で校正された値）をそのまま流用していたが、
         # ここで比較するのは 5〜20秒の連結音声の埋め込み同士であり文脈が異なる
@@ -241,7 +247,16 @@ class ClusterVoiceNamer:
                 self._embeddings[raw_cluster] = emb
             # confidence不足。バッファは維持し、次の観測でさらに蓄積してから再照合する。
             return None
-        name, _confidence = match
+        name, confidence = match
+        if confidence < self.confirm_min_sim:
+            # 照合は成立したが、確定には確信不足。確定は取り消せない（再照合
+            # しない）設計のため、低確信の誤確定1回が以後の全発話を汚染する
+            # （Chiba 0532 実測: sim0.54 の誤確定→誤帰属37件。handoff §15.9）。
+            # 棄却して蓄積を続け、音声が増えて確信が上がってから確定する。
+            self.last_match = {"kind": "確定見送り(低確信)", "cluster": raw_cluster,
+                               "name": name, "sim": round(float(confidence), 3),
+                               "need": self.confirm_min_sim}
+            return None
         self._confirmed[raw_cluster] = name
         # 確定クラスタは以後の未照合クラスタの名寄せ先として引き続き有用なので、
         # 確定時にも代表埋め込みを保存する（§3 参照）。match_profile は副作用なし

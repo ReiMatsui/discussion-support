@@ -304,3 +304,21 @@ def test_unmerged_nearest_similarity_is_recorded_for_calibration():
 
     assert namer.last_match["nearest"] == "pyannote:SPEAKER_00"
     assert namer.last_match["nearest_sim"] == 0.0
+
+
+def test_low_confidence_match_does_not_confirm():
+    """類似度が確定下限(0.65)未満の照合成功は確定しない（誤確定の汚染防止, §15.9）.
+
+    確定は取り消せない設計のため、低確信の誤確定1回が以後の全発話を汚染する
+    （Chiba 0532 実測: sim0.54 の誤確定→誤帰属37件。正しい確定は全ラン 0.72
+    以上、誤確定は 0.62 以下で分離していた）。
+    """
+    tracker = _FakeTracker([("田中", 0.54), ("田中", 0.72)])
+    namer = ClusterVoiceNamer(tracker, min_sec=5.0)
+
+    assert namer.observe("pyannote:SPEAKER_00", _wav(5.0)) is None   # 0.54 → 見送り
+    assert namer.confirmed_name("pyannote:SPEAKER_00") is None
+    assert namer.last_match["kind"] == "確定見送り(低確信)"
+    # バッファは維持され、蓄積が進んで確信が上がれば確定する
+    assert namer.observe("pyannote:SPEAKER_00", _wav(5.0)) == "田中"  # 0.72 → 確定
+    assert namer.confirmed_name("pyannote:SPEAKER_00") == "田中"
