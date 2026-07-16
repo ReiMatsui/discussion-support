@@ -265,7 +265,31 @@ docs/design/attribution_logic_review_2026-07.md（帰属ロジック徹底レビ
   （test_rekey_propagation.py）ごと根絶。html_color を単調採番に変え、統合で他の
   話者の色がずれる問題も修正。
 
-## 16. P1（匿名キー解決の状態機械統合）詳細設計 — 承認待ち
+### 15.1 実機での総合検証（ユーザー実施）
+
+sandbox では live スイート＋replay しか回せないため、実機で以下を確認する:
+
+```bash
+# 1. フルテスト（回帰ゲートの正式版）
+uv run pytest -q
+
+# 2. replay 基準の再確認（79%/未確定3%/誤帰属18% を下回らないこと）
+uv run python eval/replay_attribution.py
+
+# 3. CallHome 5分の再測（§14 と同一経路。基準 67%/未確定21%/誤帰属12%。
+#    Soniox区切りの揺れで±数ptは許容。P5-P2 は挙動不変系なので大きな変化は
+#    ない想定＝変わっていないことの確認が目的）
+uv run das listen-soniox --hybrid --max-speakers 2 \
+  --wav data/callhome/0696_5min.wav --soniox-args "--no-agent"
+uv run python eval/eval_speaker_gt.py eval/gt_harness_0696.json <新セッション名>
+
+# 4. 可能なら実会話（マイク直・登録者ゼロ・3人）で §4-2 を再実施:
+#    参加者ラベル総数5以下＋主要話者が同一ラベルに集まること。
+#    このとき diag.jsonl の type:cluster_naming の nearest_sim 分布が
+#    merge_sim 校正（P4）と P1 再判断の材料になる
+```
+
+## 16. P1（匿名キー解決の状態機械統合）詳細設計 — 見送り（設計保存）
 
 ### 16.1 解決する問題（レビュー C1/C2/C4/C10）
 
@@ -335,4 +359,9 @@ profiles 素通し・max 途中変更時の落とし）。通常フローでは�
 - 検証: replay には乗らない層のため、(1) ユニットテスト、(2) CallHome 0696 の
   再測（§14 経路、基準67%・未確定21%）で before/after 比較
 
-**この設計で実装してよいか、ユーザーの承認を待つ（承認ゲート）。**
+**判断（2026-07-16、ユーザー）: 今回は見送り（P5-P2 まで）。**
+理由: 未確定の一部回収と引き換えに、誤統合が永続化するリスク（誤りの種類が
+「未確定=安全側」から「誤帰属=攻め側」に変わる）を取る変更のため、実会話
+（マイク直）検証で未確定の内訳を見てから再判断する。本設計は §16 に保存済みで、
+再開時はここから着手できる（前提の P2/P4——rekey 一貫性と merge_sim の観測性——は
+実装済み）。
