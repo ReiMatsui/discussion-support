@@ -39,7 +39,6 @@ def _tracker(emb: np.ndarray) -> VoiceProfiles:
     vp.min_sec = 1.0
     vp.short_floor = 0.45
     vp.short_bonus = 0.05
-    vp.short_margin_mult = 2.0
     vp.enroll_min_total_chars = 45
     vp.enroll_win_sec = 1.5
     vp.enroll_consist_bonus = 0.08

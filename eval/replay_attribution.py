@@ -46,7 +46,7 @@ from das.asr.live._voice_profiles import VoiceProfiles  # noqa: E402
 # CLI/sweep で上書きできる VoiceProfiles のパラメータ。
 # ctor: __init__ 引数、attr: 生成後に setattr する運用チューニング値。
 _CTOR_PARAMS = {"thresh", "margin", "min_sec", "consist", "dedupe"}
-_ATTR_PARAMS = {"short_floor", "short_bonus", "short_margin_mult", "strict_sec",
+_ATTR_PARAMS = {"short_floor", "short_bonus", "strict_sec",
                 "enroll_min_total_chars", "enroll_win_sec", "enroll_consist_bonus"}
 _ALL_PARAMS = sorted(_CTOR_PARAMS | _ATTR_PARAMS)
 
@@ -117,7 +117,7 @@ def reset_tracker(vp: VoiceProfiles, params: dict, *,
     d_th, d_dd, d_cs = VoiceProfiles.DEFAULTS[vp.model]
     vp.thresh, vp.dedupe, vp.consist = d_th, d_dd, d_cs
     vp.margin, vp.min_sec = 0.05, 1.0
-    vp.short_floor, vp.short_bonus, vp.short_margin_mult = 0.45, 0.08, 2.0
+    vp.short_floor, vp.short_bonus = 0.45, 0.08
     vp.strict_sec = 3.0
     vp.enroll_min_total_chars = 45
     vp.enroll_win_sec = 1.5
@@ -308,8 +308,6 @@ def build_argparser() -> argparse.ArgumentParser:
                    help="短発話厳格照合の下限秒数")
     p.add_argument("--short-bonus", type=float, default=None,
                    help="短発話照合のしきい値上乗せ")
-    p.add_argument("--short-margin-mult", type=float, default=None,
-                   help="短発話照合のmargin倍率")
     p.add_argument("--strict-sec", type=float, default=None,
                    help="厳格照合を要求する発話長の上限秒数")
     p.add_argument("--enroll-min-total-chars", type=float, default=None,

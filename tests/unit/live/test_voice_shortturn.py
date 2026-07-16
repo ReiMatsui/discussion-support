@@ -33,7 +33,6 @@ def _tracker(emb: np.ndarray) -> VoiceProfiles:
     vp.min_sec = 1.0
     vp.short_floor = 0.45
     vp.short_bonus = 0.05
-    vp.short_margin_mult = 2.0
     vp.margin = 0.05
     vp.thresh = 0.5
     vp.model = "resemblyzer"
