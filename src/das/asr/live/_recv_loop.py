@@ -292,6 +292,12 @@ class RecvLoop:
             sp_id = _stt_speaker_key(self.cur_speaker)
             rec_extra: dict[str, object] = {}
             d = None
+        # 相槌でも「クラスタ根拠」があれば帰属を通すためのフラグ（下の相槌規則参照。
+        # Chiba実測 2026-07-16_1551: 未確定21件中18件が1秒未満の相槌で、Sonioxは
+        # 3人の相槌を同一STTラベルに混ぜる＝STTラベル由来の推測は不信のままだが、
+        # pyannoteクラスタは声で束ねるため相槌でも分離できる。
+        # handoff_2026-07-14_unregistered_speakers.md §15.4）。
+        bc_cluster_evidence = False
         if (self.cur_ms is not None and self.cur_end is not None
                 and self.cur_end > self.cur_ms):
             voiceprint_speaker = None
@@ -355,6 +361,7 @@ class RecvLoop:
                                 s.rekey(prior_key, cluster_name)
                                 s.diarization_speaker_keys[_cluster] = cluster_name
                         sp_id = cluster_name
+                        bc_cluster_evidence = True
                         rec_extra["speaker_source"] = "cluster_voiceprint"
                         rec_extra["speaker_confidence"] = 1.0
                         rec_extra["speaker_reason"] = "pyannote_cluster_voiceprint_confirmed"
@@ -376,6 +383,9 @@ class RecvLoop:
                                 s, raw_cluster, resolved.source, resolved.speaker,
                                 duration_ms=self.cur_end - self.cur_ms,
                             )
+                            # クラスタ由来の匿名キー（@diar:N / canonical）も相槌の
+                            # 帰属根拠として信用する（UNSURE ならどのみち未確定）。
+                            bc_cluster_evidence = sp_id != UNSURE_SPEAKER
                         else:
                             sp_id = s.key_for_diarization_speaker(
                                 resolved.source, resolved.speaker,
@@ -412,8 +422,15 @@ class RecvLoop:
         # 選んだのに constrain で未確定に落ちた」事象の切り分けができなかった
         # (docs/design/handoff_2026-07-14_unregistered_speakers.md 参照)。
         # 既存フィールド（key 等）は変えず final_key を追加のみ（diag 消費側の互換維持）。
+        # 相槌規則: 相槌は聞き手が打つ＝直前話者と別人が多く、Sonioxは3人の相槌を
+        # 同一STTラベルに混ぜる（Chiba実測）ため、STTラベル・声紋継続由来の帰属は
+        # 未確定に落とす（従来どおり）。ただし pyannote クラスタ由来の根拠
+        # （確定名 cluster_voiceprint / クラスタ匿名キー）がある場合だけは通す:
+        # クラスタは「声の束ね」で相槌でも話者分離できることが実証済み
+        # （trial §8「未確定回収はpyannote優位」、handoff §15.4）。
         final_sp_id = s.constrain_human_speaker_key(
-            UNSURE_SPEAKER if _is_backchannel else sp_id)
+            sp_id if (not _is_backchannel or bc_cluster_evidence)
+            else UNSURE_SPEAKER)
         if tracker is not None and tracker.last is not None:
             try:
                 with open(s.diag_path, "a", encoding="utf-8") as f:
