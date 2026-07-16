@@ -460,7 +460,16 @@ class SessionState:
                 self.diarization_pending_ms.get(canonical, 0) + carried)
 
     def key_for_stt_fallback_speaker(self, speaker: str, duration_ms: int = 0) -> str:
-        """外部diarizationが薄い時のSTTラベルも表示用の内部キーへ正規化する."""
+        """外部diarizationが薄い時のSTTラベルも表示用の内部キーへ正規化する.
+
+        注意: ``_uses_pyannote_hysteresis`` は provider 名しか見ないため、
+        pyannote 使用時は STT フォールバックラベル（"stt:N"）にも3秒ヒステリシスが
+        掛かる。当初の設計意図（pyannote のラベル揺れ対策）とラベルの出所は
+        一致していないが、「diarization が瞬断した数秒間の STT ラベルが即座に
+        新規参加者化するのを防ぐ」効果があり安全側なので、現状は仕様として
+        維持する（docs/design/attribution_logic_review_2026-07.md C7。
+        P1 の状態機械統合で再設計する際に扱いを一本化する）。
+        """
         return self.key_for_diarization_speaker("stt", speaker, duration_ms)
 
     def key_for_label(self, sp) -> str:
@@ -1035,7 +1044,11 @@ class SessionState:
         """UIから想定話者数ヒントを更新する.
 
         STT/外部diarizationの多くは接続開始時にしかmax_speakersを受け取れないため、
-        ここでは設定値を保存し、次の会議リセット時の再接続で反映する。
+        バックエンドへの反映は次の会議リセット時の再接続になる。ただし
+        ``constrain_human_speaker_key`` と ``tracker.set_max_human_speakers`` は
+        ``args.diarization_max_speakers`` を直接参照するため**即時に**厳格化/緩和
+        される点に注意（会議中に減らすと、上限外になった既存の匿名参加者は
+        以後未確定に落ちる。docs/design/attribution_logic_review_2026-07.md C12）。
         """
         if value is not None and not 1 <= value <= 10:
             return {"ok": False, "error": "話者数は1〜10で指定してください"}

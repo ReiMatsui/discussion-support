@@ -129,4 +129,4 @@ def test_short_turn_hybrid_keeps_strict_threshold():
     # 落ちる（確定人物への追従は全モード廃止済みだが、#ラベル継続はSTTラベル
     # ベースの機構＝遡及リネームの土台なので維持）。
     assert vp.classify(_SHORT, "1", count=True) == "#1"
-    assert vp.last["kind"] == "相槌追従"
+    assert vp.last["kind"] == "照合なし"   # 旧称「相槌追従」（review D3 で改名）

@@ -4,9 +4,12 @@
 相槌追従28%(n=32)・低信頼追従0%(n=2)と、3人の掛け合いでは追従がランダム未満で
 害だった＋相槌は聞き手が打つ＝直前話者とは別人が多い、というユーザー判断により、
 前話者追従は全モードで帰属根拠から外した（2026-07-14）。抑制は
-VoiceProfiles._classify に一本化され（kind「相槌未確定」で未確定を返す）、
-かつて RecvLoop.flush にあったハイブリッド限定の _HYBRID_UNTRUSTED_FOLLOW_KINDS
-による二重の抑制は撤去した。ここでは flush 側の残る責務を固定する:
+VoiceProfiles._classify に一本化され、かつて RecvLoop.flush にあった
+ハイブリッド限定の _HYBRID_UNTRUSTED_FOLLOW_KINDS による二重の抑制は撤去した。
+（注: その後の再設計 b8897ef で、_classify は照合不成立時に「ラベル継続」＝
+同一STTラベルの声紋確定済み対応先を維持する。これは会話の直前話者への追従とは
+別物。相槌の最終的な未確定化は flush 側の constrain 入力規則が担う。
+docs/design/attribution_logic_review_2026-07.md D4 で本 docstring を実装に同期。）ここでは flush 側の残る責務を固定する:
 - tracker が返す未確定はどのモードでもそのまま records に載る（追従復活なし）
 - 未確定発話に pyannote クラスタが重なればクラスタ帰属が勝つ（ハイブリッドの
   優先度「声紋一致 > pyannoteクラスタ > 未確定」は tracker 側の廃止だけで成立）

@@ -299,6 +299,11 @@ class RecvLoop:
                     and not str(sp_id).startswith("#")):
                 voiceprint_speaker = str(sp_id)
                 # VoiceProfiles側のしきい値を通った判定なのでResolver上は高信頼扱いにする。
+                # 意図的に固定値 1.0 を渡す＝「信頼4種の声紋判定は diarization に
+                # 無条件で勝つ」。Resolver の voiceprint_high_confidence(0.70) は
+                # この経路では比較として機能しない（実simを渡すとしきい値が生きて
+                # 挙動が変わるので、変更時は要再評価。
+                # docs/design/attribution_logic_review_2026-07.md C8）。
                 voiceprint_confidence = 1.0
             diarization_events = s.diarization_window(self.cur_ms, self.cur_end)
             resolved = s.speaker_resolver.resolve(
@@ -430,8 +435,10 @@ class RecvLoop:
                                    ensure_ascii=False, default=str) + "\n")
         if _is_backchannel:
             # 相槌は、話している人とは別人の可能性が高い（Aの話中にBが「はい」）。
-            # 直前の人に追従させず未確定にする。bcフラグでUIでは薄く折りたたむ。
-            sp_id = UNSURE_SPEAKER
+            # 未確定化は final_sp_id の計算（constrain 入力を UNSURE にする）で
+            # 済んでいるため、ここでは UI 折りたたみ用の bc フラグだけ付ける
+            # (docs/design/attribution_logic_review_2026-07.md D1: 旧 sp_id 上書きは
+            # 直後の代入で消えるデッドコードだったので削除)。
             rec_extra["bc"] = True
         sp_id = final_sp_id   # constrain 済み（diag の final_key と同一値）
         with s.state_lock:

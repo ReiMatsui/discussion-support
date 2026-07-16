@@ -418,7 +418,12 @@ class VoiceProfiles:
                   count: bool = True, chars: int = 0, enroll: bool = True) -> str:
         sp = str(sp)
         prev = self.sp_map.get(sp)
-        kind, info = "相槌追従", {}
+        # 初期値「照合なし」は「中尺/長尺の照合経路に入らなかった」ことを示す
+        # センチネル（相槌 count=False・short_floor未満・短発話経路の不成立）。
+        # 旧称「相槌追従」は前話者追従の廃止（2026-07-14）後は実態と乖離して
+        # いたため改名（docs/design/attribution_logic_review_2026-07.md D3。
+        # 追従はせず、prev があればラベル継続、無ければ #ラベルに落ちるだけ）。
+        kind, info = "照合なし", {}
         if overlapped and wav.size >= SR * self.min_sec:
             kind = "重なりスキップ"
         elif count and wav.size >= SR * self.min_sec:
@@ -510,7 +515,7 @@ class VoiceProfiles:
         # そのラベルの現在の対応（声紋照合の成功で確定した人物 or #ラベル）を返す。
         # なお相槌テキストの最終的な表示は呼び出し側（RecvLoop.flush）が未確定に
         # 落とす規則を持つ（相槌は聞き手が打つ＝直前話者と別人のことが多い）。
-        if kind == "相槌追従" and prev is not None and not prev.startswith("#"):
+        if kind == "照合なし" and prev is not None and not prev.startswith("#"):
             self._note("ラベル継続", label=sp, prev=prev, **info)
             return prev
         key = prev if prev is not None else "#" + sp
@@ -720,7 +725,7 @@ class VoiceProfiles:
                          f"/ラベル間{np.median(self.diff_sims):.2f}")
         if self.counts:
             order = ["声紋一致", "補正", "自動登録", "合流", "蓄積中", "未確定",
-                     "ラベル継続", "相槌追従", "重なりスキップ", "声紋計算不可"]
+                     "ラベル継続", "照合なし", "重なりスキップ", "声紋計算不可"]
             parts.append("判定内訳: " + " / ".join(
                 f"{k}{self.counts[k]}" for k in order if self.counts.get(k)))
         return "、".join(parts) or "判定なし"

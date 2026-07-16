@@ -229,8 +229,8 @@ def test_nearest_cluster_returns_best_with_similarity():
     namer.observe("pyannote:SPEAKER_01", _wav(5.0, 0.3))   # 直交（sim=0 < dedupe）→独立
 
     assert namer.nearest_cluster("pyannote:SPEAKER_00") == ("pyannote:SPEAKER_01", 0.0)
-    assert namer.nearest_cluster("pyannote:SPEAKER_01",
-                                 exclude={"pyannote:SPEAKER_00"}) is None
+    # 対称にも動く（exclude 引数は未使用のため削除。review D2）
+    assert namer.nearest_cluster("pyannote:SPEAKER_01") == ("pyannote:SPEAKER_00", 0.0)
 
 
 def test_nearest_cluster_returns_none_without_embedding():

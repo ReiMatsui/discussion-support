@@ -89,25 +89,35 @@ class ClusterVoiceNamer:
             raw_cluster = self._aliases[raw_cluster]
         return raw_cluster
 
-    def nearest_cluster(self, raw_cluster: str,
-                        exclude: set[str] | None = None,
-                        ) -> tuple[str, float] | None:
+    def nearest_cluster(self, raw_cluster: str) -> tuple[str, float] | None:
         """自クラスタの代表埋め込みに最も近い他クラスタ(canonical)と類似度を返す.
 
         ``--diarization-max-speakers`` の上限到達後、新規参加者を増やさず
         最も近い既存参加者へ統合するための探索用
         （docs/design/handoff_2026-07-14_unregistered_speakers.md §3 の2）。
-        統合してよいかの判断（類似度の下限 = tracker.dedupe）は呼び出し側が行う
-        ため、ここでは閾値をかけず ``(canonical, 類似度)`` を返す。
+        統合してよいかの判断（類似度の下限）は呼び出し側が行うため、
+        ここでは閾値をかけず ``(canonical, 類似度)`` を返す。
         自クラスタの埋め込みが未計算、または比較対象が無ければ None。
+        （未使用だった exclude 引数は削除。
+        docs/design/attribution_logic_review_2026-07.md D2）
         """
         key = self.canonical_cluster(raw_cluster)
         emb = self._embeddings.get(key)
         if emb is None:
             return None
+        return self._nearest_embedding(emb, self_key=key)
+
+    def _nearest_embedding(self, emb: np.ndarray, *, self_key: str,
+                           ) -> tuple[str, float] | None:
+        """埋め込み emb に最も近い他クラスタ(canonical)と類似度を返す共通実装.
+
+        observe() の名寄せ探索と nearest_cluster() の重複実装を一本化した
+        （片方だけ修正される事故の防止。
+        docs/design/attribution_logic_review_2026-07.md D5）。
+        """
         best, best_sim = None, -1.0
         for other, other_emb in self._embeddings.items():
-            if other == key or (exclude is not None and other in exclude):
+            if other == self_key:
                 continue
             sim = float(np.dot(emb, other_emb))
             if sim > best_sim:
@@ -187,13 +197,8 @@ class ClusterVoiceNamer:
             # 既存クラスタ(canonical)へ統合する。
             emb = self.tracker.embed(concat)
             if emb is not None:
-                best, best_sim = None, -1.0
-                for other, other_emb in self._embeddings.items():
-                    if other == raw_cluster:
-                        continue
-                    sim = float(np.dot(emb, other_emb))
-                    if sim > best_sim:
-                        best, best_sim = other, sim
+                nearest = self._nearest_embedding(emb, self_key=raw_cluster)
+                best, best_sim = nearest if nearest is not None else (None, -1.0)
                 if best is not None and best_sim >= self.tracker.dedupe:
                     self._merge_cluster(raw_cluster, best)
                     self.last_match = {"kind": "クラスタ名寄せ", "raw": raw_cluster,
