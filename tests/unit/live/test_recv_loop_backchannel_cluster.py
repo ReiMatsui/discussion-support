@@ -1,17 +1,20 @@
-"""相槌へのクラスタ根拠つき帰属（handoff §15.4）の flush 配線テスト.
+"""相槌へのクラスタ根拠つき帰属（handoff §15.4-15.5）の flush 配線テスト.
 
 背景: 相槌は聞き手が打つ＝直前話者と別人が多く、Soniox は3人の相槌を同一
 STTラベルに混ぜる（Chiba 2026-07-16_1551 実測: 未確定21件中18件が1秒未満の
-相槌で、S1/S2/S3 の「うん」全部に同じラベル対応が付いた）ため、STTラベル・
-声紋継続由来の帰属は従来どおり未確定に落とす。ただし pyannote クラスタは
-声で束ねるため相槌でも分離でき（trial §8 未確定回収は pyannote 優位）、
-クラスタ由来の根拠（確定名 / クラスタ匿名キー）がある場合だけ帰属を通す。
+相槌）ため、STTラベル・声紋継続由来の帰属は従来どおり未確定に落とす。
+pyannote クラスタ由来の根拠（確定名 / クラスタ匿名キー）がある場合だけ
+帰属を通すが、それも「pyannote がその相槌を独立の短いイベントとして
+切り出した場合」に限る: 長いターンに飲み込まれた相槌はメイン話者の
+クラスタしか重なっておらず、吸収誤帰属になる（Chiba 2026-07-16_1630 実測:
+無条件許可で誤帰属6%→16%）。
 """
 from __future__ import annotations
 
 import datetime
 from types import SimpleNamespace
 
+from das.asr.live._diarization import DiarizationEvent
 from das.asr.live._recv_loop import RecvLoop
 from das.asr.live._session_state import SessionState
 
@@ -91,6 +94,12 @@ def _make_state(tmp_path, *, tracker, namer, resolver):
     return state
 
 
+def _add_event(state, *, speaker="SPEAKER_00", start=900, end=1500):
+    """指定クラスタの diarization イベントを注入する."""
+    state.diarization_events.append(DiarizationEvent(
+        start_ms=start, end_ms=end, speaker=speaker, source="pyannote"))
+
+
 def _flush_bc(state, *, text="うん。", ms=1000, end=1400):
     loop = RecvLoop(state, _Args(), _Backend())  # type: ignore[arg-type]
     loop.cur_speaker = "1"  # type: ignore[assignment]
@@ -102,10 +111,11 @@ def _flush_bc(state, *, text="うん。", ms=1000, end=1400):
 
 
 def test_backchannel_attributed_via_confirmed_cluster(tmp_path):
-    """相槌でも、クラスタ確定名（声紋で裏付け済み）があれば帰属される."""
+    """相槌でも、専用の短イベント＋クラスタ確定名があれば帰属される."""
     state = _make_state(tmp_path, tracker=_Tracker("ラベル継続", "人物9"),
                         namer=_Namer(name="田中"),
                         resolver=_PyannoteResolver("SPEAKER_00"))
+    _add_event(state)                                # 相槌と同程度の短イベント
 
     rec = _flush_bc(state)
 
@@ -115,15 +125,33 @@ def test_backchannel_attributed_via_confirmed_cluster(tmp_path):
 
 
 def test_backchannel_attributed_via_cluster_key(tmp_path):
-    """相槌でも、クラスタ匿名キー(@diar:N)の根拠があれば帰属される."""
+    """相槌でも、専用の短イベント＋クラスタ匿名キー(@diar:N)なら帰属される."""
     state = _make_state(tmp_path, tracker=_Tracker("ラベル継続", "人物9"),
                         namer=_Namer(name=None),
                         resolver=_PyannoteResolver("SPEAKER_00"))
+    _add_event(state)
 
     rec = _flush_bc(state)
 
     assert rec["speaker"] == "@diar:1"
     assert rec["speaker_source"] == "pyannote"
+    assert rec.get("bc") is True
+
+
+def test_backchannel_absorbed_in_long_turn_stays_unsure(tmp_path):
+    """長いターンに飲み込まれた相槌は未確定のまま（吸収誤帰属の防止, §15.5）.
+
+    クラスタ確定名があっても、その相槌区間に重なるイベントが長い
+    （メイン話者のターン）なら、クラスタは相槌の話者を表していない。
+    """
+    state = _make_state(tmp_path, tracker=_Tracker("ラベル継続", "人物9"),
+                        namer=_Namer(name="田中"),
+                        resolver=_PyannoteResolver("SPEAKER_00"))
+    _add_event(state, start=0, end=10000)            # 10秒のターンに飲み込まれた
+
+    rec = _flush_bc(state)
+
+    assert rec["speaker"] == "?"
     assert rec.get("bc") is True
 
 

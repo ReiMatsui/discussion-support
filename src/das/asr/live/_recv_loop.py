@@ -20,7 +20,8 @@ from ._constants import (
     UNSURE_SPEAKER,
     fmt_ts,
 )
-from ._diarization import TimeSegment, has_overlapping_speakers
+from ._diarization import (TimeSegment, has_dedicated_short_event,
+                           has_overlapping_speakers)
 from ._ui import _print_line
 from ._voice_profiles import _best_text_similarity
 
@@ -335,6 +336,14 @@ class RecvLoop:
                     # 未設定なら以下は素通りし、従来どおり key_for_diarization_speaker
                     # による匿名キー付与だけで完結する（Soniox単独/他provider配線は不変）。
                     raw_cluster = f"{resolved.source}:{resolved.speaker}"
+                    if _is_backchannel and s.cluster_namer is not None:
+                        # 相槌の帰属根拠としてクラスタを信用するのは、pyannote が
+                        # その相槌を独立の短いイベントとして切り出した場合のみ。
+                        # 長いターンに飲み込まれた相槌は「メイン話者のクラスタ」しか
+                        # 重なっておらず、吸収誤帰属になる（handoff §15.5 実測）。
+                        bc_cluster_evidence = has_dedicated_short_event(
+                            diarization_events, resolved.speaker,
+                            self.cur_ms, self.cur_end)
                     cluster_overlap = False
                     cluster_name = None
                     if s.cluster_namer is not None:
@@ -361,7 +370,6 @@ class RecvLoop:
                                 s.rekey(prior_key, cluster_name)
                                 s.diarization_speaker_keys[_cluster] = cluster_name
                         sp_id = cluster_name
-                        bc_cluster_evidence = True
                         rec_extra["speaker_source"] = "cluster_voiceprint"
                         rec_extra["speaker_confidence"] = 1.0
                         rec_extra["speaker_reason"] = "pyannote_cluster_voiceprint_confirmed"
@@ -383,9 +391,6 @@ class RecvLoop:
                                 s, raw_cluster, resolved.source, resolved.speaker,
                                 duration_ms=self.cur_end - self.cur_ms,
                             )
-                            # クラスタ由来の匿名キー（@diar:N / canonical）も相槌の
-                            # 帰属根拠として信用する（UNSURE ならどのみち未確定）。
-                            bc_cluster_evidence = sp_id != UNSURE_SPEAKER
                         else:
                             sp_id = s.key_for_diarization_speaker(
                                 resolved.source, resolved.speaker,
