@@ -73,12 +73,23 @@ def das_command() -> list[str]:
     return ["uv", "run", "das"]   # フォールバック（uv 経由で起動された場合は不要）
 
 
-def run_live(mix_path: Path, max_speakers: int, extra_soniox: str) -> str:
+# 構成比較用（handoff §15.7）。hybrid=3役分業（現行）、soniox=旧デフォルト
+# （STTラベル＋断片声紋）、pyannote=クラスタ単独（名前付けなし）。
+_MODE_FLAGS = {
+    "hybrid": ["--hybrid"],
+    "soniox": [],
+    "pyannote": ["--diarization", "pyannote"],
+}
+
+
+def run_live(mix_path: Path, max_speakers: int, extra_soniox: str,
+             mode: str) -> str:
     """listen-soniox を実走し、新規セッション名を自動検出して返す."""
     before = {p.name for p in TRANSCRIPTS.glob("*.turns.jsonl")}
     started = datetime.datetime.now()
     cmd = das_command() + [
-        "listen-soniox", "--hybrid", "--max-speakers", str(max_speakers),
+        "listen-soniox", *_MODE_FLAGS[mode],
+        "--max-speakers", str(max_speakers),
         "--wav", str(mix_path), "--soniox-args", extra_soniox,
     ]
     print(f"# 実行: {' '.join(cmd)}")
@@ -93,21 +104,25 @@ def run_live(mix_path: Path, max_speakers: int, extra_soniox: str) -> str:
 
 
 def append_result(conv: str, session: str, minutes: float | None,
-                  stdout_text: str) -> None:
+                  mode: str, stdout_text: str) -> None:
     """採点出力から主要数値を拾って results.csv に1行追記する."""
     import re
     m_acc = re.search(r"帰属精度: (\d+)%", stdout_text)
+    m_sub = re.search(r"相槌除外（実質発話 \d+件）: 精度 (\d+)%", stdout_text)
     path = ROOT / "data" / "chiba" / "results.csv"
     new_file = not path.exists()
     with open(path, "a", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         if new_file:
-            w.writerow(["date", "conv", "minutes", "session", "accuracy_pct"])
+            w.writerow(["date", "conv", "minutes", "mode", "session",
+                        "accuracy_pct", "substantive_pct"])
         w.writerow([datetime.date.today().isoformat(), conv,
-                    minutes or "full", session,
-                    m_acc.group(1) if m_acc else ""])
+                    minutes or "full", mode, session,
+                    m_acc.group(1) if m_acc else "",
+                    m_sub.group(1) if m_sub else ""])
     print(f"# 結果を {path.relative_to(ROOT)} に追記"
-          + (f"（精度 {m_acc.group(1)}%）" if m_acc else ""))
+          + (f"（精度 {m_acc.group(1)}%" if m_acc else "（")
+          + (f" / 実質 {m_sub.group(1)}%）" if m_sub else "）"))
 
 
 def main() -> None:
@@ -116,6 +131,9 @@ def main() -> None:
     p.add_argument("--minutes", type=float, default=None)
     p.add_argument("--gap", type=float, default=0.5)
     p.add_argument("--max-speakers", type=int, default=3)
+    p.add_argument("--mode", choices=sorted(_MODE_FLAGS), default="hybrid",
+                   help="構成: hybrid（現行）/ soniox（旧デフォルト）/ "
+                        "pyannote（クラスタ単独）。構成A/B比較用（handoff §15.7）")
     p.add_argument("--soniox-args", default="--no-agent",
                    help="listen-soniox へ渡す追加引数（既定: エージェント停止）")
     p.add_argument("--force-prep", action="store_true", help="GT・音声を作り直す")
@@ -132,7 +150,7 @@ def main() -> None:
             sys.exit("--skip-run には --session <セッション名> が必要です")
         session = a.session
     else:
-        session = run_live(mix_path, a.max_speakers, a.soniox_args)
+        session = run_live(mix_path, a.max_speakers, a.soniox_args, a.mode)
         print(f"# 新セッション: {session}")
 
     # 採点（eval_speaker_gt の main をそのまま使い、出力を拾って要約も残す）
@@ -145,7 +163,7 @@ def main() -> None:
                  else session)
     text = buf.getvalue()
     print(text)
-    append_result(a.conv, session, a.minutes, text)
+    append_result(a.conv, session, a.minutes, a.mode, text)
 
 
 if __name__ == "__main__":

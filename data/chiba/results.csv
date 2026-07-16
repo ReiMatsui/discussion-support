@@ -1,6 +1,5 @@
-date,conv,minutes,session,accuracy_pct
-2026-07-16,chiba0132,full,chiba0132,100
-2026-07-16,chiba0132,full,chiba0132,100
-2026-07-16,chiba0132,full,2026-07-16_1551,64
-2026-07-16,chiba0132,full,2026-07-16_1630,65
-2026-07-16,chiba0132,full,2026-07-16_1653,62
+date,conv,minutes,mode,session,accuracy_pct,substantive_pct
+2026-07-16,chiba0132,full,hybrid,chiba0132,100,
+2026-07-16,chiba0132,full,hybrid,2026-07-16_1630,65,
+2026-07-16,chiba0132,full,hybrid,2026-07-16_1653,62,
+2026-07-16,chiba0132,full,hybrid,2026-07-16_1551,64,83
