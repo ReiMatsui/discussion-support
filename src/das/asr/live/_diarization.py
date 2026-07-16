@@ -165,34 +165,6 @@ class SpeakerResolver:
         )
 
 
-def has_dedicated_short_event(
-    events: Iterable[DiarizationEvent],
-    speaker: str,
-    start_ms: int,
-    end_ms: int,
-) -> bool:
-    """発話区間に重なる該当クラスタのイベントが「発話と同程度に短い」か.
-
-    相槌へのクラスタ根拠つき帰属（handoff §15.4-15.5）の門番。pyannote が
-    その相槌を独立の発話として切り出していれば、重なる同クラスタのイベント長は
-    相槌長と同程度になる。長いイベントしか重なっていない場合は「メイン話者の
-    長いターンに相槌が飲み込まれた」＝クラスタは相槌の話者を表していない
-    （Chiba 2026-07-16_1630 実測: 吸収誤帰属で誤帰属6%→16%に悪化）ため、
-    根拠として認めない。しきい値は発話長の2倍または+400msの緩い方。
-    """
-    utt = max(1, end_ms - start_ms)
-    limit = max(utt * 2, utt + 400)
-    for e in events:
-        if e.speaker != speaker:
-            continue
-        e_end = e.end_ms if e.end_ms is not None else end_ms
-        if min(e_end, end_ms) - max(e.start_ms, start_ms) <= 0:
-            continue
-        if e_end - e.start_ms <= limit:
-            return True
-    return False
-
-
 def has_overlapping_speakers(
     events: Iterable[DiarizationEvent],
     start_ms: int,
