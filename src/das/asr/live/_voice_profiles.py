@@ -106,6 +106,10 @@ class VoiceProfiles:
     # 厳格照合を要求する発話長の上限秒数（クラス既定値。__init__ 経由でインスタンス化）。
     strict_sec = 3.0
 
+    # ラベル継続の健全性窓（クラス既定値。0で無効=旧挙動。テスト用フェイクが
+    # __new__ 構築でも動くよう、strict_sec と同じくクラス既定値を持つ）。
+    label_purity_window = 4
+
     # モデル別の既定しきい値（実音声プールで校正済み。スコアのスケールが違う）
     # resemblyzer: 軽量・依存少。同一/別人の分布に重なりあり（分離マージン-0.06）
     # ecapa: ほぼ完全分離(+0.01)＋10倍速。混合音声を成分話者と強くマッチさせる癖
@@ -188,6 +192,14 @@ class VoiceProfiles:
             else:
                 print(f"# 注意: {path} は別の声紋モデルで作成されたため読み込みません", flush=True)
         self.sp_map: dict[str, str] = {}                    # Sonioxラベル -> 表示キー
+        # ラベル健全性の履歴: Sonioxラベル -> 直近の照合成功（一致/補正/登録/合流）
+        # で確定した人物のリスト。高重なり会話ではSonioxが複数話者を同一ラベルに
+        # 混ぜることがあり（Chiba 0532 実測: 自動登録3人が全て同一ラベル発、
+        # ラベル継続の正解率22%）、その場合「ラベル継続」は誤帰属を量産する。
+        # 直近 label_purity_window 回の成功が単一人物でないラベルは「不純」と
+        # みなし、継続を未確定に落とす（handoff §15.7）。0 で無効（従来挙動）。
+        self.label_hist: dict[str, list[str]] = {}
+        self.label_purity_window = self.label_purity_window  # クラス既定値を実体化
         self.label_embs: dict[str, list[np.ndarray]] = {}   # ラベル -> 直近声紋（手動登録・校正用）
         # 未確定の声の保留プール（ラベルで仕切らない）。Sonioxは新しい声を既存ラベルに混ぜて
         # 出すことがあるので、声は声同士で束ねる。各サンプルは (声紋, 文字数) を持ち、
@@ -227,6 +239,7 @@ class VoiceProfiles:
         """
         with self._lock:
             self.sp_map.clear()
+            getattr(self, "label_hist", {}).clear()
             self.label_embs.clear()
             self.pool.clear()
             self.n_anon = 0
@@ -344,9 +357,31 @@ class VoiceProfiles:
         # 遡及置換は未確定キー(#ラベル)の昇格のみ。人物キーは絶対に書き換えない。
         rename = ("#" + sp, target) if (prev is None or prev.startswith("#")) else None
         self.sp_map[sp] = target
+        self._record_label_success(sp, target)
         self._note("自動登録" if is_new else "合流", label=sp, name=target,
                    rename=rename, chars=round(total_chars))
         return target
+
+    def _record_label_success(self, sp: str, person: str) -> None:
+        """照合成功（一致/補正/登録/合流）のたびにラベル→人物の履歴を残す."""
+        if not hasattr(self, "label_hist"):   # __new__ 構築のテスト用フェイク対策
+            self.label_hist = {}
+        h = self.label_hist.setdefault(str(sp), [])
+        h.append(person)
+        del h[:-max(int(self.label_purity_window), 8)]
+
+    def _label_pure(self, sp: str) -> bool:
+        """ラベルの直近の照合成功が単一人物に収束しているか（継続の門番）.
+
+        不純（直近 window 回に2人以上）なら、そのラベルは複数話者を混載して
+        いる可能性が高く、「ラベル継続」は根拠にならない（handoff §15.7）。
+        履歴が無い/window=0 の場合は従来どおり健全とみなす。
+        """
+        w = int(self.label_purity_window)   # replay の sweep は float で渡し得る
+        if not w:
+            return True
+        h = getattr(self, "label_hist", {}).get(str(sp), [])
+        return len(set(h[-w:])) <= 1
 
     def set_max_human_speakers(self, value: int | None) -> None:
         self.max_human_speakers = value
@@ -460,6 +495,7 @@ class VoiceProfiles:
                     need_mg = self.margin
                     if sim >= need_th and sim - second >= need_mg:
                         self.sp_map[sp] = cand
+                        self._record_label_success(sp, cand)
                         h = self.own_sims.setdefault(cand, [])
                         h.append(sim)
                         del h[:-20]
@@ -504,6 +540,7 @@ class VoiceProfiles:
                     if (sim >= strict_th
                             and sim - second >= self.margin):
                         self.sp_map[sp] = cand
+                        self._record_label_success(sp, cand)
                         self._note("補正" if (prev is not None and not prev.startswith("#")
                                               and prev != cand) else "声紋一致",
                                    label=sp, sim=round(sim, 3), second=round(second, 3),
@@ -512,16 +549,30 @@ class VoiceProfiles:
                 # 厳格に決められない短い発話はラベル継続（そのラベルの現在の人物対応を
                 # 維持）。対応先は声紋照合の成功でしか書き換わらないため根拠なしの
                 # 決めつけではない（classify docstring の実測根拠を参照）。
-                if prev is not None and not prev.startswith("#"):
+                # ただしラベルが不純（複数話者を混載）なら継続しない（§15.7）。
+                if (prev is not None and not prev.startswith("#")
+                        and self._label_pure(sp)):
                     self._note("ラベル継続", label=sp, prev=prev, short=True)
                     return prev
         # 声紋で決められない発話（相槌・短発話・声紋計算不可の短経路）はラベル継続:
         # そのラベルの現在の対応（声紋照合の成功で確定した人物 or #ラベル）を返す。
         # なお相槌テキストの最終的な表示は呼び出し側（RecvLoop.flush）が未確定に
         # 落とす規則を持つ（相槌は聞き手が打つ＝直前話者と別人のことが多い）。
-        if kind == "照合なし" and prev is not None and not prev.startswith("#"):
+        if (kind == "照合なし" and prev is not None and not prev.startswith("#")
+                and self._label_pure(sp)):
             self._note("ラベル継続", label=sp, prev=prev, **info)
             return prev
+        # ラベル不純（直近の照合成功が複数人物に割れている）: このラベルに基づく
+        # 帰属（prev 継続も #ラベルのプレースホルダも）は複数話者を混載するため
+        # 未確定に落とす。sp_map は汚さない（照合成功が単一人物に収束すれば
+        # 継続は自然に復活する）。Chiba 0532 実測でラベル継続22%（54件中12正解）
+        # が誤帰属29%の主因だった（handoff §15.7）。
+        if not self._label_pure(sp):
+            info.setdefault("prev", prev)
+            info["hist"] = (self.label_hist.get(str(sp), [])
+                            [-int(self.label_purity_window):])
+            self._note("ラベル不純", label=sp, **info)
+            return UNSURE_SPEAKER
         key = prev if prev is not None else "#" + sp
         # 閉じた名簿（名簿を確定, auto=False）: 許すのは「登録済みのアクティブな名前付き
         # プロファイルへの継続」だけ。未知/匿名(#ラベル・人物N)は新規参加者を作らず未確定に
@@ -729,7 +780,8 @@ class VoiceProfiles:
                          f"/ラベル間{np.median(self.diff_sims):.2f}")
         if self.counts:
             order = ["声紋一致", "補正", "自動登録", "合流", "蓄積中", "未確定",
-                     "ラベル継続", "照合なし", "重なりスキップ", "声紋計算不可"]
+                     "ラベル継続", "ラベル不純", "照合なし", "重なりスキップ",
+                     "声紋計算不可"]
             parts.append("判定内訳: " + " / ".join(
                 f"{k}{self.counts[k]}" for k in order if self.counts.get(k)))
         return "、".join(parts) or "判定なし"

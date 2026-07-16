@@ -47,7 +47,8 @@ from das.asr.live._voice_profiles import VoiceProfiles  # noqa: E402
 # ctor: __init__ 引数、attr: 生成後に setattr する運用チューニング値。
 _CTOR_PARAMS = {"thresh", "margin", "min_sec", "consist", "dedupe"}
 _ATTR_PARAMS = {"short_floor", "short_bonus", "strict_sec",
-                "enroll_min_total_chars", "enroll_win_sec", "enroll_consist_bonus"}
+                "enroll_min_total_chars", "enroll_win_sec", "enroll_consist_bonus",
+                "label_purity_window"}
 _ALL_PARAMS = sorted(_CTOR_PARAMS | _ATTR_PARAMS)
 
 
@@ -124,6 +125,8 @@ def reset_tracker(vp: VoiceProfiles, params: dict, *,
     vp.enroll_consist_bonus = 0.08
     vp.profiles = {}
     vp.sp_map = {}
+    vp.label_hist = {}
+    vp.label_purity_window = 4
     vp.label_embs = {}
     vp.pool = []
     vp.n_anon = 0
@@ -316,6 +319,9 @@ def build_argparser() -> argparse.ArgumentParser:
                    help="登録サンプルの分割窓長")
     p.add_argument("--enroll-consist-bonus", type=float, default=None,
                    help="登録時の一貫性しきい値上乗せ")
+    p.add_argument("--label-purity-window", type=float, default=None,
+                   help="ラベル継続の健全性窓（直近N回の照合成功が単一人物で"
+                        "あることを要求。0で無効=旧挙動）")
     p.add_argument("--sweep", action="append", default=[], metavar="NAME=V1,V2,...",
                    help=f"グリッド探索（複数指定で直積）。対象: {', '.join(_ALL_PARAMS)}")
     p.add_argument("--dump", action="store_true", help="発話ごとの判定を表示")
