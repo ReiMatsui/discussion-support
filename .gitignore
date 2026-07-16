@@ -74,6 +74,14 @@ transcripts/
 data/overlap_test/
 live_transcriber.html
 
+# 評価用コーパス（ライセンス配布物・大容量。取得/前処理はスクリプトで再現可能:
+# CallHome=eval §14 の経路, Chiba=eval/prep_chiba.py）
+data/callhome/
+data/chiba/*
+!data/chiba/results.csv
+data/sakura/
+data/sakura_raw/
+
 # ドキュメント成果物（別管理）
 *.docx
 *.pptx
