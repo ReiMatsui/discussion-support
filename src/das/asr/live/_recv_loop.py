@@ -62,11 +62,10 @@ def _merged_diarization_speaker_key(s: SessionState, raw_cluster: str,
       key_for_diarization_speaker を呼び、ヒステリシスの pending を canonical に
       集約する。
     - 名寄せ不成立: 参加人数上限まで人間スロットが埋まっている場合のみ、最近傍
-      クラスタの既存キーへ統合を試みる（§3 の2: 昇格の厳格化）。ただし類似度が
-      namer.merge_sim（名寄せ用の類似度下限、既定は tracker.dedupe と同値）
-      未満なら「全く似ていない新話者」なので統合しない。それも不可なら従来どおり
-      key_for_diarization_speaker へ（最終的に constrain_human_speaker_key で
-      未確定に落ちる＝安全側の既存挙動）。
+      クラスタの既存キーへ統合を試みる（§3 の2: 昇格の厳格化）。ただし
+      namer.merge_sim が None（既定＝統合無効, handoff §15.12）または類似度が
+      それ未満なら統合しない。その場合は従来どおり key_for_diarization_speaker へ
+      （最終的に constrain_human_speaker_key で未確定に落ちる＝安全側の既存挙動）。
     """
     namer = s.cluster_namer
     canonical = namer.canonical_cluster(raw_cluster)
@@ -94,11 +93,10 @@ def _merged_diarization_speaker_key(s: SessionState, raw_cluster: str,
         nearest = namer.nearest_cluster(raw_cluster)
         if nearest is not None:
             nearest_cluster, nearest_sim = nearest
-            # 下限閾値は namer.merge_sim（名寄せと同じ独立ノブ。既定は従来どおり
-            # tracker.dedupe と同値＝挙動不変。review C6/P4 で文脈分離）。
-            # 無条件の最近傍統合だと類似度0.0でも既存参加者に張り付くため、
-            # merge_sim 未満は統合せず従来経路へ（constrain で未確定＝安全側）。
-            if nearest_sim >= namer.merge_sim:
+            # 下限閾値は namer.merge_sim（名寄せと同じ独立ノブ）。None は統合無効
+            # ＝既定（クラスタ埋め込み同士の比較に安全な閾値が存在しないことが
+            # 実測で判明したため。handoff §15.12、_cluster_naming.py 参照）。
+            if namer.merge_sim is not None and nearest_sim >= namer.merge_sim:
                 nearest_key = s.diarization_speaker_keys.get(nearest_cluster)
                 if nearest_key is not None:
                     return nearest_key

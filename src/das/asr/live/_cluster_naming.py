@@ -69,17 +69,18 @@ class ClusterVoiceNamer:
         # 参照）。「確定後は再照合しない」設計のため、確定は一致の中でも特に
         # 高確信のものに限る。下回った照合成功は確定せず蓄積を続ける。
         self.confirm_min_sim = float(confirm_min_sim)
-        # クラスタ間名寄せ・最近傍統合の類似度下限。当初は tracker.dedupe を
-        # 流用していたが（review C6/P4 で独立ノブ化）、Chiba 0532 実測
-        # （2026-07-17_0027）で、確定を0.70で堰き止めた結果、未確定のまま残った
-        # クラスタが sim0.55 の名寄せで別話者クラスタへ吸収される抜け穴が発覚。
-        # 名寄せ・最近傍統合も確定と同じく**取り消せない操作**なので、同じ
-        # 高確信バー（PYANNOTE_CLUSTER_CONFIRM_MIN_SIM）を既定とする。
-        # 既知のコスト: pyannote再接続後の同一人物クラスタ統合（実測 sim0.52）も
-        # 弾かれ、再接続で参加者が分裂し得る（未確定側に倒れる＝安全側。
-        # handoff §15.10）。
-        self.merge_sim = float(merge_sim) if merge_sim is not None \
-            else max(float(tracker.dedupe), PYANNOTE_CLUSTER_CONFIRM_MIN_SIM)
+        # クラスタ間名寄せ・最近傍統合の類似度下限。None なら**無効**（既定）。
+        # 経緯（handoff §15.12）: クラスタ埋め込み同士の比較は、声が似た話者間で
+        # sim 0.71 まで出る一方、再接続後の同一人物統合は 0.52 と、同一/別人を
+        # 分離できる閾値が存在しないことが実測で判明（Chiba 0532: 0.55 と 0.707 の
+        # 別話者誤統合を2回実測、有益な統合の実証は全ランで0件）。
+        # 統合は取り消せない操作のため、既定で無効とする。当初の目的（クラスタ
+        # 分裂によるラベル爆発の防止, §3-1）は、ヒステリシス＋max-speakers
+        # constrain＋プロファイル経由のクラスタ確定（品質管理された照合で同一
+        # 人物に収束する）が担う。再接続でクラスタが分裂した場合は新しい匿名
+        # 参加者になる（未確定側に倒れる＝安全側の既知限界）。
+        self.merge_sim: float | None = (
+            float(merge_sim) if merge_sim is not None else None)
         self._buffers: dict[str, list[np.ndarray]] = {}
         self._confirmed: dict[str, str] = {}   # raw_cluster -> 確定名
         # クラスタ間名寄せ（docs/design/handoff_2026-07-14_unregistered_speakers.md §3）:
@@ -231,7 +232,8 @@ class ClusterVoiceNamer:
             if emb is not None:
                 nearest = self._nearest_embedding(emb, self_key=raw_cluster)
                 best, best_sim = nearest if nearest is not None else (None, -1.0)
-                if best is not None and best_sim >= self.merge_sim:
+                if (self.merge_sim is not None and best is not None
+                        and best_sim >= self.merge_sim):
                     self._merge_cluster(raw_cluster, best)
                     self.last_match = {"kind": "クラスタ名寄せ", "raw": raw_cluster,
                                        "canonical": best, "sim": round(best_sim, 3)}

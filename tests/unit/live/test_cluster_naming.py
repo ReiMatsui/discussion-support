@@ -152,12 +152,14 @@ def test_independent_clusters_do_not_share_buffers_or_confirmations():
 
 
 # --- クラスタ間名寄せ（登録者ゼロ対策, handoff_2026-07-14 §3） -------------
+# （2026-07-17 §15.12: 名寄せ・最近傍統合は既定で無効。本節は merge_sim を明示して
+#   機構そのものを検証する opt-in テスト）
 
 
 def test_similar_unmatched_clusters_are_merged():
     """未照合2クラスタが類似埋め込みなら名寄せされ、2つ目は新規参加者にならない."""
     tracker = _FakeTracker([], embed_map={0.1: _V1, 0.2: _V2})
-    namer = ClusterVoiceNamer(tracker, min_sec=5.0)
+    namer = ClusterVoiceNamer(tracker, min_sec=5.0, merge_sim=tracker.dedupe)
 
     assert namer.observe("pyannote:SPEAKER_00", _wav(5.0, 0.1)) is None   # 代表埋め込み登録
     assert namer.observe("pyannote:SPEAKER_01", _wav(5.0, 0.2)) is None   # 類似→名寄せ
@@ -171,7 +173,7 @@ def test_similar_unmatched_clusters_are_merged():
 def test_dissimilar_clusters_stay_independent():
     """非類似（閾値未満）なら名寄せせず、各クラスタは独立を保つ."""
     tracker = _FakeTracker([], embed_map={0.1: _V1, 0.3: _V3})
-    namer = ClusterVoiceNamer(tracker, min_sec=5.0)
+    namer = ClusterVoiceNamer(tracker, min_sec=5.0, merge_sim=tracker.dedupe)
 
     namer.observe("pyannote:SPEAKER_00", _wav(5.0, 0.1))
     namer.observe("pyannote:SPEAKER_01", _wav(5.0, 0.3))
@@ -182,7 +184,7 @@ def test_dissimilar_clusters_stay_independent():
 def test_absorbed_cluster_accumulates_into_canonical():
     """名寄せ後、吸収側raw_clusterでのobserveはcanonicalのバッファへ蓄積される."""
     tracker = _FakeTracker([None, None, ("田中", 0.8)], embed_map={0.1: _V1, 0.2: _V2})
-    namer = ClusterVoiceNamer(tracker, min_sec=5.0)
+    namer = ClusterVoiceNamer(tracker, min_sec=5.0, merge_sim=tracker.dedupe)
     namer.observe("pyannote:SPEAKER_00", _wav(5.0, 0.1))      # 照合1回目(None)→埋め込み登録
     namer.observe("pyannote:SPEAKER_01", _wav(5.0, 0.2))      # 照合2回目(None)→名寄せ成立
 
@@ -197,7 +199,7 @@ def test_absorbed_cluster_accumulates_into_canonical():
 def test_merge_into_confirmed_canonical_returns_confirmed_name():
     """canonicalが確定済みなら、名寄せ成立時にその確定名が即返る."""
     tracker = _FakeTracker([None, ("田中", 0.8), None], embed_map={0.1: _V1, 0.2: _V2})
-    namer = ClusterVoiceNamer(tracker, min_sec=5.0)
+    namer = ClusterVoiceNamer(tracker, min_sec=5.0, merge_sim=tracker.dedupe)
     namer.observe("pyannote:SPEAKER_00", _wav(5.0, 0.1))   # 照合不成立→埋め込み登録
     assert namer.observe("pyannote:SPEAKER_00", _wav(0.5, 0.1)) == "田中"   # 確定
 
@@ -210,7 +212,7 @@ def test_merge_into_confirmed_canonical_returns_confirmed_name():
 def test_reset_clears_aliases_and_embeddings():
     """resetで名寄せ状態（aliases/embeddings）もクリアされる."""
     tracker = _FakeTracker([], embed_map={0.1: _V1, 0.2: _V2})
-    namer = ClusterVoiceNamer(tracker, min_sec=5.0)
+    namer = ClusterVoiceNamer(tracker, min_sec=5.0, merge_sim=tracker.dedupe)
     namer.observe("pyannote:SPEAKER_00", _wav(5.0, 0.1))
     namer.observe("pyannote:SPEAKER_01", _wav(5.0, 0.2))
     assert namer.canonical_cluster("pyannote:SPEAKER_01") == "pyannote:SPEAKER_00"
@@ -224,7 +226,7 @@ def test_reset_clears_aliases_and_embeddings():
 def test_nearest_cluster_returns_best_with_similarity():
     """nearest_clusterは閾値をかけず (最近傍, 類似度) を返す（統合可否は呼び出し側）."""
     tracker = _FakeTracker([], embed_map={0.1: _V1, 0.3: _V3})
-    namer = ClusterVoiceNamer(tracker, min_sec=5.0)
+    namer = ClusterVoiceNamer(tracker, min_sec=5.0, merge_sim=tracker.dedupe)
     namer.observe("pyannote:SPEAKER_00", _wav(5.0, 0.1))
     namer.observe("pyannote:SPEAKER_01", _wav(5.0, 0.3))   # 直交（sim=0 < dedupe）→独立
 
@@ -236,7 +238,7 @@ def test_nearest_cluster_returns_best_with_similarity():
 def test_nearest_cluster_returns_none_without_embedding():
     """自クラスタの埋め込みが未計算ならnearest_clusterはNone."""
     tracker = _FakeTracker([])
-    namer = ClusterVoiceNamer(tracker, min_sec=5.0)
+    namer = ClusterVoiceNamer(tracker, min_sec=5.0, merge_sim=tracker.dedupe)
 
     assert namer.nearest_cluster("pyannote:SPEAKER_00") is None
 
@@ -244,7 +246,7 @@ def test_nearest_cluster_returns_none_without_embedding():
 def test_confirmed_cluster_saves_embedding_and_serves_as_merge_target():
     """確定経路でも代表埋め込みが保存され、以後の名寄せ先として機能する（F4）."""
     tracker = _FakeTracker([("田中", 0.8)], embed_map={0.1: _V1, 0.2: _V2})
-    namer = ClusterVoiceNamer(tracker, min_sec=5.0)
+    namer = ClusterVoiceNamer(tracker, min_sec=5.0, merge_sim=tracker.dedupe)
 
     assert namer.observe("pyannote:SPEAKER_00", _wav(5.0, 0.1)) == "田中"   # 即確定
     # 確定クラスタの埋め込みが保存されているので、類似クラスタは名寄せで即帰属する
@@ -267,26 +269,27 @@ def test_zero_norm_embedding_is_guarded_and_not_stored():
 
     assert vp.embed(_wav(2.0)) is None        # NaN 正規化ではなく None ガード
 
-    namer = ClusterVoiceNamer(vp, min_sec=5.0)
+    namer = ClusterVoiceNamer(vp, min_sec=5.0, merge_sim=vp.dedupe)
     assert namer.observe("pyannote:SPEAKER_00", _wav(5.0)) is None
     assert namer._embeddings == {}            # NaN 入りの代表埋め込みを保存しない
 
 
-def test_merge_sim_defaults_to_high_confidence_bar():
-    """merge_sim の既定は「取り消せない操作」共通の高確信バー（§15.10）.
+def test_merge_disabled_by_default():
+    """名寄せ・最近傍統合は既定で無効（merge_sim=None, §15.12）.
 
-    dedupe(0.50相当)を流用していた頃、確定を0.70で堰き止めた結果、未確定の
-    クラスタが sim0.55 の名寄せで別話者へ吸収される抜け穴があった
-    （Chiba 0532, 2026-07-17_0027）。名寄せも確定と同じく不可逆なので、
-    既定は max(dedupe, PYANNOTE_CLUSTER_CONFIRM_MIN_SIM)。
+    クラスタ埋め込み同士の比較は、声が似た話者間で sim0.71 まで出る一方、
+    再接続後の同一人物統合は 0.52 と、同一/別人を分離できる閾値が存在しない
+    ことが実測で判明（Chiba 0532: 0.55/0.707 の別話者誤統合を2回実測、
+    有益な統合の実証は全ラン0件）。不可逆な操作のため既定で無効とする。
     """
-    from das.asr.live._constants import PYANNOTE_CLUSTER_CONFIRM_MIN_SIM
+    tracker = _FakeTracker([], embed_map={0.1: _V1, 0.2: _V2})
+    namer = ClusterVoiceNamer(tracker, min_sec=5.0)
+    assert namer.merge_sim is None
 
-    namer = ClusterVoiceNamer(_FakeTracker([], dedupe=0.50), min_sec=5.0)
-    assert namer.merge_sim == PYANNOTE_CLUSTER_CONFIRM_MIN_SIM   # 0.50 < 0.70
-
-    high = ClusterVoiceNamer(_FakeTracker([], dedupe=0.72), min_sec=5.0)
-    assert high.merge_sim == 0.72                                # dedupe が高ければそちら
+    # 類似 0.9 のクラスタ同士でも統合されず独立を保つ
+    namer.observe("pyannote:SPEAKER_00", _wav(5.0, 0.1))
+    namer.observe("pyannote:SPEAKER_01", _wav(5.0, 0.2))
+    assert namer.canonical_cluster("pyannote:SPEAKER_01") == "pyannote:SPEAKER_01"
 
 
 def test_merge_sim_is_independent_of_dedupe():
@@ -306,7 +309,7 @@ def test_merge_sim_is_independent_of_dedupe():
 def test_unmerged_nearest_similarity_is_recorded_for_calibration():
     """名寄せ不成立時も最近傍と類似度を last_match に残す（merge_sim 校正用。review P4）."""
     tracker = _FakeTracker([None, None], embed_map={0.1: _V1, 0.3: _V3}, dedupe=0.72)
-    namer = ClusterVoiceNamer(tracker, min_sec=5.0)
+    namer = ClusterVoiceNamer(tracker, min_sec=5.0, merge_sim=tracker.dedupe)
 
     namer.observe("pyannote:SPEAKER_00", _wav(5.0, 0.1))
     namer.observe("pyannote:SPEAKER_01", _wav(5.0, 0.3))   # 直交 sim=0 → 不成立
@@ -323,7 +326,7 @@ def test_low_confidence_match_does_not_confirm():
     以上、誤確定は 0.62 以下で分離していた）。
     """
     tracker = _FakeTracker([("田中", 0.54), ("田中", 0.72)])
-    namer = ClusterVoiceNamer(tracker, min_sec=5.0)
+    namer = ClusterVoiceNamer(tracker, min_sec=5.0, merge_sim=tracker.dedupe)
 
     assert namer.observe("pyannote:SPEAKER_00", _wav(5.0)) is None   # 0.54 → 見送り
     assert namer.confirmed_name("pyannote:SPEAKER_00") is None
