@@ -212,8 +212,11 @@ class _ProfileQualityMixin:
         プロファイルの一致分布を学び直す（汚染期の受理simでしきい値が
         歪んだままになるのを防ぐ）。呼び出し元が classify の受理パス＝
         min_sec 以上の発話のみで、短発話の不安定な埋め込みは混ぜない。
-        設計: docs/design/handoff_2026-07-14_unregistered_speakers.md §13.1
-        （CallHome 0856、登録材料の53-55%混合で帰属27%に崩壊）への事後回収層。
+        設計: docs/design/handoff_2026-07-14_unregistered_speakers.md §13.1 の
+        当初分析（CallHome 0856、登録材料の53-55%混合で帰属27%に崩壊）への
+        事後回収層として導入。なお §13.2 の再現では登録汚染は 0856 の主因では
+        なかった（自動登録プロファイルは純粋）と判明済みで、本機構は「将来条件で
+        効く汚染への保険」として維持されている（同節の修正記録参照）。
         """
         if not self.ANON.match(name):
             return   # 実名プロファイルは書き換えない（__init__ の own_embs 註釈参照）
@@ -558,9 +561,10 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
         コミット直前に純度検査（_purity_subset）を通す（二段構え）:
         anchor一貫性(ecs)は「今の声に似ているか」の粗い前置フィルタだが、
         電話会話等でSonioxのセグメント境界が甘いと1発話に両話者が混ざり、
-        窓埋め込みが両者の中間に落ちて ecs を通過する（CallHome 0856 実測:
-        自動登録プロファイルが両話者53-55%の混合になり帰属27%へ崩壊。
-        docs/design/handoff_2026-07-14_unregistered_speakers.md §13.1）。
+        窓埋め込みが両者の中間に落ちて ecs を通過し得る（CallHome 0856 の
+        当初分析 docs/design/handoff_2026-07-14_unregistered_speakers.md §13.1。
+        なお §13.2 の再現で登録汚染は 0856 の主因ではなかったと判明済みで、
+        本検査は「将来条件で効く汚染への保険」として維持されている）。
         そこでコミット時に集合全体のペアワイズ一貫性を検査し、
         - 採用部分集合の累積文字数が enroll_min_total_chars に届けば
           その部分集合のみでプロファイル作成（混入分は pool に残す＝

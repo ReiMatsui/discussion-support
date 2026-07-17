@@ -81,6 +81,11 @@ class ClusterVoiceNamer:
         # constrain＋プロファイル経由のクラスタ確定（品質管理された照合で同一
         # 人物に収束する）が担う。再接続でクラスタが分裂した場合は新しい匿名
         # 参加者になる（未確定側に倒れる＝安全側の既知限界）。
+        # opt-in の到達経路は本コンストラクタ引数のみ（CLI・replay からは設定
+        # 不可。本番生成 _bootstrap.py は渡さない＝常に無効）。有効化する場合は
+        # 生成箇所にノブを配線すること（2026-07-17 残骸確認・維持判断済み:
+        # 無効時も match 不成立ごとの embed 計算は続き、diag の nearest/
+        # nearest_sim として閾値校正の観測材料になっている。review P4）。
         self.merge_sim: float | None = (
             float(merge_sim) if merge_sim is not None else None)
         self._buffers: dict[str, list[np.ndarray]] = {}
