@@ -21,25 +21,16 @@ from __future__ import annotations
 import json
 import sys
 from collections import Counter, defaultdict
-from itertools import permutations
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # eval/（_gtlib 用）
 
-try:
-    # 本体と同じ相槌判定を使う（sys.path 追加により uv 外の直接実行でも通る）
-    from das.asr.live._constants import _BACKCHANNEL_RE  # noqa: E402
-except ImportError:   # 最後の砦: スタンドアロン用フォールバック（本体と同期すること）
-    import re
-    _BACKCHANNEL_RE = re.compile(
-        r'^[\s、。,.!?！？]*'
-        r'(うん|ふん|ふーん|へー|ほー|おー|あー|えー'
-        r'|はい|ええ|そう|そっか|そうだね|そうですね|そうですか'
-        r'|なるほど|確かに|分かる|わかる|分かります|わかりました'
-        r'|了解|オッケー|OK)'
-        r'[\s、。,.!?！？うんはいええそっかなるほど確かに]*$',
-        re.IGNORECASE,
-    )
+# _gtlib = GT読み込み・突合・最適対応の共通実装（gt_timeline は互換の再公開）
+import _gtlib
+from _gtlib import gt_timeline, read_jsonl
+
+# 本体と同じ相槌判定を使う（das が無い環境ではフォールバック。_gtlib 参照）
+_BACKCHANNEL_RE = _gtlib.load_backchannel_re()
 
 UNSURE = "未確定"
 
@@ -49,8 +40,7 @@ def load(gt_path: str, session_override: str | None = None):
     root = Path(__file__).resolve().parent.parent / "transcripts"
 
     def read_turns(session):
-        return [json.loads(l)
-                for l in open(root / f"{session}.turns.jsonl", encoding="utf-8")]
+        return read_jsonl(root / f"{session}.turns.jsonl")
 
     if gt.get("kind") == "timeline":
         # タイムライン形式GT（eval/fetch_callhome_jpn.py 等が生成）:
@@ -61,50 +51,20 @@ def load(gt_path: str, session_override: str | None = None):
         session = session_override
         turns = read_turns(session)
         diag_path = root / f"{session}.diag.jsonl"
-        diag = ([json.loads(l) for l in open(diag_path, encoding="utf-8")]
-                if diag_path.exists() else [])
+        diag = read_jsonl(diag_path) if diag_path.exists() else []
         return gt, None, turns, diag, session
 
     gt_turns = read_turns(gt["session"])  # GTのturn_id→時間区間の定義元
     session = session_override or gt["session"]
     turns = gt_turns if session == gt["session"] else read_turns(session)
     diag_path = root / f"{session}.diag.jsonl"
-    diag = ([json.loads(l) for l in open(diag_path, encoding="utf-8")]
-            if diag_path.exists() else [])
+    diag = read_jsonl(diag_path) if diag_path.exists() else []
     return gt, gt_turns, turns, diag, session
 
 
-def gt_timeline(gt_turns, labels):
-    """GTを話者→時間区間リストのタイムラインに変換する.
-
-    区間単位のGTは特定の区切りに紐づくため、別の区切りのランを採点するには
-    「誰がいつ喋っていたか」の時間表現に直すのが正しい（区切りが違う発話に
-    単一の正解を押し付けない）。
-    """
-    tl: dict[str, list[tuple[int, int]]] = {}
-    for g in gt_turns:
-        c = labels.get(str(g["turn_id"])) or labels.get(g["turn_id"])
-        if c in ("S1", "S2", "S3"):
-            tl.setdefault(c, []).append((g["ms"], g["end_ms"]))
-    return tl
-
-
 def gt_code_by_timeline(t, tl):
-    """発話 t の時間帯で支配的（80%以上）なGT話者を返す.
-
-    ラベル済み時間が発話長の3割未満なら None（正解範囲外）、
-    支配的話者がいなければ "MULTI"（複数人が混在する区間＝単一正解を
-    割り当てられないため採点対象外として件数報告のみ）。
-    """
-    s, e = t["ms"], t["end_ms"]
-    dur = max(1, e - s)
-    ovs = {c: sum(max(0, min(e, b) - max(s, a)) for a, b in ivs)
-           for c, ivs in tl.items()}
-    total = sum(ovs.values())
-    if total < dur * 0.3:
-        return None
-    c, top = max(ovs.items(), key=lambda x: x[1])
-    return c if top >= total * 0.8 else "MULTI"
+    """発話 t の時間帯で支配的（80%以上）なGT話者を返す（_gtlib 共通実装の薄い皮）."""
+    return _gtlib.gt_code_by_timeline(t["ms"], t["end_ms"], tl)
 
 
 def main(gt_path: str, session_override: str | None = None) -> None:
@@ -183,17 +143,9 @@ def main(gt_path: str, session_override: str | None = None) -> None:
 
     # --- 最適1:1対応での帰属精度（未確定は常に不正解扱い） ---
     def best_mapping(subset):
-        """subset（4タプル）に対する最適1:1対応と精度（未確定は常に不正解扱い）."""
-        real_ = sorted({s for _, s, _, _ in subset if s != UNSURE})
-        acc_, map_ = 0.0, {}
-        for k in range(min(len(gts), len(real_)) + 1):
-            for perm in permutations(real_, k):
-                for gsel in permutations(gts, k):
-                    m = dict(zip(perm, gsel))
-                    a = sum(1 for _, s, g, _ in subset if m.get(s) == g) / len(subset)
-                    if a > acc_:
-                        acc_, map_ = a, m
-        return acc_, map_
+        """subset（4タプル）に対する最適1:1対応と精度（_gtlib 共通実装に委譲）."""
+        return _gtlib.best_mapping([(s, g) for _, s, g, _ in subset],
+                                   gts, unsure=UNSURE)
 
     def breakdown(subset, mapping):
         unsure = sum(1 for _, s, _, _ in subset if s == UNSURE) / len(subset)

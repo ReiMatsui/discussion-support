@@ -19,39 +19,32 @@ import json
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # eval/（_gtlib 用）
+
+from _gtlib import gt_code_by_timeline, gt_timeline, read_jsonl
+
 ROOT = Path(__file__).resolve().parent.parent
 
 
 def main(gt_path: str, session: str) -> None:
     gt = json.loads(Path(gt_path).read_text(encoding="utf-8"))
     root = ROOT / "transcripts"
-    gt_turns = [json.loads(l)
-                for l in open(root / f"{gt['session']}.turns.jsonl", encoding="utf-8")]
-    turns = [json.loads(l)
-             for l in open(root / f"{session}.turns.jsonl", encoding="utf-8")]
+    gt_turns = read_jsonl(root / f"{gt['session']}.turns.jsonl")
+    turns = read_jsonl(root / f"{session}.turns.jsonl")
 
-    tl: dict[str, list[tuple[int, int]]] = {}
-    for g in gt_turns:
-        c = gt["labels"].get(str(g["turn_id"])) or gt["labels"].get(g["turn_id"])
-        if c in ("S1", "S2", "S3"):
-            tl.setdefault(c, []).append((g["ms"], g["end_ms"]))
+    # タイムライン化と突合は採点系（eval_speaker_gt / replay）と共通の
+    # _gtlib 実装を使う（従来はインライン複製だった。数値規則は同一）。
+    tl = gt_timeline(gt_turns, gt["labels"])
 
     labels: dict[str, str] = {}
     n_multi = n_uncov = 0
     for t in turns:
-        s, e = t["ms"], t["end_ms"]
-        dur = max(1, e - s)
-        ovs = {c: sum(max(0, min(e, b) - max(s, a)) for a, b in ivs)
-               for c, ivs in tl.items()}
-        total = sum(ovs.values())
-        if total < dur * 0.3:
+        code = gt_code_by_timeline(t["ms"], t["end_ms"], tl)
+        if code is None:
             n_uncov += 1
             continue
-        c, top = max(ovs.items(), key=lambda x: x[1])
-        if top >= total * 0.8:
-            labels[str(t["turn_id"])] = c
-        else:
-            labels[str(t["turn_id"])] = "MULTI"
+        labels[str(t["turn_id"])] = code
+        if code == "MULTI":
             n_multi += 1
 
     out = {"session": session, "labels": labels,

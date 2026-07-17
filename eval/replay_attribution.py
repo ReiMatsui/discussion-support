@@ -31,17 +31,20 @@ import itertools
 import json
 import os
 import sys
-import time
 import tempfile
+import time
 import wave
 from collections import Counter, defaultdict
-from itertools import permutations
 from pathlib import Path
 
 import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # eval/（_gtlib 用）
+
+# _gtlib = GT読み込み・突合・最適対応の共通実装
+import _gtlib  # noqa: E402
 
 from das.asr.live._constants import _BACKCHANNEL_RE, SR, UNSURE_SPEAKER  # noqa: E402
 from das.asr.live._voice_profiles import VoiceProfiles  # noqa: E402
@@ -71,14 +74,9 @@ def load_inputs(gt_path: Path, wav_path: Path | None):
     gt = json.loads(gt_path.read_text(encoding="utf-8"))
     session = gt["session"]
     root = ROOT / "transcripts"
-    turns_path = root / f"{session}.turns.jsonl"
-    with open(turns_path, encoding="utf-8") as f:
-        turns = [json.loads(line) for line in f]
+    turns = _gtlib.read_jsonl(root / f"{session}.turns.jsonl")
     diag_path = root / f"{session}.diag.jsonl"
-    diag = []
-    if diag_path.exists():
-        with open(diag_path, encoding="utf-8") as f:
-            diag = [json.loads(line) for line in f]
+    diag = _gtlib.read_jsonl(diag_path) if diag_path.exists() else []
     # 元セッションの diag から、発話開始ms→Soniox生ラベルの対応を引く
     label_by_ms = {d["ms"]: str(d["label"]) for d in diag if "label" in d}
     audio = _read_audio(wav_path or (root / f"{session}.wav"))
@@ -95,22 +93,10 @@ def load_inputs(gt_path: Path, wav_path: Path | None):
     return gt, items, audio
 
 
-def _gt_code_by_timeline(ms: int, end_ms: int,
-                         tl: dict[str, list[tuple[int, int]]]) -> str | None:
-    """発話の時間帯で支配的（80%以上）なGT話者を返す.
-
-    eval/eval_speaker_gt.py の gt_code_by_timeline と同じ規則（採点系の互換維持）:
-    GTラベル済み時間が発話長の3割未満なら None（正解範囲外＝採点対象外）、
-    支配的話者がいなければ "MULTI"（単一正解を割り当てられない）。
-    """
-    dur = max(1, end_ms - ms)
-    ovs = {c: sum(max(0, min(end_ms, b) - max(ms, a)) for a, b in ivs)
-           for c, ivs in tl.items()}
-    total = sum(ovs.values())
-    if total < dur * 0.3:
-        return None
-    c, top = max(ovs.items(), key=lambda x: x[1])
-    return c if top >= total * 0.8 else "MULTI"
+# タイムライン突合（支配80%/カバレッジ30%）は eval_speaker_gt と共通の
+# _gtlib.gt_code_by_timeline を使う（採点系の互換維持。従来ここにあった
+# 同名の複製実装は 2026-07-17 に _gtlib へ一本化）。
+_gt_code_by_timeline = _gtlib.gt_code_by_timeline
 
 
 def load_session_inputs(session: str, gt_path: Path, wav_path: Path):
@@ -266,17 +252,14 @@ def replay(vp: VoiceProfiles, items: list[dict], audio: np.ndarray) -> list[dict
 
 def best_mapping(single: list[dict],
                  gts: tuple[str, ...] = ("S1", "S2", "S3")) -> tuple[float, dict]:
-    """最適1:1対応（未確定は常に不正解扱い）での帰属精度と対応表を返す."""
-    real = sorted({r["pred"] for r in single if r["pred"] != UNSURE_SPEAKER})
-    best_acc, best_map = 0.0, {}
-    for k in range(min(len(gts), len(real)) + 1):
-        for perm in permutations(real, k):
-            for gsel in permutations(gts, k):
-                m = dict(zip(perm, gsel, strict=False))
-                acc = sum(1 for r in single if m.get(r["pred"]) == r["gt"]) / len(single)
-                if acc > best_acc:
-                    best_acc, best_map = acc, m
-    return best_acc, best_map
+    """最適1:1対応（未確定は常に不正解扱い）での帰属精度と対応表を返す.
+
+    _gtlib の共通実装に委譲（番兵は classify の生キー UNSURE_SPEAKER="?"。
+    eval_speaker_gt 側は表示ラベル "未確定" と値が違うため、共通化では
+    番兵を引数で渡す設計にしている。_gtlib docstring 参照）。
+    """
+    return _gtlib.best_mapping([(r["pred"], r["gt"]) for r in single],
+                               gts, unsure=UNSURE_SPEAKER)
 
 
 def summarize(results: list[dict], *, verbose: bool = True,
