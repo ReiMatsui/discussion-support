@@ -730,3 +730,93 @@ profiles 素通し・max 途中変更時の落とし）。通常フローでは�
 確立方針（誤帰属＞未確定の優先、未確定はライブのクラスタ層が回収）どおり。
 電話品質での門番緩和が必要なら label_purity_window の sweep で校正可能
 （0856 は main §13.2 の分析どおり0.5秒級ラベル入れ替わりが支配的な音源）。
+
+## 18. コード整理（refactor/attribution-cleanup、2026-07-17、Claude Fable 5）
+
+§15.13 の「次: コード整理」を実施。機能追加なしの「本質への絞り込み」で、
+**全コミット挙動不変**（P1 のような挙動変更は含まない）。ブランチ
+refactor/attribution-cleanup（main `ced49c9` 起点、4コミット）。
+
+事前確認（ユーザー承認済み）: (1) P1（§16 の発行前スロット判定）は今回
+畳み込まず、後から小さい差分で入る構造にするに留める（§15.12 の名寄せ既定
+無効化により、P1 の主効果だった「満杯時の最近傍統合」は現行既定では発動せず、
+今入れて効くのは相槌 pending 除外と不可視キー抑止のみ、という状況判断も込み）。
+(2) クラスタ間名寄せの opt-in 機構は §15.12 の判断どおり維持。
+(3) ブランチ削除は main 取込済みの2本のみ。
+
+### 18.1 変更内容（コミット順）
+
+- `eb91c78` **flush の帰属 if 連鎖を _attribution.py へ一本化**（レビュー§2）。
+  声紋→Resolver→クラスタ確定/匿名キー→constrain の判定を
+  `_attribution.decide_speaker`（ステップ0-4 の明示フロー）として切り出し、
+  flush は「エコー除去→classify→帰属決定→記録」の骨格だけにした。
+  旧 `_merged_diarization_speaker_key` は `_anonymous_cluster_key` に改名して
+  同モジュールへ移動。**P1 を導入する場合の変更点が
+  `_anonymous_cluster_key` 内部＋相槌 pending 分岐に閉じる**ことを
+  モジュール docstring に固定（再開時はそこから）。
+- `535a05f` **VoiceProfiles を2責務のミックスインに分離**。
+  `_LabelTrustMixin`（ラベル信頼度: _label_pure / _continuation_target /
+  _record_label_success ＋ 新設 `_trusted_continuation` で継続可否の
+  AND 判定を短発話・照合なしの2経路で共通化）と
+  `_ProfileQualityMixin`（プロファイル品質: _purity_subset / _track_own_emb /
+  _person_th ＋ 新設 `_record_reference_sim`）。状態は従来どおり
+  `VoiceProfiles.__init__` が実体化（__new__ 構築のテストフェイク互換）。
+- `6ef0f70` **統合の残骸掃除**。tests の未使用 `vp.short_margin_mult` 行を
+  削除（P3 で本体から削除済み・読まれていなかった）。純度検査・事後回収の
+  docstring の 0856「登録汚染」引用を §13.2 の結論（主因ではなく保険として
+  維持）に補正。merge_sim の opt-in 到達経路がコンストラクタ引数のみ
+  （CLI/replay から設定不可）で、無効時の embed 計算は diag の校正材料
+  （P4）として意図的に残ることを _cluster_naming に明記。
+- `fe32d62` **eval 採点系の共通化**。eval_speaker_gt / replay_attribution /
+  transplant_gt に3重複していた「JSONL読み込み・タイムライン突合
+  （支配80%/カバレッジ30%）・最適1:1対応の総当たり」を `eval/_gtlib.py` に
+  一本化。互換のため「未確定」番兵は引数渡し（eval_speaker_gt の "未確定" と
+  replay の UNSURE_SPEAKER="?" は別物）、探索順・tie-break・出力書式は不変
+  （run_chiba.py の正規表現スクレイプも保護）。prep_chiba / run_chiba は
+  採点ロジックを持たない（生成側／eval_speaker_gt への委譲）ため対象外。
+
+### 18.2 回帰ゲートの結果
+
+各コミット後に (1) `uv run pytest -q` と (2) replay 5本を実施し、replay は
+§17 のベースライン表と**全コミット・全5本で出力一致**（進捗の経過秒表示を
+除きビット単位で同一。kind別内訳まで一致）:
+
+| データ | 期待値（§17） | 結果 |
+|---|---|---|
+| 142016 | 79%／誤帰属18% | 全コミットで一致 |
+| Chiba 1723 | 37%／46%／誤7% | 同上 |
+| 0696 | 56%／72%／誤2% | 同上 |
+| 0743 | 61%／78%／誤15% | 同上 |
+| 0856 | 20%／38%／誤10% | 同上 |
+
+pytest は検証環境（Linux サンドボックス）で 890 パス＋1 失敗。失敗は
+`test_agent_worker.py::test_structuring_checker_rejudges_after_pending_reset`
+のみで、**リファクタ前の main 時点から同環境で恒常的に失敗する
+タイミング依存**（1秒 tick のチェッカーを 10 秒待つ設計が遅い環境で
+2周目に届かない）。コード起因でないため「この1件を除き全緑＋差分なし」を
+ゲートとして運用した。実機（Mac）では従来どおり 891 全緑の想定
+（要確認: `uv run pytest -q`）。
+
+eval 共通化は追加で新旧コードの出力等価性を直接確認: transplant
+（stdout＋生成json）、eval_speaker_gt（同一セッション labels GT／
+timeline GT の2形態）、run_chiba 流の importlib 読込、すべて一致。
+
+### 18.3 掃除の過程で確定した事実（コード変更なしの記録）
+
+- 名寄せ opt-in（merge_sim）は本番から到達不能（設定手段がコンストラクタ
+  引数のみで、_bootstrap は渡さない）。有効化するなら生成箇所への配線が必要。
+- `voiceprint_high_confidence`(0.70) は引き続き「意図固定済みデッド」
+  （C8。conf=1.0 固定の docstring 明記で現状維持）。
+- ローカルブランチ整理（ユーザー判断: 取込済み2本のみ削除）: 未取込
+  コミットを持つ `feature/edge-direction-rules`（1件）・
+  `fix/af-hardening-2026-07`（介入側修正6件）は保持。main 取込済みの
+  `try/pyannote-live1`・`fix/code-review-2026-07-07` は削除対象だが、
+  リモート作業環境からはローカルgitのファイル削除ができず未実施。
+  実機で次を実行して完了:
+  `git branch -d try/pyannote-live1 fix/code-review-2026-07-07`
+
+### 18.4 次アクション
+
+- 実会話マイク直検証（§4-2 プロトコル。§15.13 の本命残タスク、変わらず）
+- その結果で未確定の内訳を見て P1 の再判断（§16 保存済み設計＋§18.1 の
+  差し込み点から着手）
