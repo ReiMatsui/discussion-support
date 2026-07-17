@@ -2633,8 +2633,11 @@ def _load_wav_mono_16k(path: str) -> "np.ndarray":
     従来は librosa を使っていたが、librosa はどの依存グループにも宣言されて
     おらず --wav が常に ModuleNotFoundError で死んでいた。主用途（本システムが
     録音した transcripts/*.wav の再入力）は PCM WAV なので標準ライブラリ wave で
-    依存ゼロで読み、レート違いは線形補間で SR に合わせる。PCM 以外の形式のみ
-    torchaudio（soniox extra で導入済み）にフォールバックする。
+    依存ゼロで読み、レート違いは線形補間で SR に合わせる。PCM 以外の形式は
+    torchaudio へのフォールバックを試みるが、環境によっては動かない
+    （torchaudio 2.9+ のデコードは torchcodec 必須で、未導入だと ImportError）
+    ため、失敗時は PCM WAV への変換手順を示して明確に終了する
+    （2026-07-15 レビュー F5）。
     """
     import wave
     try:
@@ -2651,9 +2654,21 @@ def _load_wav_mono_16k(path: str) -> "np.ndarray":
             raise wave.Error(f"unsupported sample width: {width}")
         if n_ch > 1:
             y = y.reshape(-1, n_ch).mean(axis=1)
-    except wave.Error:
-        import torchaudio
-        t, sr = torchaudio.load(path)
+    # wave.Error に加えて EOFError も捕捉する: 空ファイル・ヘッダ途中で切れた
+    # ファイルでは wave モジュールが EOFError を裸で投げ、従来はトレースバック
+    # ごと落ちていた（2026-07-15 レビュー F5、プローブ probe_wav.py で確認）。
+    except (wave.Error, EOFError):
+        try:
+            import torchaudio
+            t, sr = torchaudio.load(path)
+        except Exception as e:
+            # torchaudio 未導入 / torchcodec 欠如 / 非対応・破損ファイルは
+            # ユーザーが対処可能なメッセージで終了する（内部トレースバックを
+            # 見せない。--wav はCLIの入り口なので案内が最重要）。
+            raise SystemExit(
+                f"--wav: {path} を読み込めませんでした（{type(e).__name__}: {e}）。\n"
+                "  PCM WAV に変換してください（例: ffmpeg -i in.mp3 -ar 16000 -ac 1 out.wav）"
+            ) from e
         y = t.mean(dim=0).numpy().astype("float32")
     if sr != SR:
         # 線形補間による簡易リサンプル（STT入力用途には十分）

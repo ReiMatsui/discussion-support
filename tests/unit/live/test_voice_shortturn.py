@@ -27,6 +27,8 @@ def _tracker(emb: np.ndarray) -> VoiceProfiles:
     vp.pool = []
     vp.label_embs = {}
     vp.own_sims = {}
+    vp.own_embs = {}
+    vp._own_updates = {}
     vp.counts = {}
     vp.last = None
     vp.n_anon = 0
@@ -129,3 +131,57 @@ def test_short_turn_hybrid_keeps_strict_threshold():
     # ベースの機構＝遡及リネームの土台なので維持）。
     assert vp.classify(_SHORT, "1", count=True) == "#1"
     assert vp.last["kind"] == "照合なし"   # 旧称「相槌追従」（review D3 で改名）
+
+
+def test_short_turn_after_ai_echo_is_unsure_not_ai_key():
+    """AI声紋一致直後の同ラベル短発話は __AI__ を継続せず未確定に落とす（F1）.
+
+    sp_map に残った "__AI__" をラベル継続で返すと、_recv_loop の
+    startswith("__") エコー破棄が発動して人間の短発話が本文ごと消える実バグ
+    （2026-07-15 レビューで確定）。継続可否ガード（_continuation_target）は
+    アクティブな人間プロファイルだけを継続対象とする。
+    """
+    from das.asr.live._constants import UNSURE_SPEAKER
+    vp = _tracker(_unit(1, 1, 0))            # 判別できない短い声
+    vp.profiles["__AI__"] = _unit(0, 0, 1)
+    vp._active_keys.add("__AI__")
+    vp.sp_map["1"] = "__AI__"                # 直前にAI声紋一致
+    assert vp.classify(_SHORT, "1", count=True) == UNSURE_SPEAKER
+    assert vp.last["kind"] == "継続不可"
+
+
+def test_short_turn_after_deactivate_breaks_continuation():
+    """deactivate 済み人物へのラベル継続は短発話でも切れる（F1）.
+
+    メインパス（中尺）には従来からこのガードがあったが、短発話・相槌の
+    継続経路には無く、無効化済み人物へ発話が帰属し続けていた。
+    """
+    from das.asr.live._constants import UNSURE_SPEAKER
+    vp = _tracker(_unit(1, 1, 0))            # 判別できない短い声
+    vp.sp_map["1"] = "A"
+    vp._active_keys = {"B"}                  # A は deactivate 済み
+    assert vp.classify(_SHORT, "1", count=True) == UNSURE_SPEAKER
+    assert vp.last["kind"] == "継続不可"
+
+
+def test_short_turn_overlapped_is_not_matched_or_corrected():
+    """overlapped=True の短発話は声紋照合・補正（sp_map 書き換え）をしない（F2）.
+
+    重なり音声の埋め込みはデタラメ（classify docstring）。中尺は「重なり
+    スキップ」なのに短発話だけ照合まで走り、誤補正の穴だった（2026-07-15
+    レビューで確定）。重なりは発話長によらずラベル継続へ落とす。
+    """
+    vp = _tracker(_unit(1, 0, 0))            # 声としては明確にA（=補正され得る声）
+    vp.sp_map["1"] = "B"                     # 直前は声紋照合でB
+    assert vp.classify(_SHORT, "1", count=True, overlapped=True) == "B"
+    assert vp.last["kind"] == "ラベル継続"    # 「補正」「声紋一致」にならない
+    assert vp.sp_map["1"] == "B"             # 書き換えない
+
+
+def test_set_hybrid_sets_instance_attribute_only():
+    """set_hybrid はインスタンス属性のみ設定し、クラス属性を汚染しない（F8）."""
+    vp = _tracker(_unit(1, 0, 0))
+    vp.set_hybrid(True)
+    assert vp.__dict__.get("hybrid") is True
+    assert VoiceProfiles.hybrid is False     # 既定値（クラス属性）は不変
+

@@ -39,17 +39,33 @@ uv run das ui
 
 ## 対面議論のライブ入力 (Soniox + 声紋プロファイル)
 
-speaker-attribution 由来の「誰が何を言ったか」文字起こしを統合済み (`das/asr/live.py`)。
+「誰が何を言ったか」の文字起こし＋話者特定＋統合AF構築＋ライブ介入 (`das/asr/live`)。
+
+**基本のコマンドはこれ:**
 
 ```bash
 uv sync --extra soniox
 echo "SONIOX_API_KEY=..." >> .env
-uv run das listen-soniox            # 録音→話者特定→統合AF構築→ライブ介入
-# 実行中: ブラウザUIで参加人数・名前登録・停止
-# 議事録(MD/HTML/turns.jsonl/interventions.jsonl)は transcripts/ に自動保存
+
+uv run das listen-soniox --max-speakers 3   # ← 参加人数を指定して録音開始
+```
+
+話者特定は声紋ベース。登録者ゼロでも自動で人物を学習し、同じ人を同じラベルに集める。
+実行中はブラウザUIで名前登録・モード切替・停止。議事録
+(MD/turns.jsonl/diag.jsonl) は transcripts/ に自動保存。
+
+よく使うオプション:
+
+```bash
+uv run das listen-soniox --max-speakers 3 --wav <録音.wav>   # 過去の録音で再実験（マイク不要）
+uv run das listen-soniox --max-speakers 3 --hybrid           # 実験的: pyannote話者分離を併用
+                                                             # （要 PYANNOTEAI_API_KEY。採否は検証中、
+                                                             #   docs/design/handoff_2026-07-14_*.md 参照）
 # バッチでも可: uv run das run-session transcripts/<日時>.turns.jsonl
 # 介入レビュー: uv run python -m das.asr.live.replay transcripts/<日時>.turns.jsonl --no-api --serve
 ```
+
+話者特定の精度評価ツール（正解アノテーション・採点・オフライン再生）は `eval/` にある。
 
 ### AIファシリテーター付きライブUI (`python -m das.asr.live`)
 

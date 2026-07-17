@@ -52,6 +52,10 @@ class _FakeTracker:
         self.model = "redimnet"
         self.profiles: dict = {}
         self.enrolled: list = []
+        # 非アクティブ集合（deactivate 済み・voices.json 残留の再現用）。
+        # constrain の素通し判定は profiles 全体ではなく is_active_human に
+        # 限定された（2026-07-15 レビュー F4）。
+        self.inactive: set = set()
 
     def enroll_from_audio(self, name, wav):
         self.enrolled.append((name, len(wav)))
@@ -62,7 +66,11 @@ class _FakeTracker:
         return list(self.profiles)
 
     def active_profile_names(self):
-        return [name for name in self.profiles if not str(name).startswith("人物")]
+        return [name for name in self.profiles
+                if not str(name).startswith("人物") and name not in self.inactive]
+
+    def is_active_human(self, key):
+        return key in self.profiles and key not in self.inactive
 
 
 class _FakeBackend:
@@ -391,6 +399,29 @@ def test_voiceprint_profile_key_survives_constrain_regardless_of_label_letter():
     assert s.constrain_human_speaker_key("人物1") == "人物1"
     # プロファイルの無い匿名キーは従来どおり上限で未確定に落ちる
     assert s.constrain_human_speaker_key("@diar:9") == UNSURE_SPEAKER
+
+
+def test_inactive_profile_key_does_not_bypass_constrain():
+    """非アクティブなプロファイルは constrain の素通し対象にしない（F4, 2026-07-15）.
+
+    素通しの意図は「声紋で実在が裏付けられた（＝アクティブに照合されている）
+    人物をラベル文字の巡り合わせで落とさない」こと。tracker.profiles には
+    deactivate 済み・voices.json 残留の非アクティブプロファイルも含まれるため、
+    profiles 全体で判定すると参加人数上限の選別に穴が開く。
+    """
+    s = _make_state()
+    tr = _FakeTracker(auto=True)
+    tr.profiles = {"人物1": 1, "人物2": 1, "人物3": 1}
+    tr.inactive = {"人物2"}          # deactivate 済み
+    s.tracker = tr
+    s.set_diarization_max_speakers(3)
+    s.anonymous_labels = {"人物1": "参加者A", "#4": "参加者B",
+                          "人物3": "参加者C", "人物2": "参加者D"}
+
+    # アクティブなプロファイルは引き続き素通し（既存バグ修正の意図は維持）
+    assert s.constrain_human_speaker_key("人物1") == "人物1"
+    # 非アクティブは素通しせず、通常のスロット選別で上限外→未確定に落ちる
+    assert s.constrain_human_speaker_key("人物2") == UNSURE_SPEAKER
 
 
 def test_http_rename_without_tracker():

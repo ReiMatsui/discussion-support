@@ -209,3 +209,36 @@ def test_send_audio_flushes_multiple_full_chunks_at_once() -> None:
 
     assert len(ws.sent) == 2
     assert all(len(p) == 1600 * 4 for p in ws.sent)
+
+
+def test_restart_advances_label_epoch_to_avoid_key_collision(monkeypatch) -> None:
+    """close→start の再起動でラベルepochが進み、旧ラベル空間と衝突しない（F3）.
+
+    _bootstrap の STT切断復旧は同一インスタンスに provider.close();
+    provider.start() を行う。従来 start() が epoch を 0 にリセットしていたため、
+    再起動後の SPEAKER_00 が旧セッションの確定名
+    （cluster_namer._confirmed / diarization_speaker_keys の
+    "pyannote:SPEAKER_00"）へ即誤帰属し得た（2026-07-15 レビューで確定）。
+    epoch を引き継いでインクリメントすれば R{epoch}: 前置で自然に区別される。
+    """
+    provider = PyannoteStreamingDiarizationProvider("k", auto_reconnect=False)
+    monkeypatch.setattr(provider, "_connect", lambda: None)
+
+    def speaker_of(p):
+        start = {"type": "diarization_speaker_start",
+                 "data": {"timestamp": 1.0, "speaker": "SPEAKER_00"}}
+        end = {"type": "diarization_speaker_end",
+               "data": {"timestamp": 2.0, "speaker": "SPEAKER_00"}}
+        assert p._parse_message(json.dumps(start)) is None
+        return p._parse_message(json.dumps(end)).speaker
+
+    provider.start()
+    assert speaker_of(provider) == "SPEAKER_00"      # 初回は epoch=0（前置なし）
+
+    provider._sent_audio_ms = 5000                   # 5秒送信済みの想定
+    provider.close()
+    provider.start()
+    # 再起動後は raw キーが変わり（R1: 前置）、旧 SPEAKER_00 と衝突しない
+    assert speaker_of(provider) == "R1:SPEAKER_00"
+    # タイムラインは再接続時と同様に累計msを引き継いで単調を保つ
+    assert provider._session_base_ms == 5000
