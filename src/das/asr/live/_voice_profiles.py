@@ -77,7 +77,207 @@ def _best_text_similarity(text: str, recent_texts: list[str],
     return best
 
 
-class VoiceProfiles:
+class _LabelTrustMixin:
+    """ラベル信頼度: 「STTラベル→人物」対応をどこまで信じてよいかの判定.
+
+    Sonioxラベルは複数話者を混載し得る（Chiba 0532 実測: 自動登録3人が全て
+    同一ラベル発）ため、ラベルに基づく帰属（ラベル継続・#プレースホルダ）と
+    学習（蓄積・登録）は、このミックスインの門番を通ったときだけ許す:
+
+      - _label_pure:            直近の照合成功が単一人物に収束しているか（§15.7）
+      - _continuation_target:   対応先が実在するアクティブな人間か（AI声紋・
+                                deactivate済みの遮断。2026-07-15 レビュー）
+      - _trusted_continuation:  上記2つのANDで「ラベル継続」の可否を1回で判定
+
+    状態（label_hist）は VoiceProfiles.__init__ が実体化する（テストの
+    __new__ 構築フェイクとの互換のため、このミックスインは状態を持たない）。
+    """
+
+    def _continuation_target(self, prev) -> str | None:
+        """ラベル継続の対応先として使える人物キーを返す（継続不可なら None）.
+
+        継続を許すのは「現在アクティブな人間プロファイル」への対応だけ
+        （#プレースホルダは別経路。docs/design/handoff_2026-07-14_unregistered_speakers.md
+        のラベル継続設計を参照）。従来この判定はメインパス（中尺発話）にしか無く、
+        短発話・相槌のラベル継続が以下を素通しした（2026-07-15 レビューで確定）:
+          - AI声紋キー(__AI__等): sp_map に残った __AI__ を継続で返すと、
+            _recv_loop の startswith("__") エコー破棄が発動し、AIエコー直後の
+            人間の短発話・相槌が本文ごと消える実バグ。
+          - deactivate 済み・remap等で消えた人物、閉じた名簿の非アクティブ登録者:
+            実体の無い/照合対象外の対応先へ発話が帰属し続ける。
+        3経路（メイン・短発話・相槌）すべてこのヘルパで判定を統一する。
+        """
+        if prev is None or prev.startswith("#"):
+            return None
+        return prev if prev in self._active_human() else None
+
+    def _record_label_success(self, sp: str, person: str) -> None:
+        """照合成功（一致/補正/登録/合流）のたびにラベル→人物の履歴を残す."""
+        if not hasattr(self, "label_hist"):   # __new__ 構築のテスト用フェイク対策
+            self.label_hist = {}
+        h = self.label_hist.setdefault(str(sp), [])
+        h.append(person)
+        del h[:-max(int(self.label_purity_window), 8)]
+
+    def _label_pure(self, sp: str) -> bool:
+        """ラベルの直近の照合成功が単一人物に収束しているか（継続の門番）.
+
+        不純（直近 window 回に2人以上）なら、そのラベルは複数話者を混載して
+        いる可能性が高く、「ラベル継続」は根拠にならない（handoff §15.7）。
+        履歴が無い/window=0 の場合は従来どおり健全とみなす。
+        """
+        w = int(self.label_purity_window)   # replay の sweep は float で渡し得る
+        if not w:
+            return True
+        h = getattr(self, "label_hist", {}).get(str(sp), [])
+        return len(set(h[-w:])) <= 1
+
+    def _trusted_continuation(self, sp: str, prev) -> str | None:
+        """「ラベル継続」してよい対応先を返す（不可なら None）.
+
+        継続可否は _continuation_target（AI声紋・deactivate済み等の遮断）と
+        _label_pure（複数話者混載ラベルの遮断, §15.7）のANDで判定する。
+        短発話経路・「照合なし」経路の共通門番。
+        """
+        cont = self._continuation_target(prev)
+        if cont is not None and self._label_pure(sp):
+            return cont
+        return None
+
+
+class _ProfileQualityMixin:
+    """プロファイル品質: 登録済み声紋の健全性維持と人物別しきい値.
+
+    プロファイルは凍結が原則だが、登録材料の混入（Soniox境界の甘さで1発話に
+    両話者が混ざる等）は事前には完全に防げない。ここに集めた3層で品質を守る:
+
+      - _purity_subset:        埋め込み集合の最大自己一貫部分集合（登録時の
+                               純度検査と事後検査の共通中核。分布の相対構造のみで
+                               判定し、固定しきい値を持たない）
+      - _track_own_emb:        受理一致の埋め込みを監視し、二峰性（汚染）を
+                               検出したら多数派で再構築する事後回収層（§13.1）
+      - _person_th / _record_reference_sim:
+                               人物別しきい値（新規性検出）とその学習履歴。
+                               記録は person_th と独立な固定基準で行い、
+                               自己参照ラチェットを断つ（§13.2）
+
+    状態（own_sims/own_embs/_own_updates）は VoiceProfiles.__init__ が実体化
+    する（テストの __new__ 構築フェイクとの互換のため、状態はここに持たない）。
+    """
+
+    def _purity_subset(self, embs: list[np.ndarray]) -> list[int]:
+        """最大の自己一貫部分集合のインデックスを返す（登録純度検査の中核）.
+
+        medoid（他との類似度合計が最大の埋め込み）を種に、medoidとの類似度分布を
+        1次元2クラス分割（クラス間分散最大の割線＝Otsu流）し、下側クラスタの平均が
+        上側クラスタの平均の半分未満なら「別の声の混入」とみなして上側だけ返す。
+        判定は分布の相対構造のみで行い、固定の類似度しきい値を持たない:
+        CallHome 0856 実測（8kHz電話、docs/design/
+        handoff_2026-07-14_unregistered_speakers.md §13.1）で話者内類似は
+        中央値0.38-0.65、話者間は中央値0.116・最大0.343と、話者間は話者内の
+        半分を下回る相対構造が確認されており、絶対値は帯域・マイクで動くが
+        この比は保たれる（16kHz会議録の実測でも同様）。単峰（混入なし）の
+        集合では下側平均が上側の半分を割らないため全採用のまま素通りする。
+        """
+        n = len(embs)
+        if n < 4:   # 分布を語れるサンプル数がない → 検査せず全採用
+            return list(range(n))
+        m = np.stack(embs)
+        sims = m @ m.T
+        med = int(np.argmax(sims.sum(axis=1)))   # medoid（最も「みんなに似ている」声）
+        others = [i for i in range(n) if i != med]
+        s = np.array([float(sims[med, i]) for i in others])
+        order = np.argsort(s)   # medoid類似度の昇順
+        sv = s[order]
+        best_k, best_score = 0, -1.0
+        for k in range(1, len(sv)):   # クラス間分散が最大の割線を探す
+            score = k * (len(sv) - k) * (sv[k:].mean() - sv[:k].mean()) ** 2
+            if score > best_score:
+                best_score, best_k = score, k
+        mu_lo = float(sv[:best_k].mean())
+        mu_hi = float(sv[best_k:].mean())
+        if mu_lo >= 0.5 * mu_hi:   # 下側も「同じ声」の揺らぎの範囲 → 単峰
+            return list(range(n))
+        return sorted([med] + [others[i] for i in order[best_k:]])
+
+    def _track_own_emb(self, name: str, emb: np.ndarray) -> None:
+        """受理された一致の埋め込みを蓄積し、N回ごとに汚染検査→多数派で再構築（P3）.
+
+        登録時の純度検査（_purity_subset）をすり抜けて混合プロファイルができた
+        場合、そのプロファイルは両話者の発話を引き寄せるため、受理一致の埋め込み
+        列が二峰性を持つ（プール内に相互類似度の低い2クラスタ）。これを検出したら
+        多数派クラスタの平均でプロファイルを再構築し、少数派は破棄する。
+        検査は _REBUILD_EVERY 回の受理ごと（16×16 の内積行列1回＝サブms級）。
+        再構築後は own_sims（人物別しきい値の履歴）もリセットし、新しい
+        プロファイルの一致分布を学び直す（汚染期の受理simでしきい値が
+        歪んだままになるのを防ぐ）。呼び出し元が classify の受理パス＝
+        min_sec 以上の発話のみで、短発話の不安定な埋め込みは混ぜない。
+        設計: docs/design/handoff_2026-07-14_unregistered_speakers.md §13.1
+        （CallHome 0856、登録材料の53-55%混合で帰属27%に崩壊）への事後回収層。
+        """
+        if not self.ANON.match(name):
+            return   # 実名プロファイルは書き換えない（__init__ の own_embs 註釈参照）
+        oe = self.own_embs.setdefault(name, [])
+        oe.append(emb)
+        del oe[:-self._OWN_EMB_CAP]
+        cnt = self._own_updates.get(name, 0) + 1
+        self._own_updates[name] = cnt
+        if cnt % self._REBUILD_EVERY or len(oe) < self._REBUILD_EVERY:
+            return
+        keep = self._purity_subset(oe)
+        # 単峰（健全）なら何もしない。二峰でも「多数派」と呼べる側が過半数に
+        # 届かなければ、どちらが本人か判定できないので書き換えない（安全側）。
+        if len(keep) >= len(oe) or len(keep) * 2 <= len(oe):
+            return
+        embs = [oe[i] for i in keep]
+        prof = np.mean(np.stack(embs), axis=0)
+        self.profiles[name] = prof / np.linalg.norm(prof)
+        self.own_embs[name] = embs
+        self.own_sims[name] = []
+        # 直近判定(last)は呼び出し元の一致noteに使われるため上書きせず、
+        # counts のみ記録する（diag の stats 経由で観測可能）。
+        self.counts["プロファイル再構築"] = self.counts.get("プロファイル再構築", 0) + 1
+
+    def _person_th(self, name: str, base: float) -> float:
+        """人物別しきい値 = max(基準値, その人物の一致sim下位35パーセンタイル - 0.12).
+
+        旧仕様は中央値-0.12。受理simのみの履歴（選択バイアス）と組み合わさると
+        「しきい値上昇→低め一致が記録されない→中央値上昇→さらに上昇」の
+        ラチェットになった（CallHome 0856 実測で 0.42→0.73 まで肥大し、
+        正しい 0.5-0.65 帯の一致を全遮断）。対策は二本立て:
+          1. 記録側: person_th と独立な基準（base+margin通過の生sim）で記録し
+             自己参照を断つ（own_sims の __init__ 註釈参照）
+          2. 統計側: 中央値でなく下位35パーセンタイルを使う。本人のsimは帯域・
+             マイクで絶対値が動く（8kHz電話 0.5-0.65 / 16kHz会議 0.67-0.82）ため
+             固定の上限は置けないが、下位分位なら「本人の一致の下端」に追従し、
+             分布の裾の揺らぎや別人混入の高値外れに引きずられにくい
+        いずれも相対設計（観測simの分位）なので 8k/16k どちらでも壊れない。
+        巻き取り防止の本来機能は維持: 本人が安定して高sim（例 0.7台）を出す
+        環境では p35-0.12 ≈ 0.58-0.61 となり、別人の 0.5 前後の中途半端な
+        類似は引き続き弾く。
+        分位の選定はオフライン再現4本の実測（2026-07-15）: p25 は両話者のsim帯が
+        重なる電話ペアで巻き取りが再発（0743: 62%→60.2%）、中央値はラチェットは
+        直っても 0856 の回復が鈍い（29%→30.5%）。p35 は 0856=32.9% / 0743=63.4%
+        / 0696=71.6% / YouTube 16kHz=78.9% と全データセットで基準線以上。
+        """
+        h = self.own_sims.get(name, [])
+        if len(h) >= 3:
+            return max(base, float(np.percentile(h, 35)) - 0.12)
+        return base
+
+    def _record_reference_sim(self, name: str, sim: float) -> None:
+        """人物別しきい値の学習履歴に、固定基準を通過した1位simを記録する.
+
+        記録は person_th 判定の手前（基準しきい値＋margin という固定条件のみ）
+        で行う。受理後に記録すると person_th 自身が記録条件に入り、選択バイアス
+        でしきい値がラチェットする（_person_th docstring 参照）。
+        """
+        h = self.own_sims.setdefault(name, [])
+        h.append(sim)
+        del h[:-20]
+
+
+class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
     """凍結プロファイル照合による話者特定（台帳固定・誤り非伝播）.
 
     判定は2経路だけ:
@@ -281,24 +481,6 @@ class VoiceProfiles:
         return {k: v for k, v in self.profiles.items()
                 if k in self._active_keys and k not in ai}
 
-    def _continuation_target(self, prev) -> str | None:
-        """ラベル継続の対応先として使える人物キーを返す（継続不可なら None）.
-
-        継続を許すのは「現在アクティブな人間プロファイル」への対応だけ
-        （#プレースホルダは別経路。docs/design/handoff_2026-07-14_unregistered_speakers.md
-        のラベル継続設計を参照）。従来この判定はメインパス（中尺発話）にしか無く、
-        短発話・相槌のラベル継続が以下を素通しした（2026-07-15 レビューで確定）:
-          - AI声紋キー(__AI__等): sp_map に残った __AI__ を継続で返すと、
-            _recv_loop の startswith("__") エコー破棄が発動し、AIエコー直後の
-            人間の短発話・相槌が本文ごと消える実バグ。
-          - deactivate 済み・remap等で消えた人物、閉じた名簿の非アクティブ登録者:
-            実体の無い/照合対象外の対応先へ発話が帰属し続ける。
-        3経路（メイン・短発話・相槌）すべてこのヘルパで判定を統一する。
-        """
-        if prev is None or prev.startswith("#"):
-            return None
-        return prev if prev in self._active_human() else None
-
     def is_active_human(self, key: str) -> bool:
         """key が現在照合対象のアクティブな人間プロファイルか（人物N含む・AI声紋除く）.
 
@@ -365,41 +547,6 @@ class VoiceProfiles:
             if e is not None:
                 samples.append((e, chars / n))
         return samples or [(emb, float(chars))]
-
-    def _purity_subset(self, embs: list[np.ndarray]) -> list[int]:
-        """最大の自己一貫部分集合のインデックスを返す（登録純度検査の中核）.
-
-        medoid（他との類似度合計が最大の埋め込み）を種に、medoidとの類似度分布を
-        1次元2クラス分割（クラス間分散最大の割線＝Otsu流）し、下側クラスタの平均が
-        上側クラスタの平均の半分未満なら「別の声の混入」とみなして上側だけ返す。
-        判定は分布の相対構造のみで行い、固定の類似度しきい値を持たない:
-        CallHome 0856 実測（8kHz電話、docs/design/
-        handoff_2026-07-14_unregistered_speakers.md §13.1）で話者内類似は
-        中央値0.38-0.65、話者間は中央値0.116・最大0.343と、話者間は話者内の
-        半分を下回る相対構造が確認されており、絶対値は帯域・マイクで動くが
-        この比は保たれる（16kHz会議録の実測でも同様）。単峰（混入なし）の
-        集合では下側平均が上側の半分を割らないため全採用のまま素通りする。
-        """
-        n = len(embs)
-        if n < 4:   # 分布を語れるサンプル数がない → 検査せず全採用
-            return list(range(n))
-        m = np.stack(embs)
-        sims = m @ m.T
-        med = int(np.argmax(sims.sum(axis=1)))   # medoid（最も「みんなに似ている」声）
-        others = [i for i in range(n) if i != med]
-        s = np.array([float(sims[med, i]) for i in others])
-        order = np.argsort(s)   # medoid類似度の昇順
-        sv = s[order]
-        best_k, best_score = 0, -1.0
-        for k in range(1, len(sv)):   # クラス間分散が最大の割線を探す
-            score = k * (len(sv) - k) * (sv[k:].mean() - sv[:k].mean()) ** 2
-            if score > best_score:
-                best_score, best_k = score, k
-        mu_lo = float(sv[:best_k].mean())
-        mu_hi = float(sv[best_k:].mean())
-        if mu_lo >= 0.5 * mu_hi:   # 下側も「同じ声」の揺らぎの範囲 → 単峰
-            return list(range(n))
-        return sorted([med] + [others[i] for i in order[best_k:]])
 
     def _enroll_accumulate(self, samples: list[tuple[np.ndarray, float]],
                            sp: str, prev, ecs: float) -> str | None:
@@ -478,64 +625,6 @@ class VoiceProfiles:
                    rename=rename, chars=round(total_chars))
         return target
 
-    def _record_label_success(self, sp: str, person: str) -> None:
-        """照合成功（一致/補正/登録/合流）のたびにラベル→人物の履歴を残す."""
-        if not hasattr(self, "label_hist"):   # __new__ 構築のテスト用フェイク対策
-            self.label_hist = {}
-        h = self.label_hist.setdefault(str(sp), [])
-        h.append(person)
-        del h[:-max(int(self.label_purity_window), 8)]
-
-    def _label_pure(self, sp: str) -> bool:
-        """ラベルの直近の照合成功が単一人物に収束しているか（継続の門番）.
-
-        不純（直近 window 回に2人以上）なら、そのラベルは複数話者を混載して
-        いる可能性が高く、「ラベル継続」は根拠にならない（handoff §15.7）。
-        履歴が無い/window=0 の場合は従来どおり健全とみなす。
-        """
-        w = int(self.label_purity_window)   # replay の sweep は float で渡し得る
-        if not w:
-            return True
-        h = getattr(self, "label_hist", {}).get(str(sp), [])
-        return len(set(h[-w:])) <= 1
-    def _track_own_emb(self, name: str, emb: np.ndarray) -> None:
-        """受理された一致の埋め込みを蓄積し、N回ごとに汚染検査→多数派で再構築（P3）.
-
-        登録時の純度検査（_purity_subset）をすり抜けて混合プロファイルができた
-        場合、そのプロファイルは両話者の発話を引き寄せるため、受理一致の埋め込み
-        列が二峰性を持つ（プール内に相互類似度の低い2クラスタ）。これを検出したら
-        多数派クラスタの平均でプロファイルを再構築し、少数派は破棄する。
-        検査は _REBUILD_EVERY 回の受理ごと（16×16 の内積行列1回＝サブms級）。
-        再構築後は own_sims（人物別しきい値の履歴）もリセットし、新しい
-        プロファイルの一致分布を学び直す（汚染期の受理simでしきい値が
-        歪んだままになるのを防ぐ）。呼び出し元が classify の受理パス＝
-        min_sec 以上の発話のみで、短発話の不安定な埋め込みは混ぜない。
-        設計: docs/design/handoff_2026-07-14_unregistered_speakers.md §13.1
-        （CallHome 0856、登録材料の53-55%混合で帰属27%に崩壊）への事後回収層。
-        """
-        if not self.ANON.match(name):
-            return   # 実名プロファイルは書き換えない（__init__ の own_embs 註釈参照）
-        oe = self.own_embs.setdefault(name, [])
-        oe.append(emb)
-        del oe[:-self._OWN_EMB_CAP]
-        cnt = self._own_updates.get(name, 0) + 1
-        self._own_updates[name] = cnt
-        if cnt % self._REBUILD_EVERY or len(oe) < self._REBUILD_EVERY:
-            return
-        keep = self._purity_subset(oe)
-        # 単峰（健全）なら何もしない。二峰でも「多数派」と呼べる側が過半数に
-        # 届かなければ、どちらが本人か判定できないので書き換えない（安全側）。
-        if len(keep) >= len(oe) or len(keep) * 2 <= len(oe):
-            return
-        embs = [oe[i] for i in keep]
-        prof = np.mean(np.stack(embs), axis=0)
-        self.profiles[name] = prof / np.linalg.norm(prof)
-        self.own_embs[name] = embs
-        self.own_sims[name] = []
-        # 直近判定(last)は呼び出し元の一致noteに使われるため上書きせず、
-        # counts のみ記録する（diag の stats 経由で観測可能）。
-        self.counts["プロファイル再構築"] = self.counts.get("プロファイル再構築", 0) + 1
-
     def set_max_human_speakers(self, value: int | None) -> None:
         self.max_human_speakers = value
 
@@ -558,33 +647,6 @@ class VoiceProfiles:
             tgt.extend(float(np.dot(emb, e2)) for e2 in es[-3:])
         del self.same_sims[:-60]
         del self.diff_sims[:-120]
-
-    def _person_th(self, name: str, base: float) -> float:
-        """人物別しきい値 = max(基準値, その人物の一致sim下位35パーセンタイル - 0.12).
-
-        旧仕様は中央値-0.12。受理simのみの履歴（選択バイアス）と組み合わさると
-        「しきい値上昇→低め一致が記録されない→中央値上昇→さらに上昇」の
-        ラチェットになった（CallHome 0856 実測で 0.42→0.73 まで肥大し、
-        正しい 0.5-0.65 帯の一致を全遮断）。対策は二本立て:
-          1. 記録側: person_th と独立な基準（base+margin通過の生sim）で記録し
-             自己参照を断つ（own_sims の __init__ 註釈参照）
-          2. 統計側: 中央値でなく下位35パーセンタイルを使う。本人のsimは帯域・
-             マイクで絶対値が動く（8kHz電話 0.5-0.65 / 16kHz会議 0.67-0.82）ため
-             固定の上限は置けないが、下位分位なら「本人の一致の下端」に追従し、
-             分布の裾の揺らぎや別人混入の高値外れに引きずられにくい
-        いずれも相対設計（観測simの分位）なので 8k/16k どちらでも壊れない。
-        巻き取り防止の本来機能は維持: 本人が安定して高sim（例 0.7台）を出す
-        環境では p35-0.12 ≈ 0.58-0.61 となり、別人の 0.5 前後の中途半端な
-        類似は引き続き弾く。
-        分位の選定はオフライン再現4本の実測（2026-07-15）: p25 は両話者のsim帯が
-        重なる電話ペアで巻き取りが再発（0743: 62%→60.2%）、中央値はラチェットは
-        直っても 0856 の回復が鈍い（29%→30.5%）。p35 は 0856=32.9% / 0743=63.4%
-        / 0696=71.6% / YouTube 16kHz=78.9% と全データセットで基準線以上。
-        """
-        h = self.own_sims.get(name, [])
-        if len(h) >= 3:
-            return max(base, float(np.percentile(h, 35)) - 0.12)
-        return base
 
     def _embed(self, wav: np.ndarray) -> np.ndarray | None:
         t0 = time.perf_counter()
@@ -674,13 +736,9 @@ class VoiceProfiles:
                     # 出力ビット一致を確認して削除。review P3）。
                     need_mg = self.margin
                     # 人物別しきい値の学習履歴は person_th 判定の手前で記録する
-                    # （基準しきい値＋margin という固定条件のみ）。受理後に記録
-                    # すると person_th 自身が記録条件に入り、選択バイアスで
-                    # しきい値がラチェットする（_person_th docstring 参照）。
+                    # （固定基準のみ。理由は _record_reference_sim docstring）。
                     if sim >= th + bonus and sim - second >= need_mg:
-                        h = self.own_sims.setdefault(cand, [])
-                        h.append(sim)
-                        del h[:-20]
+                        self._record_reference_sim(cand, sim)
                     if sim >= need_th and sim - second >= need_mg:
                         self.sp_map[sp] = cand
                         self._record_label_success(sp, cand)
@@ -748,21 +806,19 @@ class VoiceProfiles:
                 # 厳格に決められない短い発話はラベル継続（そのラベルの現在の人物対応を
                 # 維持）。対応先は声紋照合の成功でしか書き換わらないため根拠なしの
                 # 決めつけではない（classify docstring の実測根拠を参照）。
-                # 継続可否は _continuation_target（AI声紋・deactivate済み等の遮断）
-                # と _label_pure（複数話者混載ラベルの遮断, §15.7）のANDで判定。
-                cont = self._continuation_target(prev)
-                if cont is not None and self._label_pure(sp):
+                # 継続の門番は _trusted_continuation（ラベル信頼度）に統一。
+                cont = self._trusted_continuation(sp, prev)
+                if cont is not None:
                     self._note("ラベル継続", label=sp, prev=cont, short=True)
                     return cont
         # 声紋で決められない発話（相槌・短発話・声紋計算不可の短経路）はラベル継続:
         # そのラベルの現在の対応（声紋照合の成功で確定した人物 or #ラベル）を返す。
         # なお相槌テキストの最終的な表示は呼び出し側（RecvLoop.flush）が未確定に
         # 落とす規則を持つ（相槌は聞き手が打つ＝直前話者と別人のことが多い）。
-        # 継続可否は _continuation_target（メインパスと同じガード）と
-        # _label_pure（混載ラベルの遮断, §15.7）のANDで判定。
+        # 継続の門番は _trusted_continuation（ラベル信頼度）に統一（短発話経路と共通）。
         if kind == "照合なし":
-            cont = self._continuation_target(prev)
-            if cont is not None and self._label_pure(sp):
+            cont = self._trusted_continuation(sp, prev)
+            if cont is not None:
                 self._note("ラベル継続", label=sp, prev=cont, **info)
                 return cont
         # ラベル不純（直近の照合成功が複数人物に割れている）: このラベルに基づく
