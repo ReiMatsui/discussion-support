@@ -90,6 +90,12 @@ def run_live(mix_path: Path, max_speakers: int, extra_soniox: str,
     cmd = das_command() + [
         "listen-soniox", *_MODE_FLAGS[mode],
         "--max-speakers", str(max_speakers),
+        # 帰属測定に介入系は不要: docsの事前AF化・発話ごとのAF構築の入口・
+        # 3秒周期の介入判定を止める（LLM呼び出しの純減。--soniox-args の
+        # --no-agent は音声ファシリテーターのみで、これらは別レイヤ。
+        # 2026-07-20 まで（chiba0132 管制ラン含む）の測定は介入込み条件、
+        # 以後は本軽量化条件——比較時はこの切り替え点に注意）。
+        "--skip-docs", "--facilitate-interval", "0",
         "--wav", str(mix_path), "--soniox-args", extra_soniox,
     ]
     print(f"# 実行: {' '.join(cmd)}")
