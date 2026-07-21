@@ -20,6 +20,10 @@ RecvLoop.flush() 内の手続き的な if 連鎖として実装されており�
      3c. それ以外 → 匿名キー解決（_anonymous_cluster_key: 名寄せ・
          最近傍統合・ヒステリシスを含む。cluster_namer が無い構成は
          SessionState.key_for_diarization_speaker へ直行）
+     3d. 不純ラベル門番（ハイブリッドのみ, handoff §18.8）: 声紋層が
+         「ラベル不純」で棄権した発話は、声紋1位候補が回収先と一致する
+         ときだけ 3a/3c の結果を採用し、それ以外は未確定に差し替える
+         （台帳・蓄積の副作用は 3a-3c のまま保存）
   4. STT に落ちた（diarization 供給ありで重なりが無く、声紋も無い）
      → STT フォールバックキー
   最後に呼び出し側（flush）が constrain_human_speaker_key で参加人数上限・
@@ -39,7 +43,11 @@ if TYPE_CHECKING:
 
     from ._session_state import SessionState
 
-from ._constants import PYANNOTE_CLUSTER_OVERLAP_MIN_RATIO, UNSURE_SPEAKER
+from ._constants import (
+    CLUSTER_IMPURE_RECOVERY_ENDORSE_MIN_SIM,
+    PYANNOTE_CLUSTER_OVERLAP_MIN_RATIO,
+    UNSURE_SPEAKER,
+)
 from ._diarization import TimeSegment, has_overlapping_speakers
 from ._ui import _print_line
 
@@ -127,10 +135,46 @@ def _voiceprint_claim(d, sp_id) -> tuple[str | None, float | None]:
     return None, None
 
 
-def _cluster_attribution(s: SessionState, resolved, *, wav,
+def _cluster_attribution(s: SessionState, resolved, *, d, wav,
                          start_ms: int, end_ms: int,
                          diarization_events, rec_extra: dict) -> str:
-    """ステップ3: diarization が勝った発話をクラスタ層で解決する.
+    """ステップ3: diarization が勝った発話をクラスタ層で解決し、不純門番を適用する.
+
+    3a-3c で通常どおりキーを解決した後、ステップ3d（不純ラベル門番,
+    handoff §18.8）が最終キーだけを差し替える。台帳・蓄積の副作用
+    （observe / rekey / ヒステリシス pending / キー発行）は従来どおり
+    実行される——オフライン反実仮想（記録ランの最終ラベルのみ差し替えて
+    再採点）と実装の意味論を一致させるため、判定は出力段に置く。
+    """
+    sp_id = _cluster_attribution_raw(
+        s, resolved, wav=wav, start_ms=start_ms, end_ms=end_ms,
+        diarization_events=diarization_events, rec_extra=rec_extra)
+    # --- 3d. 不純ラベル門番（ハイブリッド構成のみ。handoff §18.8） ---
+    # 声紋層が「ラベル不純」（直近の照合成功が複数人物に割れたSTTラベル）で
+    # 棄権した発話のクラスタ回収は、Chiba 12会話の実測で通算正解45%
+    # （0632では0/17）と当てにならず、誤帰属の主経路だった（§18.6）。
+    # ただし「その発話自身の声紋1位候補が回収先と一致」する回収は
+    # 開発5会話で正解37/誤り6、検証5会話でも成立。弱い声紋の裏付けが
+    # あるときだけ回収を通し、それ以外は未確定に落とす（誤帰属＞未確定の
+    # 優先。§15.3）。pyannote単独・Soniox単独（cluster_namer なし）は不変。
+    if (s.cluster_namer is not None and sp_id != UNSURE_SPEAKER
+            and d and d.get("kind") == "ラベル不純"):
+        endorsed = (d.get("name") == sp_id
+                    and float(d.get("sim") or 0.0)
+                    >= CLUSTER_IMPURE_RECOVERY_ENDORSE_MIN_SIM)
+        if not endorsed:
+            rec_extra["speaker_source"] = "cluster_impure_label"
+            rec_extra["speaker_confidence"] = 0.0
+            rec_extra["speaker_reason"] = (
+                "impure_stt_label_without_voiceprint_endorsement")
+            return UNSURE_SPEAKER
+    return sp_id
+
+
+def _cluster_attribution_raw(s: SessionState, resolved, *, wav,
+                             start_ms: int, end_ms: int,
+                             diarization_events, rec_extra: dict) -> str:
+    """ステップ3a-3c: クラスタ確定名／重なり未確定／匿名キーの解決本体.
 
     ハイブリッド構成 (--vp-cluster-naming, s.cluster_namer あり) では
     pyannoteクラスタ単位の声紋名前付け
@@ -229,7 +273,7 @@ def decide_speaker(s: SessionState, *, sp_id, d, wav: np.ndarray | None,
         else:
             # --- 3. diarization が勝った ---
             sp_id = _cluster_attribution(
-                s, resolved, wav=wav, start_ms=start_ms, end_ms=end_ms,
+                s, resolved, d=d, wav=wav, start_ms=start_ms, end_ms=end_ms,
                 diarization_events=diarization_events, rec_extra=rec_extra)
         if vp_debug and resolved.source != "voiceprint":
             # peek_disp_name（割当てなし）: この時点の sp_id は constrain 前で、
