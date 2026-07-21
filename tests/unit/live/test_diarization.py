@@ -562,6 +562,7 @@ class _FakeClusterNamer:
     def __init__(self, name: str | None) -> None:
         self.name = name
         self.calls: list[tuple[str, bool]] = []
+        self.merge_sim = None   # 名寄せ・最近傍統合は無効（本番既定と同じ）
 
     def observe(self, raw_cluster: str, wav, *, overlapped: bool = False) -> str | None:
         self.calls.append((raw_cluster, overlapped))

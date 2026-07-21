@@ -70,6 +70,7 @@ class _Namer:
     def __init__(self) -> None:
         self.tracker = SimpleNamespace(dedupe=0.5)
         self.last_match = None
+        self.merge_sim = None   # 名寄せ・最近傍統合は無効（本番既定と同じ）
 
     def observe(self, raw_cluster, wav, *, overlapped=False):
         return None
