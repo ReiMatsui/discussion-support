@@ -5,8 +5,11 @@
 RecvLoop.flush() 内の手続き的な if 連鎖として実装されており、それが「事実上の
 統合層」になっていた（docs/design/attribution_logic_review_2026-07.md §2 の指摘）。
 本モジュールはその判定を1本の明示的なフロー（decide_speaker）として切り出した
-もの（2026-07-17 再編）。**挙動は flush 時代と同一**（回帰ゲート: テストスイート
-全件＋eval/replay_attribution.py 5本の出力一致。handoff §17 のベースライン表）。
+もの（2026-07-17 再編。再編自体は挙動不変で、回帰ゲート: テストスイート全件＋
+eval/replay_attribution.py 5本の出力一致。handoff §17 のベースライン表）。
+その後、ステップ3d（不純ラベル門番, 2026-07-21, handoff §18.8）が承認済みの
+**挙動変更**として追加されている——replay 5本が今も一致するのは、3d が
+クラスタ層（replay の対象外）にのみ作用し声紋層が無変更のため。
 
 判定フロー（上から順に評価し、確定した段階で終了）:
 
@@ -103,15 +106,20 @@ def _anonymous_cluster_key(s: SessionState, raw_cluster: str,
         c_source, _, c_speaker = canonical.partition(":")
         return s.key_for_diarization_speaker(c_source, c_speaker,
                                              duration_ms=duration_ms)
-    if (raw_cluster not in s.diarization_speaker_keys
+    # 最近傍統合の下限閾値は namer.merge_sim（名寄せと同じ独立ノブ）。None は
+    # 統合無効＝既定（クラスタ埋め込み同士の比較に安全な閾値が存在しないことが
+    # 実測で判明したため。handoff §15.12、_cluster_naming.py 参照）。無効時は
+    # 最近傍探索そのものを省く: 結果はどのみち捨てられ、merge_sim 校正用の
+    # diag（nearest/nearest_sim）は ClusterVoiceNamer._observe 側が別経路で
+    # 出しているため、ここで計算する意味がない（2026-07-21 セルフレビューで
+    # 純デッド計算と確認して整理。opt-in 時の挙動は不変）。
+    if (namer.merge_sim is not None
+            and raw_cluster not in s.diarization_speaker_keys
             and s.human_slot_budget_exhausted()):
         nearest = namer.nearest_cluster(raw_cluster)
         if nearest is not None:
             nearest_cluster, nearest_sim = nearest
-            # 下限閾値は namer.merge_sim（名寄せと同じ独立ノブ）。None は統合無効
-            # ＝既定（クラスタ埋め込み同士の比較に安全な閾値が存在しないことが
-            # 実測で判明したため。handoff §15.12、_cluster_naming.py 参照）。
-            if namer.merge_sim is not None and nearest_sim >= namer.merge_sim:
+            if nearest_sim >= namer.merge_sim:
                 nearest_key = s.diarization_speaker_keys.get(nearest_cluster)
                 if nearest_key is not None:
                     return nearest_key
@@ -157,6 +165,12 @@ def _cluster_attribution(s: SessionState, resolved, *, d, wav,
     # 開発5会話で正解37/誤り6、検証5会話でも成立。弱い声紋の裏付けが
     # あるときだけ回収を通し、それ以外は未確定に落とす（誤帰属＞未確定の
     # 優先。§15.3）。pyannote単独・Soniox単独（cluster_namer なし）は不変。
+    # スコープの境界（2026-07-21 セルフレビューで確認・意図的に現状維持）:
+    # 門番は kind「ラベル不純」に限定しており、声紋層が別理由で棄権した発話
+    # （「継続不可」、closed roster の「未確定」）のクラスタ回収は裏付けなしで
+    # 通る。これらは Chiba 12会話の測定で誤帰属の主因ではなく、遮断の効果を
+    # 測ったデータもないため広げない（データなき拡張はしない）。_classify に
+    # UNSURE を返す新しい kind を足す場合は、この境界を再検討すること。
     if (s.cluster_namer is not None and sp_id != UNSURE_SPEAKER
             and d and d.get("kind") == "ラベル不純"):
         endorsed = (d.get("name") == sp_id
