@@ -125,6 +125,22 @@ def test_trigger_with_drift_reason_injects_context(agent):
     assert agent._responding is True
 
 
+def test_trigger_with_recent_agent_texts_adds_no_repeat_note(agent):
+    """直近の自分の発話を渡すと「同じ内容を繰り返さない」注記が付く（2026-07-22）."""
+    agent.trigger(drift_reason="雑談に脱線",
+                  recent_agent_texts=["論点Aに戻しましょう"])
+    text = agent.ws.last_create_text()
+    assert "[あなたの直近の発言]" in text
+    assert "論点Aに戻しましょう" in text
+    assert "繰り返さないでください" in text
+
+
+def test_trigger_without_recent_agent_texts_is_unchanged(agent):
+    """recent_agent_texts 未指定（fact/manual/retry 経路等）は従来と同一の文面."""
+    agent.trigger(drift_reason="雑談に脱線")
+    assert "[あなたの直近の発言]" not in agent.ws.last_create_text()
+
+
 def test_trigger_preserves_pending_on_send_failure(agent):
     """送信が例外を投げても、蓄積発話は失われず再試行できる（Bug 2）."""
     agent.feed("人間", "失われては困る発言")

@@ -399,6 +399,23 @@ def _intervention_timing_metadata(
     return timing
 
 
+def _recent_agent_texts(state: SessionState, n: int = 4) -> list[str]:
+    """直近にファシリテーターが実際に発話したテキスト（新しい順でない末尾n件）.
+
+    trigger のコンテキストに渡し、生成側で「同じ内容の介入の繰り返し」を
+    防ぐために使う（duplicate_content の第2層）。records は膨らむため
+    後方からの走査で打ち切る。
+    """
+    texts: list[str] = []
+    with state.state_lock:
+        for r in reversed(state.records):
+            if r.get("speaker") == AGENT_SPEAKER and r.get("text"):
+                texts.append(str(r["text"]))
+                if len(texts) >= n:
+                    break
+    return list(reversed(texts))
+
+
 def _build_candidates(
     pending: _PendingInterventions,
     agent,
@@ -2365,7 +2382,8 @@ def _run_agent_worker(state: SessionState):
                 _log_intervention_event(
                     state, "drift", decision.drift_reason, timing=timing)
                 agent.trigger(topics=_bargein_topics,
-                              drift_reason=decision.drift_reason)
+                              drift_reason=decision.drift_reason,
+                              recent_agent_texts=_recent_agent_texts(state))
                 _pending.clear_drift()
                 _last_intervention_at = time.monotonic()
                 _note_intervention(_last_intervention_at, "drift", decision.drift_reason)
@@ -2516,7 +2534,8 @@ def _run_agent_worker(state: SessionState):
             _log_intervention_event(
                 state, "summarize", normal_decision.detail, timing=timing)
             agent.trigger(topics=_topics,
-                          summary_focus=normal_decision.summary_focus)
+                          summary_focus=normal_decision.summary_focus,
+                          recent_agent_texts=_recent_agent_texts(state))
             _last_intervention_at = time.monotonic()
             _pending.summarize = None   # 採択したら消費（drainで再取得しない）
             _note_intervention(_last_intervention_at, "summarize", normal_decision.detail)
@@ -2531,7 +2550,8 @@ def _run_agent_worker(state: SessionState):
             print(f"# [trigger] silence: {normal_decision.detail}", flush=True)
             _log_intervention_event(
                 state, "silence", normal_decision.detail, timing=timing)
-            agent.trigger(topics=_topics)
+            agent.trigger(topics=_topics,
+                          recent_agent_texts=_recent_agent_texts(state))
             _last_intervention_at = time.monotonic()
             _note_intervention(_last_intervention_at, "silence", normal_decision.detail)
         elif normal_decision.reason == "invite":
@@ -2546,7 +2566,8 @@ def _run_agent_worker(state: SessionState):
             _log_intervention_event(
                 state, "invite", normal_decision.detail, timing=timing)
             agent.trigger(topics=_topics,
-                          invite_target=normal_decision.invite_target)
+                          invite_target=normal_decision.invite_target,
+                          recent_agent_texts=_recent_agent_texts(state))
             _last_intervention_at = time.monotonic()
             _last_invited = normal_decision.invite_target
             _pending.invite = None

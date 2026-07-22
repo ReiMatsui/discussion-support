@@ -387,7 +387,8 @@ class RealtimeAgent(_RealtimeBase):
                 af_presentation: str | None = None,
                 hold_playback: bool = False,
                 retry_intervention: bool | None = None,
-                is_retry: bool = False):
+                is_retry: bool = False,
+                recent_agent_texts: list[str] | None = None):
         """蓄積した発話をRealtimeAPIに送信し応答を要求.
 
         topics: 現在の論点一覧（_topic_workerが抽出したもの）。
@@ -399,6 +400,10 @@ class RealtimeAgent(_RealtimeBase):
                 _pendingが空でも送信し、その人に声をかける発話を促す。
         fact_correction: 高確信の事実誤り補正。設定されていると、
                 _pendingが空でも送信し、短い補足だけを促す。
+        recent_agent_texts: 直近に自分（ファシリテーター）が実際に発話した
+                テキスト。渡された場合、コンテキストに含めて「同じ内容の
+                介入を繰り返さない」よう明示する（同一表示の再発防止の
+                最終層。一次防御は Controller の duplicate_content）。
         retry_intervention: 割り込みで中断されたときに、発話内容を保存して
                 次の機会に再送してよいか。未指定なら、事実補正は再送せず、
                 それ以外の介入だけ再送候補にする。
@@ -493,6 +498,19 @@ class RealtimeAgent(_RealtimeBase):
                 "説教・長い説明はせず、提示された情報の要点だけを届けてください。"
             )
             conv = f"{af_note}\n\n{conv}" if conv else af_note
+        # --- 直近の自分の発話（同一内容の介入をもう一度生成しない） ---
+        # Controller の duplicate_content は brief（脱線理由/整理焦点）の同一性
+        # しか見えない。brief が違っても文面が実質同じになる再発は、生成側に
+        # 「既に言ったこと」を見せて防ぐ（2026-07-22 の再発報告への第2層）。
+        if recent_agent_texts and conv:
+            said = "\n".join(f"  - {t}" for t in recent_agent_texts if t.strip())
+            if said:
+                repeat_note = (
+                    "[あなたの直近の発言]\n" + said + "\n"
+                    "上と実質的に同じ内容の発言は繰り返さないでください。"
+                    "同じことしか言えない場合は、繰り返す代わりに、"
+                    "いま新しく加えられる一言だけを短く述べてください。")
+                conv = f"{conv}\n\n{repeat_note}"
         # --- 保存された介入内容をコンテキストに追加 ---
         # 注: 有効な介入は送信成功までクリアしない（Bug 2）。
         #     期限切れの介入のみ、送信成否に関わらずここで破棄する。

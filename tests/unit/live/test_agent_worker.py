@@ -45,14 +45,15 @@ class FakeAgent:
     def trigger(self, *, topics=None, drift_reason=None, invite_target=None,
                 fact_correction=None, manual_request=None,
                 summary_focus=None, retry_intervention=None,
-                is_retry=False) -> None:
+                is_retry=False, recent_agent_texts=None) -> None:
         self.trigger_calls.append({"topics": topics, "drift_reason": drift_reason,
                                    "invite_target": invite_target,
                                    "fact_correction": fact_correction,
                                    "manual_request": manual_request,
                                    "summary_focus": summary_focus,
                                    "retry_intervention": retry_intervention,
-                                   "is_retry": is_retry})
+                                   "is_retry": is_retry,
+                                   "recent_agent_texts": recent_agent_texts})
         # 実エージェントの挙動を模倣: トリガーで介入と保留発話を消費
         self._pending_intervention = None
         self._pending.clear()
@@ -126,6 +127,20 @@ class FakeState:
 
     def set_manual_call_status(self, status: str, **kw) -> None:
         self.manual_statuses.append({"status": status, **kw})
+
+
+def test_recent_agent_texts_returns_tail_of_agent_utterances():
+    """records からファシリテーター発話の末尾n件だけを古い順で返す."""
+    from das.asr.live._constants import AGENT_SPEAKER
+    from das.asr.live._workers import _recent_agent_texts
+    state = FakeState(FakeAgent(), None)
+    state.records = [
+        {"speaker": "A", "text": "人間の発話"},
+        *[{"speaker": AGENT_SPEAKER, "text": f"介入{i}"} for i in range(6)],
+        {"speaker": "B", "text": "別の人間の発話"},
+    ]
+    assert _recent_agent_texts(state, n=4) == ["介入2", "介入3", "介入4", "介入5"]
+    assert _recent_agent_texts(FakeState(FakeAgent(), None)) == []
 
 
 def test_log_intervention_event_includes_review_context():
