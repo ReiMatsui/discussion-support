@@ -117,7 +117,7 @@ def test_medium_turn_requires_strict_threshold():
     vp = _tracker(emb)                 # thresh=0.5, short_bonus=0.05
     vp.short_bonus = 0.08
     vp.sp_map = {}
-    # 1.6s（< strict_sec=3.0）: 0.55 < 0.5+0.08 → 即時判定せず蓄積へ
+    # 1.6s（< strict_sec=2.0）: 0.55 < 0.5+0.08 → 即時判定せず蓄積へ
     assert vp.classify(_LONG, "2", count=True, chars=20) == "#2"
     assert vp.last["kind"] == "蓄積中"
     # 3.2s（>= strict_sec）: 0.55 >= 0.5 → 基準しきい値で即時判定

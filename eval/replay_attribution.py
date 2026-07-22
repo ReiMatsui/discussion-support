@@ -171,7 +171,7 @@ def reset_tracker(vp: VoiceProfiles, params: dict, *,
     vp.thresh, vp.dedupe, vp.consist = d_th, d_dd, d_cs
     vp.margin, vp.min_sec = 0.05, 1.0
     vp.short_floor, vp.short_bonus = 0.45, 0.08
-    vp.strict_sec = 3.0
+    vp.strict_sec = 2.0
     vp.enroll_min_total_chars = 45
     vp.enroll_win_sec = 1.5
     vp.enroll_consist_bonus = 0.08
