@@ -16,6 +16,8 @@ Controller は **決定的**（LLM呼び出しなし）に実装する。同期�
 """
 from __future__ import annotations
 
+import difflib
+import re
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -23,6 +25,8 @@ from ._constants import (
     _AGENT_CONV_SILENCE,
     _FACTCHECK_COOLDOWN,
     _FACTCHECK_PENDING_TTL,
+    _INTERVENTION_CONTENT_DEDUP_SEC,
+    _INTERVENTION_CONTENT_DEDUP_SIM,
     _INTERVENTION_COOLDOWN,
     _INTERVENTION_PAUSE_COUNT,
     _INTERVENTION_PAUSE_DRIFT,
@@ -57,6 +61,7 @@ SuppressionCode = Literal[
     "awaiting_drift_confirmation",  # 脱線の確認回数待ち
     "cooldown_global",              # 直前のあらゆる介入から間隔不足
     "cooldown_kind",                # 直前の同種介入から間隔不足
+    "duplicate_content",            # 実質同一内容の同種介入を最近実施済み
     "awaiting_pause",               # 発話の切れ目（pause）待ち
     "same_as_last_invited",         # 直前と同じ相手への連続声かけ
     "lower_priority",               # 採択可能だが他候補を優先
@@ -173,6 +178,11 @@ class _KindPolicy:
     # "kind"  : 直前の「同種」介入からの間隔を見る（fact/count/silence）
     # "global": 直前の「あらゆる」介入からの間隔を見る（drift/invite。会話を頻繁に止めない）
     cooldown_scope: str = "kind"
+    # 同一内容の再発火抑止窓（秒, 0=しない）。時間クールダウンは間隔しか見ない
+    # ため、brief が内容そのものである種別（drift/summarize）だけこの窓で
+    # 「同じことをもう一度言う」介入を抑止する。fact は上流（checker 側 90s
+    # dedup）が担い、silence/invite/retry の brief は内容ではないため対象外。
+    content_dedup_sec: float = 0.0
 
 
 _KIND_POLICY: dict[str, _KindPolicy] = {
@@ -180,12 +190,14 @@ _KIND_POLICY: dict[str, _KindPolicy] = {
     # manual: ユーザーが明示的に呼んだので基本尊重。ただし直前に明確な fact 補正が
     # あればそちらを優先。global cooldown は受けず（kind scope）、連打だけ抑える。
     "manual":   _KindPolicy(1, _INTERVENTION_PAUSE_MANUAL, _MANUAL_CALL_COOLDOWN, 3000, "wait_for_pause"),
-    "drift":    _KindPolicy(2, _INTERVENTION_PAUSE_DRIFT, _INTERVENTION_COOLDOWN, 2000, "wait_for_pause", "global"),
+    "drift":    _KindPolicy(2, _INTERVENTION_PAUSE_DRIFT, _INTERVENTION_COOLDOWN, 2000, "wait_for_pause", "global",
+                            content_dedup_sec=_INTERVENTION_CONTENT_DEDUP_SEC),
     "retry":    _KindPolicy(3, _INTERVENTION_PAUSE_RETRY, 0.0, 2000, "wait_for_pause"),
     # summarize: 価値判定つき整理介入（C3, count を置換）。上流でLLMが「今、整理が
     # 価値を足す」と判定済み。同種連発を防ぐ kind cooldown 30s に加え、他介入直後も
     # 抑えるため global scope にして「仕切りすぎ」の構造要因を断つ。
-    "summarize": _KindPolicy(4, _INTERVENTION_PAUSE_COUNT, 30.0, 2000, "wait_for_pause", "global"),
+    "summarize": _KindPolicy(4, _INTERVENTION_PAUSE_COUNT, 30.0, 2000, "wait_for_pause", "global",
+                             content_dedup_sec=_INTERVENTION_CONTENT_DEDUP_SEC),
     "silence":  _KindPolicy(5, 0.0, 0.0, 2000, "low"),
     "invite":   _KindPolicy(6, _INVITE_SILENCE, _INTERVENTION_COOLDOWN, 2000, "wait_for_pause", "global"),
     "conversation": _KindPolicy(7, _AGENT_CONV_SILENCE, 0.0, 2000, "low"),
@@ -287,6 +299,18 @@ class FacilitationController:
                 f"脱線判定の確認待ち "
                 f"({int(cand.payload.get('drift_count', 0))}/"
                 f"{inp.required_drift_confirmations})")
+        # 同一内容の再発火抑止（時間クールダウンより先に見る: 「間隔不足」より
+        # 「同じことを最近もう言った」の方が抑制理由として情報が多い）。
+        # 時間を置くと同じ内容の drift/summarize が再発火して表示が繰り返される
+        # 実利用報告（2026-07-22）への対処。窓と類似床は _constants に集約。
+        if policy.content_dedup_sec > 0:
+            for e in inp.recent_interventions:
+                if (e.kind == cand.kind
+                        and inp.now - e.at < policy.content_dedup_sec
+                        and _same_content(cand.brief, e.brief)):
+                    return False, "duplicate_content", (
+                        f"実質同一内容の{cand.kind}介入を最近実施済み"
+                        f"（{policy.content_dedup_sec:.0f}s窓）")
         # クールダウン（§3.3）。kind別 / global を共通engineで扱う。
         if policy.cooldown_scope == "global":
             if (inp.last_intervention_at
@@ -327,6 +351,24 @@ class FacilitationController:
         if cand.interrupt_policy == "never_barge_in":
             return "low"
         return policy.urgency
+
+
+def _same_content(a: str, b: str) -> bool:
+    """介入 brief 同士が「実質同一内容」か（duplicate_content 判定）.
+
+    brief は LLM が毎回生成するため文言が揺れる（「雑談に脱線」↔「雑談に
+    脱線しています」）。空白を除去した上で、完全一致または SequenceMatcher
+    類似が床以上なら同一とみなす。決定的（LLM なし）で Controller の設計
+    制約（同期・低遅延）を守る。
+    """
+    na = re.sub(r"\s+", "", a)
+    nb = re.sub(r"\s+", "", b)
+    if not na or not nb:
+        return False
+    if na == nb:
+        return True
+    return (difflib.SequenceMatcher(None, na, nb).ratio()
+            >= _INTERVENTION_CONTENT_DEDUP_SIM)
 
 
 # 鮮度に依存する fact 候補の有効期限を作るためのヘルパー。

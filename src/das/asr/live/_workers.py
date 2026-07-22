@@ -816,10 +816,11 @@ def _controller_barge_in_decision(
     if _suppressed_for(
         decision,
         candidate_id="drift",
-        codes=("cooldown_global", "expired"),
+        codes=("cooldown_global", "expired", "duplicate_content"),
     ):
         # クールダウン中の脱線は「今の脱線」への対応時機を逸しており、
-        # 期限切れは鮮度を失っている。どちらも保持し続けず忘れる。
+        # 期限切れは鮮度を失っている。同一内容（duplicate_content）は既に
+        # 伝えた脱線を蒸し返すだけになる。いずれも保持し続けず忘れる。
         pending.clear_drift()
     if decision.candidate_id is None:
         # 候補はあるが今は採らない → 保持して次の機会を待つ（hold）。
@@ -884,6 +885,11 @@ def _controller_normal_decision(
         required_drift_confirmations=0,
     ))
     latency_ms = (time.perf_counter() - t0) * 1000
+    if _suppressed_for(decision, candidate_id="summarize",
+                       codes=("duplicate_content",)):
+        # 同一焦点の整理は既に実施済み。保持し続けると毎tick同じ抑制が続く
+        # だけなので忘れる（新しい焦点の要求は drain で置き換わる）。
+        pending.summarize = None
     if decision.candidate_id is None:
         # 連続声かけ抑制（同じ人を続けて誘わない）→ skip_invite で invite を消費。
         for s in decision.suppressed:
@@ -2023,11 +2029,13 @@ def _run_agent_worker(state: SessionState):
     _af_held_kind = "af_l1"
     # 採否の経緯（採択/抑制/latency）を intervention_review.jsonl へ記録する。
     _review = _InterventionReviewRecorder()
+    # maxlen はクールダウン照会に加えて同一内容抑止（duplicate_content, 10分窓）
+    # の照会範囲を兼ねる。介入は最短でも十数秒間隔なので 30 件で窓を十分覆う。
     _recent_interventions: collections.deque[InterventionLogEntry] = (
-        collections.deque(maxlen=10))
+        collections.deque(maxlen=30))
 
     def _note_intervention(at: float, kind: str, detail: str = "") -> None:
-        """実際に発火した介入を cooldown 用の直近履歴に記録する."""
+        """実際に発火した介入を cooldown/同一内容抑止用の直近履歴に記録する."""
         _recent_interventions.append(
             InterventionLogEntry(at=at, kind=kind, brief=detail))
 

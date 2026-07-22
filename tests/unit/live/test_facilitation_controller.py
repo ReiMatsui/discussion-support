@@ -663,6 +663,126 @@ def test_review_record_logs_supplied_controller_decision_without_reevaluation():
     assert state.reviews[0]["dispatched"] is True
 
 
+# ---------------------------------------------------------------------------
+# 同一内容の再発火抑止（duplicate_content, 2026-07-22 実利用の再発報告に対応）
+# ---------------------------------------------------------------------------
+
+def test_content_dedup_policy_scope():
+    """内容dedupは brief=内容そのもの の drift/summarize だけに掛かる."""
+    assert policy_for("drift").content_dedup_sec > 0
+    assert policy_for("summarize").content_dedup_sec > 0
+    for kind in ("fact", "manual", "retry", "silence", "invite",
+                 "conversation", "af_l1", "af_l2"):
+        assert policy_for(kind).content_dedup_sec == 0.0, kind
+
+
+def test_drift_same_content_blocked_even_after_cooldown():
+    """時間クールダウンを過ぎても、同一内容の drift は dedup 窓内では再発火しない.
+
+    バグの核心の固定: 従来は 25s の間隔さえ空けば同じ脱線理由が何度でも
+    再発火し、表示が繰り返された。
+    """
+    now = time.monotonic()
+    c = FacilitationController()
+    recent = (InterventionLogEntry(at=now, kind="drift", brief="雑談に脱線"),)
+    d = c.arbitrate(FacilitationInput(
+        candidates=(_drift(now + 120),), recent_interventions=recent,
+        silence_elapsed=5.0, snapshot_epoch=1, now=now + 120.0,
+        cooldown=25.0, last_intervention_at=now))   # global cooldown は通過済み
+    assert d.candidate_id is None
+    assert d.suppressed[0]["code"] == "duplicate_content"
+
+
+def test_drift_similar_wording_is_also_blocked():
+    """文言が揺れても実質同一（類似が床以上）なら抑止する."""
+    now = time.monotonic()
+    c = FacilitationController()
+    recent = (InterventionLogEntry(at=now, kind="drift",
+                                   brief="雑談に脱線しています"),)
+    d = c.arbitrate(FacilitationInput(
+        candidates=(_drift(now + 120),),   # brief="雑談に脱線"
+        recent_interventions=recent, silence_elapsed=5.0,
+        snapshot_epoch=1, now=now + 120.0))
+    assert d.candidate_id is None
+    assert d.suppressed[0]["code"] == "duplicate_content"
+
+
+def test_drift_new_content_is_allowed():
+    """別の脱線（内容が違う）は従来どおり採れる."""
+    now = time.monotonic()
+    c = FacilitationController()
+    recent = (InterventionLogEntry(at=now, kind="drift",
+                                   brief="予算の細部に脱線"),)
+    d = c.arbitrate(FacilitationInput(
+        candidates=(_drift(now + 120),),   # brief="雑談に脱線"
+        recent_interventions=recent, silence_elapsed=5.0,
+        snapshot_epoch=1, now=now + 120.0))
+    assert d.candidate_id == "drift"
+
+
+def test_drift_same_content_allowed_after_window():
+    """dedup 窓（10分）を過ぎれば、同じ内容でも再度採れる（永久封印はしない）."""
+    now = time.monotonic()
+    c = FacilitationController()
+    recent = (InterventionLogEntry(at=now, kind="drift", brief="雑談に脱線"),)
+    d = c.arbitrate(FacilitationInput(
+        candidates=(_drift(now + 601),), recent_interventions=recent,
+        silence_elapsed=5.0, snapshot_epoch=1, now=now + 601.0))
+    assert d.candidate_id == "drift"
+
+
+def test_summarize_same_focus_blocked():
+    """同じ焦点の整理介入は窓内で再発火しない."""
+    now = time.monotonic()
+    c = FacilitationController()
+    recent = (InterventionLogEntry(at=now, kind="summarize", brief="論点の整理"),)
+    d = c.arbitrate(FacilitationInput(
+        candidates=(_summarize(now + 60),), recent_interventions=recent,
+        silence_elapsed=5.0, snapshot_epoch=1, now=now + 60.0))
+    assert d.candidate_id is None
+    assert d.suppressed[0]["code"] == "duplicate_content"
+
+
+def test_fact_same_content_not_deduped_by_controller():
+    """fact は Controller の内容dedup対象外（checker 側 90s dedup の責務のまま）."""
+    now = time.monotonic()
+    c = FacilitationController()
+    recent = (InterventionLogEntry(at=now, kind="fact",
+                                   brief="指標Xは分子を分母で割ります。"),)
+    d = c.arbitrate(FacilitationInput(
+        candidates=(_fact(now + 10),), recent_interventions=recent,
+        silence_elapsed=5.0, snapshot_epoch=1, now=now + 10.0,
+        fact_cooldown=2.0))   # kind cooldown も通過済み
+    assert d.candidate_id == "fact-1"
+
+
+def test_barge_adapter_discards_duplicate_drift():
+    """同一内容で抑止された drift 候補は保持し続けず消費する."""
+    now = time.monotonic()
+    pend = _PendingInterventions(drift_reason="雑談に脱線", drift_count=3,
+                                 last_drift_request_at=now)   # TTL内の候補
+    decision, _ctrl, _cands, _latency = _barge(
+        _FakeAgent(), pend, _FakeProactivityState(), now=now,
+        last_intervention_at=now - 120.0, cooldown=25.0,
+        recent_interventions=[InterventionLogEntry(
+            at=now - 120.0, kind="drift", brief="雑談に脱線")])
+    assert decision.reason == "hold"
+    assert pend.drift_reason is None
+
+
+def test_normal_adapter_forgets_duplicate_summarize():
+    """同一焦点で抑止された summarize 候補は忘れる（毎tickの再抑制を防ぐ）."""
+    now = time.monotonic()
+    agent = _FakeAgent(pending_count=0)   # silence 候補を混ぜない
+    pend = _PendingInterventions(summarize={"focus": "論点の整理"})
+    decision, _ctrl, _cands, _latency = _normal(
+        agent, pend, now=now,
+        recent_interventions=[InterventionLogEntry(
+            at=now - 60.0, kind="summarize", brief="論点の整理")])
+    assert decision.reason == "none"
+    assert pend.summarize is None
+
+
 def test_review_dispatched_flag_distinguishes_record_from_evaluate():
     """record（実採択）は dispatched=True、evaluate（hold時のwhat-if）は False."""
     now = time.monotonic()
