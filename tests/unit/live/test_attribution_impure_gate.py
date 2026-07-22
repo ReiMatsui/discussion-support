@@ -47,19 +47,12 @@ class _ConfirmedNamer:
 
     def __init__(self, name="人物1") -> None:
         self._name = name
-        self.merge_sim = None
         self.last_match = None
 
     def observe(self, raw_cluster, wav, *, overlapped=False):
         return self._name
 
-    def canonical_cluster(self, raw_cluster):
-        return raw_cluster
-
     def rename_confirmed(self, old, new):
-        return None
-
-    def nearest_cluster(self, raw_cluster):
         return None
 
 

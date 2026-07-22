@@ -256,7 +256,7 @@ class RecvLoop:
                                        ensure_ascii=False, default=str) + "\n")
             except OSError:
                 pass
-        # 名寄せ・クラスタ確定イベントを diag に残し、実地検証で観測可能にする
+        # クラスタ確定イベントを diag に残し、実地検証で観測可能にする
         # (docs/design/handoff_2026-07-14_unregistered_speakers.md §4-2)。
         # 書いたら消費（None化）して同一イベントの重複出力を防ぐ。
         # cluster_namer が無い経路（従来モード）は不変。

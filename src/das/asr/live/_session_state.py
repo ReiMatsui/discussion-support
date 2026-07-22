@@ -347,18 +347,6 @@ class SessionState:
                     slots.add(slot)
         return len(slots)
 
-    def human_slot_budget_exhausted(self) -> bool:
-        """参加人数上限(diarization_max_speakers)まで人間スロットが埋まっているか.
-
-        クラスタ間名寄せの「昇格の厳格化」用
-        （docs/design/handoff_2026-07-14_unregistered_speakers.md §3 の2）:
-        上限到達後は新規の参加者Xを増やさず、最近傍クラスタへの統合を優先する
-        判断に使う。上限未設定なら常に False（従来挙動）。
-        """
-        max_speakers = self._max_human_speakers()
-        return (max_speakers is not None
-                and self._known_human_slot_count() >= max_speakers)
-
     def constrain_human_speaker_key(self, key) -> str:
         """参加人数上限を超える新規匿名話者を「未確定」に落とす.
 
@@ -456,20 +444,6 @@ class SessionState:
         key = f"@diar:{self.diarization_key_seq}"
         self.diarization_speaker_keys[raw] = key
         return self.diarization_speaker_keys[raw]
-
-    def merge_diarization_pending(self, absorbed: str, canonical: str) -> None:
-        """名寄せで吸収された生ラベルのヒステリシス累積を canonical へ合算する.
-
-        クラスタ間名寄せ（docs/design/handoff_2026-07-14_unregistered_speakers.md §3）
-        で absorbed→canonical の統合が成立した時点で呼ぶ。同一人物の発話量なので、
-        吸収側に溜まっていた pending を canonical へ引き継ぎ、クラスタ分裂で
-        ヒステリシスが二重に課されて参加者化が不当に遅れるのを防ぐ。
-        canonical が既にキー発行済みなら pending は不要なので捨てるだけでよい。
-        """
-        carried = self.diarization_pending_ms.pop(absorbed, 0)
-        if carried and canonical not in self.diarization_speaker_keys:
-            self.diarization_pending_ms[canonical] = (
-                self.diarization_pending_ms.get(canonical, 0) + carried)
 
     def key_for_stt_fallback_speaker(self, speaker: str, duration_ms: int = 0) -> str:
         """外部diarizationが薄い時のSTTラベルも表示用の内部キーへ正規化する.

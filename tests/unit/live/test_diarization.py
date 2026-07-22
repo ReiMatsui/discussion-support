@@ -562,19 +562,10 @@ class _FakeClusterNamer:
     def __init__(self, name: str | None) -> None:
         self.name = name
         self.calls: list[tuple[str, bool]] = []
-        self.merge_sim = None   # 名寄せ・最近傍統合は無効（本番既定と同じ）
 
     def observe(self, raw_cluster: str, wav, *, overlapped: bool = False) -> str | None:
         self.calls.append((raw_cluster, overlapped))
         return self.name
-
-    # クラスタ間名寄せ（handoff_2026-07-14 §3）の追加インターフェース。
-    # このフェイクでは名寄せなし（canonical=自分自身・最近傍なし）として振る舞う。
-    def canonical_cluster(self, raw_cluster: str) -> str:
-        return raw_cluster
-
-    def nearest_cluster(self, raw_cluster: str) -> str | None:
-        return None
 
     def rename_confirmed(self, old: str, new: str) -> None:
         return None   # rekey からの伝搬（review P2）。フェイクでは何もしない

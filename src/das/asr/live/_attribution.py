@@ -20,9 +20,9 @@ eval/replay_attribution.py 5本の出力一致。handoff §17 のベースライ
   3. diarization が勝った（ハイブリッド構成では続けてクラスタ層で解決）:
      3a. クラスタ確定名あり → 確定名（過去の匿名キーは rekey で遡及統合）
      3b. 重なり発話 → 未確定（声が混ざり声紋があてにならない）
-     3c. それ以外 → 匿名キー解決（_anonymous_cluster_key: 名寄せ・
-         最近傍統合・ヒステリシスを含む。cluster_namer が無い構成は
-         SessionState.key_for_diarization_speaker へ直行）
+     3c. それ以外 → 匿名キー解決（SessionState.key_for_diarization_speaker。
+         pyannote 使用時はヒステリシスを含む。クラスタ間名寄せ・最近傍統合は
+         2026-07-21 に機構ごと削除 — _cluster_naming.py の経緯コメント参照）
      3d. 不純ラベル門番（ハイブリッドのみ, handoff §18.8）: 声紋層が
          「ラベル不純」で棄権した発話は、声紋1位候補が回収先と一致する
          ときだけ 3a/3c の結果を採用し、それ以外は未確定に差し替える
@@ -33,9 +33,9 @@ eval/replay_attribution.py 5本の出力一致。handoff §17 のベースライ
   closed roster を適用する（相槌は constrain 入力を未確定に差し替える）。
 
 P1（発行前スロット判定, handoff §16。2026-07-16 見送り・設計保存）を将来
-導入する場合、変更点は 3c の _anonymous_cluster_key の内部（発行前に
-スロット判定し、満杯なら発行せず待つ）と、相槌を pending に加算しない分岐
-（flush 側）に閉じる。ステップ0-2・3a-3b はそのまま。
+導入する場合、変更点は 3c の匿名キー解決（key_for_diarization_speaker の
+呼び出し周り。発行前にスロット判定し、満杯なら発行せず待つ）と、相槌を
+pending に加算しない分岐（flush 側）に閉じる。ステップ0-2・3a-3b はそのまま。
 """
 from __future__ import annotations
 
@@ -66,64 +66,6 @@ _VOICEPRINT_RELIABLE_KINDS = {"声紋一致", "補正", "自動登録", "合流"
 # 冗長になったため撤去（二重実装を残さない）。ハイブリッドの帰属優先度
 # 「声紋一致 > pyannoteクラスタ(名寄せ済み) > 未確定」は tracker が UNSURE を
 # 返すことで従来どおり成立する（UNSURE は stt_fallback の参加者化もしない）。
-
-
-def _anonymous_cluster_key(s: SessionState, raw_cluster: str,
-                           source: str, speaker: str,
-                           *, duration_ms: int) -> str:
-    """クラスタ間名寄せを反映した匿名キー解決（s.cluster_namer 有効時のみ呼ぶ）.
-
-    設計: docs/design/handoff_2026-07-14_unregistered_speakers.md §3。
-    - 名寄せ成立済み (canonical != raw): 新規参加者を作らず canonical のキーへ
-      帰属させる。吸収側に別キーが発行済みなら rekey で過去レコードごと遡及統合
-      する（§3 の3）。どちらも未キーなら canonical の source/speaker で
-      key_for_diarization_speaker を呼び、ヒステリシスの pending を canonical に
-      集約する。
-    - 名寄せ不成立: 参加人数上限まで人間スロットが埋まっている場合のみ、最近傍
-      クラスタの既存キーへ統合を試みる（§3 の2: 昇格の厳格化）。ただし
-      namer.merge_sim が None（既定＝統合無効, handoff §15.12）または類似度が
-      それ未満なら統合しない。その場合は従来どおり key_for_diarization_speaker へ
-      （最終的に constrain_human_speaker_key で未確定に落ちる＝安全側の既存挙動）。
-    """
-    namer = s.cluster_namer
-    canonical = namer.canonical_cluster(raw_cluster)
-    if canonical != raw_cluster:
-        # 吸収側に溜まっていたヒステリシス pending を canonical へ合算する
-        # （同一人物なので分裂で参加者化が二重に遅れないようにする。§3 参照）。
-        s.merge_diarization_pending(raw_cluster, canonical)
-        canonical_key = s.diarization_speaker_keys.get(canonical)
-        absorbed_key = s.diarization_speaker_keys.pop(raw_cluster, None)
-        if canonical_key is not None:
-            if absorbed_key is not None and absorbed_key != canonical_key:
-                # 吸収側に既に @diar:N を発行済み → 過去レコードごと遡及統合。
-                s.rekey(absorbed_key, canonical_key)
-            return canonical_key
-        if absorbed_key is not None:
-            # canonical 側が未キーなら吸収側の発行済みキーを canonical へ付け替えて
-            # 再利用する（過去レコードのキーを安定に保つ）。
-            s.diarization_speaker_keys[canonical] = absorbed_key
-            return absorbed_key
-        c_source, _, c_speaker = canonical.partition(":")
-        return s.key_for_diarization_speaker(c_source, c_speaker,
-                                             duration_ms=duration_ms)
-    # 最近傍統合の下限閾値は namer.merge_sim（名寄せと同じ独立ノブ）。None は
-    # 統合無効＝既定（クラスタ埋め込み同士の比較に安全な閾値が存在しないことが
-    # 実測で判明したため。handoff §15.12、_cluster_naming.py 参照）。無効時は
-    # 最近傍探索そのものを省く: 結果はどのみち捨てられ、merge_sim 校正用の
-    # diag（nearest/nearest_sim）は ClusterVoiceNamer._observe 側が別経路で
-    # 出しているため、ここで計算する意味がない（2026-07-21 セルフレビューで
-    # 純デッド計算と確認して整理。opt-in 時の挙動は不変）。
-    if (namer.merge_sim is not None
-            and raw_cluster not in s.diarization_speaker_keys
-            and s.human_slot_budget_exhausted()):
-        nearest = namer.nearest_cluster(raw_cluster)
-        if nearest is not None:
-            nearest_cluster, nearest_sim = nearest
-            if nearest_sim >= namer.merge_sim:
-                nearest_key = s.diarization_speaker_keys.get(nearest_cluster)
-                if nearest_key is not None:
-                    return nearest_key
-    return s.key_for_diarization_speaker(source, speaker, duration_ms=duration_ms)
 
 
 def _voiceprint_claim(d, sp_id) -> tuple[str | None, float | None]:
@@ -212,17 +154,12 @@ def _cluster_attribution_raw(s: SessionState, resolved, *, wav,
         # 以後このクラスタの発話はこの名前に帰属する。過去にこのクラスタへ既に
         # 匿名キー(@diar:N)を発行済みだった場合、既存の rekey 機構で過去分も
         # まとめて確定名へ付け替える（設計点4: 低コストな遡及リネーム）。
-        # クラスタ間名寄せで吸収されたクラスタはキーが canonical 側で
-        # 管理されるため、raw/canonical 両方のキーを確定名へ統合する
-        # (docs/design/handoff_2026-07-14_unregistered_speakers.md §3)。
-        # 統合後は diarization_speaker_keys も確定名に付け替え、
-        # 以後の最近傍統合が古い @diar:N を復活させないようにする。
-        _canonical = s.cluster_namer.canonical_cluster(raw_cluster)
-        for _cluster in {raw_cluster, _canonical}:
-            prior_key = s.diarization_speaker_keys.get(_cluster)
-            if prior_key is not None and prior_key != cluster_name:
-                s.rekey(prior_key, cluster_name)
-                s.diarization_speaker_keys[_cluster] = cluster_name
+        # 台帳 diarization_speaker_keys も確定名に付け替え、古い @diar:N が
+        # 以後の解決で復活しないようにする。
+        prior_key = s.diarization_speaker_keys.get(raw_cluster)
+        if prior_key is not None and prior_key != cluster_name:
+            s.rekey(prior_key, cluster_name)
+            s.diarization_speaker_keys[raw_cluster] = cluster_name
         rec_extra["speaker_source"] = "cluster_voiceprint"
         rec_extra["speaker_confidence"] = 1.0
         rec_extra["speaker_reason"] = "pyannote_cluster_voiceprint_confirmed"
@@ -235,19 +172,14 @@ def _cluster_attribution_raw(s: SessionState, resolved, *, wav,
         rec_extra["speaker_reason"] = "multiple_diarization_speakers_overlap"
         return UNSURE_SPEAKER
     # --- 3c. 匿名キー解決 ---
-    if s.cluster_namer is not None:
-        # クラスタ間名寄せを反映したキー解決（遡及統合・max-speakers超過時の
-        # 最近傍統合を含む。§3 参照）。cluster_namer が無い場合は下の従来
-        # コードのままで、Soniox単独/pyannote単独の挙動は一切変えない。
-        sp_id = _anonymous_cluster_key(
-            s, raw_cluster, resolved.source, resolved.speaker,
-            duration_ms=end_ms - start_ms,
-        )
-    else:
-        sp_id = s.key_for_diarization_speaker(
-            resolved.source, resolved.speaker,
-            duration_ms=end_ms - start_ms,
-        )
+    # pyannote 使用時は key_for_diarization_speaker がヒステリシス（累積3秒
+    # 未満は未確定）を適用する。かつてここにあった cluster_namer 有りの
+    # 専用経路（クラスタ間名寄せ・最近傍統合）は 2026-07-21 に機構ごと
+    # 削除し、構成によらず同じ解決になった（_cluster_naming.py 参照）。
+    sp_id = s.key_for_diarization_speaker(
+        resolved.source, resolved.speaker,
+        duration_ms=end_ms - start_ms,
+    )
     rec_extra["speaker_source"] = resolved.source
     rec_extra["speaker_confidence"] = round(resolved.confidence, 3)
     rec_extra["speaker_reason"] = resolved.reason
