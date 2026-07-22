@@ -405,9 +405,15 @@ class SessionState:
         即座に @diar:N を発行すると偽参加者が量産されるため、pyannote
         provider使用時のみ猶予を設ける。Soniox/AssemblyAI経路の挙動は
         変えない（従来どおり即時登録）。
+
+        sortformer（ローカルSortformer, 2026-07-22 追加）もクラスタ型の
+        匿名ラベル（SPEAKER_00..03）を出す同族であり、序盤の揺れ・短い
+        誤活性に同じリスクがあるため、同じ猶予を適用する（誤帰属より
+        未確定を選ぶ設計原則にも整合）。
         """
         provider = self.diarization_provider
-        return provider is not None and getattr(provider, "name", None) == "pyannote"
+        return provider is not None and getattr(provider, "name", None) in (
+            "pyannote", "sortformer")
 
     def key_for_diarization_speaker(
         self, source: str, speaker: str, duration_ms: int = 0

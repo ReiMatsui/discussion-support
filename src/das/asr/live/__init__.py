@@ -82,14 +82,25 @@ def post_system(text: str) -> None:
 @click.option("--soniox-endpoint/--no-soniox-endpoint", default=True,
               help="Sonioxのエンドポイント検出を使う")
 @click.option("--diarization", default="none",
-              type=click.Choice(["none", "pyannote", "assemblyai"]),
-              help="外部話者分離の供給源")
+              type=click.Choice(["none", "pyannote", "assemblyai", "sortformer"]),
+              help="外部話者分離の供給源（sortformer=ローカルNVIDIA Streaming "
+                   "Sortformer。要セットアップ: "
+                   "docs/design/sortformer_live_setup_2026-07-22.md）")
 @click.option("--diarization-max-speakers", type=int, default=None,
               help="外部話者分離に渡す最大話者数ヒント（AssemblyAI等）")
 @click.option("--vp-cluster-naming", is_flag=True,
-              help="pyannoteハイブリッド構成: pyannoteの生クラスタ単位で声紋照合し"
-                   "名前を確定する（--diarization pyannote専用。声紋照合が"
+              help="ハイブリッド構成: diarizationの生クラスタ単位で声紋照合し"
+                   "名前を確定する（--diarization pyannote/sortformer専用。声紋照合が"
                    "有効な時のみ機能。docs/design/pyannote_live1_trial_2026-07-09.md §9）")
+@click.option("--sortformer-python", default=None,
+              help="--diarization sortformer 用: NeMo専用venvのpython"
+                   "（省略時は環境変数 SORTFORMER_PYTHON → ~/.venvs/sortformer/bin/python）")
+@click.option("--sortformer-latency", default="low",
+              type=click.Choice(["low", "high"]),
+              help="sortformerのレイテンシ設定（low=約1秒。highは検証用）")
+@click.option("--sortformer-device", default="cpu",
+              type=click.Choice(["cpu", "mps", "cuda"]),
+              help="sortformerの推論デバイス（Apple Siliconではmpsを推奨）")
 @click.option("--port", type=int, default=8231, help="UIサーバーのポート番号（0で無効）")
 @click.option("--agent/--no-agent", default=True,
               help="AIファシリテーターを有効化（OPENAI_API_KEY必要）")

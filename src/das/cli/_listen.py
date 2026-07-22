@@ -96,13 +96,15 @@ def listen_soniox(
     diarization: str | None = typer.Option(
         None,
         "--diarization",
-        help="外部話者分離の供給源 (none|pyannote|assemblyai)",
+        help="外部話者分離の供給源 (none|pyannote|assemblyai|sortformer)。"
+        "--hybrid と併用すると pyannote の代わりにこちらが後勝ちで使われる"
+        " (例: --hybrid --diarization sortformer)",
     ),
     vp_cluster_naming: bool = typer.Option(
         False,
         "--vp-cluster-naming",
-        help="pyannote の生クラスタ単位で声紋照合して名前を確定する"
-        " (--diarization pyannote 専用)",
+        help="diarization の生クラスタ単位で声紋照合して名前を確定する"
+        " (--diarization pyannote/sortformer 専用)",
     ),
     max_speakers: int | None = typer.Option(
         None,
