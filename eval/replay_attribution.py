@@ -54,7 +54,7 @@ from das.asr.live._voice_profiles import VoiceProfiles  # noqa: E402
 _CTOR_PARAMS = {"thresh", "margin", "min_sec", "consist", "dedupe"}
 _ATTR_PARAMS = {"short_floor", "short_bonus", "strict_sec",
                 "enroll_min_total_chars", "enroll_win_sec", "enroll_consist_bonus",
-                "label_purity_window"}
+                "label_purity_window", "person_th_offset"}
 _ALL_PARAMS = sorted(_CTOR_PARAMS | _ATTR_PARAMS)
 
 
@@ -175,6 +175,7 @@ def reset_tracker(vp: VoiceProfiles, params: dict, *,
     vp.enroll_min_total_chars = 45
     vp.enroll_win_sec = 1.5
     vp.enroll_consist_bonus = 0.08
+    vp.person_th_offset = 0.12
     vp.profiles = {}
     vp.sp_map = {}
     vp.label_hist = {}
@@ -397,6 +398,8 @@ def build_argparser() -> argparse.ArgumentParser:
     p.add_argument("--label-purity-window", type=float, default=None,
                    help="ラベル継続の健全性窓（直近N回の照合成功が単一人物で"
                         "あることを要求。0で無効=旧挙動）")
+    p.add_argument("--person-th-offset", type=float, default=None,
+                   help="人物別しきい値のオフセット（p35 - この値。既定0.12）")
     p.add_argument("--sweep", action="append", default=[], metavar="NAME=V1,V2,...",
                    help=f"グリッド探索（複数指定で直積）。対象: {', '.join(_ALL_PARAMS)}")
     p.add_argument("--dump", action="store_true", help="発話ごとの判定を表示")

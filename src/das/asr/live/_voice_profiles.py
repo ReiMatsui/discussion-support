@@ -265,7 +265,7 @@ class _ProfileQualityMixin:
         """
         h = self.own_sims.get(name, [])
         if len(h) >= 3:
-            return max(base, float(np.percentile(h, 35)) - 0.12)
+            return max(base, float(np.percentile(h, 35)) - self.person_th_offset)
         return base
 
     def _record_reference_sim(self, name: str, sim: float) -> None:
@@ -312,6 +312,12 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
     # ラベル継続の健全性窓（クラス既定値。0で無効=旧挙動。テスト用フェイクが
     # __new__ 構築でも動くよう、strict_sec と同じくクラス既定値を持つ）。
     label_purity_window = 4
+
+    # 人物別しきい値のオフセット（_person_th: p35 - この値）。分位点 p35 は
+    # sweep 実測で選定済みだが、このオフセット自体は旧仕様（中央値-0.12）からの
+    # 流用で未検証（attribution_selfreview_2026-07-21.md）。sweep 可能にするため
+    # 属性化（既定 0.12 ＝従来と同一挙動）。
+    person_th_offset = 0.12
 
     # モデル別の既定しきい値（実音声プールで校正済み。スコアのスケールが違う）
     # resemblyzer: 軽量・依存少。同一/別人の分布に重なりあり（分離マージン-0.06）
