@@ -1026,3 +1026,42 @@ test_recv_loop_cluster_merge.py）から。
 付随変更: person_th のオフセットを sweep 可能な属性 person_th_offset に
 実体化 `9213941`（既定0.12・挙動不変）。sweep 基盤として新規Chiba 9ランの
 移植GT（eval/gt_2026-07-20_*.json）を追加。
+
+## 19. 介入の同一内容再表示バグの修正（2026-07-22、Claude Fable 5）
+
+**報告（実利用）**: 時間を置くと同じ介入表示が何度も出る。
+（本ドキュメントの主題＝帰属側ではなく介入側だが、明示の修正依頼を受けた）
+
+**原因**: 介入の再発火抑止が時間（cooldown 25s等・kind別/global）しか
+見ておらず、**内容を比較する層がどこにも無かった**（fact の checker 側
+90s dedup が唯一の例外）。会話が停滞すると checker は同じ入力窓から同じ
+brief（脱線理由/整理焦点）を再生成し、cooldown 経過後にそのまま再発火。
+文案生成 LLM にも過去介入は渡っておらず、表示層にも dedup なし。
+
+**修正（2層）**:
+
+1. `7b7dd40` **Controller に duplicate_content 門番**。brief が内容そのもの
+   である drift/summarize に限り、直近の同種介入と実質同一
+   （空白除去後の完全一致 or SequenceMatcher 類似 ≥ 0.6 =
+   `_INTERVENTION_CONTENT_DEDUP_SIM`）の候補は 10 分窓
+   （`_INTERVENTION_CONTENT_DEDUP_SEC`）で採らない。抑止された
+   drift/summarize の pending は忘れる（毎tick再抑制の防止）。
+   `_recent_interventions` deque は 10→30 件（窓の照会範囲を担保）。
+   fact は checker 側 90s dedup の責務のまま。silence/invite/retry の
+   brief は内容ではないため対象外（silence は pending>0 が発火条件なので
+   新規発話なしには出ない）。
+2. `61bfa60` **生成側への注入**。drift/summarize/silence/invite の
+   trigger に直近のファシリテーター発話（records 末尾4件）を渡し、
+   「同じ内容の発言を繰り返さない」注記を付ける。brief が違っても
+   文面が実質同じになる再発への第2層。fact/manual/retry は不変。
+
+**検証**: 新規テスト12本（controller 9 + realtime 2 + worker helper 1）、
+全量 891 passed（既知flake `test_structuring_checker_rejudges_after_pending_reset`
+のみ除外、修正前後とも失敗することをstashで確認）。ruff 新規エラーなし。
+帰属側（flush/_attribution）は非接触なので replay 基準表（§18.10）は不変。
+
+**残る再発余地（既知・許容）**: 同一内容でも 10 分窓を過ぎれば再発火し得る
+（永久封印は「本当にまた脱線した」場合を殺すため意図的にしない）。silence
+要約は内容比較をしないが、第2層の注記が繰り返しを抑える。ライブでの
+効きは次回実会話で `intervention_review.jsonl` の duplicate_content 抑止
+行を確認。
