@@ -352,11 +352,12 @@ class SessionState:
         return len(slots)
 
     def constrain_human_speaker_key(self, key) -> str:
-        """参加人数上限を超える新規匿名話者を「未確定」に落とす.
+        """参加人数上限を超える新規話者を「未確定」に落とす（統一席ルール）.
 
-        参加人数は「表示できる人間スロット数」として扱う。既に出現済みの人間話者は
-        維持するが、上限到達後の新しい #/@diar:/人物N は増やさない。設定前に
-        余剰ラベルが作られていた場合も、以後は上限外として未確定に寄せる。
+        ルールは一文: **既に席（表示ラベル）を持つ人は常に通す。新しい人は
+        席が空いていれば入れる。満席なら未確定＋警告**。キーの種別
+        （@diar:N / #N / 人物N）による例外は持たない（2026-07-25 一掃。
+        経緯は関数内コメント参照）。
 
         名簿を確定（closed roster, tracker.auto == False）している場合はこれより優先し、
         「登録済みのアクティブな人 or 未確定」だけを許す。声紋以外の経路（外部
@@ -370,33 +371,26 @@ class SessionState:
         if tracker is not None and not getattr(tracker, "auto", True):
             roster = set(tracker.active_profile_names())
             return key if key in roster else UNSURE_SPEAKER
-        # 声紋トラッカーで「アクティブな人間プロファイル」と裏付けられたキー
-        # （自動登録の「人物N」、有効化済みの実名）はスロット選別の対象外として通す。
-        # 登録数は tracker.set_max_human_speakers が上限管理しており、ここで匿名
-        # ラベル文字の辞書順スロットで二重に絞ると、声紋一致で確定済みの人物が
-        # ラベル文字の巡り合わせ（例: 人物2=参加者D）だけで全発話が未確定に落ちる
-        # （2026-07-14 実セッションで確認、
-        # docs/design/handoff_2026-07-14_unregistered_speakers.md 参照）。
-        # 判定は tracker.profiles 全体ではなくアクティブ集合（is_active_human）に
-        # 限定する: profiles には deactivate 済み・voices.json 残留の非アクティブ
-        # プロファイルも含まれ、それまで素通しすると上限選別の穴になる
-        # （2026-07-15 レビュー F4。素通しの本来の意図＝実在が裏付けられた人物の
-        # 保護、は維持）。
-        is_active_human = getattr(tracker, "is_active_human", None)
-        if is_active_human is not None and is_active_human(key):
-            return key
+        # 統一ルール（2026-07-25 一掃）: 「既に席（表示ラベル）を持つ人は常に
+        # 通す。新しい人は席が空いていれば入れる。満席なら未確定＋警告」。
+        #
+        # 旧実装は2つの帳簿を併用していた:
+        #   (a) 声紋アクティブ人物（人物N/実名）の無条件素通し
+        #   (b) 匿名キーのラベル文字辞書順スロット選別（sorted(labels)[:max]）
+        # (a) は「上限2なのに参加者Cが現れる」（声紋の二重登録が3人目として表示、
+        # 2026-07-25 実セッション）を生み、(b) は「文字の巡り合わせだけで既存
+        # 人物が全滅」（2026-07-14 実セッション、人物2=参加者D事故）を生んだ。
+        # 統一ルールは両事故を同時に防ぐ: 席を持つ人物は文字順に関係なく通り
+        # （→2026-07-14 の保護は素通し無しで成立）、新規は種別（@diar/#/人物N）
+        # を問わず席が無ければ入れない（→参加者Cは生まれず未確定+警告になる。
+        # 声紋の二重登録された人物の発話は、合流(dedupe)か上限の引き上げで回収）。
         if not (self._is_anonymous_speaker_key(key) or self._is_system_anonymous_name(key)):
-            return key
+            return key   # 実名リネーム済みの人物は既存の席保持者
         max_speakers = self._max_human_speakers()
         if max_speakers is None:
             return key
         if key in self.anonymous_labels:
-            label = self.anonymous_labels[key]
-            labels = sorted(set(self.anonymous_labels.values()))
-            if label in labels[:max_speakers]:
-                return key
-            self._note_constrain_drop(key, max_speakers)
-            return UNSURE_SPEAKER
+            return key   # 既に席を持つ
         if self._known_human_slot_count() >= max_speakers:
             self._note_constrain_drop(key, max_speakers)
             return UNSURE_SPEAKER
@@ -1105,8 +1099,9 @@ class SessionState:
         バックエンドへの反映は次の会議リセット時の再接続になる。ただし
         ``constrain_human_speaker_key`` と ``tracker.set_max_human_speakers`` は
         ``args.diarization_max_speakers`` を直接参照するため**即時に**厳格化/緩和
-        される点に注意（会議中に減らすと、上限外になった既存の匿名参加者は
-        以後未確定に落ちる。docs/design/attribution_logic_review_2026-07.md C12）。
+        される。会議中に減らしても既存の席（表示済み参加者）は維持され、
+        以後の新規参入だけが絞られる（統一席ルール, 2026-07-25。旧仕様の
+        「文字辞書順で既存を未確定化」は 2026-07-14 型事故の機構のため廃止）。
         """
         if value is not None and not 1 <= value <= 10:
             return {"ok": False, "error": "話者数は1〜10で指定してください"}

@@ -374,3 +374,30 @@ def test_constrain_drop_state_cleared_on_reset(tmp_path):
     s.reset_for_new_meeting()
     assert s.constrain_warned is False
     assert s.constrain_drop_counts == {}
+
+
+def test_constrain_unified_seat_rule_counterfactual_1723(tmp_path):
+    """統一席ルールの実セッション反実仮想（2026-07-25_1723, max=2）.
+
+    観測: 席2つ（@diar:1=A, 人物1=B）が埋まった後、声紋の二重登録で生まれた
+    人物2 が旧実装では素通しして「参加者C」を作った。統一ルールでは未確定に
+    落ち、表示される人間は設定どおり2人を超えない。
+    """
+    from types import SimpleNamespace
+    s = SessionState(
+        args=SimpleNamespace(diarization_max_speakers=2),
+        started=datetime.datetime(2026, 7, 25),
+        out_path=str(tmp_path / "o.md"), html_path=str(tmp_path / "o.html"),
+        diag_path=str(tmp_path / "o.diag"), turns_path=str(tmp_path / "o.turns"),
+        wav_path=str(tmp_path / "o.wav"))
+    assert s.constrain_human_speaker_key("@diar:1") == "@diar:1"
+    s.records.append({"ms": 0, "end_ms": 500, "speaker": "@diar:1", "text": "x"})
+    s.disp_name("@diar:1")                      # 参加者A
+    assert s.constrain_human_speaker_key("人物1") == "人物1"
+    s.records.append({"ms": 600, "end_ms": 900, "speaker": "人物1", "text": "y"})
+    s.disp_name("人物1")                        # 参加者B
+    # 3人目（声紋の二重登録）は席が無いので未確定 → 参加者Cは生まれない
+    assert s.constrain_human_speaker_key("人物2") == "?"
+    # 既存の2人はその後も安定して通る
+    assert s.constrain_human_speaker_key("@diar:1") == "@diar:1"
+    assert s.constrain_human_speaker_key("人物1") == "人物1"

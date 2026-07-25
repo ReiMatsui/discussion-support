@@ -308,7 +308,13 @@ def test_participant_count_caps_new_anonymous_display_slots():
     assert s.constrain_human_speaker_key("人物3") == UNSURE_SPEAKER
 
 
-def test_participant_count_rejects_existing_extra_anonymous_labels():
+def test_participant_count_keeps_existing_seats_and_blocks_new_ones():
+    """上限を下げても既存の席は守り、新規だけを絞る（統一席ルール, 2026-07-25）.
+
+    旧仕様は「上限を下回った既存の匿名参加者を文字辞書順で未確定化」していたが、
+    この文字順トリミングは 2026-07-14 の実在人物全滅事故と同じ機構であり、
+    一掃の対象とした。既存の余剰表示の整理はリネーム/統合（rekey）で行う。
+    """
     s = _make_state()
     s.set_diarization_max_speakers(2)
     s.anonymous_labels = {
@@ -321,7 +327,8 @@ def test_participant_count_rejects_existing_extra_anonymous_labels():
         {"speaker": "#2", "text": "b", "ms": 500, "end_ms": 1000},
     ]
 
-    assert s.constrain_human_speaker_key("#5") == UNSURE_SPEAKER
+    assert s.constrain_human_speaker_key("#5") == "#5"       # 既存の席は守る
+    assert s.constrain_human_speaker_key("#9") == UNSURE_SPEAKER   # 新規は満席で拒否
 
 
 def test_participant_count_includes_named_human_speakers():
@@ -377,14 +384,14 @@ def test_open_roster_still_allows_anonymous_within_cap():
 
 
 def test_voiceprint_profile_key_survives_constrain_regardless_of_label_letter():
-    """声紋プロファイル済みキー（人物N）はラベル文字の辞書順スロット選別で落とさない.
+    """席（表示ラベル）を持つ人物Nは文字の辞書順に関係なく通る（2026-07-14の保護）.
 
-    バグ修正（2026-07-14 実セッション）: 自動登録済みの「人物2」のラベルが
-    「参加者D」（4番目の文字）だったため、max_speakers=3 のスロット選別
-    （sorted(labels)[:max] の文字辞書順）から漏れ、声紋一致（sim 0.75-0.85）にも
-    かかわらず全25発話が未確定に落ちた。登録数の上限は tracker 側の
-    set_max_human_speakers が管理するため、constrain で二重に絞らない
-    (docs/design/handoff_2026-07-14_unregistered_speakers.md 参照)。
+    元事故: 自動登録済みの「人物2」のラベルが「参加者D」（4番目の文字）だった
+    ため、旧実装の文字辞書順スロット選別（sorted(labels)[:max]）から漏れ、
+    声紋一致にもかかわらず全25発話が未確定に落ちた。旧実装はアクティブ人物の
+    「無条件素通し」でこれを防いだが、素通しは「上限2なのに参加者Cが現れる」
+    （2026-07-25）を生んだため、統一席ルール（既に席を持つ人は常に通す。
+    文字順の選別はしない）に置換。この事故の保護は素通し無しで成立する。
     """
     s = _make_state()
     tr = _FakeTracker(auto=True)
@@ -401,27 +408,28 @@ def test_voiceprint_profile_key_survives_constrain_regardless_of_label_letter():
     assert s.constrain_human_speaker_key("@diar:9") == UNSURE_SPEAKER
 
 
-def test_inactive_profile_key_does_not_bypass_constrain():
-    """非アクティブなプロファイルは constrain の素通し対象にしない（F4, 2026-07-15）.
+def test_new_person_key_without_seat_is_constrained_even_with_profile():
+    """席の無い新規キーは、声紋プロファイルの有無に関係なく満席なら未確定.
 
-    素通しの意図は「声紋で実在が裏付けられた（＝アクティブに照合されている）
-    人物をラベル文字の巡り合わせで落とさない」こと。tracker.profiles には
-    deactivate 済み・voices.json 残留の非アクティブプロファイルも含まれるため、
-    profiles 全体で判定すると参加人数上限の選別に穴が開く。
+    旧実装のアクティブ人物「無条件素通し」（F4, 2026-07-15 で範囲を絞った上で
+    維持）は、声紋が同一人物を二重登録した際に上限を超えた3人目（参加者C）を
+    表示してしまった（2026-07-25 実セッション、max=2 で 人物2 が参加者Cに）。
+    統一席ルールでは新規参入は種別を問わず席の空きが条件になり、上限は
+    文字どおり上限になる（落ちた事実は diag/警告で可視化される）。
     """
     s = _make_state()
     tr = _FakeTracker(auto=True)
-    tr.profiles = {"人物1": 1, "人物2": 1, "人物3": 1}
-    tr.inactive = {"人物2"}          # deactivate 済み
+    tr.profiles = {"人物1": 1, "人物2": 1, "人物9": 1}
     s.tracker = tr
-    s.set_diarization_max_speakers(3)
-    s.anonymous_labels = {"人物1": "参加者A", "#4": "参加者B",
-                          "人物3": "参加者C", "人物2": "参加者D"}
+    s.set_diarization_max_speakers(2)
+    s.anonymous_labels = {"人物1": "参加者A", "人物2": "参加者B"}
 
-    # アクティブなプロファイルは引き続き素通し（既存バグ修正の意図は維持）
+    # 席を持つ人物は通る
     assert s.constrain_human_speaker_key("人物1") == "人物1"
-    # 非アクティブは素通しせず、通常のスロット選別で上限外→未確定に落ちる
-    assert s.constrain_human_speaker_key("人物2") == UNSURE_SPEAKER
+    assert s.constrain_human_speaker_key("人物2") == "人物2"
+    # 席の無い新規は、声紋プロファイルがあっても満席なら未確定（参加者Cは生まれない）
+    assert s.constrain_human_speaker_key("人物9") == UNSURE_SPEAKER
+    assert s.constrain_human_speaker_key("@diar:9") == UNSURE_SPEAKER
 
 
 def test_http_rename_without_tracker():
