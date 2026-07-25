@@ -155,6 +155,38 @@ def build_backend(args: LiveArgs) -> STTBackend:
             enable_endpoint_detection=getattr(args, "soniox_endpoint", False))
 
 
+def start_ui_server(state: SessionState, port: int):
+    """UIサーバーを起動する。指定ポートが使用中なら空きポートへ自動フォールバック.
+
+    従来はポート使用中だと警告1行でUI無効のまま続行し、ブラウザの既存タブが
+    「別プロセス（前セッションの生き残り）のUI」に繋がったままになる罠があった
+    （2026-07-25 監査 B: 設定・開始操作が全部別プロセスへ飛ぶ）。ポートが
+    塞がっていても新しいUIを必ず立て、実際のURLを目立つ形で表示する。
+
+    戻り値: (httpd, 実際のポート)。起動不能なら (None, port)。
+    """
+    from http.server import ThreadingHTTPServer
+    handler = _UIHandler.create(state)
+    try:
+        httpd = ThreadingHTTPServer(("127.0.0.1", port), handler)
+        port = httpd.server_address[1]   # port=0 指定でも実ポートを返す
+    except OSError as first_err:
+        try:
+            httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        except OSError as second_err:
+            print(f"# 警告: UIサーバーを起動できません ({second_err})", flush=True)
+            return None, port
+        actual = httpd.server_address[1]
+        print(f"# 注意: ポート{port}は使用中のため（{first_err}）、"
+              f"空きポート{actual}でUIを起動します。", flush=True)
+        print(f"#   既に開いているブラウザタブは前のセッションに繋がっている"
+              f"可能性があります。このセッションのUIは "
+              f"http://127.0.0.1:{actual}/ です", flush=True)
+        port = actual
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    return httpd, port
+
+
 _TOPICS_SCHEMA = {
     "type": "object",
     "properties": {
@@ -677,7 +709,8 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
     state.open_wav()
 
     def _sys_hook(text: str) -> None:
-        state.add_sys(None, text)
+        # 経過時刻付きで記録する（監査D: [--:--] はいつ起きたか追えない）。
+        state.add_sys(state.elapsed_ms(), text)
         state.save()
     _SYS_HOOK_REF[0] = _sys_hook
 
@@ -690,15 +723,10 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
 
     # --- UIサーバー ---
     _httpd = None
+    _ui_port = args.port
     if _serve:
-        # SSE(長時間接続)が他リクエストを塞がないよう、スレッド対応サーバーを使う
-        from http.server import ThreadingHTTPServer
-        try:
-            _httpd = ThreadingHTTPServer(("127.0.0.1", args.port),
-                                         _UIHandler.create(state))
-            threading.Thread(target=_httpd.serve_forever, daemon=True).start()
-        except OSError as e:
-            print(f"# 警告: UIサーバーをポート{args.port}で起動できません ({e})", flush=True)
+        _httpd, _ui_port = start_ui_server(state, args.port)
+        if _httpd is None:
             _serve = False
             state._serve = False
             state.waiting_to_start = False
@@ -764,14 +792,14 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
 
     state.save()
     if _serve:
-        print(f"# ブラウザUI: http://127.0.0.1:{args.port}/ "
+        print(f"# ブラウザUI: http://127.0.0.1:{_ui_port}/ "
               f"（開始前設定・モード切替・ライブ更新・新しい会議・停止）", flush=True)
     else:
         print(f"# ブラウザ表示: open {html_path}", flush=True)
     if not args.no_open:
         import webbrowser
         if _serve:
-            webbrowser.open(f"http://127.0.0.1:{args.port}/")
+            webbrowser.open(f"http://127.0.0.1:{_ui_port}/")
         else:
             webbrowser.open("file://" + os.path.abspath(html_path))
     audio_started = False

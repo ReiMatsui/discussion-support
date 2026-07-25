@@ -1270,3 +1270,48 @@ def test_sse_stream_sends_snapshot():
             resp.close()
         state.stop.set()
         httpd.shutdown()
+
+
+def test_http_intervention_trigger_n_errors_without_agent():
+    """agent 未初期化での trigger_n 設定は 200 で黙殺せずエラーを返す（監査C）."""
+    s = _make_state()
+    s.agent = None
+    httpd, port = _serve(s)
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/intervention",
+            data=json.dumps({"trigger_n": 5}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            urllib.request.urlopen(req)
+            raise AssertionError("400 が返るべき")
+        except urllib.error.HTTPError as e:
+            assert e.code == 400
+            body = json.loads(e.read())
+            assert "未初期化" in body["error"]
+    finally:
+        httpd.shutdown()
+
+
+def test_start_ui_server_falls_back_to_free_port():
+    """UIポートが使用中なら空きポートへ自動フォールバックする（監査B）.
+
+    旧実装は警告1行でUI無効のまま続行し、ブラウザの既存タブが前セッションの
+    UIに繋がったままになる罠だった（設定・開始操作が別プロセスへ飛ぶ）。
+    """
+    from das.asr.live._bootstrap import start_ui_server
+    s = _make_state()
+    httpd1, port1 = start_ui_server(s, 0)          # まず適当な空きポートで起動
+    try:
+        httpd2, port2 = start_ui_server(s, port1)  # 同じポート → 衝突
+        try:
+            assert httpd2 is not None
+            assert port2 != port1                  # 別ポートで生きている
+            with urllib.request.urlopen(
+                    f"http://127.0.0.1:{port2}/api/state") as r:
+                assert json.loads(r.read())["running"] is True
+        finally:
+            if httpd2 is not None:
+                httpd2.shutdown()
+    finally:
+        httpd1.shutdown()

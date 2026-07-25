@@ -170,8 +170,13 @@ class _UIHandler:
                         if trigger_n < 1 or trigger_n > 50:
                             self._json(400, {"ok": False, "error": "発話数は1〜50で指定してください"})
                             return
-                        if s.agent is not None:
-                            s.agent.apply_config(trigger_n=trigger_n)
+                        if s.agent is None:
+                            # 従来は 200 OK を返しつつ黙って無反映だった
+                            # （2026-07-25 監査 C: 「効いた顔をする設定」の同族）。
+                            self._json(400, {"ok": False, "error":
+                                             "AIファシリテーターが未初期化のため発話数を設定できません"})
+                            return
+                        s.agent.apply_config(trigger_n=trigger_n)
                     s.rev += 1
                     s.save()
                     _print_line(
@@ -236,7 +241,7 @@ class _UIHandler:
                             return
                         s.rekey(old, name)
                         msg = f"「{name}」の声を登録しました（以後の新しい発話から照合）"
-                        s.add_sys(None, msg)
+                        s.add_sys(s.elapsed_ms(), msg)
                         s.save()
                         _print_line(f"# {name} の声を登録しました（UIから）")
                     else:
@@ -259,7 +264,7 @@ class _UIHandler:
                         merged = s.tracker.activate(name)
                         if merged is not None:
                             s.rekey(merged, name)
-                            s.add_sys(None, f"「{name}」を有効化（{merged}と統合）")
+                            s.add_sys(s.elapsed_ms(), f"「{name}」を有効化（{merged}と統合）")
                             _print_line(f"# {name} を有効化（{merged}と統合、UIから）")
                         else:
                             _print_line(f"# {name} を有効化（UIから）")
@@ -311,7 +316,7 @@ class _UIHandler:
                         return
                     actual_seconds = round(len(seg) / (SR * 2), 1)
                     msg = f"「{name}」の声を事前登録しました（以後の新しい発話から照合）"
-                    s.add_sys(None, msg)
+                    s.add_sys(s.elapsed_ms(), msg)
                     s.save()
                     _print_line(f"# {name} を事前登録（{actual_seconds:.0f}秒、UIから）")
                     self._json(200, {"ok": True, "name": name,
@@ -328,7 +333,7 @@ class _UIHandler:
                         self._json(400, {"error": "声紋照合が無効です"})
                         return
                     s.tracker.auto = not locked
-                    s.add_sys(None, "名簿を確定しました（登録済みの人だけで進めます）"
+                    s.add_sys(s.elapsed_ms(), "名簿を確定しました（登録済みの人だけで進めます）"
                               if locked else "名簿の確定を解除しました（自動登録ON）")
                     s.save()
                     _print_line(f"# 名簿{'確定' if locked else '解除'}（UIから）")

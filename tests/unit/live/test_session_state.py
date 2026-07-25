@@ -401,3 +401,29 @@ def test_constrain_unified_seat_rule_counterfactual_1723(tmp_path):
     # 既存の2人はその後も安定して通る
     assert s.constrain_human_speaker_key("@diar:1") == "@diar:1"
     assert s.constrain_human_speaker_key("人物1") == "人物1"
+
+
+def test_saved_html_colors_stable_across_rekey(tmp_path):
+    """保存用HTMLの色が rekey（統合/リネーム）で他の話者へずれない（監査E）.
+
+    旧実装は list(colors).index() だったため、rekey の pop で後続話者の色が
+    全員ずれた（ライブUI側は C11/P2 で修正済み、保存HTML側だけ旧実装が残存）。
+    """
+    from types import SimpleNamespace
+    s = SessionState(
+        args=SimpleNamespace(diarization_max_speakers=None),
+        started=datetime.datetime(2026, 7, 25),
+        out_path=str(tmp_path / "o.md"), html_path=str(tmp_path / "o.html"),
+        diag_path=str(tmp_path / "o.diag"), turns_path=str(tmp_path / "o.turns"),
+        wav_path=str(tmp_path / "o.wav"))
+    s.records = [
+        {"speaker": "#1", "text": "a", "ms": 0, "end_ms": 500},
+        {"speaker": "#2", "text": "b", "ms": 500, "end_ms": 1000},
+    ]
+    color2_before = s.html_color("#2")
+    s.write_html(live=False)
+    s.rekey("#1", "田中")          # 先頭キーの統合（旧実装ならここで #2 の色がずれた）
+    s.write_html(live=False)
+    assert s.html_color("#2") == color2_before
+    with open(tmp_path / "o.html", encoding="utf-8") as f:
+        assert color2_before in f.read()

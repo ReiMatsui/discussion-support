@@ -1211,9 +1211,10 @@ class SessionState:
                     parts.append(f'<div class="sys">⚙ {_html.escape(r["sys"])}</div>')
                     continue
                 sp = str(r["speaker"])
-                self.color_of(sp)
-                idx = list(self.colors).index(sp)
-                c = HTML_PALETTE[idx % len(HTML_PALETTE)]
+                # 監査E: 旧実装 list(colors).index() は rekey の pop で後続全員の
+                # 色がずれる（api_snapshot 側は C11/P2 で修正済みだった）。
+                # 保存用HTMLも同じ安定採番 html_color() に統一する。
+                c = self.html_color(sp)
                 badge = ""
                 if r.get("vp") == "補正":
                     note = _html.escape(r.get("note", ""))
@@ -1227,8 +1228,7 @@ class SessionState:
             sp_tags = []
             for s in speakers:
                 dn = _html.escape(self.disp_name(s))
-                idx_s = list(self.colors).index(s) if s in self.colors else 0
-                c = HTML_PALETTE[idx_s % len(HTML_PALETTE)]
+                c = self.html_color(s)
                 lbl = self._speaker_label(str(s))
                 is_renameable = self._serve and self.tracker is not None and lbl is not None
                 if is_renameable:
@@ -1288,8 +1288,7 @@ class SessionState:
                     for s in ranked:
                         v = data.get(s, 0)
                         pct = v / total * 100 if total else 0
-                        idx_s = list(self.colors).index(s) if s in self.colors else 0
-                        c = HTML_PALETTE[idx_s % len(HTML_PALETTE)]
+                        c = self.html_color(s)
                         dn = _html.escape(self.disp_name(s))
                         short = dn[:2] if len(dn) > 3 else dn
                         rows.append(
