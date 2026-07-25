@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
 import shlex
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -170,6 +172,31 @@ def listen_soniox(
     )
 
 
+# ライブ介入(グラフレーン)の同一内容再提示の抑止窓（秒）。
+# _facilitation.py の _INTERVENTION_CONTENT_DEDUP_SEC（Realtime レーン）と
+# 同じ思想・同じ 10 分。会話が同じ状態に留まる間の再提示を止め、
+# 窓を過ぎたら（本当に再度価値があれば）再提示を許す。
+_PRESENT_DEDUP_SEC = 600.0
+
+
+def _is_duplicate_presentation(body: str, recent: dict[str, float],
+                               *, now: float,
+                               window: float = _PRESENT_DEDUP_SEC) -> bool:
+    """同一内容（空白無視の完全一致）の介入提示を window 秒抑止する.
+
+    True を返した場合は提示しない。False の場合は提示扱いとして
+    recent に時刻を記録する（呼び出し側の分岐を単純に保つため副作用込み）。
+    """
+    key = re.sub(r"\s+", "", body or "")
+    if not key:
+        return False
+    last = recent.get(key)
+    if last is not None and now - last < window:
+        return True
+    recent[key] = now
+    return False
+
+
 def _build_soniox_argv(
     *,
     wav: Path | None = None,
@@ -295,6 +322,12 @@ async def _run_listen_soniox_async(
 
     # --- ライブ介入: FacilitationAgent を周期的に呼び、ターミナル+議事録HTMLに提示 ---
     facilitator = FacilitationAgent(llm=llm)
+    # 同一介入の再提示抑止（2026-07-25 実利用: 会話が停滞すると 3 秒周期の判定が
+    # 同じ提示を延々と繰り返した）。このレーンには従来クールダウンも重複抑止も
+    # 無かった。L1 は提示済み source_text を価値ゲート（B1 の新規性判定）に渡して
+    # 再生成自体を抑え、最終防衛として本文の同一内容を 10 分窓で抑止する。
+    presented_texts: set[str] = set()
+    _recent_bodies: dict[str, float] = {}
 
     def _present(decision: InterventionDecision) -> None:
         if decision.kind == "skip":
@@ -310,6 +343,11 @@ async def _run_listen_soniox_async(
                 parts.append(f"[{tag}] {it.source_text}")
             body = " / ".join(parts) or decision.brief or decision.reason
             head = f"💡介入({to}さん宛)"
+        if _is_duplicate_presentation(body, _recent_bodies,
+                                      now=time.monotonic()):
+            return
+        for it in decision.items:
+            presented_texts.add(it.source_text.strip())
         msg = f"{head}: {body}"
         typer.echo(f"\n{msg}")
         with contextlib.suppress(Exception):
@@ -325,6 +363,12 @@ async def _run_listen_soniox_async(
             try:
                 # 判断 + L2 整文を facilitation 側で一元化 (レビュー M-1)
                 decision = await facilitator.decide_and_render(list(history), store)
+                # L1 価値ゲート（B1）: AF checker レーンと同じ入口で「提示済み・
+                # 直近既出・鮮度切れ」を落とす。従来この CLI レーンだけ未適用で、
+                # 同一 L1 が無限に再提示されていた。
+                decision = facilitator.apply_l1_value_gate(
+                    decision, store, list(history),
+                    presented_source_texts=presented_texts)
                 _present(decision)
             except Exception as exc:
                 typer.echo(f"[listen-soniox] 介入判定エラー: {exc!r}")
