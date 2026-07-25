@@ -109,6 +109,10 @@ class SessionState:
         self.cluster_namer: ClusterVoiceNamer | None = cluster_namer
         self.anonymous_labels: dict[str, str] = {}
         self._DIARIZATION_KEEP_MS = 10 * 60 * 1000
+        # 上限(constrain)で未確定化した回数（可視化用, 2026-07-25 実セッションで
+        # 「上限1のまま2人会話→2人目が全滅」が無警告で起きた対策）。帰属は変えない。
+        self.constrain_drop_counts: dict[str, int] = {}
+        self.constrain_warned = False
 
         # AI
         self.agent: RealtimeAgent | None = None
@@ -391,10 +395,41 @@ class SessionState:
             labels = sorted(set(self.anonymous_labels.values()))
             if label in labels[:max_speakers]:
                 return key
+            self._note_constrain_drop(key, max_speakers)
             return UNSURE_SPEAKER
         if self._known_human_slot_count() >= max_speakers:
+            self._note_constrain_drop(key, max_speakers)
             return UNSURE_SPEAKER
         return key
+
+    def _note_constrain_drop(self, key: str, max_speakers: int) -> None:
+        """上限で未確定化した事実を可視化する（帰属の挙動は一切変えない）.
+
+        2026-07-25 の実セッションで「想定話者数1のまま2人会話→2人目の
+        クラスタ(31発話)が無警告で全滅」が起きた対策。diag に構造化イベントを
+        残し、同一キーが繰り返し落ちる場合は一度だけ議事録/UIに警告を出す。
+        """
+        n = self.constrain_drop_counts.get(key, 0) + 1
+        self.constrain_drop_counts[key] = n
+        with contextlib.suppress(OSError), \
+                open(self.diag_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "type": "constrain_drop", "key": key, "count": n,
+                "max_speakers": max_speakers,
+                "slots": sorted(set(self.anonymous_labels.values())),
+            }, ensure_ascii=False) + "\n")
+        if n == 3 and not self.constrain_warned:
+            self.constrain_warned = True
+            self.add_sys(self.elapsed_ms(),
+                         f"注意: 想定話者数の上限（{max_speakers}人）により、"
+                         "新しい話者の発話を未確定にしています。実際の参加人数が"
+                         "多い場合は「想定話者数」を増やしてください")
+            self.rev += 1
+
+    def elapsed_ms(self) -> int:
+        """セッション開始からの経過ミリ秒（sysメッセージのタイムスタンプ用）."""
+        return max(0, int((datetime.datetime.now() - self.started)
+                          .total_seconds() * 1000))
 
     def _uses_pyannote_hysteresis(self) -> bool:
         """新規ラベルの参加者化にヒステリシスを適用するか.
@@ -898,6 +933,8 @@ class SessionState:
             self.diarization_speaker_keys = {}
             self.diarization_pending_ms = {}
             self.diarization_key_seq = 0
+            self.constrain_drop_counts = {}
+            self.constrain_warned = False
         with self.diarization_lock:
             self.diarization_events = []
         if self.cluster_namer is not None:

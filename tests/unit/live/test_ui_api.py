@@ -850,7 +850,8 @@ def test_http_diarization_updates_max_speakers_for_next_meeting():
         assert out == {"ok": True, "max_speakers": 3}
         assert s.args.diarization_max_speakers == 3
         assert s.api_snapshot()["diarization"]["max_speakers"] == 3
-        assert s.records[-1]["sys"] == "想定話者数を更新: 3（新しい会議/再接続で確実に反映）"
+        assert s.records[-1]["sys"] == ("想定話者数を更新: 3"
+                                    "（帰属判定へ即時反映。STT/話者分離側は新しい会議で反映）")
     finally:
         httpd.shutdown()
 

@@ -614,8 +614,14 @@ async function toggleRoster() {
   } catch (e) { /* SSEで状態が届く */ }
 }
 
-async function setSpeakerCount() {
-  const source = document.activeElement === $("setup-speaker-count") ? $("setup-speaker-count") : $("speaker-count");
+async function setSpeakerCount(source) {
+  // change イベントの発生元を明示的に受け取る。activeElement 依存だと、
+  // ブラウザによっては select が focus を持たず（macOS のネイティブ select 等）、
+  // 別パネルの古い値を送ってしまう（2026-07-25: 設定したはずの人数が
+  // 効かないまま会議が進んだ事象の再発防止）。
+  if (!(source instanceof HTMLSelectElement)) {
+    source = document.activeElement === $("setup-speaker-count") ? $("setup-speaker-count") : $("speaker-count");
+  }
   const v = source.value;
   const status = $("speaker-count-status");
   status.textContent = "保存中...";
@@ -735,8 +741,8 @@ $("agenda").addEventListener("keydown", (e) => { if (e.key === "Enter") setAgend
 $("enroll-btn").onclick = enrollPerson;
 $("enroll-script-next").onclick = nextEnrollScript;
 $("roster-lock").addEventListener("change", toggleRoster);
-$("speaker-count").addEventListener("change", setSpeakerCount);
-$("setup-speaker-count").addEventListener("change", setSpeakerCount);
+$("speaker-count").addEventListener("change", (e) => setSpeakerCount(e.target));
+$("setup-speaker-count").addEventListener("change", (e) => setSpeakerCount(e.target));
 $("start-session").onclick = startSession;
 $("intervention-enabled").addEventListener("change", setIntervention);
 $("proactivity").addEventListener("change", setIntervention);

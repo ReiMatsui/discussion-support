@@ -206,7 +206,13 @@ class _UIHandler:
                     result = s.set_diarization_max_speakers(max_speakers)
                     if result.get("ok"):
                         label = max_speakers if max_speakers is not None else "未指定"
-                        s.add_sys(None, f"想定話者数を更新: {label}（新しい会議/再接続で確実に反映）")
+                        # 帰属側(constrain)は即時反映。旧文言「新しい会議/再接続で
+                        # 確実に反映」は即時性が伝わらず、ms=None のため更新時刻も
+                        # 残らず、「上限が古いまま会議が進んだ」事後切り分けが
+                        # できなかった（2026-07-25 実セッションの反省）。
+                        s.add_sys(getattr(s, "elapsed_ms", lambda: None)(),
+                                  f"想定話者数を更新: {label}"
+                                  "（帰属判定へ即時反映。STT/話者分離側は新しい会議で反映）")
                         s.save()
                         _print_line(f"# 想定話者数を更新（UIから）: {label}")
                     self._json(200 if result.get("ok") else 400, result)

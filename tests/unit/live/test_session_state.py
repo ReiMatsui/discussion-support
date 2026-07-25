@@ -314,3 +314,63 @@ def test_effective_silence_ignores_stale_partial():
     s.partial_text = "クリアされずに固着した partial"
     s._last_partial_change = now - 11.0  # 10秒超前
     assert _effective_silence(s, now, last) == now - last[0]
+
+
+# ---------------------------------------------------------------------------
+# constrain の可視化（2026-07-25: 上限1のまま2人会話→2人目が無警告で全滅の対策）
+# ---------------------------------------------------------------------------
+
+def _make_state_with_diag(tmp_path, max_speakers=1):
+    from types import SimpleNamespace
+    return SessionState(
+        args=SimpleNamespace(diarization_max_speakers=max_speakers),
+        started=datetime.datetime(2026, 1, 1),
+        out_path=str(tmp_path / "o.md"),
+        html_path=str(tmp_path / "o.html"),
+        diag_path=str(tmp_path / "o.diag"),
+        turns_path=str(tmp_path / "o.turns"),
+        wav_path=str(tmp_path / "o.wav"),
+    )
+
+
+def test_constrain_drop_writes_diag_and_keeps_behavior(tmp_path):
+    """上限で落とした事実が diag に構造化され、返り値（挙動）は従来どおり."""
+    import json as _json
+    s = _make_state_with_diag(tmp_path, max_speakers=1)
+    s.records.append({"ms": 0, "end_ms": 500, "speaker": "@diar:1", "text": "x"})
+    s.disp_name("@diar:1")   # スロット1を占有
+    assert s.constrain_human_speaker_key("@diar:2") == "?"   # 挙動は不変
+    with open(tmp_path / "o.diag") as f:
+        events = [_json.loads(line) for line in f]
+    assert events and events[0]["type"] == "constrain_drop"
+    assert events[0]["key"] == "@diar:2"
+    assert events[0]["max_speakers"] == 1
+    assert events[0]["slots"] == ["参加者A"]
+
+
+def test_constrain_drop_warns_once_after_repeats(tmp_path):
+    """同一キーが3回落ちたら一度だけ sys 警告が出る（連発はしない）."""
+    s = _make_state_with_diag(tmp_path, max_speakers=1)
+    s.records.append({"ms": 0, "end_ms": 500, "speaker": "@diar:1", "text": "x"})
+    s.disp_name("@diar:1")
+    for _ in range(5):
+        s.constrain_human_speaker_key("@diar:2")
+    sys_msgs = [r["sys"] for r in s.records if "sys" in r]
+    assert len(sys_msgs) == 1
+    assert "想定話者数の上限" in sys_msgs[0]
+    # 警告レコードにはタイムスタンプ（経過ms）が付く
+    warn = next(r for r in s.records if "sys" in r)
+    assert isinstance(warn["ms"], int)
+
+
+def test_constrain_drop_state_cleared_on_reset(tmp_path):
+    """会議リセットで警告状態と回数がクリアされ、次の会議で再警告できる."""
+    s = _make_state_with_diag(tmp_path, max_speakers=1)
+    s.records.append({"ms": 0, "end_ms": 500, "speaker": "@diar:1", "text": "x"})
+    s.disp_name("@diar:1")
+    for _ in range(3):
+        s.constrain_human_speaker_key("@diar:2")
+    assert s.constrain_warned is True
+    s.reset_for_new_meeting()
+    assert s.constrain_warned is False
+    assert s.constrain_drop_counts == {}
