@@ -71,6 +71,16 @@ class SortformerLocalDiarizationProvider:
         self._reader: threading.Thread | None = None
         self._dead = False
         self._ready = threading.Event()
+        # STT再接続時の close→start 対応（pyannote provider の F3 と同じ対策）:
+        # ワーカーは再起動ごとに時刻0・SPEAKER_00 から数え直すため、
+        # (1) 供給済み音声の累計msを基点として引き継がないとイベントが過去時刻に
+        #     ずれて resolver の重なり照合が全滅し、
+        # (2) ラベルを世代で区別しないと新旧の SPEAKER_00（別人になり得る）が
+        #     同一キー "sortformer:SPEAKER_00" に合流して誤帰属する。
+        self._session_base_ms = 0
+        self._sent_bytes = 0
+        self._label_epoch = 0
+        self._started_once = False
 
     @property
     def name(self) -> str:
@@ -91,6 +101,12 @@ class SortformerLocalDiarizationProvider:
             self._active_starts.clear()
         self._dead = False
         self._ready = threading.Event()
+        if self._started_once:
+            # 再起動: 時刻基点を引き継ぎ、ラベル世代を進める（クラスdocstring参照）。
+            self._session_base_ms += self._sent_bytes // 32   # 16kHz PCM16: 32B=1ms
+            self._label_epoch += 1
+        self._started_once = True
+        self._sent_bytes = 0
         cmd = [self._python, self._worker_path,
                "--model", self._model, "--latency", self._latency,
                "--device", self._device]
@@ -127,7 +143,10 @@ class SortformerLocalDiarizationProvider:
                 print("# 話者分離(sortformer): ワーカー準備完了", flush=True)
                 continue
             spk = str(d.get("spk") or "")
-            ms = int(d.get("ms") or 0)
+            if spk and self._label_epoch > 0:
+                # 再起動後のラベルは世代前置で旧世代と区別する（pyannote と同形式）。
+                spk = f"R{self._label_epoch}:{spk}"
+            ms = int(d.get("ms") or 0) + self._session_base_ms
             if kind == "start" and spk:
                 with self._lock:
                     self._active_starts[spk] = ms
@@ -153,6 +172,7 @@ class SortformerLocalDiarizationProvider:
         try:
             proc.stdin.write(pcm16k)
             proc.stdin.flush()
+            self._sent_bytes += len(pcm16k)
         except (BrokenPipeError, OSError):
             if not self._dead:
                 self._dead = True

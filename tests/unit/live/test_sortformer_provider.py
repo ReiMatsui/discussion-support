@@ -86,11 +86,18 @@ def test_worker_crash_degrades_to_inert(tmp_path):
     p.close()
 
 
-def test_restart_resets_state(tmp_path):
-    """close→start（会議リセット対）で新ワーカーが起動し、状態が捨てられる."""
+def test_restart_resets_state_and_keeps_timeline_monotonic(tmp_path):
+    """close→start（STT再接続対）で状態は捨てるが、時刻基点とラベル世代は引き継ぐ.
+
+    pyannote provider の F3 と同じ対策: ワーカーは再起動ごとに時刻0・
+    SPEAKER_00 から数え直すため、(1) 供給済み音声の累計msを基点に足さないと
+    イベントが過去時刻にずれて resolver の照合が全滅し、(2) ラベルを
+    R{epoch}: で区別しないと新旧の SPEAKER_00（別人になり得る）が同一キーに
+    合流して誤帰属する（2026-07-25 自己監査で発見・修正）。
+    """
     p = _make_provider(tmp_path)
     p.start()
-    p.send_audio(b"\0" * 3200)
+    p.send_audio(b"\0" * 3200)   # 100ms ぶん供給
     p.close()
     assert _wait(lambda: len(p._events.queue) >= 1)
 
@@ -100,7 +107,11 @@ def test_restart_resets_state(tmp_path):
     p.send_audio(b"\0" * 3200)
     p.close()
     assert _wait(lambda: len(p._events.queue) >= 1)
-    assert [e.speaker for e in p.drain_events()] == ["SPEAKER_00"]
+    events = p.drain_events()
+    # ラベルは世代前置で旧世代と区別され、時刻は供給済み100msを基点に進む
+    assert [e.speaker for e in events] == ["R1:SPEAKER_00"]
+    assert events[0].start_ms == 100 + 0
+    assert events[0].end_ms == 100 + 800
 
 
 def test_provider_name_is_sortformer(tmp_path):
