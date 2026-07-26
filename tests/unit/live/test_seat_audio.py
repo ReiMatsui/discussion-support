@@ -134,3 +134,53 @@ def test_ai_and_unsure_keys_are_never_seats():
     sa.observe(UNSURE_SPEAKER, _audio(-1.0, 4.0))
     sa.observe("人物1", _audio(1.0, 4.0))
     assert sa.nearest(_audio(1.0, 1.0)) is None   # 候補は人物1だけ＝比較不能
+
+
+# ---------------------------------------------------------------------------
+# 遡及訂正（handoff §28）
+# ---------------------------------------------------------------------------
+
+def test_retro_revises_early_calls_with_the_grown_reference():
+    """序盤の判定を、参照が育った後の基準で決め直す.
+
+    誤りはセッション序盤に偏る（実測: 開始0-1分は正解29%、5-10分は90%）。
+    参照が育った時点で決め直すと 79.2%→89.5%（5分時点）。
+    """
+    from das.asr.live._seat_audio import RetroAttributor
+    sa = SeatAudio(_Tracker(), ref_sec=30.0, min_ref_sec=1.0)
+    retro = RetroAttributor(sa, schedule=(120.0,), interval=300.0)
+
+    # 序盤: 席が1つしか育っておらず判定できない
+    sa.observe("人物1", _audio(1.0, 2.0))
+    early = sa.embed(_audio(-1.0, 1.0))      # 実際は人物2の声
+    assert sa.nearest_from(early) is None
+    retro.remember(1000, early)
+
+    # 参照が育つ
+    sa.observe("人物2", _audio(-1.0, 2.0))
+
+    assert retro.due(130.0) is True
+    assert retro.revise() == {1000: "人物2"}   # 後から正しく決まる
+
+
+def test_retro_fires_on_schedule_then_at_intervals():
+    """予定時刻に達したときだけ発火し、以後は一定間隔で繰り返す."""
+    from das.asr.live._seat_audio import RetroAttributor
+    retro = RetroAttributor(SeatAudio(_Tracker()), schedule=(120.0, 300.0),
+                            interval=300.0)
+    assert retro.due(119.0) is False
+    assert retro.due(120.0) is True
+    assert retro.due(299.0) is False
+    assert retro.due(300.0) is True
+    assert retro.due(400.0) is False      # 前回から interval 経っていない
+    assert retro.due(600.0) is True
+
+
+def test_retro_reset_clears_remembered_voices():
+    from das.asr.live._seat_audio import RetroAttributor
+    sa = _ready(min_ref_sec=1.0)
+    retro = RetroAttributor(sa, schedule=(120.0,), interval=300.0)
+    retro.remember(1000, sa.embed(_audio(1.0, 1.0)))
+    retro.reset()
+    assert retro.revise() == {}
+    assert retro.due(119.0) is False       # 予定も先頭に戻る

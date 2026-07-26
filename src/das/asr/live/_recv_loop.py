@@ -131,6 +131,28 @@ class RecvLoop:
             _print_line(f"# 鋳造リンク: {seat_key}({raw_cluster}) を {name} へ統合"
                         f"（対称類似{sim:.2f}）")
 
+    def _maybe_retro_reattribute(self) -> None:
+        """時刻が来たら、序盤に決めた帰属を今の参照で貼り直す（handoff §28）.
+
+        誤りはセッション序盤に極端に偏る（実測: 開始0-1分は正解29%、
+        5-10分は90%）。システムは収束していて悪いのは立ち上がりだけなので、
+        参照が育った時点で決め直すと 79.2%→89.5%（5分時点）になる。
+
+        表示済みの行の話者名が変わるため、変わったことをシステム行として
+        タイムラインに残す（黙って書き換えない）。
+        """
+        s = self.state
+        if s.retro is None or self.cur_ms is None:
+            return
+        if not s.retro.due(self.cur_ms / 1000.0):
+            return
+        changed = s.apply_retro_attribution(s.retro.revise())
+        if not changed:
+            return
+        s.add_sys(self.cur_ms,
+                  f"これまでの声を聞き直して、{changed}件の話者を再判定しました")
+        _print_line(f"# 遡及訂正: {changed}件の話者を再判定しました")
+
     def flush(self):
         from das.asr.live import ON_UTTERANCE
 
@@ -380,7 +402,12 @@ class RecvLoop:
                         and _kind in _VOICEPRINT_RELIABLE_KINDS):
                     s.seat_audio.observe(final_sp_id, wav)
             if _reason is not None:
-                picked = s.seat_audio.nearest(wav)
+                # 声紋は1回だけ計算し、判定にも遡及訂正の控えにも使い回す。
+                _emb = s.seat_audio.embed(wav)
+                if s.retro is not None:
+                    s.retro.remember(self.cur_ms, _emb)
+                picked = (s.seat_audio.nearest_from(_emb)
+                          if _emb is not None else None)
                 if picked is not None:
                     final_sp_id = picked[0]
                     rec_extra["speaker_source"] = "seat_assign"
@@ -425,6 +452,7 @@ class RecvLoop:
             with contextlib.suppress(Exception):
                 ON_UTTERANCE(s.disp_name(sp_id), self.cur_text.strip())
         _print_line(f"{c}[{fmt_ts(self.cur_ms)}] {s.disp_name(sp_id)}{RESET}: {self.cur_text.strip()}")
+        self._maybe_retro_reattribute()
         s.save()
         self.cur_text = ""
         self.cur_ms = None

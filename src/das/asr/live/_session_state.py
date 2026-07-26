@@ -35,7 +35,7 @@ from ._constants import (
 )
 from ._diarization import DiarizationEvent, DiarizationProvider, SpeakerResolver
 from ._participation import participation_stats
-from ._seat_audio import SeatAudio
+from ._seat_audio import RetroAttributor, SeatAudio
 from ._speaker_keys import (
     NON_PARTICIPANT_KEYS,
     is_provisional_key,
@@ -116,6 +116,10 @@ class SessionState:
         # 席落ち発話の割当て（handoff §27。ハイブリッド構成でのみ生成される）。
         # None なら従来どおり席上限で落ちた発話は未確定のまま。
         self.seat_audio: SeatAudio | None = seat_audio
+        # 序盤に決めた帰属の貼り直し（handoff §28）。seat_audio が無い構成では
+        # 生成されないので、pyannote単独・Soniox単独は従来どおり見直さない。
+        self.retro: RetroAttributor | None = (
+            RetroAttributor(seat_audio) if seat_audio is not None else None)
         self.anonymous_labels: dict[str, str] = {}
         self._DIARIZATION_KEEP_MS = 10 * 60 * 1000
         # 上限(constrain)で未確定化した回数（可視化用, 2026-07-25 実セッションで
@@ -625,6 +629,46 @@ class SessionState:
                     self.anonymous_labels.setdefault(
                         new, self.anonymous_labels.pop(old))
 
+    def apply_retro_attribution(self, revised: dict) -> int:
+        """遡及訂正の結果を records に反映する（handoff §28）.
+
+        対象は「席の音声で決めた発話」と「未確定のまま残った発話」だけで、
+        声紋層が高信頼で判定した発話（``speaker_source`` がそれ以外）は
+        触らない——そちらは席の平均より強いという §27.12 の判断を変えない。
+
+        リネームとの関係: ユーザーが付けた名前は `rekey` が records の
+        speaker キーごと移すので、ここで扱うのは常に「現在のキー」である。
+        本メソッドは席から席へ移すだけで、名前の台帳（names/colors の対応）は
+        変えない。
+
+        戻り値: 実際に変わった件数（0 なら呼び出し側は通知も保存もしない）。
+        """
+        if not revised:
+            return 0
+        changed = 0
+        with self.state_lock:
+            for r in self.records:
+                if "speaker" not in r:
+                    continue
+                ms = r.get("ms")
+                new_key = revised.get(ms)
+                if new_key is None or str(r["speaker"]) == str(new_key):
+                    continue
+                src = r.get("speaker_source")
+                revisable = (src == "seat_assign"
+                             or str(r["speaker"]) == UNSURE_SPEAKER)
+                if not revisable:
+                    continue
+                r["speaker"] = new_key
+                r["speaker_source"] = "seat_assign_retro"
+                r["unsure"] = False
+                changed += 1
+            if changed:
+                for r in self.records:
+                    if "speaker" in r:
+                        self.color_of(r["speaker"])
+        return changed
+
     def add_sys(self, ms, text: str):
         """システムイベントを議事録のタイムラインに残す."""
         with self.state_lock:
@@ -955,6 +999,8 @@ class SessionState:
             self.cluster_namer.reset()
         if self.seat_audio is not None:
             self.seat_audio.reset()
+        if self.retro is not None:
+            self.retro.reset()
         if self.tracker is not None:
             self.tracker.reset_session()
         with self.topics_lock:

@@ -33,6 +33,8 @@ import threading
 import numpy as np
 
 from ._constants import (
+    RETRO_INTERVAL_SEC,
+    RETRO_SCHEDULE_SEC,
     SEAT_AUDIO_MIN_REF_SEC,
     SEAT_AUDIO_REF_SEC,
     SR,
@@ -113,15 +115,26 @@ class SeatAudio:
         育つのを待つのではない。待つ形にすると、たまにしか喋らない人が1人
         いるだけで割当てが止まり、適用が157→17件に落ちる）。
         """
+        emb = self.embed(wav)
+        return None if emb is None else self.nearest_from(emb)
+
+    def embed(self, wav: np.ndarray | None) -> np.ndarray | None:
+        """音声を声紋にする（遡及訂正が同じ埋め込みを取っておくために公開）."""
         if wav is None or wav.size == 0:
             return None
+        return self.tracker.embed_audio(wav)
+
+    def nearest_from(self, emb: np.ndarray) -> tuple[str, float, float] | None:
+        """既に計算済みの声紋で寄せ先を選ぶ（本体。docstring は `nearest`）.
+
+        遡及訂正（`RetroAttributor`）は序盤の発話の声紋を保持しておき、
+        参照が育った後に**この関数だけ**を呼び直す。音声を持ち直す必要も、
+        埋め込みを計算し直す必要もない。
+        """
         with self._lock:
             cands = {k: v for k, v in self._embeddings.items()
                      if self._seconds.get(k, 0.0) >= self.min_ref_sec}
         if len(cands) < 2:
-            return None
-        emb = self.tracker.embed_audio(wav)
-        if emb is None:
             return None
         ranked = sorted(((float(np.dot(emb, v)), k) for k, v in cands.items()),
                         reverse=True)
@@ -157,3 +170,86 @@ class SeatAudio:
             self._seconds.clear()
             self._frozen.clear()
             self.last_pick = None
+
+
+class RetroAttributor:
+    """序盤に決めた帰属を、席の参照が育ってから貼り直す（handoff §28）.
+
+    **なぜ要るのか**: 誤りはセッション序盤に極端に偏る。実測（Chiba 9会話）で
+    開始0-1分は正解29%、1-2分は69%、5-10分は90%。システムは収束していて、
+    悪いのは立ち上がりだけだった。にもかかわらず、一度決めた帰属を二度と
+    見直していなかった。
+
+    貼り直したときの実測:
+
+        いまのまま       正解 79.2% / 誤帰属 13.6% / 未確定 7.1%
+        2分時点で貼り直す 84.5% / 13.9% / 1.6%
+        5分時点で貼り直す 89.5% /  9.9% / 0.6%
+        終了時に一括     93.1% /  6.9% / 0.0%
+
+    **持つものが小さい**: 発話ごとの声紋は192次元。1200発話でも 1.8MB で、
+    音声を持ち直す必要はない。判定も `SeatAudio.nearest_from` を新しい参照で
+    呼び直すだけ。
+
+    **対象**: 席の音声で決めた発話と、未確定のまま残った発話だけ。声紋層が
+    高信頼で判定した発話（声紋一致・補正・自動登録・合流）は触らない——
+    そちらは席の平均より強い、という §27.12 の判断を変えていない。
+    """
+
+    def __init__(self, seat: SeatAudio, *,
+                 schedule: tuple[float, ...] = RETRO_SCHEDULE_SEC,
+                 interval: float = RETRO_INTERVAL_SEC) -> None:
+        self.seat = seat
+        # 校正: 2分・5分は handoff §28.2 の実測点。それ以降を interval ごとに
+        # 繰り返すのは、終了時一括（93.1%）が5分時点（89.5%）を上回る＝
+        # 参照が育つほど良くなるという同じ測定からの外挿。
+        self.schedule = tuple(schedule)
+        self.interval = float(interval)
+        self._embeddings: dict[int, np.ndarray] = {}   # ms -> 声紋
+        self._next_idx = 0
+        self._next_at = self.schedule[0] if self.schedule else self.interval
+        self._lock = threading.RLock()
+
+    def remember(self, ms: int | None, emb: np.ndarray | None) -> None:
+        """後で決め直せるように、この発話の声紋を控える."""
+        if ms is None or emb is None:
+            return
+        with self._lock:
+            self._embeddings[int(ms)] = emb
+
+    def due(self, elapsed_sec: float) -> bool:
+        """貼り直しの時刻に達したか（達したら次回の時刻へ進める）."""
+        with self._lock:
+            if elapsed_sec < self._next_at:
+                return False
+            self._next_idx += 1
+            if self._next_idx < len(self.schedule):
+                self._next_at = self.schedule[self._next_idx]
+            else:
+                self._next_at = elapsed_sec + self.interval
+            return True
+
+    def revise(self) -> dict[int, str]:
+        """控えてある声紋を今の参照で判定し直し、{ms: 新しいキー} を返す.
+
+        呼び出し側（`SessionState.apply_retro_attribution`）が records を
+        書き換える。ここは判定だけで副作用を持たない。
+        """
+        with self._lock:
+            items = list(self._embeddings.items())
+        out: dict[int, str] = {}
+        for ms, emb in items:
+            got = self.seat.nearest_from(emb)
+            if got is not None:
+                out[ms] = got[0]
+        return out
+
+    def rename(self, old: str, new: str) -> None:
+        """付け替えは `SeatAudio` 側が持つので、ここは何もしない（明示）."""
+
+    def reset(self) -> None:
+        with self._lock:
+            self._embeddings.clear()
+            self._next_idx = 0
+            self._next_at = (self.schedule[0] if self.schedule
+                             else self.interval)

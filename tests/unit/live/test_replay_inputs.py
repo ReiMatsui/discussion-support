@@ -708,3 +708,79 @@ def test_reliable_kinds_are_not_overridden(tmp_path, monkeypatch):
     rec = _label_only_loop(tmp_path, monkeypatch, "声紋一致", "人物2", 1.0)
     assert rec["speaker"] == "人物2"
     assert rec.get("speaker_source") != "seat_assign"
+
+
+# ---------------------------------------------------------------------------
+# 遡及訂正（handoff §28）: flush の呼び出し口と保護規則
+# ---------------------------------------------------------------------------
+
+def _retro_state(tmp_path):
+    from das.asr.live._seat_audio import RetroAttributor, SeatAudio
+    state = _state_for_recording(tmp_path, [])
+    state.seat_audio = SeatAudio(_SeatTracker(), ref_sec=30.0, min_ref_sec=0.5)
+    state.retro = RetroAttributor(state.seat_audio, schedule=(120.0,),
+                                  interval=300.0)
+    return state
+
+
+def test_retro_rewrites_past_records_and_announces_it(tmp_path, monkeypatch):
+    """予定時刻に達したら過去の発話を貼り直し、その旨をタイムラインに残す.
+
+    黙って書き換えない（表示済みの行の話者名が変わるため）。
+    """
+    state = _retro_state(tmp_path)
+    loop = RecvLoop(state, _Args(), backend=None)
+    monkeypatch.setattr("das.asr.live._recv_loop.decide_speaker",
+                        lambda *a, **k: UNSURE_SPEAKER)
+    monkeypatch.setattr(state, "constrain_human_speaker_key", lambda k: k)
+    state.tracker.last = {"kind": "ラベル不純", "label": "1"}
+    # 序盤: 席が1つしか無く決められない → 未確定のまま記録され、声紋は控えられる
+    state.seat_audio.observe("人物1", np.full(SR, 1.0, dtype=np.float32))
+    state.asr_pcm_buf = bytearray(np.full(SR * 10, -20000, dtype="<i2").tobytes())
+    loop.cur_speaker = "1"
+    loop.cur_text = "序盤の発言です"
+    loop.cur_ms, loop.cur_end = 1000, 3000
+    loop.flush()
+    assert state.records[-1]["speaker"] == UNSURE_SPEAKER
+
+    # 参照が育ち、予定時刻を超えた発話が来る
+    state.seat_audio.observe("人物2", np.full(SR, -1.0, dtype=np.float32))
+    loop.cur_speaker = "1"
+    loop.cur_text = "しばらく後の発言です"
+    loop.cur_ms, loop.cur_end = 130_000, 132_000
+    loop.flush()
+
+    revised = [r for r in state.records if r.get("ms") == 1000]
+    assert revised[0]["speaker"] == "人物2"           # 過去が貼り直された
+    assert revised[0]["speaker_source"] == "seat_assign_retro"
+    assert any("再判定" in r.get("sys", "") for r in state.records)
+
+
+def test_retro_does_not_touch_confident_voiceprint_decisions(tmp_path,
+                                                             monkeypatch):
+    """声紋層が高信頼で決めた発話は貼り直さない（§27.12 の判断を変えない）."""
+    state = _retro_state(tmp_path)
+    loop = RecvLoop(state, _Args(), backend=None)
+    monkeypatch.setattr("das.asr.live._recv_loop.decide_speaker",
+                        lambda *a, **k: "人物1")
+    monkeypatch.setattr(state, "constrain_human_speaker_key", lambda k: k)
+    state.tracker.last = {"kind": "声紋一致", "label": "1"}
+    state.asr_pcm_buf = bytearray(np.full(SR * 10, -20000, dtype="<i2").tobytes())
+    loop.cur_speaker = "1"
+    loop.cur_text = "声紋で確定した発言です"
+    loop.cur_ms, loop.cur_end = 1000, 3000
+    loop.flush()
+
+    # 声で見れば人物2 に寄るはずの状況を作ってから貼り直しを走らせる
+    state.seat_audio.observe("人物2", np.full(SR, -1.0, dtype=np.float32))
+    changed = state.apply_retro_attribution({1000: "人物2"})
+
+    assert changed == 0
+    assert state.records[-1]["speaker"] == "人物1"
+
+
+def test_retro_is_absent_without_seat_audio(tmp_path):
+    """seat_audio が無い構成（pyannote単独・Soniox単独）は見直さない."""
+    state = _state_for_recording(tmp_path, [])
+    assert state.seat_audio is None
+    assert state.retro is None

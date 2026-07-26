@@ -48,10 +48,10 @@ import decompose_attribution as dec  # noqa: E402
 from das.asr.live._attribution import _VOICEPRINT_RELIABLE_KINDS  # noqa: E402
 from das.asr.live._constants import SR, UNSURE_SPEAKER  # noqa: E402
 from das.asr.live._recv_loop import _LABEL_ONLY_KINDS  # noqa: E402
-from das.asr.live._seat_audio import SeatAudio  # noqa: E402
+from das.asr.live._seat_audio import RetroAttributor, SeatAudio  # noqa: E402
 
 CUTS = (120.0, 300.0, float("inf"))       # 遡及訂正を行う時刻（秒）
-NAMES = ("now", "retro_2m", "retro_5m", "retro_end")
+NAMES = ("now", "retro_2m", "retro_5m", "retro_end", "prod")
 
 
 def run_one(run: str, vp) -> dict | None:
@@ -143,9 +143,53 @@ def run_one(run: str, vp) -> dict | None:
         return good / n, (n - good - uns) / n, uns / n
 
     out = {"now": _score(_base)}
-    for name, cut in zip(NAMES[1:], CUTS, strict=True):
+    for name, cut in zip(NAMES[1:1 + len(CUTS)], CUTS, strict=True):
         out[name] = _score(lambda u, c=cut: _retro(u, c))
+    out["prod"] = _score_production(rows, pcm, vp, t0)
     return out
+
+
+def _score_production(rows, pcm, vp, t0):
+    """**本番の RetroAttributor / SeatAudio をそのまま駆動**した成績.
+
+    `_recv_loop.flush` と同じ順序で呼ぶ（声紋は1回だけ計算して判定と控えに
+    使い回し、時刻が来たら `due` → `revise`）。予定表も `_constants` の値。
+    実装が測定値（retro_5m 前後）を再現するかの確認になる。
+    """
+    seat = SeatAudio(vp)
+    retro = RetroAttributor(seat)
+    final: dict[int, str] = {}
+    for u, _c in rows:
+        a, b = int(u["ms"]), int(u.get("end") or u["ms"])
+        wav = pcm[int(a / 1000 * SR):int(b / 1000 * SR)]
+        cur = str(u["final_key"])
+        kind = u.get("kind")
+        if cur != UNSURE_SPEAKER and kind == "蓄積中" and not dec.endorsed(u):
+            cur = UNSURE_SPEAKER
+        revisable = (kind in _LABEL_ONLY_KINDS
+                     or (cur == UNSURE_SPEAKER
+                         and str(u.get("key")) != UNSURE_SPEAKER))
+        if revisable:
+            emb = seat.embed(wav)
+            retro.remember(a, emb)
+            got = seat.nearest_from(emb) if emb is not None else None
+            final[a] = got[0] if got is not None else cur
+        else:
+            if cur != UNSURE_SPEAKER and kind in _VOICEPRINT_RELIABLE_KINDS:
+                seat.observe(cur, wav)
+            final[a] = cur
+        if retro.due((a - t0) / 1000.0):
+            for ms, key in retro.revise().items():
+                # apply_retro_attribution と同じ保護: 席由来か未確定だけ直す
+                if ms in final and (final[ms] == UNSURE_SPEAKER
+                                    or ms in retro._embeddings):
+                    final[ms] = key
+    pairs = [(final[int(u["ms"])], c) for u, c in rows if int(u["ms"]) in final]
+    _a, m = _gtlib.best_mapping(pairs, dec.GT_CODES, unsure=UNSURE_SPEAKER)
+    n = len(pairs)
+    good = sum(1 for f, c in pairs if m.get(f) == c)
+    uns = sum(1 for f, _ in pairs if f == UNSURE_SPEAKER)
+    return good / n, (n - good - uns) / n, uns / n
 
 
 def main(argv: list[str] | None = None) -> None:
