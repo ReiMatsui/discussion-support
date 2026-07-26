@@ -45,7 +45,8 @@ class FakeAgent:
     def trigger(self, *, topics=None, drift_reason=None, invite_target=None,
                 fact_correction=None, manual_request=None,
                 summary_focus=None, retry_intervention=None,
-                is_retry=False, recent_agent_texts=None) -> None:
+                is_retry=False, recent_agent_texts=None,
+                af_presentation=None, hold_playback=False) -> None:
         self.trigger_calls.append({"topics": topics, "drift_reason": drift_reason,
                                    "invite_target": invite_target,
                                    "fact_correction": fact_correction,
@@ -53,7 +54,9 @@ class FakeAgent:
                                    "summary_focus": summary_focus,
                                    "retry_intervention": retry_intervention,
                                    "is_retry": is_retry,
-                                   "recent_agent_texts": recent_agent_texts})
+                                   "recent_agent_texts": recent_agent_texts,
+                                   "af_presentation": af_presentation,
+                                   "hold_playback": hold_playback})
         # 実エージェントの挙動を模倣: トリガーで介入と保留発話を消費
         self._pending_intervention = None
         self._pending.clear()
@@ -1178,3 +1181,82 @@ def test_unconfirmed_speaker_not_fed_to_agent():
     _run_worker_briefly(state, until=lambda: agent.interrupts > 0)
 
     assert agent.feeds == []
+
+
+# ---------------------------------------------------------------------------
+# 発火の記帳（2026-07-25 監査）: cooldown の時計と「誰を誘ったか」の更新漏れ
+# ---------------------------------------------------------------------------
+
+def _run_worker_with(state, *, steps, timeout=6.0) -> None:
+    """ワーカーを動かしつつ、途中で外から状態を変える（順序のあるシナリオ用）.
+
+    steps は (待ち条件, その時点で実行する処理) の列。条件が真になるたびに次へ進む。
+    """
+    t = threading.Thread(target=_run_agent_worker, args=(state,), daemon=True)
+    t.start()
+    deadline = time.monotonic() + timeout
+    for until, action in steps:
+        while time.monotonic() < deadline and not until():
+            time.sleep(0.02)
+        if action is not None:
+            action()
+    time.sleep(0.4)   # 直後のtickで誤発火しないことまで見る
+    state.stop.set()
+    t.join(timeout=2.0)
+
+
+def test_conversation_advances_the_global_cooldown_clock():
+    """会話モードの応答も cooldown の時計を進める（連続発話の防止）.
+
+    invite は他候補と違い mode で gate されないため、会話モードでも conversation と
+    共存する。conversation が時計を進めないと、直後の invite が global cooldown を
+    素通りして「AIが息継ぎなしに2回喋る」（2026-07-25 監査で発見）。
+    """
+    agent = FakeAgent(mode="conversation")
+    agent._pending.append("人間の発話")        # conversation 候補の発火条件
+    state = FakeState(agent)
+    state._last_utt_time = [time.monotonic() - 100]   # 沈黙は十分（pause を通す）
+
+    _run_worker_with(state, steps=[
+        # conversation が発火するまで待ち、その後で声かけ要求を積む
+        (lambda: len(agent.trigger_calls) >= 1,
+         lambda: state.invite_requests.put("参加者A")),
+    ])
+
+    kinds = [e["reason"] for e in state.intervention_events]
+    assert "conversation" in kinds
+    # 直後の invite は cooldown(25s) で抑制される（修正前はここで2回目が発火した）
+    assert "invite" not in kinds, f"conversation直後に invite が発火した: {kinds}"
+    assert len(agent.trigger_calls) == 1
+
+
+def test_af_intervention_records_who_was_invited():
+    """AF介入が人を指名したら「誰を誘ったか」を記録する（連続指名の防止）.
+
+    af_l1/af_l2 は invite_target を渡して実際に指名するのに _last_invited を
+    更新しておらず、直後に同じ人への invite 候補が来ても skip_invite が働かず
+    連続で指名していた（2026-07-25 監査で発見）。
+    """
+    agent = FakeAgent()
+    state = FakeState(agent)
+    state._last_utt_time = [time.monotonic() - 100]
+    # global cooldown を 0 にして「時計」ではなく「誰を誘ったか」だけを見る
+    # （cooldown が効いていると invite が別理由で止まり、記録漏れを検出できない）
+    state.proactivity = {"silence_summarize": 18.0, "cooldown": 0.0}
+    state.af_requests = queue.Queue()
+    state.af_requests.put({
+        "kind": "af_l2", "brief": "俯瞰",
+        "af_text": "論点を整理します", "target_speaker": "参加者A",
+    })
+
+    _run_worker_with(state, steps=[
+        # af が発火するまで待ち、その後で同じ人への声かけ要求を積む
+        (lambda: len(agent.trigger_calls) >= 1,
+         lambda: state.invite_requests.put("参加者A")),
+    ])
+
+    assert agent.trigger_calls[0]["invite_target"] == "参加者A"
+    reasons = [e["reason"] for e in state.intervention_events]
+    assert "af_l2" in reasons
+    # 同じ人への連続指名は抑制される（修正前は invite が通り2回続けて指名した）
+    assert "invite" not in reasons, f"同じ人が連続で指名された: {reasons}"

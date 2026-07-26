@@ -2044,6 +2044,9 @@ def _run_agent_worker(state: SessionState):
     _af_gate = _AfEarlyGenGate()
     _af_held_text = ""
     _af_held_kind = "af_l1"
+    # 生成先行(hold)中の af が指名している相手。release 時に「誰を誘ったか」を
+    # 記録するために保持する（保持しないと同じ人を連続で指名しうる）。
+    _af_held_target: str | None = None
     # 採否の経緯（採択/抑制/latency）を intervention_review.jsonl へ記録する。
     _review = _InterventionReviewRecorder()
     # maxlen はクールダウン照会に加えて同一内容抑止（duplicate_content, 10分窓）
@@ -2051,10 +2054,31 @@ def _run_agent_worker(state: SessionState):
     _recent_interventions: collections.deque[InterventionLogEntry] = (
         collections.deque(maxlen=30))
 
-    def _note_intervention(at: float, kind: str, detail: str = "") -> None:
-        """実際に発火した介入を cooldown/同一内容抑止用の直近履歴に記録する."""
+    def _note_intervention(at: float, kind: str, detail: str = "",
+                           *, invite_target: str | None = None) -> None:
+        """実際に発火した介入を記録する（発火の副作用はここに一本化する）.
+
+        記録するのは3つ:
+          - 直近履歴 `_recent_interventions`（同一内容抑止 duplicate_content 用）
+          - `_last_intervention_at`（global scope の cooldown の時計）
+          - `_last_invited`（同じ人への連続声かけの抑止。指名した時だけ）
+
+        **時計と声かけ相手をここで進めるのは、分岐ごとの更新漏れを構造的に防ぐため**。
+        発火分岐は種別ごとの巨大な if-elif 連鎖になっており、実際に漏れが2件起きた
+        （2026-07-25 の監査）:
+          - `conversation` だけ `_last_intervention_at` を更新しておらず、会話モードで
+            AIが応答した直後に、mode で gate されない `invite` 候補が古い時刻を基準に
+            global cooldown を通過して続けざまに喋っていた
+          - `af_l1`/`af_l2` は `invite_target` を渡して実際に人を指名するのに
+            `_last_invited` を更新せず、同じ人への連続指名の抑止が効いていなかった
+        以後、新しい発火分岐を足すときは `_note_intervention` を呼ぶだけでよい。
+        """
+        nonlocal _last_intervention_at, _last_invited
         _recent_interventions.append(
             InterventionLogEntry(at=at, kind=kind, brief=detail))
+        _last_intervention_at = at
+        if invite_target:
+            _last_invited = invite_target
 
     while not state.stop.is_set():
         time.sleep(0.25)
@@ -2195,6 +2219,7 @@ def _run_agent_worker(state: SessionState):
                     _held = _af_payload or {}
                     _af_held_text = str(_held.get("af_text") or "")
                     _af_held_kind = str(_held.get("kind") or "af_l1")
+                    _af_held_target = _held.get("target_speaker") or None
                     _log_intervention_event(state, _af_held_kind, "af 生成先行(hold)")
                 elif _af_action == "deliver":  # 取り込み遅延で pause 通過後に来た → 即時配信
                     _held = _af_payload or {}
@@ -2205,8 +2230,8 @@ def _run_agent_worker(state: SessionState):
                         with contextlib.suppress(Exception):
                             _afrt.note_intervention(_af_kd, _af_tx)
                     _pending.clear_af()  # 消費
-                    _last_intervention_at = _af_now
-                    _note_intervention(_last_intervention_at, _af_kd, "af 即時配信")
+                    _note_intervention(_af_now, _af_kd, "af 即時配信",
+                                       invite_target=_held.get("target_speaker"))
                     _log_intervention_event(
                         state, _af_kd, "af 即時配信",
                         timing=_intervention_timing_metadata(
@@ -2220,8 +2245,8 @@ def _run_agent_worker(state: SessionState):
                         with contextlib.suppress(Exception):
                             _afrt.note_intervention(_af_held_kind, _af_held_text)
                     _pending.clear_af()  # 消費
-                    _last_intervention_at = _af_now
-                    _note_intervention(_last_intervention_at, _af_held_kind, "af release")
+                    _note_intervention(_af_now, _af_held_kind, "af release",
+                                       invite_target=_af_held_target)
                     _log_intervention_event(
                         state, _af_held_kind, "af release",
                         timing=_intervention_timing_metadata(
@@ -2569,9 +2594,9 @@ def _run_agent_worker(state: SessionState):
                           invite_target=normal_decision.invite_target,
                           recent_agent_texts=_recent_agent_texts(state))
             _last_intervention_at = time.monotonic()
-            _last_invited = normal_decision.invite_target
             _pending.invite = None
-            _note_intervention(_last_intervention_at, "invite", normal_decision.detail)
+            _note_intervention(_last_intervention_at, "invite", normal_decision.detail,
+                               invite_target=normal_decision.invite_target)
         elif normal_decision.reason in ("af_l1", "af_l2"):
             # AF ベース介入（H1 フェーズ4）。AF 有効時のみここに到達する。
             _af_kind = normal_decision.reason
@@ -2595,7 +2620,8 @@ def _run_agent_worker(state: SessionState):
                     _af_rt.note_intervention(_af_kind, normal_decision.af_text)
             _last_intervention_at = time.monotonic()
             _pending.clear_af()  # 採択したら消費
-            _note_intervention(_last_intervention_at, _af_kind, normal_decision.detail)
+            _note_intervention(_last_intervention_at, _af_kind, normal_decision.detail,
+                               invite_target=normal_decision.invite_target)
         elif normal_decision.reason == "skip_invite":
             _pending.invite = None  # 同じ人を連続では誘わない
 
