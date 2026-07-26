@@ -475,21 +475,27 @@ class SessionState:
         UIに残る）。
         """
         raw = f"{source}:{speaker}"
-        if raw in self.diarization_speaker_keys:
-            return self.diarization_speaker_keys[raw]
-        if self._uses_pyannote_hysteresis():
-            threshold_ms = int(PYANNOTE_PARTICIPANT_HYSTERESIS_S * 1000)
-            pending = self.diarization_pending_ms.get(raw, 0) + max(0, duration_ms)
-            if pending < threshold_ms:
-                self.diarization_pending_ms[raw] = pending
-                return UNSURE_SPEAKER
-            self.diarization_pending_ms.pop(raw, None)
-        # len ベースの採番は名寄せの pop で辞書が縮むと使用中キーを再発行するため、
-        # 単調増加カウンタで採番する（名寄せ無しなら len+1 と同値＝従来挙動不変）。
-        self.diarization_key_seq += 1
-        key = f"@diar:{self.diarization_key_seq}"
-        self.diarization_speaker_keys[raw] = key
-        return self.diarization_speaker_keys[raw]
+        # 台帳 diarization_speaker_keys は recvスレッドが書き、rekey（UIの
+        # /rename・/activate 経由＝別スレッド）が state_lock 下で走査・書き換えする。
+        # 発行側がロックを取らないと、rekey の .items() 走査中に新キーが挿入されて
+        # 「dictionary changed size during iteration」で rekey が落ちる
+        # （2026-07-25 監査）。読み取り→採番→登録を1手にまとめて守る。
+        with self.state_lock:
+            if raw in self.diarization_speaker_keys:
+                return self.diarization_speaker_keys[raw]
+            if self._uses_pyannote_hysteresis():
+                threshold_ms = int(PYANNOTE_PARTICIPANT_HYSTERESIS_S * 1000)
+                pending = self.diarization_pending_ms.get(raw, 0) + max(0, duration_ms)
+                if pending < threshold_ms:
+                    self.diarization_pending_ms[raw] = pending
+                    return UNSURE_SPEAKER
+                self.diarization_pending_ms.pop(raw, None)
+            # len ベースの採番は名寄せの pop で辞書が縮むと使用中キーを再発行するため、
+            # 単調増加カウンタで採番する（名寄せ無しなら len+1 と同値＝従来挙動不変）。
+            self.diarization_key_seq += 1
+            key = f"@diar:{self.diarization_key_seq}"
+            self.diarization_speaker_keys[raw] = key
+            return key
 
     def key_for_stt_fallback_speaker(self, speaker: str, duration_ms: int = 0) -> str:
         """外部diarizationが薄い時のSTTラベルも表示用の内部キーへ正規化する.
@@ -589,7 +595,7 @@ class SessionState:
                     r["speaker"] = new
             # 外部diarizationクラスタの台帳。旧キーを指したままだと、以後の
             # そのクラスタの発話が旧キー（削除済みの人物N等）で帰属される。
-            for cluster, k in self.diarization_speaker_keys.items():
+            for cluster, k in list(self.diarization_speaker_keys.items()):
                 if k == old:
                     self.diarization_speaker_keys[cluster] = new
             # クラスタ確定名。observe() が確定名を短絡で返すため、ここを

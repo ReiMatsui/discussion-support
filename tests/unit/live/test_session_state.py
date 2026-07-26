@@ -483,3 +483,31 @@ def test_show_partial_writes_text_and_timestamp_under_one_lock(tmp_path):
     t.join(timeout=1.0)
     assert done == [True]
     assert s.partial_text == "次の途中経過"
+
+
+def test_diarization_key_issue_is_serialized_with_rekey(tmp_path):
+    """クラスタ台帳の発行が state_lock 下で行われる（rekey の走査との競合防止）.
+
+    台帳 diarization_speaker_keys は recvスレッドが書き、rekey（UIの /rename・
+    /activate 経由＝別スレッド）が state_lock 下で `.items()` を走査して書き換える。
+    発行側がロックを取らないと、走査中の挿入で「dictionary changed size during
+    iteration」が起きて rekey が落ちる（2026-07-25 監査）。
+    """
+    import threading
+
+    s = _make_state_with_diag(tmp_path, max_speakers=None)
+    assert s.key_for_diarization_speaker("pyannote", "A") == "@diar:1"
+
+    s.state_lock.acquire()
+    issued: list[str] = []
+
+    def _issuer() -> None:
+        issued.append(s.key_for_diarization_speaker("pyannote", "B"))
+
+    t = threading.Thread(target=_issuer, daemon=True)
+    t.start()
+    t.join(timeout=0.3)
+    assert issued == [], "state_lock 保持中に新しいクラスタキーが発行された"
+    s.state_lock.release()
+    t.join(timeout=1.0)
+    assert issued == ["@diar:2"]

@@ -106,7 +106,8 @@ class RecvLoop:
         if seat_key != name:
             # 席（@diar:N 等）の過去分・台帳・色をまとめて人物Nへ寄せる。
             s.rekey(seat_key, name)
-        s.diarization_speaker_keys[raw_cluster] = name
+        with s.state_lock:
+            s.diarization_speaker_keys[raw_cluster] = name
         namer.adopt_confirmed(raw_cluster, name)
         with contextlib.suppress(OSError), \
                 open(s.diag_path, "a", encoding="utf-8") as f:

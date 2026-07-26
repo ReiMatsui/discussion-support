@@ -159,7 +159,10 @@ def _cluster_attribution_raw(s: SessionState, resolved, *, wav,
         prior_key = s.diarization_speaker_keys.get(raw_cluster)
         if prior_key is not None and prior_key != cluster_name:
             s.rekey(prior_key, cluster_name)
-            s.diarization_speaker_keys[raw_cluster] = cluster_name
+            # 台帳の書き換えも state_lock 下で行う（rekey の走査と競合させない。
+            # ロック規約は SessionState.key_for_diarization_speaker のコメント参照）
+            with s.state_lock:
+                s.diarization_speaker_keys[raw_cluster] = cluster_name
         rec_extra["speaker_source"] = "cluster_voiceprint"
         rec_extra["speaker_confidence"] = 1.0
         rec_extra["speaker_reason"] = "pyannote_cluster_voiceprint_confirmed"
