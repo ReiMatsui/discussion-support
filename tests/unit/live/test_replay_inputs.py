@@ -366,3 +366,51 @@ def test_diagnosis_marks_old_recordings_as_a_lower_bound(tmp_path, capsys):
     assert "判定の入力が記録されていない" in out
     assert "下限" in out
     assert "観測クラスタ数（下限）: 2" in out   # 人物1 の発話は数えられない
+
+
+# ---------------------------------------------------------------------------
+# 文字起こし精度（eval/score_transcription.py）
+# ---------------------------------------------------------------------------
+
+def test_transcription_normalization_strips_transcript_markup():
+    """転記記号を落とし、実際に話された語は残す（Chiba は CSJ 系の転記規則）."""
+    import score_transcription as sc
+
+    src = "(F_あのね:)(D_ア)塾講の:ことなんだけど:<笑>(1.547)中二の子"
+    assert sc.normalize(src) == "あのねア塾講のことなんだけど中二の子"
+    # フィラー・言い直しを除く指定では中身ごと落ちる
+    assert sc.normalize(src, keep_filler=False) == "塾講のことなんだけど中二の子"
+
+
+def test_transcription_normalization_levels_punctuation_and_width():
+    """句読点・空白・全角半角の差は誤りに数えない（土俵を揃える）."""
+    import score_transcription as sc
+
+    assert sc.normalize("で、恋の話なんですけど。") == sc.normalize("で恋の話なんですけど")
+    assert sc.normalize("ＡＢＣ") == sc.normalize("ABC")
+
+
+def test_cer_counts_edits_against_reference_length():
+    """CER は編集距離 ÷ 参照長（挿入・削除・置換を同じ重みで数える）."""
+    import score_transcription as sc
+
+    assert sc.cer("あいうえお", "あいうえお") == (0, 5)
+    assert sc.cer("あいうえお", "あいうXお") == (1, 5)     # 置換1
+    assert sc.cer("あいうえお", "あいうえおか") == (1, 5)   # 挿入1
+    assert sc.cer("あいうえお", "あいうえ") == (1, 5)       # 削除1
+
+
+def test_full_concatenation_is_the_default_alignment():
+    """既定は全文連結（時間窓で仕切ると区切りの違いが誤りに化けるため）.
+
+    当初は「参照は相槌を独立ターンで挟むのに対しシステムは長くまとめるので
+    全文連結だと順序ずれが誤差になる」と考えて10秒窓を試したが、実測で
+    CER は 32%→50% と悪化した。システムのターンが40秒級で複数の窓をまたぎ、
+    参照だけが後続の窓に残って全削除に数えられるため。既定を戻した経緯を
+    ここで固定する（同じ「改善」を繰り返さないため）。
+    """
+    import inspect
+
+    import score_transcription as sc
+    sig = inspect.signature(sc.score_run)
+    assert sig.parameters["window_sec"].default == 0.0
