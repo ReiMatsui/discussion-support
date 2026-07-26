@@ -824,7 +824,16 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
                 # 継続の門番は _trusted_continuation（ラベル信頼度）に統一。
                 cont = self._trusted_continuation(sp, prev)
                 if cont is not None:
-                    self._note("ラベル継続", label=sp, prev=cont, short=True)
+                    # 1位候補と sim を診断に残す（**info。挙動は不変）。
+                    # ここは照合を実際に行った上で「厳格に決められなかった」経路
+                    # なので候補は手元にあるのに、これまで捨てていた。そのため
+                    # handoff §26.4 の測定で「ラベル継続」だけ裏付けの弁別力を
+                    # 評価できず（138件すべて name 無し）、誤帰属の27.7%を占める
+                    # この kind に対して §18.8 型の門番を設計できなかった。
+                    # tracker.last の name/sim を読む側は kind で分岐しているため
+                    # （自動登録・ラベル不純）、ここに足しても判定は変わらない。
+                    self._note("ラベル継続", label=sp,
+                               **{**info, "prev": cont, "short": True})
                     return cont
         # 声紋で決められない発話（相槌・短発話・声紋計算不可の短経路）はラベル継続:
         # そのラベルの現在の対応（声紋照合の成功で確定した人物 or #ラベル）を返す。

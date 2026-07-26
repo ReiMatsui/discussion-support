@@ -185,3 +185,26 @@ def test_set_hybrid_sets_instance_attribute_only():
     assert vp.__dict__.get("hybrid") is True
     assert VoiceProfiles.hybrid is False     # 既定値（クラス属性）は不変
 
+
+
+def test_short_turn_continuation_records_the_top_candidate():
+    """判別できなかった短発話でも、1位候補と sim を診断に残す（handoff §26.7）.
+
+    ここは照合を実際に行った上で「厳格に決められなかった」経路なので候補は
+    手元にあるのに、これまで捨てていた。そのため §26.4 の測定で「ラベル継続」
+    （誤帰属の27.7%を占める）だけ裏付けの弁別力を評価できず、§18.8 型の門番を
+    設計できなかった。返り値は変えない——記録だけを足す。
+    """
+    vp = _tracker(_unit(1, 1, 0))            # AとBの中間（判別できない）
+    vp.sp_map["1"] = "B"
+
+    assert vp.classify(_SHORT, "1", count=True) == "B"   # 判定は従来どおり
+
+    assert vp.last["kind"] == "ラベル継続"
+    assert vp.last["prev"] == "B"            # 継続先は上書きされない
+    assert vp.last["name"] in ("A", "B")     # 1位候補（AとBの中間なので僅差）
+    assert vp.last["sim"] >= vp.last["second"]
+    # 記録されたのは「候補」であって「採用先」ではない。両者が一致するかどうかが
+    # §18.8 の裏付け判定そのものなので、別のキーとして残すことに意味がある
+    assert "name" in vp.last and "prev" in vp.last
+    assert vp.sp_map["1"] == "B"             # 副作用は無い
