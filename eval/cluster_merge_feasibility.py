@@ -117,10 +117,49 @@ def collect(run: str) -> dict | None:
             "frags": frags, "frag_gt": frag_gt, "seat_of_code": seat_of_code}
 
 
+def score_with_merge(run: str, decided: dict[str, str]) -> dict:
+    """声紋で決めた寄せ先を適用したときの成績（GT は採点にしか使わない）.
+
+    `decompose_attribution --merge-ceiling` は多数派GTへ寄せる**上限**だが、
+    ここでは寄せ先を声紋だけで決め、しきい値を満たしたクラスタのみ統合する。
+    したがって実装したときに実際に得られる値の推定になる。
+    """
+    loaded = dec.load_run(run)
+    utts, code_by_ms = loaded          # collect が通った run のみ渡される
+    rows = [(u, code_by_ms.get(u["ms"])) for u in utts]
+    rows = [(u, c) for u, c in rows if c in dec.GT_CODES
+            and not dec._BACKCHANNEL_RE.match(str(u["_text"]).strip())]
+
+    def _score(final_of) -> dict:
+        pairs = [(final_of(u), c) for u, c in rows]
+        _a, mapping = _gtlib.best_mapping(pairs, dec.GT_CODES,
+                                          unsure=dec.UNSURE_SPEAKER)
+        n = len(pairs)
+        good = sum(1 for f, c in pairs if mapping.get(f) == c)
+        uns = sum(1 for f, _ in pairs if f == dec.UNSURE_SPEAKER)
+        return {"acc": good / n, "unsure": uns / n,
+                "wrong": (n - good - uns) / n, "n": n}
+
+    def _cur(u: dict) -> str:
+        return str(u["final_key"])
+
+    def _merged(u: dict) -> str:
+        cur = _cur(u)
+        if cur != dec.UNSURE_SPEAKER:
+            return cur
+        return decided.get(str(u.get("key")), cur)
+
+    return {"run": run, "before": _score(_cur), "after": _score(_merged)}
+
+
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--prefix", default=None, help="対象ランの接頭辞で絞る")
     p.add_argument("--model", default="redimnet")
+    p.add_argument("--min-sim", type=float,
+                   default=PYANNOTE_CLUSTER_CONFIRM_MIN_SIM,
+                   help="統合に要求する類似度の下限。負の値で「下限なし＝"
+                        "席持ちの中の1位に必ず寄せる」（閉集合の割当て）")
     args = p.parse_args(argv)
 
     from das.asr.live._voice_profiles import VoiceProfiles
@@ -135,10 +174,13 @@ def main(argv: list[str] | None = None) -> None:
     ok = tot = 0
     ok_utt = tot_utt = 0
     below = short = short_utt = 0
+    diff_sims: list[float] = []   # 別人との類似度（2位）。§15.12 との整合確認用
+    applied: list[dict] = []      # しきい値を適用したときの実際の成績
     for run in runs:
         c = collect(run)
         if c is None:
             continue
+        decided: dict[str, str] = {}   # 分裂キー -> 寄せ先（しきい値を満たした分）
         embs = {}
         for k, spans in c["seats"].items():
             e = vp.embed_audio(concat(c["pcm"], spans))
@@ -154,6 +196,10 @@ def main(argv: list[str] | None = None) -> None:
                             reverse=True)
             sim, top = ranked[0]
             second = ranked[1][0] if len(ranked) > 1 else 0.0
+            if len(ranked) > 1:
+                # 2位は定義上「別人」。ここが確定線を超えるなら、絶対しきい値
+                # では同一人物と別人を分けられない（§15.12 の実測と同じ結論）
+                diff_sims.append(second)
             gt_code = c["frag_gt"][k].most_common(1)[0][0]
             want = c["seat_of_code"].get(gt_code)
             hit = top == want
@@ -169,9 +215,12 @@ def main(argv: list[str] | None = None) -> None:
             # 分けないと、しきい値の話と蓄積条件の話が混ざる
             short += sec < PYANNOTE_CLUSTER_NAMING_MIN_SEC
             short_utt += n if sec < PYANNOTE_CLUSTER_NAMING_MIN_SEC else 0
+            if sim >= args.min_sim:
+                decided[k] = top
             print(f"{run:<20}{k:<10}{n:>5}{sec:>7.1f}{gt_code:>9}"
                   f"{want or '?'!s:>10}{sim:>7.2f}{sim - second:>7.2f}"
                   f"{'○' if hit else '×':>6}")
+        applied.append(score_with_merge(run, decided))
     if not tot:
         raise SystemExit("# 測れるランが無かった")
     print(f"\n1位正解率  クラスタ単位 {ok}/{tot} = {ok / tot:.0%}"
@@ -181,6 +230,32 @@ def main(argv: list[str] | None = None) -> None:
     print(f"照合の蓄積下限({PYANNOTE_CLUSTER_NAMING_MIN_SEC}秒)に届かないクラスタ: "
           f"{short}/{tot} 個（発話 {short_utt}/{tot_utt} 件）"
           " — live では照合を試みてすらいない")
+    if applied:
+        n = len(applied)
+        m = {f"{w}_{k}": sum(a[w][k] for a in applied) / n
+             for w in ("before", "after") for k in ("acc", "wrong", "unsure")}
+        how = ("下限なし＝席持ちの中の1位に必ず寄せる"
+               if args.min_sim < 0 else f"しきい値{args.min_sim}以上のみ統合")
+        print(f"\n# {how}（声紋だけで寄せ先を決める。上限ではない）")
+        for a in applied:
+            b, af = a["before"], a["after"]
+            print(f"{a['run']:<20}{b['acc']:>8.1%}→{af['acc']:<8.1%}"
+                  f"{b['wrong']:>9.1%}→{af['wrong']:<9.1%}"
+                  f"{b['unsure']:>9.1%}→{af['unsure']:<9.1%}")
+        print(f"{'平均':<20}{m['before_acc']:>8.1%}→{m['after_acc']:<8.1%}"
+              f"{m['before_wrong']:>9.1%}→{m['after_wrong']:<9.1%}"
+              f"{m['before_unsure']:>9.1%}→{m['after_unsure']:<9.1%}")
+        print(f"  正解 {(m['after_acc'] - m['before_acc']) * 100:+.1f}pt"
+              f" / 誤帰属 {(m['after_wrong'] - m['before_wrong']) * 100:+.1f}pt"
+              f" / 未確定 {(m['after_unsure'] - m['before_unsure']) * 100:+.1f}pt")
+    if diff_sims:
+        diff_sims.sort(reverse=True)
+        print(f"\n# 別人との類似度（各分裂クラスタの2位。n={len(diff_sims)}）")
+        print("  最大 {:.2f} / 上位5件 {}".format(
+            diff_sims[0], " ".join(f"{x:.2f}" for x in diff_sims[:5])))
+        print(f"  うち確定しきい値({PYANNOTE_CLUSTER_CONFIRM_MIN_SIM})以上: "
+              f"{sum(1 for x in diff_sims if x >= PYANNOTE_CLUSTER_CONFIRM_MIN_SIM)}件"
+              " — 絶対しきい値では同一人物と別人を分けられない（§15.12 の再確認）")
     print("\n読み方:")
     print("  1位が正しいのに sim がしきい値未満なら、名寄せを妨げているのは")
     print("  照合能力ではなく**しきい値**。逆に1位自体が外れているなら、")
