@@ -209,6 +209,7 @@ class RecvLoop:
                 wav = np.frombuffer(seg, dtype="<i2").astype(np.float32) / 32768.0
             else:
                 wav = np.zeros(0, dtype=np.float32)
+            _classify_flags: dict[str, object] = {}
             if stt_speaker_unknown:
                 sp_id = UNSURE_SPEAKER
                 d = None
@@ -235,14 +236,21 @@ class RecvLoop:
                 # count: 相槌は照合ごとスキップ。enroll: エコー窓中は照合・補正は
                 # するが蓄積・登録はしない（P2-2）。エコー窓直後の人間の返答が声紋
                 # 補正なしのラベル追従に落ちるのを防ぐ。
+                _overlapped = self.overlaps_other(self.cur_ms, self.cur_end, label)
+                _enroll = (not _is_backchannel) and not _ai_active
                 sp_id = tracker.classify(
                     wav, self.cur_speaker,
-                    overlapped=self.overlaps_other(self.cur_ms, self.cur_end, label),
+                    overlapped=_overlapped,
                     count=not _is_backchannel,
-                    enroll=(not _is_backchannel) and not _ai_active,
+                    enroll=_enroll,
                     chars=len(self.cur_text.strip()))
                 d = tracker.last
                 rec_extra: dict[str, object] = {}
+                # classify に実際に渡した条件（オフライン再生用, handoff §23）。
+                # overlapped は発話系列から再現できるが、enroll はエコー窓＝AI再生
+                # 区間に依存し記録からは再現できないため必ず残す。
+                _classify_flags = {"ov": _overlapped, "enr": _enroll,
+                                   "chars": len(self.cur_text.strip())}
             # --- 声紋ベースのAIエコー除去 ---
             if (sp_id is not None
                     and sp_id.startswith("__") and sp_id.endswith("__")):
@@ -280,14 +288,20 @@ class RecvLoop:
             rec_extra: dict[str, object] = {}
             d = None
             wav = None
+            _classify_flags = {}
         # --- 話者帰属の決定（声紋→Resolver→クラスタ確定/匿名キー） ---
         # 判定フローは _attribution.decide_speaker に一本化（構成ごとの分岐・
         # 各ステップの根拠はモジュール docstring 参照）。constrain（参加人数
         # 上限・closed roster）はこの後の final_sp_id 計算で適用する。
+        # diag_extra には「判定の入力」を集める（records ではなく diag に出す）。
+        # 目的はオフライン再生: これが無いとクラスタ層の入力が実行後に失われ、
+        # 記録から本番コードを回せない（handoff §23）。
+        diag_extra: dict[str, object] = dict(_classify_flags)
         sp_id = decide_speaker(
             s, sp_id=sp_id, d=d, wav=wav,
             start_ms=self.cur_ms, end_ms=self.cur_end,
             rec_extra=rec_extra, vp_debug=self.args.vp_debug,
+            diag_extra=diag_extra,
         )
         if self.cur_ms is not None and self.cur_end is not None:
             self.recent_segs.append((self.cur_ms, self.cur_end, label))
@@ -304,7 +318,7 @@ class RecvLoop:
                 with open(s.diag_path, "a", encoding="utf-8") as f:
                     f.write(json.dumps({"ms": self.cur_ms, "end": self.cur_end, "label": label,
                                         "key": sp_id, "final_key": final_sp_id,
-                                        **tracker.last},
+                                        **tracker.last, **diag_extra},
                                        ensure_ascii=False, default=str) + "\n")
             except OSError:
                 pass

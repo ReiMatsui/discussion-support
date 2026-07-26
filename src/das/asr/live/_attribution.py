@@ -191,7 +191,8 @@ def _cluster_attribution_raw(s: SessionState, resolved, *, wav,
 
 def decide_speaker(s: SessionState, *, sp_id, d, wav: np.ndarray | None,
                    start_ms: int | None, end_ms: int | None,
-                   rec_extra: dict, vp_debug: bool) -> str:
+                   rec_extra: dict, vp_debug: bool,
+                   diag_extra: dict | None = None) -> str:
     """発話の話者キーを決める統合層（constrain 前まで。フローはモジュール docstring）.
 
     引数:
@@ -199,12 +200,24 @@ def decide_speaker(s: SessionState, *, sp_id, d, wav: np.ndarray | None,
       d: tracker.last（声紋判定の診断辞書。tracker 無しなら None）
       wav: 発話区間の音声（クラスタ層の蓄積・照合に使う）
       rec_extra: records に併記する判定根拠（本関数が追記する）
+      diag_extra: diag に併記する「判定の入力」（本関数が追記する。records には
+        入れない）。ここに diarization の窓を残すのは**オフライン再生のため**:
+        クラスタ層の入力（provider の話者区間）はどこにも保存されておらず、
+        実行が終わると失われるため、記録から本番コードを再生できなかった
+        （eval/replay_attribution.py の「クラスタ帰属は再現不可」の原因）。
+        窓は `diarization_window` の出力＝この判定が実際に見た入力そのもので、
+        provider の内部状態（確定済み/進行中の区別）を復元する必要がない。
     戻り値: constrain_human_speaker_key 適用前の話者キー。
     """
     if start_ms is None or end_ms is None or end_ms <= start_ms:
         return sp_id   # ステップ0: 区間不明は声紋段の結果のまま
     voiceprint_speaker, voiceprint_confidence = _voiceprint_claim(d, sp_id)
     diarization_events = s.diarization_window(start_ms, end_ms)
+    if diag_extra is not None and diarization_events:
+        # 位置引数の配列で持つ（1発話あたり数件×全発話なので、キー名を繰り返すと
+        # diag が無用に膨らむ）。順序は [source, speaker, start_ms, end_ms]。
+        diag_extra["diar"] = [[e.source, e.speaker, e.start_ms, e.end_ms]
+                              for e in diarization_events]
     resolved = s.speaker_resolver.resolve(
         utterance=TimeSegment(start_ms, end_ms),
         stt_speaker=str(sp_id),

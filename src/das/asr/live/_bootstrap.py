@@ -565,6 +565,33 @@ def vp_cluster_naming_disabled_warning(
     return None
 
 
+def write_session_config(state, args: LiveArgs, tracker) -> None:
+    """このランの構成を diag の先頭に1行残す（オフライン再生の前提を復元するため）.
+
+    帰属の結果は構成に強く依存する（想定話者数・声紋モデル・自動登録の有無・
+    ハイブリッド構成か・鋳造リンクが有効か）。従来これらはどこにも記録されず、
+    記録を後から採点するときに「どの設定で録れたランか」を人手で思い出すしか
+    なかった（2026-07-25 の実会話3本が上限1のまま録れていた事故は、まさにこれが
+    記録に残っていなかったために事後まで気づけなかった）。
+    """
+    cfg = {
+        "type": "session_config",
+        "diarization": args.diarization,
+        "diarization_max_speakers": args.diarization_max_speakers,
+        "vp_cluster_naming": bool(args.vp_cluster_naming),
+        "vp_mint_cluster_link": bool(args.vp_mint_cluster_link),
+        "vp_model": None if tracker is None else tracker.model,
+        "vp_auto": None if tracker is None else bool(tracker.auto),
+        "vp_hybrid": None if tracker is None else bool(tracker.hybrid),
+        "stt": args.stt,
+    }
+    try:
+        with open(state.diag_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(cfg, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
 def vp_mint_cluster_link_disabled_warning(
         vp_cluster_naming: bool, vp_mint_cluster_link: bool) -> str | None:
     """--vp-mint-cluster-link が効かない構成なら警告文を返す（有効構成なら None）.
@@ -726,6 +753,7 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
                          cluster_namer=cluster_namer)
     state.stt_backend = backend
     state.waiting_to_start = bool(args.setup and _serve and not args.wav and not args.simulate)
+    write_session_config(state, args, tracker)
 
     # --- AIエージェント ---
     _agent_oai_key = os.environ.get("OPENAI_API_KEY", "")
