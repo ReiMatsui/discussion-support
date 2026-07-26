@@ -45,6 +45,7 @@ import _gtlib  # noqa: E402  (eval/ 共通採点)
 from das.asr.live._constants import (  # noqa: E402
     _BACKCHANNEL_RE,
     PYANNOTE_CLUSTER_NAMING_MAX_BUFFER_SEC,
+    PYANNOTE_CLUSTER_NAMING_MIN_SEC,
     SR,
     UNSURE_SPEAKER,
 )
@@ -271,6 +272,129 @@ def session_calibration(sess: Session, emb: Embedder) -> dict:
                 diff.append(float(np.dot(profs[a], profs[b])))
     return {"same": [round(x, 3) for x in same],
             "diff": [round(x, 3) for x in diff]}
+
+
+def stage_linkops(links_path: Path, emb: Embedder) -> None:
+    """実装どおりの演算で対称類似を測り直す（閾値の移植可能性の検査）.
+
+    ステージ1の sim_full は「音声を連結してから声紋化」で測ったが、実装で
+    人物側に使える蓄積は ``VoiceProfiles.own_embs``（受理一致の**発話ごとの
+    声紋**を最大16件）である。演算が違えば同じ数字は出ない可能性があるため、
+    同じペアを実装どおりの式で測り直す:
+
+        cluster側 = 声紋(連結したクラスタbuffer)   ← match_profile と同じ
+        person側  = 正規化(mean(発話ごとの声紋))   ← own_embs の平均と同じ
+
+    出力は元の JSONL に ``sim_op`` を足して書き戻す。
+    """
+    rows = [json.loads(x) for x in links_path.read_text(encoding="utf-8").splitlines()
+            if x.strip()]
+    by_session: dict[str, list[dict]] = {}
+    for r in rows:
+        if not r.get("empty"):
+            by_session.setdefault(r["session"], []).append(r)
+    for name, rs in by_session.items():
+        sess = Session(name)
+        person_vec: dict[str, np.ndarray | None] = {}
+        seat_vec: dict[str, np.ndarray | None] = {}
+        for r in rs:
+            p = r["person"]
+            if p not in person_vec:
+                # own_embs 相当: 受理一致の発話ごと声紋を最大 _OWN_EMB_CAP(16) 件
+                embs = [emb.embed(w) for w in
+                        person_certified_audio(sess, p, limit_sec=10 ** 6)[-16:]]
+                embs = [e for e in embs if e is not None]
+                if embs:
+                    v = np.mean(np.stack(embs), axis=0)
+                    person_vec[p] = v / np.linalg.norm(v)
+                else:
+                    person_vec[p] = None
+            s = r["seat"]
+            if s not in seat_vec:
+                w = concat_tail(seat_audio(sess, s),
+                                PYANNOTE_CLUSTER_NAMING_MAX_BUFFER_SEC)
+                seat_vec[s] = emb.embed(w) if w.size else None
+            pv, sv = person_vec[p], seat_vec[s]
+            r["sim_op"] = (round(float(np.dot(pv, sv)), 3)
+                           if pv is not None and sv is not None else None)
+        print(f"  {name}: {len(rs)}ペア 測り直し", flush=True)
+    links_path.write_text(
+        "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n",
+        encoding="utf-8")
+
+
+def stage_linksim(sessions: list[str], emb: Embedder, out_path: Path) -> None:
+    """案B遅延を時系列で忠実にシミュレートし、判定点ごとの正誤を出す.
+
+    ステージ1/linkops は「セッション全量の声紋」で測ったが、実装が実際に
+    比較できるのは**その時点のバッファ**である（クラスタ側は直近
+    PYANNOTE_CLUSTER_NAMING_MAX_BUFFER_SEC 秒。1723 で全量なら 0.73 の
+    ペアが直近20秒だと 0.05 になる＝クラスタ後半が別人の声、という例がある）。
+    さらに遅延リンクは「蓄積が伸びるたびに何度も判定する」ため、1回でも
+    誤って跨げば統合が起きる。よって測るべきは2つ:
+
+      - 初回成立の正誤（実際に統合が起きる瞬間）
+      - 全判定点のうち誤って跨いだ回数（繰り返し判定による誤リンク露出）
+
+    判定点は各クラスタの累積音声が 5/10/20/40/80/160 秒を超えた発話
+    （埋め込み計算量を抑えるための間引き。実装は毎観測で判定するが、
+    バッファは直近20秒なので情報の増分はこの粒度でほぼ尽きる）。
+    """
+    checkpoints = (5.0, 10.0, 20.0, 40.0, 80.0, 160.0)
+    rows: list[dict] = []
+    for name in sessions:
+        sess = Session(name)
+        truth = {}
+        for line in out_path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                r = json.loads(line)
+                if r.get("session") == name and not r.get("empty"):
+                    truth[(r["person"], r["seat"])] = r["same_person"]
+        seat_buf: dict[str, list[np.ndarray]] = {}
+        seat_sec: dict[str, float] = {}
+        seat_next: dict[str, int] = {}
+        person_buf: dict[str, list[np.ndarray]] = {}
+        person_sec: dict[str, float] = {}
+        n_pts = 0
+        for d in sess.utts:
+            k = str(d.get("key", ""))
+            w = sess.wav_of(d)
+            if d.get("kind") in RELIABLE_KINDS:
+                p = str(d.get("name") or d.get("key"))
+                if p.startswith("人物") and w.size >= SR * 1.0:
+                    person_buf.setdefault(p, []).append(w)
+                    person_sec[p] = person_sec.get(p, 0.0) + w.size / SR
+            if not k.startswith("@diar:") or w.size < SR * 0.5:
+                continue
+            seat_buf.setdefault(k, []).append(w)
+            seat_sec[k] = seat_sec.get(k, 0.0) + w.size / SR
+            i = seat_next.get(k, 0)
+            if i >= len(checkpoints) or seat_sec[k] < checkpoints[i]:
+                continue
+            seat_next[k] = i + 1
+            cv = emb.embed(concat_tail(seat_buf[k],
+                                       PYANNOTE_CLUSTER_NAMING_MAX_BUFFER_SEC))
+            if cv is None:
+                continue
+            for p, sec in person_sec.items():
+                if sec < PYANNOTE_CLUSTER_NAMING_MIN_SEC:
+                    continue
+                pv = emb.embed(concat_tail(
+                    person_buf[p], PYANNOTE_CLUSTER_NAMING_MAX_BUFFER_SEC))
+                if pv is None:
+                    continue
+                n_pts += 1
+                rows.append({
+                    "session": name, "person": p, "seat": k,
+                    "at_ms": d["ms"], "seat_sec": round(seat_sec[k], 1),
+                    "person_sec": round(sec, 1),
+                    "sim": round(float(np.dot(pv, cv)), 3),
+                    "same_person": truth.get((p, k)),
+                })
+        print(f"  {name}: 判定点{n_pts}件", flush=True)
+    (out_path.parent / "phase0_linksim.jsonl").write_text(
+        "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n",
+        encoding="utf-8")
 
 
 def stage_links(sessions: list[str], emb: Embedder, out_path: Path) -> None:
@@ -759,7 +883,8 @@ def stage_utt(sessions: list[str], links_path: Path,
 
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("--stage", required=True, choices=["links", "utt"])
+    p.add_argument("--stage", required=True,
+                   choices=["links", "linkops", "linksim", "utt"])
     p.add_argument("--sessions", nargs="*", default=None)
     p.add_argument("--model", default="redimnet")
     p.add_argument("--out", default=None)
@@ -770,6 +895,12 @@ def main(argv: list[str] | None = None) -> None:
     if args.stage == "links":
         out = Path(args.out or ROOT / "eval" / "phase0_links.jsonl")
         stage_links(sessions, Embedder(args.model), out)
+    elif args.stage == "linkops":
+        stage_linkops(Path(args.out or ROOT / "eval" / "phase0_links.jsonl"),
+                      Embedder(args.model))
+    elif args.stage == "linksim":
+        stage_linksim(sessions, Embedder(args.model),
+                      Path(args.out or ROOT / "eval" / "phase0_links.jsonl"))
     elif args.stage == "utt":
         import tempfile
         links_path = Path(args.out or ROOT / "eval" / "phase0_links.jsonl")
