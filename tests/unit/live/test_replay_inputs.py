@@ -122,6 +122,29 @@ def test_diag_records_the_classify_flags(tmp_path):
     assert state.tracker.calls[-1]["enroll"] is True
 
 
+def test_diag_records_which_path_decided_the_speaker(tmp_path):
+    """帰属がどの経路で決まったかが diag に残る（handoff §26.6）.
+
+    speaker_source は records にしか無く、records は終了時に永続化されない
+    （transcripts に残るのは diag/turns/wav だけ）。そのためオフライン分析が
+    「この誤帰属は 3d の門番で止められる経路か、STT フォールバックか」を
+    分けられず、門番の適用範囲を数字で決められなかった。
+    """
+    state = _state_for_recording(tmp_path, [])   # 窓が空＝STT フォールバック
+    loop = RecvLoop(state, _Args(), backend=None)
+    loop.cur_speaker = "1"
+    loop.cur_text = "これは検証用の発言です"
+    loop.cur_ms, loop.cur_end = 1000, 3000
+
+    loop.flush()
+
+    utt = next(d for d in _diag_lines(state.diag_path) if "label" in d)
+    assert utt["src"] == "stt_fallback"
+    assert utt["why"] == state.records[-1]["speaker_reason"]
+    # diag の経路は records の経路と同じもの（二重管理にしない）
+    assert utt["src"] == state.records[-1]["speaker_source"]
+
+
 def test_diag_does_not_leak_decision_inputs_into_records(tmp_path):
     """判定の入力は diag 限定で、議事録レコードには混ぜない（出力形式の互換）."""
     events = [DiarizationEvent(start_ms=900, end_ms=3100,

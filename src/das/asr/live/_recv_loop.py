@@ -303,6 +303,15 @@ class RecvLoop:
             rec_extra=rec_extra, vp_debug=self.args.vp_debug,
             diag_extra=diag_extra,
         )
+        # 判定がどの経路で決まったかを diag にも残す（診断のみ・挙動不変）。
+        # speaker_source は records にしか無く、records は終了時に永続化されない
+        # （transcripts に残るのは diag/turns/wav だけ）。そのため
+        # eval/decompose_attribution.py が「この誤帰属は 3d の門番で止められる
+        # 経路か、それとも STT フォールバックか」を分けられなかった
+        # （handoff §26.6）。短いキー名なのは diag が1発話1行で膨らむため。
+        if rec_extra.get("speaker_source") is not None:
+            diag_extra["src"] = rec_extra["speaker_source"]
+            diag_extra["why"] = rec_extra.get("speaker_reason")
         if self.cur_ms is not None and self.cur_end is not None:
             self.recent_segs.append((self.cur_ms, self.cur_end, label))
             del self.recent_segs[:-12]
