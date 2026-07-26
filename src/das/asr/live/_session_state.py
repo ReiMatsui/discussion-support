@@ -342,12 +342,23 @@ class SessionState:
         return key
 
     def _known_human_slot_count(self) -> int:
+        """既に席（表示ラベル）を持つ人の数を数える.
+
+        records には話者を持たないレコードも混ざる（add_sys のシステム
+        メッセージ: 「この声を『参加者A』として追跡開始」「注意: 想定話者数の
+        上限…」など）。これらを話者キー "" として数えると、**空文字が1つの席
+        として居座り、想定話者数が実質1人ぶん目減りする**（2026-07-25 に統一席
+        ルールで records 走査を導入した際の取りこぼし。sys は鋳造のたびに必ず
+        出るので、上限2の2人会話では実際に座れるのが1人だけになっていた）。
+        話者を持つレコードだけを数える。
+        """
         slots = set(self.anonymous_labels.values())
         with self.state_lock:
             for r in self.records:
-                key = str(r.get("speaker", "")) if "speaker" in r else ""
-                slot = self._human_slot_key(key)
-                if slot is not None:
+                if "speaker" not in r:
+                    continue
+                slot = self._human_slot_key(str(r["speaker"]))
+                if slot:
                     slots.add(slot)
         return len(slots)
 

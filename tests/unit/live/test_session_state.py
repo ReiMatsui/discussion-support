@@ -403,6 +403,25 @@ def test_constrain_unified_seat_rule_counterfactual_1723(tmp_path):
     assert s.constrain_human_speaker_key("人物1") == "人物1"
 
 
+def test_sys_records_do_not_consume_a_seat(tmp_path):
+    """システムメッセージが席を1つ食い潰さない（想定話者数の目減り対策）.
+
+    records には話者を持たない add_sys のレコードが混ざる。統一席ルール
+    （2026-07-25）が records を走査するようになった際、これらを話者キー "" と
+    して数えていたため、空文字が1席として居座り上限が実質1人ぶん減っていた。
+    sys は鋳造のたびに必ず出る（「この声を『参加者A』として追跡開始」）ので、
+    上限2の2人会話では2人目が常に締め出されていた。
+    """
+    s = _make_state_with_diag(tmp_path, max_speakers=2)
+    s.records.append({"ms": 0, "end_ms": 500, "speaker": "@diar:1", "text": "x"})
+    s.disp_name("@diar:1")                      # 参加者A（席1）
+    assert s._known_human_slot_count() == 1
+    s.add_sys(100, "この声を「参加者A」として追跡開始")
+    assert s._known_human_slot_count() == 1     # sys は席を作らない
+    # 2人目は席が空いているので通る（旧実装では "?" に落ちていた）
+    assert s.constrain_human_speaker_key("@diar:2") == "@diar:2"
+
+
 def test_saved_html_colors_stable_across_rekey(tmp_path):
     """保存用HTMLの色が rekey（統合/リネーム）で他の話者へずれない（監査E）.
 
