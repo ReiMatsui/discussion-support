@@ -36,8 +36,20 @@ uv run python eval/replay_attribution.py   # 79%/未確定3%/誤帰属18% を確
 すべて推奨構成（ハイブリッド）で実行:
 
 ```bash
-uv run das listen-soniox --hybrid --max-speakers 3 --soniox-args "--no-agent"
+uv run das listen-soniox --hybrid --max-speakers 3 \
+  --vp-mint-cluster-link --soniox-args "--no-agent"
 ```
+
+**`--vp-mint-cluster-link` を必ず付ける**（2026-07-25 追加）。二重帳簿の根治
+（handoff §21）の opt-in で、既定は無効。付けないと「同じ人が2席を取り実在者が
+締め出される」現象がそのまま再現し、この検証で見たい数字が取れない。
+A/B が必要なら記録は1本でよく、後述の診断スクリプトが同じ記録を
+on/off で流し直す（実会話を2本録る必要はない）。
+
+**想定話者数（`--max-speakers`）は実際の参加人数に合わせる。** 2026-07-25 の
+実会話3本は上限1のまま録れており（§20-3）、当時は設定が記録に残っていなかった
+ため事後まで気づけなかった。現在は diag の1行目に構成が残るので、録音直後に
+`head -1 transcripts/$SESSION.diag.jsonl` で確認できる。
 
 （介入込みの通し確認をしたい場合は `--no-agent` を外す。ただし帰属測定の
 本数を稼ぐ間は切っておくとAPIコストと交絡を避けられる）
@@ -53,6 +65,36 @@ uv run das listen-soniox --hybrid --max-speakers 3 --soniox-args "--no-agent"
   （`ls -t transcripts/*.turns.jsonl | head -1`）
 - A は可能なら2本（会話の重なり方が違う日・メンバーで）。1本の数字で
   結論を出さない（§15.3 の過学習警戒と同じ姿勢）
+
+## 2.5 録音直後にまず流す（アノテーション不要・1分）
+
+GT を付ける前に、この1本から取れる判断材料をまとめて出す:
+
+```bash
+SESSION=$(basename "$(ls -t transcripts/*.turns.jsonl | head -1)" .turns.jsonl)
+uv run python eval/diagnose_live_session.py --session $SESSION
+```
+
+出るもの（詳細はスクリプトの docstring）:
+
+- **A. 再生の忠実性** — 記録に判定の入力が揃っているか。揃っていれば
+  `eval/replay_live_attribution.py --session $SESSION` の「記録との自己一致」が
+  100% になるはずで、**そうなって初めて ID空間の統合（§24.3）に着手できる**
+- **B. クラスタ分裂** — 実質クラスタ数 ÷ 想定話者数。**項目2（土台が2つとも
+  壊れている問題）に決着をつける数字**。1.0 に近ければ土台は健全で改善は
+  声紋層・門番側で効く。大きく上回るなら分裂が支配的で、門番を増やしても
+  頭打ち＝入力側（マイク配置・複数マイク・DOA）の問題
+- **C. 席の圧迫** — 未確定率と、上限で落ちたキーの内訳
+- **D. 声紋層の健全性** — ラベル不純率・クラスタ確定の見送り・鋳造リンクの発火
+
+鋳造リンクの A/B（同じ記録を on/off で流し直す）:
+
+```bash
+uv run python eval/diagnose_live_session.py --session $SESSION --ab
+```
+
+Phase 0 の予測は GT11本平均で 実質 +9pt / 未確定 −15pt（§21）。実会話で同じ
+向きなら opt-in を既定化してよい、という判断材料になる。
 
 ## 3. 終了後の採点（1本あたり: アノテーション20-30分＋採点1分）
 

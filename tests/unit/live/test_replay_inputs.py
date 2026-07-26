@@ -285,3 +285,69 @@ def test_old_recordings_are_reported_as_not_replayable(tmp_path):
 
     rec = rla.load_session("old", root=tmp_path)
     assert rla.has_replayable_inputs(rec["utts"]) is False
+
+
+# ---------------------------------------------------------------------------
+# 録音後の診断（eval/diagnose_live_session.py）
+# ---------------------------------------------------------------------------
+
+def test_diagnosis_measures_cluster_fragmentation(tmp_path):
+    """クラスタ分裂を「発話時間の90%を覆うクラスタ数」で測る（項目2の判断材料）.
+
+    観測クラスタ数をそのまま使うと、1発話だけの雑音クラスタが数を膨らませて
+    分裂の深刻さを過大評価する。時間で重み付けした実質クラスタ数を見る。
+    """
+    import diagnose_live_session as diag
+
+    # 2人の会話に、主要2クラスタ＋雑音3クラスタ（各1発話・短い）
+    utts = []
+    for i in range(10):
+        ms = 1000 + i * 5000
+        spk = "SPEAKER_00" if i % 2 == 0 else "SPEAKER_01"
+        utts.append({"ms": ms, "end": ms + 4000, "label": "1",
+                     "key": "@diar:1", "final_key": "@diar:1", "kind": "蓄積中",
+                     "ov": False, "enr": True, "chars": 10,
+                     "diar": [["pyannote", spk, ms, ms + 4000]]})
+    for j, spk in enumerate(("SPEAKER_07", "SPEAKER_08", "SPEAKER_09")):
+        ms = 60000 + j * 1000
+        utts.append({"ms": ms, "end": ms + 200, "label": "1",
+                     "key": "?", "final_key": "?", "kind": "照合なし",
+                     "ov": False, "enr": True, "chars": 2,
+                     "diar": [["pyannote", spk, ms, ms + 200]]})
+    texts = [(u["ms"], "検証用の発言です") for u in utts]
+    _write_recording(tmp_path, "s", utts, texts,
+                     config={"type": "session_config", "diarization": "pyannote",
+                             "diarization_max_speakers": 2})
+
+    rec = diag.read_diag("s", root=tmp_path)
+    sec: dict[str, float] = {}
+    for u in rec["utts"]:
+        dur = (u["end"] - u["ms"]) / 1000.0
+        for src, spk, _s, _e in u.get("diar", []):
+            sec[f"{src}:{spk}"] = sec.get(f"{src}:{spk}", 0.0) + dur
+    total = sum(sec.values())
+    acc, effective = 0.0, 0
+    for _k, v in sorted(sec.items(), key=lambda kv: -kv[1]):
+        acc += v
+        effective += 1
+        if acc >= total * 0.9:
+            break
+    assert len(sec) == 5        # 観測は5クラスタ
+    assert effective == 2       # 実質は2＝想定話者数と一致（分裂していない）
+
+
+def test_diagnosis_reports_old_recordings_as_unmeasurable(tmp_path, capsys):
+    """入力の無い旧ランでは「測定不可」と明示する（黙って0を出さない）."""
+    import diagnose_live_session as diag
+
+    utts = [{"ms": 1000, "end": 3000, "label": "1", "key": "?",
+             "final_key": "?", "kind": "蓄積中"}]
+    _write_recording(tmp_path, "old", utts, [(1000, "旧ランの発言")],
+                     config={"type": "session_config"})
+
+    rec = diag.read_diag("old", root=tmp_path)
+    diag.report_fidelity("old", rec)
+    diag.report_fragmentation(rec)
+    out = capsys.readouterr().out
+    assert "判定の入力が記録されていない" in out
+    assert "測定不可" in out
