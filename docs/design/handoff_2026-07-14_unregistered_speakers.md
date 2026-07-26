@@ -1102,3 +1102,66 @@ brief（脱線理由/整理焦点）を再生成し、cooldown 経過後にそ�
    `bc56b8b` の取りこぼし。上限2の2人会話で座れるのは1人だった）。
 6. **未着手**: マイク直の実会話ではクラスタが分裂する（2人の会話に pyannote
    クラスタ10個）。実会話1723の未確定84.9%の主因はこちらで、二重帳簿ではない。
+
+## 22. 全系統の自己監査と修正6件（2026-07-25、Claude Opus 5）
+
+ユーザー依頼「バグ・複雑すぎるロジック・修正すべき点を徹底的に洗い出す」。
+機械的な網羅（複雑度計測・パターン検索・サブエージェントによる領域別スイープ）で
+候補を集め、**全件を自分でコードに当たって裏取り**した。サブエージェントの報告は
+9件中5件が誤検出だったため、検証工程は省略できない（誤検出の内訳は §22.3）。
+
+### 22.1 修正した実バグ6件
+
+1. **`conversation` 介入だけ cooldown の時計を進めていなかった** `720f41a`
+   発火する全分岐のうち `conversation` のみ `_last_intervention_at` 未更新。
+   `invite` は他候補と違い mode で gate されない（_workers.py:559）ため会話モードでも
+   共存し、AIが応答した直後に保留中の声かけが古い時刻基準で global cooldown を
+   通過して**息継ぎなしに2回喋る**。§19 で潰した「仕切りすぎ」の別経路。
+2. **AF介入が「誰を誘ったか」を記録していなかった** `720f41a`
+   `af_l1`/`af_l2` は `invite_target` を渡して実際に指名するのに `_last_invited`
+   を更新せず、`skip_invite` が働かない＝**同じ人が連続で指名される**。
+   生成先行(hold)→release 経路も同様だった（`--af` 既定OFFのため潜在）。
+   → 1と2は `_note_intervention` を「発火の副作用を記帳する唯一の口」にして
+   構造的に解消（直近履歴・cooldownの時計・声かけ相手をここで更新）。
+3. **AFランタイムの文書取り込みが到達不能** `a2401a4`
+   `getattr(args, "docs", None)` が LiveArgs にフィールド無しで**常に None**。
+   `AFRuntime.ingest_documents` が一度も走らず、AF介入は資料を参照していなかった。
+   merge_sim（§18.3）と同型。LiveArgs・CLI・`das listen` の転送まで配線。
+4. **`show_partial` がロック外で書いていた** `103fcdf`
+   `_effective_silence` は `partial_text` と `_last_partial_change` を組で読み
+   （F3）読み手は state_lock を取るが、書き手が取らないため読み手のロックが無意味。
+   「新しいテキスト＋古い時刻」を読むとフロアが空いたと誤認し**介入が発話に被さる**。
+5. **UIの不正リクエストが500＋トレースバック** `b649dd9`
+   `do_POST` に例外処理が皆無で、本文を読む `json.loads` 10箇所が無防備
+   （うち9箇所は Content-Length: 0 も未確認）。ルーティングを `_dispatch_post` に
+   分け、翻訳を1箇所に。`_read_json()` で本文なし＝空dict、不正＝400 に統一。
+6. **クラスタ台帳のロック規約が不統一** `2cd167c`
+   `diarization_speaker_keys` を recvスレッドがロックなしで書き、`rekey` だけ
+   state_lock 下で `.items()` 走査。UIの /rename 中に新キーが発行されると
+   `dictionary changed size during iteration` で **rekey が落ち**、台帳だけ旧キーで
+   残る（C3 の人格復活の再来）。書き手を全て state_lock 下に揃えた。
+
+### 22.2 未着手（構造の問題。着手には別途合意が要る）
+
+- `_run_agent_worker` は **579行・分岐117・ネスト8**。介入種別ごとの巨大な
+  if-elif 連鎖で状態更新が各枝に散在する。**上記1と2はこの構造が直接の原因**で、
+  枝を足すたびに更新漏れが起きる。今回は記帳を1点に集約して再発を止めたが、
+  種別×更新項目の表駆動にするのが本筋
+- `_ui.py` の `create`/`do_POST` は**ネスト14**。今回 `_dispatch_post` に分けて
+  例外処理は1箇所になったが、ルーティング自体は依然として巨大な if-elif
+- `run_session` は443行・分岐90（起動処理が一枚岩）
+
+### 22.3 調べて否定したもの（記録: 同じ誤検出を繰り返さないため）
+
+- `color_of`/`html_color` の無保護アクセス → **全て state_lock 内**だった
+- `agents/_base.py` の `tracker.profiles` 無保護書き込み → `with tracker._lock` 内
+- epoch跨ぎで沈黙タイマーが古くなる → `reset_for_new_meeting` が更新済み
+- `records`/`diarization_events` の無制限増加 → 会議単位でリセットされる設計
+  （単一の長時間会議では有効な指摘だが、現行の使い方では問題にならない）
+
+### 22.4 ゲート
+
+pytest 932 passed（既知flake `test_structuring_checker_rejudges_after_pending_reset`
+のみ）、新規テスト10件。ruff 新規エラーなし。**replay 5本は §18.10 の基準と
+完全一致**（142016=79/81/18・Chiba 1723=40/50/9・0696=68/88/2・0743=63/81/11・
+0856=20/38/9）＝帰属の声紋層は非接触。
