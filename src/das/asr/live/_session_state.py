@@ -1163,11 +1163,11 @@ class SessionState:
     def show_partial(self, sp, text: str):
         # UI向けに途中経過(partial)を保持（認識中であることが分かるように, 課題①）
         t = text.strip()
-        prev = self.partial_text
-        self.partial_text = t
         # peek_disp_name（割当てなし）を使う: partial 限りの幻キーにラベル文字を
         # 割り当てない。本表示（flush→records）の disp_name は従来どおり割当てあり。
-        self.partial_speaker = self.peek_disp_name(self.key_for_label(sp)) if t else ""
+        # 表示名の解決はロックの外で済ませる（端末出力と同じく重い処理を
+        # ロック内に持ち込まない）。
+        speaker = self.peek_disp_name(self.key_for_label(sp)) if t else ""
         # M6: 長い発話の途中では STT 確定レコードが来ず「喋っている最中に沈黙が
         # 伸びる」ため、pause 判定を満たした介入が発話に被さり得る。partial の受信
         # でも沈黙タイマーを更新し、発話中を「沈黙」と誤認しないようにする。
@@ -1175,10 +1175,21 @@ class SessionState:
         # 張り付くのを防ぐため。
         # 既知のトレードオフ: エコーウィンドウ中の AI 自身の声の partial でもタイマー
         # が更新され得るが、フロア判定を保守側（介入を待つ側）に倒すだけなので許容。
-        if t and t != prev:
-            _now = time.monotonic()
-            self._last_utt_time[0] = _now
-            self._last_partial_change = _now   # F3: フロア占有の鮮度判定に使う
+        #
+        # partial_text と _last_partial_change は **組で** 読まれる（_workers の
+        # _effective_silence が「非空の partial が直近に更新されていればフロアは
+        # 埋まっている」と判定する, F3）。書き手側がロックを取らないと、読み手が
+        # ロックを取っていても「新しいテキスト＋古いタイムスタンプ」の組を読みうる。
+        # その場合フロアが空いたと誤認して介入が発話に被さる（M6/F3 が塞いだはずの
+        # 穴が書き手側で開いていた。2026-07-25 監査）。ここで組にして書く。
+        with self.state_lock:
+            prev = self.partial_text
+            self.partial_text = t
+            self.partial_speaker = speaker
+            if t and t != prev:
+                _now = time.monotonic()
+                self._last_utt_time[0] = _now
+                self._last_partial_change = _now   # F3: フロア占有の鮮度判定に使う
         if not t:
             sys.stdout.write(CLEAR_LINE)
         else:

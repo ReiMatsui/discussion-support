@@ -446,3 +446,40 @@ def test_saved_html_colors_stable_across_rekey(tmp_path):
     assert s.html_color("#2") == color2_before
     with open(tmp_path / "o.html", encoding="utf-8") as f:
         assert color2_before in f.read()
+
+
+def test_show_partial_writes_text_and_timestamp_under_one_lock(tmp_path):
+    """partial のテキストと更新時刻が state_lock 下で組にして書かれる.
+
+    _workers._effective_silence は「非空の partial が直近に更新されていれば
+    フロアは埋まっている」と判定する（F3）。書き手がロックを取らないと、読み手が
+    state_lock を取っていても「新しいテキスト＋古いタイムスタンプ」の組を読み、
+    発話中なのにフロアが空いたと誤認して介入が発話に被さる（M6/F3 が塞いだはずの
+    穴が書き手側で開いていた。2026-07-25 監査）。
+    """
+    import threading
+
+    s = _make_state_with_diag(tmp_path, max_speakers=2)
+
+    s.show_partial("1", "途中経過のテキスト")
+    assert s.partial_text == "途中経過のテキスト"
+    assert s._last_partial_change > 0.0
+
+    # 別スレッドが state_lock を保持している間は show_partial が進めない
+    # （＝書き込みが本当にロック下にある）。修正前はロック外なので即座に完了した。
+    s.state_lock.acquire()
+    done: list[bool] = []
+
+    def _writer() -> None:
+        s.show_partial("1", "次の途中経過")
+        done.append(True)
+
+    t = threading.Thread(target=_writer, daemon=True)
+    t.start()
+    t.join(timeout=0.3)
+    assert done == [], "state_lock 保持中に partial が書き換わった（ロック外の書き込み）"
+    assert s.partial_text == "途中経過のテキスト"
+    s.state_lock.release()
+    t.join(timeout=1.0)
+    assert done == [True]
+    assert s.partial_text == "次の途中経過"
