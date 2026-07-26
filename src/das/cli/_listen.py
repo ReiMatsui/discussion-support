@@ -108,6 +108,13 @@ def listen_soniox(
         help="diarization の生クラスタ単位で声紋照合して名前を確定する"
         " (--diarization pyannote/sortformer 専用)",
     ),
+    vp_mint_cluster_link: bool = typer.Option(
+        False,
+        "--vp-mint-cluster-link",
+        help="二重帳簿の根治 (opt-in): 声紋が新しい人物を鋳造する瞬間に、席を持つ"
+        "クラスタの蓄積声紋と対称比較し、同一人物なら統合する"
+        " (--vp-cluster-naming/--hybrid 併用時のみ)",
+    ),
     max_speakers: int | None = typer.Option(
         None,
         "--max-speakers",
@@ -162,6 +169,7 @@ def listen_soniox(
                 wav=wav,
                 diarization=diarization,
                 vp_cluster_naming=vp_cluster_naming,
+                vp_mint_cluster_link=vp_mint_cluster_link,
                 max_speakers=max_speakers,
                 hybrid=hybrid,
                 soniox_args=soniox_args,
@@ -202,6 +210,7 @@ def _build_soniox_argv(
     wav: Path | None = None,
     diarization: str | None = None,
     vp_cluster_naming: bool = False,
+    vp_mint_cluster_link: bool = False,
     max_speakers: int | None = None,
     hybrid: bool = False,
     soniox_args: str = "",
@@ -225,6 +234,8 @@ def _build_soniox_argv(
         argv += ["--diarization", diarization]
     if vp_cluster_naming and not hybrid:
         argv.append("--vp-cluster-naming")
+    if vp_mint_cluster_link:
+        argv.append("--vp-mint-cluster-link")
     if max_speakers is not None:
         argv += ["--diarization-max-speakers", str(max_speakers)]
     if soniox_args:

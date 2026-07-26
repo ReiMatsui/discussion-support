@@ -868,6 +868,18 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
         self._note(kind, label=sp, **info)
         return key
 
+    def embed_audio(self, wav: np.ndarray) -> np.ndarray | None:
+        """音声を正規化済み声紋にする（副作用も状態依存もない公開API）.
+
+        ClusterVoiceNamer の鋳造時リンク（handoff_2026-07-25 案B）が、クラスタの
+        蓄積音声とプロファイルを**対称に**比べるために使う。match_profile と
+        違い「登録済みプロファイルとの照合」はしないので、呼び出し側が任意の
+        2つの声紋を突き合わせられる。_lock は取らない（_embed はプロファイル
+        台帳を読み書きしないため。ロックを取ると、既に tracker のロックを
+        保持したまま呼ばれる経路と入れ子になる）。
+        """
+        return self._embed(wav)
+
     def match_profile(self, wav: np.ndarray) -> tuple[str, float] | None:
         """副作用なしのクラスタ単位声紋照合（pyannoteハイブリッド構成用）.
 

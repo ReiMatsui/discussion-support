@@ -97,6 +97,10 @@ class LiveArgs:
     # 声紋照合し、名前を確定する（3役分業: Soniox=文字起こし/pyannote=クラスタ
     # リング/声紋照合=クラスタ単位の名前付け）。tracker(声紋)が無効なら無視される。
     vp_cluster_naming: bool = False
+    # 二重帳簿の根治（handoff_2026-07-25_dual_ledger_rootcure.md 案B, opt-in）。
+    # 声紋側が新しい人物Nを鋳造する瞬間だけ、席を持つクラスタの蓄積声紋と
+    # 対称比較して同一人物なら統合する。既定 False ＝従来挙動。
+    vp_mint_cluster_link: bool = False
     setup: bool = True
     port: int = 8231
     agent: bool = True
@@ -556,6 +560,21 @@ def vp_cluster_naming_disabled_warning(
     return None
 
 
+def vp_mint_cluster_link_disabled_warning(
+        vp_cluster_naming: bool, vp_mint_cluster_link: bool) -> str | None:
+    """--vp-mint-cluster-link が効かない構成なら警告文を返す（有効構成なら None）.
+
+    鋳造リンクはクラスタの蓄積声紋と比較する機構なので、クラスタ単位の
+    名前付け（--vp-cluster-naming）が無い構成では比較相手が存在しない。
+    黙って無効化すると「入れたつもり」で検証してしまうため明示する
+    （--vp-cluster-naming 側の F6 と同じ方針）。
+    """
+    if vp_mint_cluster_link and not vp_cluster_naming:
+        return ("# 注意: --vp-mint-cluster-link は --vp-cluster-naming と"
+                "併用したときだけ機能します（単独指定では無視されます）")
+    return None
+
+
 # ---------------------------------------------------------------------------
 # メインのセッション起動
 # ---------------------------------------------------------------------------
@@ -625,6 +644,10 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
     warning = vp_cluster_naming_disabled_warning(args.diarization, args.vp_cluster_naming)
     if warning:
         print(warning, flush=True)
+    warning = vp_mint_cluster_link_disabled_warning(
+        args.vp_cluster_naming, args.vp_mint_cluster_link)
+    if warning:
+        print(warning, flush=True)
     if args.diarization == "pyannote":
         pyannote_key = os.environ.get("PYANNOTEAI_API_KEY")
         if not pyannote_key:
@@ -680,6 +703,11 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
             tracker.set_hybrid(True)
             print("# 話者名前付け: pyannoteクラスタ単位の声紋照合ハイブリッド構成を使用"
                   "（docs/design/pyannote_live1_trial_2026-07-09.md §9）", flush=True)
+            if args.vp_mint_cluster_link:
+                print("# 鋳造リンク(opt-in): 新しい人物の鋳造時に、席を持つクラスタと"
+                      "対称比較して同一人物なら統合します"
+                      "（docs/design/handoff_2026-07-25_dual_ledger_rootcure.md 案B）",
+                      flush=True)
         else:
             print("# 注意: --vp-cluster-naming は声紋照合(tracker)が無効なため無視されます"
                   "（--no-vp解除 or 依存導入が必要）", flush=True)

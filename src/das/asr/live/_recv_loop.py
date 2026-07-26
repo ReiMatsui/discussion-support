@@ -69,6 +69,56 @@ class RecvLoop:
         return any(lbl != label and min(e, end) - max(s, start) > 0
                    for s, e, lbl in self.recent_segs)
 
+    def _link_mint_to_cluster(self, name: str) -> None:
+        """鋳造したての人物を、同一人物の席持ちクラスタへ統合する（opt-in）.
+
+        二重帳簿の根治（handoff_2026-07-25_dual_ledger_rootcure.md 案B）。
+        声紋側が新しい戸籍 人物N を作った直後に、その鋳造したてのプロファイルと
+        席を持つ各クラスタの蓄積声紋を**対称比較**し、同一人物と判定できたら
+        クラスタ側の席を人物Nへ rekey する（統合の単一入口は従来どおり
+        SessionState.rekey）。結果として 1人=1クラスタ=1戸籍=1席 になり、
+        席の二重取りで実在者が締め出される問題が消える。
+
+        既定は無効（--vp-mint-cluster-link で有効化）。cluster_namer が無い構成
+        （Soniox単独・pyannote単独）は呼ばれても即 return するため挙動不変。
+        判定は鋳造の瞬間の1回きり（繰り返し判定は分離が消える。
+        _constants.PYANNOTE_CLUSTER_MINT_LINK_MIN_SIM の校正メモ参照）。
+        """
+        s = self.state
+        namer = s.cluster_namer
+        tracker = s.tracker
+        if (namer is None or tracker is None
+                or not getattr(self.args, "vp_mint_cluster_link", False)):
+            return
+        prof = tracker.profiles.get(name)
+        if prof is None:
+            return
+
+        def _key_of(raw_cluster: str) -> str | None:
+            # 席＝現在この生クラスタが持っている表示キー。確定名があればそちら。
+            return (namer.confirmed_name(raw_cluster)
+                    or s.diarization_speaker_keys.get(raw_cluster))
+
+        hit = namer.link_minted_profile(prof, _key_of)
+        if hit is None:
+            return
+        raw_cluster, seat_key, sim = hit
+        if seat_key != name:
+            # 席（@diar:N 等）の過去分・台帳・色をまとめて人物Nへ寄せる。
+            s.rekey(seat_key, name)
+        s.diarization_speaker_keys[raw_cluster] = name
+        namer.adopt_confirmed(raw_cluster, name)
+        with contextlib.suppress(OSError), \
+                open(s.diag_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "ms": self.cur_ms, "end": self.cur_end,
+                "type": "mint_cluster_link", "cluster": raw_cluster,
+                "seat": seat_key, "name": name, "sim": round(sim, 3),
+            }, ensure_ascii=False, default=str) + "\n")
+        if self.args.vp_debug:
+            _print_line(f"# 鋳造リンク: {seat_key}({raw_cluster}) を {name} へ統合"
+                        f"（対称類似{sim:.2f}）")
+
     def flush(self):
         from das.asr.live import ON_UTTERANCE
 
@@ -210,6 +260,7 @@ class RecvLoop:
             elif d and d["kind"] == "自動登録":
                 if d["rename"]:
                     s.rekey(*d["rename"])
+                self._link_mint_to_cluster(d["name"])
                 display_name = s.disp_name(d["name"])
                 s.add_sys(self.cur_ms, f"この声を「{display_name}」として追跡開始"
                                        "（名前は右側の登録欄から設定できます）")
