@@ -1315,3 +1315,74 @@ def test_start_ui_server_falls_back_to_free_port():
                 httpd2.shutdown()
     finally:
         httpd1.shutdown()
+
+
+# --- 不正リクエストの扱い（2026-07-25 監査: do_POST に例外処理が無かった） ---
+
+def _raw_post(port, path, data: bytes | None, *, content_length=None):
+    """本文を細工した POST を送り、(ステータス, JSON本文) を返す."""
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}{path}", data=data or b"",
+        headers={"Content-Type": "application/json"}, method="POST")
+    if content_length is not None:
+        req.add_header("Content-Length", str(content_length))
+    try:
+        with urllib.request.urlopen(req) as r:
+            return r.status, json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read())
+
+
+def test_malformed_json_body_returns_400_not_500():
+    """JSONとして読めない本文は 400 で理由を返す（従来は未捕捉例外→500）."""
+    s = _make_state()
+    httpd, port = _serve(s)
+    try:
+        status, body = _raw_post(port, "/api/diarization", "{壊れたJSON".encode())
+        assert status == 400
+        assert body["ok"] is False
+        assert "JSON" in body["error"]
+    finally:
+        httpd.shutdown()
+
+
+def test_empty_body_is_treated_as_empty_object():
+    """本文なしは空dict扱い（従来は json.loads(b"") で例外→500）."""
+    s = _make_state()
+    httpd, port = _serve(s)
+    try:
+        status, body = _raw_post(port, "/api/diarization", None)
+        # max_speakers 未指定 = 自動。処理は成功する
+        assert status == 200
+        assert body["ok"] is True
+    finally:
+        httpd.shutdown()
+
+
+def test_non_object_json_body_returns_400():
+    """JSON配列など dict でない本文は 400（従来は .get で AttributeError→500）."""
+    s = _make_state()
+    httpd, port = _serve(s)
+    try:
+        status, body = _raw_post(port, "/api/diarization", b"[1, 2, 3]")
+        assert status == 400
+        assert body["ok"] is False
+    finally:
+        httpd.shutdown()
+
+
+def test_bad_field_value_returns_500_with_reason_not_traceback():
+    """想定外の値でもサーバは落ちず、原因つきJSONを返す（UIが無言で固まらない）."""
+    s = _make_state()
+    httpd, port = _serve(s)
+    try:
+        status, body = _raw_post(port, "/api/diarization",
+                                 json.dumps({"max_speakers": "たくさん"}).encode())
+        assert status == 500
+        assert body["ok"] is False
+        assert "ValueError" in body["error"]
+        # サーバは生きていて次のリクエストを普通に処理できる
+        status2, body2 = _raw_post(port, "/api/diarization", None)
+        assert status2 == 200 and body2["ok"] is True
+    finally:
+        httpd.shutdown()

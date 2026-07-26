@@ -40,6 +40,10 @@ def _voiced_seconds(wav: Any, *, frame_sec: float = 0.02,
     return float(int((rms > rms_thresh).sum()) * frame_sec)
 
 
+class _BadRequestError(ValueError):
+    """UI リクエストの本文が不正（400 で返す）."""
+
+
 class _UIHandler:
     """UIサーバー用HTTPハンドラ（トップレベル定義）.
 
@@ -113,6 +117,45 @@ class _UIHandler:
                 self.wfile.write(INDEX_HTML.encode("utf-8"))
 
             def do_POST(self):
+                """POST の入口。ここで例外を JSON エラーに翻訳する.
+
+                従来 do_POST は本体を直に持ち、10箇所の json.loads が無防備だった
+                （うち9箇所は Content-Length: 0 すら見ていない）。不正な本文で
+                未捕捉例外→500＋トレースバックになり、UI には構造化エラーが
+                返らなかった（2026-07-25 監査）。ルーティング本体は
+                _dispatch_post に移し、翻訳はここ1箇所で行う。
+                """
+                try:
+                    self._dispatch_post()
+                except _BadRequestError as e:
+                    self._json(400, {"ok": False, "error": str(e)})
+                except Exception as e:   # UIを落とさず原因を返す
+                    _print_line(f"# UI: リクエスト処理でエラー {self.path}: {e!r}")
+                    self._json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
+
+            def _read_json(self) -> dict:
+                """リクエスト本文を JSON dict として読む（不正なら _BadRequestError）.
+
+                本文なし（Content-Length 無し/0）は空dictとして扱う——従来
+                /api/facilitator/call だけがこの扱いで、他は json.loads(b"") で
+                例外になっていた。JSON でない・dict でない本文は 400 にする。
+                """
+                raw_len = self.headers.get("Content-Length", 0)
+                try:
+                    length = int(raw_len)
+                except (TypeError, ValueError) as e:
+                    raise _BadRequestError("Content-Length が数値ではありません") from e
+                if length <= 0:
+                    return {}
+                try:
+                    body = json.loads(self.rfile.read(length))
+                except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                    raise _BadRequestError(f"本文が JSON として読めません: {e}") from e
+                if not isinstance(body, dict):
+                    raise _BadRequestError("本文は JSON オブジェクトである必要があります")
+                return body
+
+            def _dispatch_post(self):
                 s = self._state
                 if self.path == "/api/stop":
                     _print_line("# セッションを停止します（UIから）")
@@ -139,19 +182,16 @@ class _UIHandler:
                     self._json(200, {"ok": True, "waiting": False})
                 elif self.path == "/api/mode":
                     from das.asr.live._workers import set_session_mode
-                    length = int(self.headers.get("Content-Length", 0))
-                    body = json.loads(self.rfile.read(length))
+                    body = self._read_json()
                     result = set_session_mode(s, str(body.get("mode", "")))
                     self._json(200 if result.get("ok") else 400, result)
                 elif self.path == "/api/topic":
-                    length = int(self.headers.get("Content-Length", 0))
-                    body = json.loads(self.rfile.read(length))
+                    body = self._read_json()
                     result = s.set_agenda(str(body.get("topic", "")))
                     _print_line(f"# 議題を設定（UIから）: {result['agenda']}")
                     self._json(200, result)
                 elif self.path == "/api/intervention":
-                    length = int(self.headers.get("Content-Length", 0))
-                    body = json.loads(self.rfile.read(length))
+                    body = self._read_json()
                     result = {"ok": True}
                     if "enabled" in body:
                         result = s.set_intervention_enabled(bool(body.get("enabled")))
@@ -193,8 +233,7 @@ class _UIHandler:
                 elif self.path == "/api/facilitator/call":
                     # 手動呼び出し（Phase1）: キューに積むだけ。発話は worker + Controller
                     # 経路が採否する（直接 agent.trigger() しない）。
-                    length = int(self.headers.get("Content-Length", 0))
-                    body = json.loads(self.rfile.read(length)) if length else {}
+                    body = self._read_json()
                     result = s.queue_manual_facilitator_call(
                         str(body.get("request", "")))
                     if not result.get("ok"):
@@ -204,8 +243,7 @@ class _UIHandler:
                                 f"{result.get('request') or '直近の議論整理'}")
                     self._json(200, result)
                 elif self.path == "/api/diarization":
-                    length = int(self.headers.get("Content-Length", 0))
-                    body = json.loads(self.rfile.read(length))
+                    body = self._read_json()
                     raw = body.get("max_speakers")
                     max_speakers = None if raw in (None, "", "auto") else int(raw)
                     result = s.set_diarization_max_speakers(max_speakers)
@@ -222,8 +260,7 @@ class _UIHandler:
                         _print_line(f"# 想定話者数を更新（UIから）: {label}")
                     self._json(200 if result.get("ok") else 400, result)
                 elif self.path == "/rename":
-                    length = int(self.headers.get("Content-Length", 0))
-                    body = json.loads(self.rfile.read(length))
+                    body = self._read_json()
                     label = str(body.get("label", ""))
                     name = str(body.get("name", ""))
                     if not label or not name:
@@ -250,8 +287,7 @@ class _UIHandler:
                         _print_line(f"# 話者{label} → {name}（UIから）")
                     self._json(200, {"ok": True, "name": name})
                 elif self.path == "/activate":
-                    length = int(self.headers.get("Content-Length", 0))
-                    body = json.loads(self.rfile.read(length))
+                    body = self._read_json()
                     name = str(body.get("name", ""))
                     active = bool(body.get("active", True))
                     if not name:
@@ -277,8 +313,7 @@ class _UIHandler:
                 elif self.path == "/api/enroll":
                     # 会議前の事前登録: 直近の音声(その人が単独で喋った分)で声紋を作る
                     import numpy as np
-                    length = int(self.headers.get("Content-Length", 0))
-                    body = json.loads(self.rfile.read(length))
+                    body = self._read_json()
                     name = str(body.get("name", "")).strip()
                     seconds = float(body.get("seconds", 20))
                     if not name:
@@ -326,8 +361,7 @@ class _UIHandler:
                                      "message": msg})
                 elif self.path == "/api/roster":
                     # 名簿の確定/解除: 確定すると自動登録オフ（登録済みだけと照合し増殖を止める）
-                    length = int(self.headers.get("Content-Length", 0))
-                    body = json.loads(self.rfile.read(length))
+                    body = self._read_json()
                     locked = bool(body.get("locked", True))
                     if s.tracker is None:
                         self._json(400, {"error": "声紋照合が無効です"})
@@ -339,8 +373,7 @@ class _UIHandler:
                     _print_line(f"# 名簿{'確定' if locked else '解除'}（UIから）")
                     self._json(200, {"ok": True, "locked": locked})
                 elif self.path == "/agent":
-                    length = int(self.headers.get("Content-Length", 0))
-                    body = json.loads(self.rfile.read(length))
+                    body = self._read_json()
                     if s.agent is None:
                         self._json(400, {"error": "AIエージェントが無効です（--agent で起動してください）"})
                         return
