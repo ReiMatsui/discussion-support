@@ -129,6 +129,9 @@ def post_system(text: str) -> None:
               type=click.Choice(["controlled", "standard", "active"]),
               help="ファシリテーターの介入の積極性（既定standard。"
                    "controlled=明確な問題時のみ）")
+@click.option("--docs", default=None, metavar="DIR",
+              help="--af 有効時に AF ランタイムが事前取り込みする文書ディレクトリ"
+                   "（未指定なら取り込まない）")
 @click.option("--af", is_flag=True,
               help="AF ベース介入を有効化（H1）。既定 OFF。毎発話 extraction+linking "
                    "が走るため重い。無指定ならルールベース介入のみ（恒久モード）。")

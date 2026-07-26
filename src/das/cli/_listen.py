@@ -172,6 +172,10 @@ def listen_soniox(
                 vp_mint_cluster_link=vp_mint_cluster_link,
                 max_speakers=max_speakers,
                 hybrid=hybrid,
+                # --docs を明示したときだけ文字起こし側の AF ランタイムにも渡す
+                # （AF 有効時のみ使われる。既定 data/docs を暗黙に二重取り込み
+                #  させないため、明示指定に限る）
+                af_docs=docs if not skip_docs else None,
                 soniox_args=soniox_args,
             ),
             min_utt_chars=min_utt_chars,
@@ -212,6 +216,7 @@ def _build_soniox_argv(
     vp_cluster_naming: bool = False,
     vp_mint_cluster_link: bool = False,
     max_speakers: int | None = None,
+    af_docs: Path | None = None,
     hybrid: bool = False,
     soniox_args: str = "",
 ) -> list[str]:
@@ -236,6 +241,8 @@ def _build_soniox_argv(
         argv.append("--vp-cluster-naming")
     if vp_mint_cluster_link:
         argv.append("--vp-mint-cluster-link")
+    if af_docs is not None:
+        argv += ["--docs", str(af_docs)]
     if max_speakers is not None:
         argv += ["--diarization-max-speakers", str(max_speakers)]
     if soniox_args:

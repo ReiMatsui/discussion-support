@@ -113,6 +113,11 @@ class LiveArgs:
     topic: str | None = None   # 人間同士モードの議題（脱線判定の基準）
     proactivity: str = "standard"  # 介入の積極性（controlled/standard/active）
     af: bool = False  # AF ベース介入を有効化 (H1 フェーズ4)。既定 OFF (モード方針)。
+    # AF ランタイムが事前に取り込む文書ディレクトリ（--af 有効時のみ使う）。
+    # 未指定なら取り込まない。従来 run_session は getattr(args, "docs", None) を
+    # 読んでいたが LiveArgs にこのフィールドが無く **常に None** だったため、
+    # AFRuntime.ingest_documents が一度も走っていなかった（2026-07-25 監査）。
+    docs: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -901,7 +906,7 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
                         target=run_af_runtime,
                         args=(state, _oai_key, _oai_model),
                         kwargs={
-                            "docs_dir": getattr(args, "docs", None),
+                            "docs_dir": args.docs,
                             "snapshot_path": _af_snapshot,
                         },
                         daemon=True,

@@ -42,3 +42,36 @@ def test_vp_cluster_naming_warning_for_non_pyannote_diarization() -> None:
         msg = warn(diar, True)
         assert msg is not None
         assert "--vp-cluster-naming" in msg and "pyannote" in msg and "無効" in msg
+
+
+def test_live_args_has_docs_field_so_af_can_ingest():
+    """AF ランタイムの文書取り込みが到達可能である（LiveArgs.docs が存在する）.
+
+    run_session は `getattr(args, "docs", None)` で docs_dir を作っていたが、
+    LiveArgs にこのフィールドが無く **常に None** だったため、
+    AFRuntime.ingest_documents が一度も走らなかった（2026-07-25 監査。
+    過去の merge_sim「本番から到達不能」と同型）。
+    """
+    import dataclasses
+
+    from das.asr.live._bootstrap import LiveArgs
+    names = {f.name for f in dataclasses.fields(LiveArgs)}
+    assert "docs" in names
+    assert LiveArgs(docs="data/docs").docs == "data/docs"
+
+
+def test_live_cli_exposes_docs_option():
+    """--docs が click のオプションとして存在し、LiveArgs へ渡る."""
+    from das.asr.live import main
+    names = {p.name for p in main.params}
+    assert "docs" in names
+
+
+def test_listen_forwards_docs_only_when_explicit():
+    """das listen は --docs を明示したときだけ文字起こし側へ転送する."""
+    from pathlib import Path
+
+    from das.cli._listen import _build_soniox_argv
+    assert "--docs" not in _build_soniox_argv()
+    argv = _build_soniox_argv(af_docs=Path("data/docs"))
+    assert argv[argv.index("--docs") + 1] == "data/docs"
