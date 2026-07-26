@@ -32,6 +32,12 @@ from ._voice_profiles import _best_text_similarity
 # decide_speaker に一本化した（2026-07-17 再編。従来ここにあった if 連鎖が
 # 「事実上の統合層」だった。docs/design/attribution_logic_review_2026-07.md §2）。
 _UNKNOWN_STT_SPEAKERS = {"", "none", "null", "unknown", "uu", UNSURE_SPEAKER}
+# 帰属の根拠がSTTラベルしか無い声紋判定の種別（handoff §27.12）。ラベル不純は
+# そのラベルが複数人を混載していると分かっている状態、ラベル継続は声紋照合が
+# 成立せずラベルの過去の対応を引き継いでいるだけの状態。どちらも「ラベルに
+# 基づく推測」なので、席の実音声と直接比べたほうが強い（実測: この2種を
+# 席の音声で決め直すと 正解 71.0%→79.2% / 誤帰属 19.7%→13.6%）。
+_LABEL_ONLY_KINDS = frozenset({"ラベル不純", "ラベル継続"})
 RecvStatus = Literal["ok", "finished", "disconnected"]
 
 
@@ -349,26 +355,37 @@ class RecvLoop:
                 rec_extra["speaker_confidence"] = 0.0
                 rec_extra["speaker_reason"] = (
                     "voiceprint_still_accumulating_without_endorsement")
-            if final_sp_id != UNSURE_SPEAKER:
+            _kind = d.get("kind") if d is not None else None
+            if _kind in _LABEL_ONLY_KINDS:
+                # 根拠がSTTラベルしかない kind は、上流のキーを信用せず
+                # 席の実音声で決め直す（handoff §27.12）。
+                #   ラベル不純: そのラベルが複数人を混載していると分かっている
+                #   ラベル継続: 声紋照合が成立せず、ラベルの過去の対応を
+                #               引き継いでいるだけ
+                # どちらも「ラベルに基づく推測」であり、声を直接比べたほうが
+                # 強い。実測で 正解 71.0%→79.2% / 誤帰属 19.7%→13.6%
+                # （検証4本では 82.0%）。棄権していた分（未確定）も
+                # 決めていた分（誤帰属の48%を占めていた）も同じ規則で扱う。
+                _reason = "label_only_kind_resolved_by_seat_audio"
+            elif final_sp_id == UNSURE_SPEAKER and sp_id != UNSURE_SPEAKER:
+                # 上流は決めていたのに席上限で落ちた分（§27.8 の本体）。
+                _reason = "seat_full_nearest_seat_audio"
+            else:
+                _reason = None
                 # 参照は「声紋層が高信頼だった発話」だけで作る。全発話で作ると
                 # 席の参照そのものが汚れる（実測: ある席は GT 純度 38%）。
                 # 高信頼4種に絞ると純度は 95-100% に上がり、寄せ先の的中も
                 # 67%→70%、誤帰属の増分も 3.9→3.4pt に下がる（handoff §27.9）。
-                if d is not None and d.get("kind") in _VOICEPRINT_RELIABLE_KINDS:
+                if (final_sp_id != UNSURE_SPEAKER
+                        and _kind in _VOICEPRINT_RELIABLE_KINDS):
                     s.seat_audio.observe(final_sp_id, wav)
-            elif (sp_id != UNSURE_SPEAKER
-                  or (d is not None and d.get("kind") == "ラベル不純")):
-                # 上流が決めていた（席上限で落ちた）ぶんに加え、声紋層が
-                # 「ラベル不純」で棄権したぶんも席の音声で判定する。
-                # 棄権の理由は人物プロファイルとの照合が弱かったことで、
-                # 参照を席の実音声にすると分離が良くなる（§27.4）。実測で
-                # 未確定 18.3%→9.3%、正解 62.0%→71.0%（handoff §27.11）。
+            if _reason is not None:
                 picked = s.seat_audio.nearest(wav)
                 if picked is not None:
                     final_sp_id = picked[0]
                     rec_extra["speaker_source"] = "seat_assign"
                     rec_extra["speaker_confidence"] = round(picked[1], 3)
-                    rec_extra["speaker_reason"] = "seat_full_nearest_seat_audio"
+                    rec_extra["speaker_reason"] = _reason
                     diag_extra["seat"] = s.seat_audio.last_pick
         if tracker is not None and tracker.last is not None:
             try:

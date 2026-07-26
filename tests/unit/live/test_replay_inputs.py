@@ -664,3 +664,47 @@ def test_impure_label_abstention_is_resolved_by_seat_audio(tmp_path,
 
     assert state.records[-1]["speaker"] == "人物2"
     assert state.records[-1]["speaker_source"] == "seat_assign"
+
+
+def _label_only_loop(tmp_path, monkeypatch, kind, upstream, tag):
+    """根拠がラベルしか無い kind の発話を1件流し、records を返す."""
+    from das.asr.live._seat_audio import SeatAudio
+    state = _state_for_recording(tmp_path, [])
+    state.seat_audio = SeatAudio(_SeatTracker(), ref_sec=30.0, min_ref_sec=1.0)
+    for key, t in (("人物1", 1.0), ("人物2", -1.0)):
+        state.seat_audio.observe(key, np.full(SR * 2, t, dtype=np.float32))
+    loop = RecvLoop(state, _Args(), backend=None)
+    monkeypatch.setattr("das.asr.live._recv_loop.decide_speaker",
+                        lambda *a, **k: upstream)
+    monkeypatch.setattr(state, "constrain_human_speaker_key", lambda k: k)
+    state.tracker.last = {"kind": kind, "label": "1"}
+    state.asr_pcm_buf = bytearray(
+        np.full(SR * 10, int(20000 * tag), dtype="<i2").tobytes())
+    loop.cur_speaker = "1"
+    loop.cur_text = "これは検証用の発言です"
+    loop.cur_ms, loop.cur_end = 1000, 3000
+    loop.flush()
+    return state.records[-1]
+
+
+def test_label_only_kinds_override_the_upstream_key(tmp_path, monkeypatch):
+    """ラベル不純・ラベル継続は上流のキーを信用せず声で決め直す（§27.12）.
+
+    どちらも根拠がSTTラベルしか無い（不純＝混載と分かっている、継続＝照合が
+    成立せず過去の対応を引き継いでいるだけ）。実測で 正解 71.0%→79.2% /
+    誤帰属 19.7%→13.6%。**上流が決めていた場合でも上書きする**のがこの変更の
+    肝で、A+B 時点で残っていた誤帰属の 48% がこの経路だった。
+    """
+    for kind in ("ラベル不純", "ラベル継続"):
+        # 上流は人物2 と言っているが、声は人物1（正のタグ）
+        rec = _label_only_loop(tmp_path, monkeypatch, kind, "人物2", 1.0)
+        assert rec["speaker"] == "人物1", kind
+        assert rec["speaker_source"] == "seat_assign"
+        assert rec["speaker_reason"] == "label_only_kind_resolved_by_seat_audio"
+
+
+def test_reliable_kinds_are_not_overridden(tmp_path, monkeypatch):
+    """声紋で決まった判定は上書きしない（声紋一致の方が席の平均より強い）."""
+    rec = _label_only_loop(tmp_path, monkeypatch, "声紋一致", "人物2", 1.0)
+    assert rec["speaker"] == "人物2"
+    assert rec.get("speaker_source") != "seat_assign"
