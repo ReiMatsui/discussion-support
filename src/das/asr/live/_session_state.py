@@ -36,6 +36,7 @@ from ._constants import (
 from ._cluster_naming import ClusterVoiceNamer
 from ._diarization import DiarizationEvent, DiarizationProvider, SpeakerResolver
 from ._participation import participation_stats
+from ._speaker_keys import is_provisional_key, looks_like_system_name
 from ._voice_profiles import VoiceProfiles
 from .agents._partner import ConversationPartner
 from .agents._realtime import RealtimeAgent
@@ -248,9 +249,9 @@ class SessionState:
         if key == UNSURE_SPEAKER:
             return "未確定"
         name = self.names.get(key)
-        if name and not self._is_system_anonymous_name(name):
+        if name and not looks_like_system_name(name):
             return name
-        if self._is_anonymous_speaker_key(key) or self._is_system_anonymous_name(key) or name:
+        if is_provisional_key(key) or looks_like_system_name(key) or name:
             return self._anonymous_label_for(key)
         return key
 
@@ -269,17 +270,11 @@ class SessionState:
         if key == UNSURE_SPEAKER:
             return "未確定"
         name = self.names.get(key)
-        if name and not self._is_system_anonymous_name(name):
+        if name and not looks_like_system_name(name):
             return name
-        if self._is_anonymous_speaker_key(key) or self._is_system_anonymous_name(key) or name:
+        if is_provisional_key(key) or looks_like_system_name(key) or name:
             return self.anonymous_labels.get(key, "?")
         return key
-
-    @staticmethod
-    def _is_system_anonymous_name(name: str | None) -> bool:
-        if not name:
-            return False
-        return re.fullmatch(r"(話者|人物)\d+", str(name)) is not None
 
     @staticmethod
     def _anonymous_suffix(index: int) -> str:
@@ -291,10 +286,6 @@ class SessionState:
             if n == 0:
                 return letters
             n -= 1
-
-    @staticmethod
-    def _is_anonymous_speaker_key(key: str) -> bool:
-        return key.startswith(("#", "@diar:"))
 
     def _anonymous_label_for(self, key: str) -> str:
         if key not in self.anonymous_labels:
@@ -314,10 +305,10 @@ class SessionState:
     def _displays_real_name(self, key: str) -> bool:
         """key が実名（話者N/人物N でも #/@diar 匿名キーでもない名前）で表示されるか."""
         name = self.names.get(key)
-        if name and not self._is_system_anonymous_name(name):
+        if name and not looks_like_system_name(name):
             return True
-        return not (self._is_anonymous_speaker_key(key)
-                    or self._is_system_anonymous_name(key))
+        return not (is_provisional_key(key)
+                    or looks_like_system_name(key))
 
     def set_display_name(self, key: str, name: str) -> None:
         """表示名を設定する。実名なら匿名ラベルの文字を解放する（リネームの共通経路）.
@@ -327,7 +318,7 @@ class SessionState:
         """
         with self.state_lock:
             self.names[key] = name
-            if not self._is_system_anonymous_name(name):
+            if not looks_like_system_name(name):
                 self.anonymous_labels.pop(key, None)
 
     def _max_human_speakers(self) -> int | None:
@@ -337,7 +328,7 @@ class SessionState:
     def _human_slot_key(self, key: str) -> str | None:
         if key in (AGENT_SPEAKER, "パートナー", UNSURE_SPEAKER):
             return None
-        if self._is_anonymous_speaker_key(key) or self._is_system_anonymous_name(key):
+        if is_provisional_key(key) or looks_like_system_name(key):
             return self.anonymous_labels.get(key, key)
         return key
 
@@ -395,7 +386,7 @@ class SessionState:
         # （→2026-07-14 の保護は素通し無しで成立）、新規は種別（@diar/#/人物N）
         # を問わず席が無ければ入れない（→参加者Cは生まれず未確定+警告になる。
         # 声紋の二重登録された人物の発話は、合流(dedupe)か上限の引き上げで回収）。
-        if not (self._is_anonymous_speaker_key(key) or self._is_system_anonymous_name(key)):
+        if not (is_provisional_key(key) or looks_like_system_name(key)):
             return key   # 実名リネーム済みの人物は既存の席保持者
         max_speakers = self._max_human_speakers()
         if max_speakers is None:

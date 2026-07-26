@@ -52,6 +52,7 @@ from ._constants import (
     UNSURE_SPEAKER,
 )
 from ._diarization import TimeSegment, has_overlapping_speakers
+from ._speaker_keys import is_label_key
 from ._ui import _print_line
 
 _VOICEPRINT_RELIABLE_KINDS = {"声紋一致", "補正", "自動登録", "合流"}
@@ -80,7 +81,7 @@ def _voiceprint_claim(d, sp_id) -> tuple[str | None, float | None]:
     """
     if (d and d.get("kind") in _VOICEPRINT_RELIABLE_KINDS
             and sp_id is not None
-            and not str(sp_id).startswith("#")):
+            and not is_label_key(sp_id)):
         return str(sp_id), 1.0
     return None, None
 

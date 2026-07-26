@@ -13,6 +13,7 @@ from typing import ClassVar
 import numpy as np
 
 from ._constants import SR, UNSURE_SPEAKER
+from ._speaker_keys import MINTED_RE, is_ai_key, is_label_key, is_minted_key
 
 # ---------- リサンプル（AI声紋登録用） ----------
 
@@ -107,7 +108,7 @@ class _LabelTrustMixin:
             実体の無い/照合対象外の対応先へ発話が帰属し続ける。
         3経路（メイン・短発話・相槌）すべてこのヘルパで判定を統一する。
         """
-        if prev is None or prev.startswith("#"):
+        if prev is None or is_label_key(prev):
             return None
         return prev if prev in self._active_human() else None
 
@@ -218,7 +219,7 @@ class _ProfileQualityMixin:
         なかった（自動登録プロファイルは純粋）と判明済みで、本機構は「将来条件で
         効く汚染への保険」として維持されている（同節の修正記録参照）。
         """
-        if not self.ANON.match(name):
+        if not is_minted_key(name):
             return   # 実名プロファイルは書き換えない（__init__ の own_embs 註釈参照）
         oe = self.own_embs.setdefault(name, [])
         oe.append(emb)
@@ -294,7 +295,9 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
     実名(enroll)のみ voices.json に永続化、匿名「人物N」はセッション限り。
     """
 
-    ANON = re.compile(r"^人物\d+$")
+    # 匿名戸籍の判定は _speaker_keys.is_minted_key に一本化した（語彙の唯一の
+    # 出所）。この属性は「人物N の形」の定義を参照したい既存コード向けに残す。
+    ANON = MINTED_RE
 
     # ハイブリッド構成（pyannoteクラスタ×声紋照合, ClusterVoiceNamer有効）フラグ。
     # クラス属性の既定値 False により、Soniox単独・pyannote単独の既存挙動は不変。
@@ -484,12 +487,11 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
             # AI声紋(__..__)と実名プロファイルは残し、匿名「人物N」だけ落とす。
             # ANON は「人物N」のみをカバーする（#ラベルは _active_keys に入らない）。
             self._active_keys = {k for k in self._active_keys
-                                 if (k.startswith("__") and k.endswith("__"))
-                                 or not self.ANON.match(k)}
+                                 if is_ai_key(k) or not is_minted_key(k)}
 
     def _active_human(self) -> dict:
         """照合対象の人間プロファイル（AI声紋 __..__ は除く）."""
-        ai = {k for k in self._active_keys if k.startswith("__") and k.endswith("__")}
+        ai = {k for k in self._active_keys if is_ai_key(k)}
         return {k: v for k, v in self.profiles.items()
                 if k in self._active_keys and k not in ai}
 
@@ -518,7 +520,7 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
     def _ai_echo(self, emb: np.ndarray, active: dict):
         """AI声紋(エコー)に一致すれば (キー, sim) を返す（無ければNone, 人間より高い閾値）."""
         ai_profs = {k: self.profiles[k] for k in self._active_keys
-                    if k.startswith("__") and k.endswith("__") and k in self.profiles}
+                    if is_ai_key(k) and k in self.profiles}
         if not ai_profs:
             return None
         best_human = max((float(np.dot(p, emb)) for p in active.values()), default=-1.0)
@@ -631,7 +633,7 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
             self._active_keys.add(target)
             is_new = True
         # 遡及置換は未確定キー(#ラベル)の昇格のみ。人物キーは絶対に書き換えない。
-        rename = ("#" + sp, target) if (prev is None or prev.startswith("#")) else None
+        rename = ("#" + sp, target) if (prev is None or is_label_key(prev)) else None
         self.sp_map[sp] = target
         self._record_label_success(sp, target)
         self._note("自動登録" if is_new else "合流", label=sp, name=target,
@@ -756,7 +758,7 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
                         self.sp_map[sp] = cand
                         self._record_label_success(sp, cand)
                         self._track_own_emb(cand, emb)   # 事後回収（二峰性監視）の材料
-                        self._note("補正" if (prev is not None and not prev.startswith("#")
+                        self._note("補正" if (prev is not None and not is_label_key(prev)
                                               and prev != cand) else "声紋一致", label=sp, **info)
                         return cand
                 # 既知の誰にも確信を持って一致しなかった → ラベル継続。ラベルの
@@ -768,7 +770,7 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
                 # 1:1帰属精度44%の主因になっていた。継続化で54%（他の変更と合わせ79%）。
                 # 対応先が継続不可（remap等で消えた・deactivate済み・AI声紋）の
                 # 場合だけは継続を断つ（判定は _continuation_target に統一。3経路共通）。
-                if (prev is not None and not prev.startswith("#")
+                if (prev is not None and not is_label_key(prev)
                         and self._continuation_target(prev) is None):
                     prev = None
                 # 登録: 発話数ではなく「声ごとのクリーンな発声の累積文字数」で確定する。
@@ -811,7 +813,7 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
                             and sim - second >= self.margin):
                         self.sp_map[sp] = cand
                         self._record_label_success(sp, cand)
-                        self._note("補正" if (prev is not None and not prev.startswith("#")
+                        self._note("補正" if (prev is not None and not is_label_key(prev)
                                               and prev != cand) else "声紋一致",
                                    label=sp, sim=round(sim, 3), second=round(second, 3),
                                    name=cand, prev=prev, short=True)
@@ -850,7 +852,7 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
         # AI声紋一致で sp_map[sp]="__AI__" になった後の同ラベル短発話・相槌が
         # __AI__ のまま返り、_recv_loop の startswith("__") エコー破棄で本文ごと
         # 消えていた。人間の発話は捨てず「未確定」として表示に残す）。
-        if (prev is not None and not prev.startswith("#")
+        if (prev is not None and not is_label_key(prev)
                 and self._continuation_target(prev) is None):
             key, kind = UNSURE_SPEAKER, "継続不可"
         else:
@@ -861,7 +863,7 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
         # 確信ある一致・AI声紋・登録者への証拠つき継続は上流で既に return 済み。
         if not self.auto:
             active = self._active_human()
-            if kind == "重なりスキップ" or key not in active or self.ANON.match(str(key)):
+            if kind == "重なりスキップ" or key not in active or is_minted_key(str(key)):
                 key = UNSURE_SPEAKER
                 kind = "未確定"
         self.sp_map[sp] = key
@@ -996,7 +998,7 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
             prof = self.profiles[name]
             # セッション中の匿名人物Nに同一人物がいたらマージ
             for key in list(self._active_keys):
-                if self.ANON.match(key) and key in self.profiles:
+                if is_minted_key(key) and key in self.profiles:
                     sim = float(np.dot(prof, self.profiles[key]))
                     if sim >= self.dedupe:
                         self.profiles.pop(key)
@@ -1013,16 +1015,16 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
     def deactivate(self, name: str) -> None:
         """プロファイルをこのセッションで無効化する（匿名人物Nは無効化不可）."""
         with self._lock:
-            if not self.ANON.match(name):
+            if not is_minted_key(name):
                 self._active_keys.discard(name)
 
     def active_profile_names(self) -> list[str]:
         """現在アクティブな名前付きプロファイルの一覧（UI表示用）."""
-        return sorted(k for k in self._active_keys if not self.ANON.match(k) and k in self.profiles)
+        return sorted(k for k in self._active_keys if not is_minted_key(k) and k in self.profiles)
 
     def all_profile_names(self) -> list[str]:
         """voices.jsonに保存された全名前付きプロファイル（UI表示用）."""
-        return sorted(k for k in self.profiles if not self.ANON.match(k))
+        return sorted(k for k in self.profiles if not is_minted_key(k))
 
     def enroll_from_audio(self, name: str, wav: np.ndarray) -> bool:
         """生の音声からその人の声紋を作って名前付き登録・有効化する（事前登録用）.
@@ -1052,7 +1054,7 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
             return True
 
     def _persist(self):
-        named = {k: v.tolist() for k, v in self.profiles.items() if not self.ANON.match(k)}
+        named = {k: v.tolist() for k, v in self.profiles.items() if not is_minted_key(k)}
         named["_model"] = self.model   # 声紋はモデル間で互換性がないため記録
         tmp = self.path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:

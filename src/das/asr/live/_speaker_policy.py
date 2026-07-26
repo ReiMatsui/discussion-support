@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from ._constants import _BACKCHANNEL_RE, AGENT_SPEAKER, UNSURE_SPEAKER
+from ._speaker_keys import is_provisional_key
 
 _GENERIC_SPEAKER = "発話者"
 _UNSURE_SPEAKER_LABELS = {UNSURE_SPEAKER, "未確定"}
@@ -51,7 +52,9 @@ def is_reliable_human_speaker(record: dict[str, Any]) -> bool:
         return False
     if record.get("speaker_source") == "stt_fallback":
         return False
-    return not str(speaker).startswith(("#", "@diar:"))
+    # 「暫定キーか」の判定は _speaker_keys に一本化（従来ここに3つ目の
+    # 同じ述語の写しがあった）。
+    return not is_provisional_key(speaker)
 
 
 def intervention_speaker_name(state, record: dict[str, Any]) -> str:
