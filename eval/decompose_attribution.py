@@ -79,10 +79,21 @@ def load_run(run: str) -> tuple[list[dict], dict[int, str]] | None:
         if c:
             code_by_ms[t["ms"]] = c
         text_by_ms.setdefault(t["ms"], t.get("text", ""))
-    utts = [d for d in _gtlib.read_jsonl(diag_path)
+    lines = list(_gtlib.read_jsonl(diag_path))
+    utts = [d for d in lines
             if d.get("type") is None and "label" in d and "key" in d]
+    # 遡及訂正（handoff §28.10）を反映する。発話ごとの行は flush 時点の
+    # final_key しか持たないので、これを適用しないと訂正のぶんだけ低く出る。
+    retro: dict[int, str] = {}
+    for d in lines:
+        if d.get("type") == "retro_reattribution":
+            for ms, key in d.get("pairs") or []:
+                retro[int(ms)] = str(key)
     for u in utts:
         u["_text"] = text_by_ms.get(u["ms"], "")
+        if int(u["ms"]) in retro:
+            u["final_key"] = retro[int(u["ms"])]
+            u["_retro"] = True
     return utts, code_by_ms
 
 

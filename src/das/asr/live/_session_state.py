@@ -635,7 +635,7 @@ class SessionState:
                     self.anonymous_labels.setdefault(
                         new, self.anonymous_labels.pop(old))
 
-    def apply_retro_attribution(self, revised: dict) -> int:
+    def apply_retro_attribution(self, revised: dict) -> dict:
         """遡及訂正の結果を records に反映する（handoff §28）.
 
         対象は「席の音声で決めた発話」と「未確定のまま残った発話」だけで、
@@ -647,11 +647,14 @@ class SessionState:
         本メソッドは席から席へ移すだけで、名前の台帳（names/colors の対応）は
         変えない。
 
-        戻り値: 実際に変わった件数（0 なら呼び出し側は通知も保存もしない）。
+        戻り値: 実際に書き換えた ``{ms: 新しいキー}``（空なら呼び出し側は
+        通知も保存もしない）。**diag に残すために内容ごと返す**——遡及訂正は
+        過去のレコードを書き換えるので、発話ごとの diag 行（flush 時点の
+        final_key）だけでは最終状態を復元できない（handoff §28.10）。
         """
         if not revised:
-            return 0
-        changed = 0
+            return {}
+        applied: dict = {}
         with self.state_lock:
             for r in self.records:
                 if "speaker" not in r:
@@ -668,12 +671,12 @@ class SessionState:
                 r["speaker"] = new_key
                 r["speaker_source"] = "seat_assign_retro"
                 r["unsure"] = False
-                changed += 1
-            if changed:
+                applied[ms] = str(new_key)
+            if applied:
                 for r in self.records:
                     if "speaker" in r:
                         self.color_of(r["speaker"])
-        return changed
+        return applied
 
     def compact_anonymous_labels(self) -> int:
         """発言の無くなったキーが押さえている表示文字を解放し、詰め直す.

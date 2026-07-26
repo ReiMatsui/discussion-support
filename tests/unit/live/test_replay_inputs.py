@@ -775,7 +775,7 @@ def test_retro_does_not_touch_confident_voiceprint_decisions(tmp_path,
     state.seat_audio.observe("人物2", np.full(SR, -1.0, dtype=np.float32))
     changed = state.apply_retro_attribution({1000: "人物2"})
 
-    assert changed == 0
+    assert changed == {}
     assert state.records[-1]["speaker"] == "人物1"
 
 
@@ -849,3 +849,36 @@ def test_tracking_notice_only_for_speakers_that_got_a_seat(tmp_path):
 
     notices = [r for r in state.records if "追跡開始" in str(r.get("sys", ""))]
     assert len(notices) == 2       # 席の数だけ
+
+
+def test_retro_is_recorded_in_diag(tmp_path, monkeypatch):
+    """遡及訂正の結果が diag に残る（記録から最終状態を復元できる）.
+
+    発話ごとの diag 行は flush 時点の final_key しか持たない。遡及訂正は
+    過去のレコードを書き換えるので、これが無いとオフライン採点が訂正の
+    ぶんだけ低く出る（handoff §28.10）。
+    """
+    state = _retro_state(tmp_path)
+    loop = RecvLoop(state, _Args(), backend=None)
+    monkeypatch.setattr("das.asr.live._recv_loop.decide_speaker",
+                        lambda *a, **k: UNSURE_SPEAKER)
+    monkeypatch.setattr(state, "constrain_human_speaker_key", lambda k: k)
+    state.tracker.last = {"kind": "ラベル不純", "label": "1"}
+    state.seat_audio.observe("人物1", np.full(SR, 1.0, dtype=np.float32))
+    state.asr_pcm_buf = bytearray(np.full(SR * 10, -20000, dtype="<i2").tobytes())
+    loop.cur_speaker = "1"
+    loop.cur_text = "序盤の発言です"
+    loop.cur_ms, loop.cur_end = 1000, 3000
+    loop.flush()
+
+    state.seat_audio.observe("人物2", np.full(SR, -1.0, dtype=np.float32))
+    loop.cur_speaker = "1"
+    loop.cur_text = "しばらく後の発言です"
+    loop.cur_ms, loop.cur_end = 130_000, 132_000
+    loop.flush()
+
+    ev = [d for d in _diag_lines(state.diag_path)
+          if d.get("type") == "retro_reattribution"]
+    assert ev, "遡及訂正のイベントが diag に無い"
+    assert ev[0]["changed"] >= 1
+    assert [1000, "人物2"] in ev[0]["pairs"]

@@ -146,15 +146,25 @@ class RecvLoop:
             return
         if not s.retro.due(self.cur_ms / 1000.0):
             return
-        changed = s.apply_retro_attribution(s.retro.revise())
+        applied = s.apply_retro_attribution(s.retro.revise())
         # 貼り直しで発言の無くなったキーが表示文字を押さえ続けると、参加者が
         # 1人しか居ないのに「参加者B」から始まる。空いた文字を詰め直す。
         s.compact_anonymous_labels()
-        if not changed:
+        if not applied:
             return
+        # diag に残す。発話ごとの行は flush 時点の final_key しか持たないので、
+        # これが無いと記録から最終状態を復元できず、オフライン採点が遡及訂正の
+        # ぶんだけ低く出る（handoff §28.10）。
+        with contextlib.suppress(OSError), \
+                open(s.diag_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "ms": self.cur_ms, "type": "retro_reattribution",
+                "changed": len(applied),
+                "pairs": [[m, k] for m, k in sorted(applied.items())],
+            }, ensure_ascii=False, default=str) + "\n")
         s.add_sys(self.cur_ms,
-                  f"これまでの声を聞き直して、{changed}件の話者を再判定しました")
-        _print_line(f"# 遡及訂正: {changed}件の話者を再判定しました")
+                  f"これまでの声を聞き直して、{len(applied)}件の話者を再判定しました")
+        _print_line(f"# 遡及訂正: {len(applied)}件の話者を再判定しました")
 
     def flush(self):
         from das.asr.live import ON_UTTERANCE
