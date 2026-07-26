@@ -550,3 +550,37 @@ def test_no_seat_audio_means_unchanged_behaviour(tmp_path, monkeypatch):
     loop.flush()
 
     assert state.records[-1]["speaker"] == UNSURE_SPEAKER
+
+
+def test_seat_reference_ignores_low_confidence_attributions(tmp_path,
+                                                            monkeypatch):
+    """参照は声紋層が高信頼だった発話だけで作る（handoff §27.9）.
+
+    全発話で作ると席の参照そのものが汚れる（実測: ある席は GT 純度 38%）。
+    高信頼4種（声紋一致・補正・自動登録・合流）に絞ると 95-100% に上がり、
+    寄せ先の的中も 67%→70%、誤帰属の増分も 3.9→3.4pt に下がる。
+    """
+    from das.asr.live._seat_audio import SeatAudio
+    state = _state_for_recording(tmp_path, [])
+    state.seat_audio = SeatAudio(_SeatTracker(), ref_sec=30.0, min_ref_sec=0.5)
+    loop = RecvLoop(state, _Args(), backend=None)
+    monkeypatch.setattr("das.asr.live._recv_loop.decide_speaker",
+                        lambda *a, **k: "人物1")
+    monkeypatch.setattr(state, "constrain_human_speaker_key", lambda k: k)
+    state.asr_pcm_buf = bytearray(np.full(SR * 10, 20000, dtype="<i2").tobytes())
+    loop.cur_speaker = "1"
+    loop.cur_text = "これは検証用の発言です"
+    loop.cur_ms, loop.cur_end = 1000, 3000
+
+    loop.flush()      # tracker.last の kind は「蓄積中」＝高信頼ではない
+
+    assert state.records[-1]["speaker"] == "人物1"     # 帰属自体は従来どおり
+    assert "人物1" not in state.seat_audio._embeddings   # 参照に入っていない
+
+    state.tracker.last = {"kind": "声紋一致", "label": "1"}
+    loop.cur_speaker = "1"
+    loop.cur_text = "こちらは高信頼で判定された発言です"
+    loop.cur_ms, loop.cur_end = 4000, 6000
+    loop.flush()
+
+    assert "人物1" in state.seat_audio._embeddings   # 高信頼なら参照に入る

@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 import contextlib
 
-from ._attribution import decide_speaker
+from ._attribution import _VOICEPRINT_RELIABLE_KINDS, decide_speaker
 from ._constants import (
     _BACKCHANNEL_RE,
     RESET,
@@ -330,7 +330,12 @@ class RecvLoop:
         # 書かない＝可逆。§15.12 の「不可逆な操作は高確信を要求」と衝突しない）。
         if s.seat_audio is not None and not _is_backchannel:
             if final_sp_id != UNSURE_SPEAKER:
-                s.seat_audio.observe(final_sp_id, wav)
+                # 参照は「声紋層が高信頼だった発話」だけで作る。全発話で作ると
+                # 席の参照そのものが汚れる（実測: ある席は GT 純度 38%）。
+                # 高信頼4種に絞ると純度は 95-100% に上がり、寄せ先の的中も
+                # 67%→70%、誤帰属の増分も 3.9→3.4pt に下がる（handoff §27.9）。
+                if d is not None and d.get("kind") in _VOICEPRINT_RELIABLE_KINDS:
+                    s.seat_audio.observe(final_sp_id, wav)
             elif sp_id != UNSURE_SPEAKER:
                 picked = s.seat_audio.nearest(wav)
                 if picked is not None:
