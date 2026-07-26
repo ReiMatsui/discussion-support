@@ -1260,3 +1260,52 @@ def test_af_intervention_records_who_was_invited():
     assert "af_l2" in reasons
     # 同じ人への連続指名は抑制される（修正前は invite が通り2回続けて指名した）
     assert "invite" not in reasons, f"同じ人が連続で指名された: {reasons}"
+
+
+# ---------------------------------------------------------------------------
+# 通常介入の発火表（_NORMAL_SPECS）と実装の整合
+# ---------------------------------------------------------------------------
+
+def test_every_normal_spec_matches_the_agent_trigger_signature():
+    """表が指定する trigger 引数名が、実エージェントの API に実在する.
+
+    発火手順を表駆動にしたので、表の綴り間違いは実行時（＝会議中）まで
+    分からない。ここで静的に突き合わせておく。
+    """
+    import inspect
+
+    from das.asr.live._workers import _NORMAL_SPECS
+    from das.asr.live.agents._realtime import RealtimeAgent
+    accepted = set(inspect.signature(RealtimeAgent.trigger).parameters) - {"self"}
+    for kind, spec in _NORMAL_SPECS.items():
+        unknown = set(spec.trigger) - accepted
+        assert not unknown, f"{kind} の trigger 引数が RealtimeAgent に無い: {unknown}"
+
+
+def test_normal_specs_cover_every_firing_reason():
+    """Controller が返しうる通常介入の種別が、全て表に載っている.
+
+    表に無い種別は `_fire_normal` が黙って何もしないため、候補は採択されたのに
+    発話しない（＝原因の分からない沈黙）になる。_NORMAL_KINDS を唯一の出所として
+    突き合わせる。
+    """
+    from das.asr.live._workers import _NORMAL_KINDS, _NORMAL_SPECS
+    assert set(_NORMAL_KINDS) <= set(_NORMAL_SPECS)
+
+
+def test_specs_that_invite_someone_also_record_it():
+    """人を指名する種別は「誰を誘ったか」の記帳対象になる（表からの派生）.
+
+    記帳するかどうかを別欄で持たず `invite_target` を渡すかから導くことで、
+    「指名するのに記録し忘れる」（handoff §22.1 の2）が構造的に起きなくなる。
+    """
+    from das.asr.live._workers import _NORMAL_SPECS
+    inviting = {k for k, s in _NORMAL_SPECS.items() if "invite_target" in s.trigger}
+    assert inviting == {"invite", "af_l1", "af_l2"}
+
+
+def test_conversation_is_the_only_kind_without_intervention_ceremony():
+    """会話モードの応答だけが timing/表示を伴わない（介入の体裁を取らない）."""
+    from das.asr.live._workers import _NORMAL_SPECS
+    silent = {k for k, s in _NORMAL_SPECS.items() if s.policy is None}
+    assert silent == {"conversation"}

@@ -945,6 +945,53 @@ def _controller_normal_decision(
     return _NormalTriggerDecision("none"), decision, cands, latency_ms
 
 
+@dataclass(frozen=True)
+class _NormalSpec:
+    """通常介入の発火手順のうち、**種別ごとに違う部分だけ**を持つ表.
+
+    発火の手順そのもの（timing算出→表示→イベント記録→trigger→消費→記帳）は
+    全種別で同じで、違うのはここにある5項目だけ。従来はこの手順が種別ごとに
+    丸ごと書き写されており（110行の if-elif 連鎖）、枝を足すたびに記帳を
+    書き忘れる事故が実際に2件起きた（handoff §22.1 の1と2）。手順を1本にし、
+    差分を表に落とすことで、新しい種別は1行足すだけで済む。
+
+    trigger: agent.trigger に渡す引数名の並び。ここから派生して決まるもの:
+      - "invite_target" を渡す種別は「誰を誘ったか」を記帳する
+      - "af_presentation" を渡す種別は AF ランタイムへ受容計測を通知する
+    pause_from: timing の pause_required の出所。"policy"＝種別ポリシーの pause、
+      "silence_summarize"＝実行時の沈黙要約しきい値（silence だけ実行時値）。
+    policy: timing に載せる方針ラベル。None なら timing も表示も出さない
+      （conversation は会話モードの応答であり「介入」の体裁を取らない）。
+    print_limit: 表示時に detail を切り詰める長さ（af は本文が長いため40）。
+    """
+
+    trigger: tuple[str, ...]
+    consume: str | None = None
+    pause_from: str = "policy"
+    policy: str | None = None
+    print_limit: int | None = None
+
+
+_NORMAL_SPECS: dict[str, _NormalSpec] = {
+    "conversation": _NormalSpec(trigger=()),
+    "summarize": _NormalSpec(
+        trigger=("topics", "summary_focus", "recent_agent_texts"),
+        consume="summarize", policy="structuring_value"),
+    "silence": _NormalSpec(
+        trigger=("topics", "recent_agent_texts"),
+        pause_from="silence_summarize", policy="silence_summary"),
+    "invite": _NormalSpec(
+        trigger=("topics", "invite_target", "recent_agent_texts"),
+        consume="invite", policy="participation_pause"),
+    "af_l1": _NormalSpec(
+        trigger=("topics", "af_presentation", "invite_target"),
+        consume="af", policy="af_intervention", print_limit=40),
+    "af_l2": _NormalSpec(
+        trigger=("topics", "af_presentation", "invite_target"),
+        consume="af", policy="af_intervention", print_limit=40),
+}
+
+
 def _run_agenda_detector(state: SessionState, oai_key: str, oai_model: str):
     """会議冒頭の発話から議題を1回推定してシードする（S3, --topic未指定時）.
 
@@ -2080,6 +2127,59 @@ def _run_agent_worker(state: SessionState):
         if invite_target:
             _last_invited = invite_target
 
+    def _fire_normal(decision: _NormalTriggerDecision, silence_elapsed: float,
+                     silence_summarize) -> None:
+        """通常介入を1件発火する（種別によらず手順は同じ。差分は _NORMAL_SPECS）.
+
+        手順: timing算出 → 表示 → イベント記録 → agent.trigger → 種別ごとの
+        後始末（AF受容計測・pending消費）→ 記帳。記帳は _note_intervention に
+        一本化してあるので、cooldown の時計と「誰を誘ったか」は種別を問わず
+        必ず更新される（handoff §22.1 の再発防止）。
+        """
+        kind = decision.reason
+        if kind == "skip_invite":
+            _pending.invite = None   # 同じ人を連続では誘わない（発話はしない）
+            return
+        spec = _NORMAL_SPECS.get(kind)
+        if spec is None:
+            return                   # "none" 等、発火しない判断
+        timing = None
+        if spec.policy is not None:
+            pause = (float(silence_summarize or 0.0)
+                     if spec.pause_from == "silence_summarize"
+                     else policy_for(kind).pause)
+            timing = _intervention_timing_metadata(
+                kind=kind, now=time.monotonic(), silence_elapsed=silence_elapsed,
+                pause_required=pause, policy=spec.policy)
+            shown = (decision.detail[:spec.print_limit] if spec.print_limit
+                     else decision.detail)
+            print(f"# [trigger] {kind}: {shown}", flush=True)
+        _log_intervention_event(state, kind, decision.detail, timing=timing)
+        available = {
+            "topics": _topics,
+            "summary_focus": decision.summary_focus,
+            "invite_target": decision.invite_target,
+            "af_presentation": decision.af_text,
+            "recent_agent_texts": _recent_agent_texts(state),
+        }
+        agent.trigger(**{k: available[k] for k in spec.trigger})
+        if "af_presentation" in spec.trigger and decision.af_text:
+            # 受容計測 (フェーズ5): 配信した af 介入を AF ランタイムに記録する。
+            _af_rt = getattr(state, "af_runtime", None)
+            if _af_rt is not None:
+                with contextlib.suppress(Exception):
+                    _af_rt.note_intervention(kind, decision.af_text)
+        if spec.consume == "af":
+            _pending.clear_af()
+        elif spec.consume == "summarize":
+            _pending.summarize = None   # 採択したら消費（drainで再取得しない）
+        elif spec.consume == "invite":
+            _pending.invite = None
+        _note_intervention(
+            time.monotonic(), kind, decision.detail,
+            invite_target=(decision.invite_target
+                           if "invite_target" in spec.trigger else None))
+
     while not state.stop.is_set():
         time.sleep(0.25)
         _diag_tick += 1
@@ -2543,87 +2643,7 @@ def _run_agent_worker(state: SessionState):
                 partner_present=partner is not None,
                 last_invited=_last_invited,
             )
-        if normal_decision.reason == "conversation":
-            _log_intervention_event(state, "conversation", normal_decision.detail)
-            agent.trigger()
-            _note_intervention(time.monotonic(), "conversation", normal_decision.detail)
-        elif normal_decision.reason == "summarize":
-            timing = _intervention_timing_metadata(
-                kind="summarize",
-                now=time.monotonic(),
-                silence_elapsed=_silence_elapsed,
-                pause_required=policy_for("summarize").pause,
-                policy="structuring_value",
-            )
-            print(f"# [trigger] summarize: {normal_decision.detail}", flush=True)
-            _log_intervention_event(
-                state, "summarize", normal_decision.detail, timing=timing)
-            agent.trigger(topics=_topics,
-                          summary_focus=normal_decision.summary_focus,
-                          recent_agent_texts=_recent_agent_texts(state))
-            _last_intervention_at = time.monotonic()
-            _pending.summarize = None   # 採択したら消費（drainで再取得しない）
-            _note_intervention(_last_intervention_at, "summarize", normal_decision.detail)
-        elif normal_decision.reason == "silence":
-            timing = _intervention_timing_metadata(
-                kind="silence",
-                now=time.monotonic(),
-                silence_elapsed=_silence_elapsed,
-                pause_required=float(_silence_summarize or 0.0),
-                policy="silence_summary",
-            )
-            print(f"# [trigger] silence: {normal_decision.detail}", flush=True)
-            _log_intervention_event(
-                state, "silence", normal_decision.detail, timing=timing)
-            agent.trigger(topics=_topics,
-                          recent_agent_texts=_recent_agent_texts(state))
-            _last_intervention_at = time.monotonic()
-            _note_intervention(_last_intervention_at, "silence", normal_decision.detail)
-        elif normal_decision.reason == "invite":
-            timing = _intervention_timing_metadata(
-                kind="invite",
-                now=time.monotonic(),
-                silence_elapsed=_silence_elapsed,
-                pause_required=policy_for("invite").pause,
-                policy="participation_pause",
-            )
-            print(f"# [trigger] invite: {normal_decision.detail}", flush=True)
-            _log_intervention_event(
-                state, "invite", normal_decision.detail, timing=timing)
-            agent.trigger(topics=_topics,
-                          invite_target=normal_decision.invite_target,
-                          recent_agent_texts=_recent_agent_texts(state))
-            _last_intervention_at = time.monotonic()
-            _pending.invite = None
-            _note_intervention(_last_intervention_at, "invite", normal_decision.detail,
-                               invite_target=normal_decision.invite_target)
-        elif normal_decision.reason in ("af_l1", "af_l2"):
-            # AF ベース介入（H1 フェーズ4）。AF 有効時のみここに到達する。
-            _af_kind = normal_decision.reason
-            timing = _intervention_timing_metadata(
-                kind=_af_kind,
-                now=time.monotonic(),
-                silence_elapsed=_silence_elapsed,
-                pause_required=policy_for(_af_kind).pause,
-                policy="af_intervention",
-            )
-            print(f"# [trigger] {_af_kind}: {normal_decision.detail[:40]}", flush=True)
-            _log_intervention_event(
-                state, _af_kind, normal_decision.detail, timing=timing)
-            agent.trigger(topics=_topics,
-                          af_presentation=normal_decision.af_text,
-                          invite_target=normal_decision.invite_target)
-            # 受容計測 (フェーズ5): 配信した af 介入を AF ランタイムに記録する。
-            _af_rt = getattr(state, "af_runtime", None)
-            if _af_rt is not None and normal_decision.af_text:
-                with contextlib.suppress(Exception):
-                    _af_rt.note_intervention(_af_kind, normal_decision.af_text)
-            _last_intervention_at = time.monotonic()
-            _pending.clear_af()  # 採択したら消費
-            _note_intervention(_last_intervention_at, _af_kind, normal_decision.detail,
-                               invite_target=normal_decision.invite_target)
-        elif normal_decision.reason == "skip_invite":
-            _pending.invite = None  # 同じ人を連続では誘わない
+        _fire_normal(normal_decision, _silence_elapsed, _silence_summarize)
 
 
 def _run_stdin_commands(state: SessionState):
