@@ -882,3 +882,108 @@ def test_retro_is_recorded_in_diag(tmp_path, monkeypatch):
     assert ev, "遡及訂正のイベントが diag に無い"
     assert ev[0]["changed"] >= 1
     assert [1000, "人物2"] in ev[0]["pairs"]
+
+
+# ---------------------------------------------------------------------------
+# 席の不変条件（handoff §28.11）
+#
+# 2026-07-26 の1日で「席の不変条件が破れる」バグを3件見つけた:
+#   §28.7 通知が constrain より前に表示ラベルを確保して席を横取りする
+#   §28.9 過去の会議で登録された実名キーが上限判定を素通りする
+#   §28.6 発言の無くなったキーが表示文字を押さえ続ける
+# いずれも別々の経路の話に見えるが、破れているのは同じ2つの性質である。
+# 経路を1つずつ塞ぐのではなく、性質そのものを固定する。
+# ---------------------------------------------------------------------------
+
+class _AdversarialTracker(_Tracker):
+    """鋳造・声紋一致・不純を混ぜて返す、意地の悪いフェイク.
+
+    実会話で実際に起きた並び（新しい人物の鋳造が続き、途中から過去の登録者に
+    一致し、ラベルが混載する）を再現する。
+    """
+
+    def __init__(self, known: list[str]) -> None:
+        super().__init__()
+        self.known = list(known)
+        self.i = 0
+
+    def classify(self, wav, speaker, *, overlapped, count, chars, enroll=True):
+        self.i += 1
+        phase = self.i % 4
+        if phase == 0:                      # 新しい人物を鋳造
+            key = f"人物{self.i}"
+            self.last = {"kind": "自動登録", "label": str(self.i),
+                         "name": key, "rename": None}
+            return key
+        if phase == 1 and self.known:       # 過去の会議の登録者に一致
+            key = self.known[(self.i // 4) % len(self.known)]
+            self.last = {"kind": "声紋一致", "label": str(self.i),
+                         "name": key, "sim": 0.9}
+            return key
+        if phase == 2:                      # ラベル不純（席の音声で決め直される）
+            self.last = {"kind": "ラベル不純", "label": str(self.i)}
+            return UNSURE_SPEAKER
+        self.last = {"kind": "蓄積中", "label": str(self.i)}
+        return f"#{self.i}"
+
+
+def _drive(state, n=24):
+    loop = RecvLoop(state, _Args(), backend=None)
+    state.asr_pcm_buf = bytearray(
+        np.full(SR * 30, 9000, dtype="<i2").tobytes())
+    for i in range(n):
+        loop.cur_speaker = str(i + 1)
+        loop.cur_text = f"{i + 1}番目の発言です"
+        loop.cur_ms, loop.cur_end = 1000 + i * 9000, 4000 + i * 9000
+        loop.flush()
+    return loop
+
+
+def _human_speakers(state):
+    from das.asr.live._speaker_keys import NON_PARTICIPANT_KEYS
+    return {str(r["speaker"]) for r in state.records
+            if "speaker" in r and str(r["speaker"]) not in NON_PARTICIPANT_KEYS
+            and str(r["speaker"]) != UNSURE_SPEAKER}
+
+
+def test_invariant_never_more_speakers_than_the_limit(tmp_path):
+    """**不変条件1**: 議事録に現れる人間の話者は、想定話者数を超えない.
+
+    鋳造・過去の登録者との一致・不純ラベルが入り混じっても超えないこと。
+    今日見つけた §28.7 / §28.9 はどちらもこの性質の破れだった。
+    """
+    state = _state_for_recording(tmp_path, [])
+    state.tracker = _AdversarialTracker(known=["松井", "壁", "朱色", "ベテランち"])
+    state.args.diarization_max_speakers = 3
+    _drive(state)
+
+    speakers = _human_speakers(state)
+    assert len(speakers) <= 3, f"上限3のはずが {sorted(speakers)}"
+
+
+def test_invariant_labels_have_no_gaps(tmp_path):
+    """**不変条件2**: 表示ラベルは参加者Aから飛びなく並ぶ.
+
+    発言の無くなったキーが文字を押さえ続けると「1人なのに参加者Bから
+    始まる」が起きる（§28.6）。遡及訂正のたびに詰め直されること。
+    """
+    state = _state_for_recording(tmp_path, [])
+    state.tracker = _AdversarialTracker(known=["松井"])
+    state.args.diarization_max_speakers = 3
+    _drive(state)
+
+    labels = sorted(state.anonymous_labels.values())
+    expected = [f"参加者{chr(ord('A') + i)}" for i in range(len(labels))]
+    assert labels == expected, f"文字が飛んでいる: {labels}"
+
+
+def test_invariant_holds_without_a_speaker_limit(tmp_path):
+    """上限を指定しない構成でも、ラベルの飛びは起きない."""
+    state = _state_for_recording(tmp_path, [])
+    state.tracker = _AdversarialTracker(known=[])
+    state.args.diarization_max_speakers = None
+    _drive(state)
+
+    labels = sorted(state.anonymous_labels.values())
+    expected = [f"参加者{chr(ord('A') + i)}" for i in range(len(labels))]
+    assert labels == expected, f"文字が飛んでいる: {labels}"
