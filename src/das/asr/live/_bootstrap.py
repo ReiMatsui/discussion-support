@@ -32,6 +32,7 @@ from das.asr.live._cluster_naming import ClusterVoiceNamer
 from das.asr.live._diarization import SpeakerResolver
 from das.asr.live._pyannote_diarization import PyannoteStreamingDiarizationProvider
 from das.asr.live._recv_loop import RecvLoop
+from das.asr.live._seat_audio import SeatAudio
 from das.asr.live._session_state import SessionState
 from das.asr.live._sortformer_diarization import SortformerLocalDiarizationProvider
 from das.asr.live._ui import _UIHandler
@@ -726,9 +727,14 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
     # かつ声紋照合(tracker)が有効な時だけ生成する。
     # tracker が無い（--no-vp や依存未導入）場合は照合しようがないため無視する。
     cluster_namer = None
+    seat_audio = None
     if args.diarization in ("pyannote", "sortformer") and args.vp_cluster_naming:
         if tracker is not None:
             cluster_namer = ClusterVoiceNamer(tracker)
+            # 席落ち発話の割当て（handoff §27）。クラスタ分裂で席を得られず
+            # 未確定に落ちる発話を、席を持つ人の実音声と比べて寄せ直す。
+            # ハイブリッド構成に閉じるので pyannote単独・Soniox単独は不変。
+            seat_audio = SeatAudio(tracker)
             # ハイブリッド時のみ、短発話(short_floor〜min_sec)の声紋照合を既知1人
             # でも試みる（VoiceProfiles.hybrid のコメント参照。実測: 声紋一致92%
             # vs 前話者追従28%, transcripts/2026-07-14_1729 GT評価）。
@@ -750,7 +756,8 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
                          tracker=tracker, serve=_serve,
                          diarization_provider=diarizer,
                          speaker_resolver=SpeakerResolver(),
-                         cluster_namer=cluster_namer)
+                         cluster_namer=cluster_namer,
+                         seat_audio=seat_audio)
     state.stt_backend = backend
     state.waiting_to_start = bool(args.setup and _serve and not args.wav and not args.simulate)
     write_session_config(state, args, tracker)

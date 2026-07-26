@@ -322,6 +322,23 @@ class RecvLoop:
         # 既存フィールド（key 等）は変えず final_key を追加のみ（diag 消費側の互換維持）。
         final_sp_id = s.constrain_human_speaker_key(
             UNSURE_SPEAKER if _is_backchannel else sp_id)
+        # --- 席落ちの割当て（クラスタ分裂の回収。handoff §27。ハイブリッド限定） ---
+        # 上流はキーを決めていたのに席上限で落ちた発話は、実測で**全て**
+        # @diar:N＝既に席を持つ人の分裂だった。参加人数の設定上そこに新しい
+        # 参加者は入れないので、残る問いは「席を持つN人のうち誰か」だけになる。
+        # この発話1件に限って席の実音声と比べ、最も似た人へ寄せる（確定は
+        # 書かない＝可逆。§15.12 の「不可逆な操作は高確信を要求」と衝突しない）。
+        if s.seat_audio is not None and not _is_backchannel:
+            if final_sp_id != UNSURE_SPEAKER:
+                s.seat_audio.observe(final_sp_id, wav)
+            elif sp_id != UNSURE_SPEAKER:
+                picked = s.seat_audio.nearest(wav)
+                if picked is not None:
+                    final_sp_id = picked[0]
+                    rec_extra["speaker_source"] = "seat_assign"
+                    rec_extra["speaker_confidence"] = round(picked[1], 3)
+                    rec_extra["speaker_reason"] = "seat_full_nearest_seat_audio"
+                    diag_extra["seat"] = s.seat_audio.last_pick
         if tracker is not None and tracker.last is not None:
             try:
                 with open(s.diag_path, "a", encoding="utf-8") as f:

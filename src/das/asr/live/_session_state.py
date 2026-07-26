@@ -16,6 +16,7 @@ from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any
 
+from ._cluster_naming import ClusterVoiceNamer
 from ._constants import (
     _MANUAL_CALL_MAX_CHARS,
     _PROACTIVITY_DEFAULT,
@@ -33,9 +34,9 @@ from ._constants import (
     UNSURE_SPEAKER,
     fmt_ts,
 )
-from ._cluster_naming import ClusterVoiceNamer
 from ._diarization import DiarizationEvent, DiarizationProvider, SpeakerResolver
 from ._participation import participation_stats
+from ._seat_audio import SeatAudio
 from ._speaker_keys import is_provisional_key, looks_like_system_name
 from ._voice_profiles import VoiceProfiles
 from .agents._partner import ConversationPartner
@@ -57,7 +58,8 @@ class SessionState:
                  turns_path, wav_path, tracker=None, serve=True,
                  diarization_provider: DiarizationProvider | None = None,
                  speaker_resolver: SpeakerResolver | None = None,
-                 cluster_namer: ClusterVoiceNamer | None = None):
+                 cluster_namer: ClusterVoiceNamer | None = None,
+                 seat_audio: SeatAudio | None = None):
         self.args = args
         self.stt_backend = None
         self.started = started
@@ -108,6 +110,9 @@ class SessionState:
         # 指定時のみ _bootstrap.py が生成して渡す。None なら従来どおり
         # key_for_diarization_speaker の匿名キー付与のみで完結する。
         self.cluster_namer: ClusterVoiceNamer | None = cluster_namer
+        # 席落ち発話の割当て（handoff §27。ハイブリッド構成でのみ生成される）。
+        # None なら従来どおり席上限で落ちた発話は未確定のまま。
+        self.seat_audio: SeatAudio | None = seat_audio
         self.anonymous_labels: dict[str, str] = {}
         self._DIARIZATION_KEEP_MS = 10 * 60 * 1000
         # 上限(constrain)で未確定化した回数（可視化用, 2026-07-25 実セッションで
@@ -593,6 +598,10 @@ class SessionState:
             # 更新しないと旧名が永久に返り続ける（C3 の人格復活の本体）。
             if self.cluster_namer is not None:
                 self.cluster_namer.rename_confirmed(old, new)
+            # 席の参照音声。追従しないとリネーム後も旧キーへ寄せてしまい、
+            # 消えたはずの人格が復活する（cluster_namer と同じ事情）。
+            if self.seat_audio is not None:
+                self.seat_audio.rename(old, new)
             if old in self.html_color_idx:
                 # 統合先が未採番なら旧キーの色番号を引き継ぐ（同一人物の色を維持
                 # しつつ、他の話者の色をずらさない。review C11）。
@@ -941,6 +950,8 @@ class SessionState:
             self.diarization_events = []
         if self.cluster_namer is not None:
             self.cluster_namer.reset()
+        if self.seat_audio is not None:
+            self.seat_audio.reset()
         if self.tracker is not None:
             self.tracker.reset_session()
         with self.topics_lock:

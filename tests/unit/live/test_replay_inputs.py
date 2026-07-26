@@ -21,7 +21,7 @@ from pathlib import Path
 
 import numpy as np
 
-from das.asr.live._constants import SR
+from das.asr.live._constants import SR, UNSURE_SPEAKER
 from das.asr.live._diarization import DiarizationEvent, SpeakerResolver
 from das.asr.live._recv_loop import RecvLoop
 from das.asr.live._session_state import SessionState
@@ -437,3 +437,116 @@ def test_full_concatenation_is_the_default_alignment():
     import score_transcription as sc
     sig = inspect.signature(sc.score_run)
     assert sig.parameters["window_sec"].default == 0.0
+
+
+# ---------------------------------------------------------------------------
+# 席落ちの割当て（handoff §27）: flush の呼び出し口
+# ---------------------------------------------------------------------------
+
+def _loop_with_seat_audio(tmp_path, *, seats):
+    """席上限で落ちる状況を作り、SeatAudio を差した RecvLoop を返す."""
+    from das.asr.live._seat_audio import SeatAudio
+    state = _state_for_recording(tmp_path, [])
+    state.seat_audio = SeatAudio(_SeatTracker(), ref_sec=30.0, min_ref_sec=1.0)
+    for key, tag in seats:
+        state.seat_audio.observe(key, np.full(SR * 2, tag, dtype=np.float32))
+    return state, RecvLoop(state, _Args(), backend=None)
+
+
+class _SeatTracker:
+    """先頭サンプルの符号で人物を分ける最小の埋め込み器."""
+
+    def embed_audio(self, wav):
+        if wav is None or wav.size == 0:
+            return None
+        v = np.array([1.0, 0.0] if float(wav[0]) >= 0 else [0.0, 1.0])
+        return v
+
+
+def test_seat_drop_is_assigned_to_the_nearest_seat(tmp_path, monkeypatch):
+    """上流が決めていたのに席上限で落ちた発話は、席の実音声で寄せ直される."""
+    state, loop = _loop_with_seat_audio(
+        tmp_path, seats=[("人物1", 1.0), ("人物2", -1.0)])
+    # 上流は決めている / constrain が未確定に落とす、という状況を作る
+    monkeypatch.setattr("das.asr.live._recv_loop.decide_speaker",
+                        lambda *a, **k: "@diar:3")
+    monkeypatch.setattr(state, "constrain_human_speaker_key",
+                        lambda k: UNSURE_SPEAKER)
+    state.asr_pcm_buf = bytearray(np.full(SR * 10, 20000, dtype="<i2").tobytes())
+    loop.cur_speaker = "1"
+    loop.cur_text = "これは検証用の発言です"
+    loop.cur_ms, loop.cur_end = 1000, 3000
+
+    loop.flush()
+
+    rec = state.records[-1]
+    assert rec["speaker"] == "人物1"          # 未確定ではなく席へ寄った
+    assert rec["speaker_source"] == "seat_assign"
+    assert rec["speaker_reason"] == "seat_full_nearest_seat_audio"
+
+
+def test_seat_assignment_does_not_fire_when_upstream_is_unsure(tmp_path,
+                                                               monkeypatch):
+    """上流が決めていない発話には掛けない（席の問題ではないため）."""
+    state, loop = _loop_with_seat_audio(
+        tmp_path, seats=[("人物1", 1.0), ("人物2", -1.0)])
+    monkeypatch.setattr(state, "constrain_human_speaker_key",
+                        lambda k: UNSURE_SPEAKER)
+    monkeypatch.setattr("das.asr.live._recv_loop.decide_speaker",
+                        lambda *a, **k: UNSURE_SPEAKER)
+    state.asr_pcm_buf = bytearray(np.full(SR * 10, 20000, dtype="<i2").tobytes())
+    loop.cur_speaker = "1"
+    loop.cur_text = "これは検証用の発言です"
+    loop.cur_ms, loop.cur_end = 1000, 3000
+
+    loop.flush()
+
+    assert state.records[-1]["speaker"] == UNSURE_SPEAKER
+
+
+def test_seat_assignment_writes_no_confirmation(tmp_path, monkeypatch):
+    """割当ては1発話限りで、次の発話は独立に判定される（可逆性の担保）.
+
+    §15.12 の一般則「不可逆な操作は高確信を要求する」との整合はここで取る。
+    確定を書かないからこそ、類似度の下限を課さずに済む。
+    """
+    state, loop = _loop_with_seat_audio(
+        tmp_path, seats=[("人物1", 1.0), ("人物2", -1.0)])
+    monkeypatch.setattr("das.asr.live._recv_loop.decide_speaker",
+                        lambda *a, **k: "@diar:3")
+    monkeypatch.setattr(state, "constrain_human_speaker_key",
+                        lambda k: UNSURE_SPEAKER)
+    state.asr_pcm_buf = bytearray(np.full(SR * 10, 20000, dtype="<i2").tobytes())
+    loop.cur_speaker = "1"
+    loop.cur_text = "これは検証用の発言です"
+    loop.cur_ms, loop.cur_end = 1000, 3000
+    loop.flush()
+    assert state.records[-1]["speaker"] == "人物1"
+
+    # 次の発話は逆の声 → 台帳に引きずられず、独立に人物2へ寄る
+    state.asr_pcm_buf = bytearray(np.full(SR * 10, -20000, dtype="<i2").tobytes())
+    loop.cur_speaker = "1"
+    loop.cur_text = "こちらは別の人の発言です"
+    loop.cur_ms, loop.cur_end = 4000, 6000
+    loop.flush()
+
+    assert state.records[-1]["speaker"] == "人物2"
+    assert state.diarization_speaker_keys == {}   # 台帳に書いていない
+
+
+def test_no_seat_audio_means_unchanged_behaviour(tmp_path, monkeypatch):
+    """seat_audio が無い構成（pyannote単独・Soniox単独）は完全に不変."""
+    state = _state_for_recording(tmp_path, [])
+    assert state.seat_audio is None
+    loop = RecvLoop(state, _Args(), backend=None)
+    monkeypatch.setattr("das.asr.live._recv_loop.decide_speaker",
+                        lambda *a, **k: "@diar:3")
+    monkeypatch.setattr(state, "constrain_human_speaker_key",
+                        lambda k: UNSURE_SPEAKER)
+    loop.cur_speaker = "1"
+    loop.cur_text = "これは検証用の発言です"
+    loop.cur_ms, loop.cur_end = 1000, 3000
+
+    loop.flush()
+
+    assert state.records[-1]["speaker"] == UNSURE_SPEAKER
