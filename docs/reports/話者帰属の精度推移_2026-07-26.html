@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>話者帰属の精度推移 2026-07-26</title>
+<style>
+  .viz-root {
+    color-scheme: light;
+    --surface-1: #fcfcfb;
+    --surface-2: #f3f2ef;
+    --line: #dedcd6;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #77756f;
+    --ok: #2a78d6;
+    --wrong: #eb6834;
+    --unsure: #1baf7a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) .viz-root {
+      color-scheme: dark;
+      --surface-1: #1a1a19;
+      --surface-2: #232322;
+      --line: #3a3a37;
+      --text-primary: #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted: #9a988f;
+      --ok: #3987e5;
+      --wrong: #d95926;
+      --unsure: #199e70;
+    }
+  }
+  :root[data-theme="dark"] .viz-root {
+    color-scheme: dark;
+    --surface-1: #1a1a19;
+    --surface-2: #232322;
+    --line: #3a3a37;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #9a988f;
+    --ok: #3987e5;
+    --wrong: #d95926;
+    --unsure: #199e70;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  .viz-root {
+    background: var(--surface-1);
+    color: var(--text-primary);
+    font-family: -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+    padding: 2.2rem 1.4rem 3rem;
+    line-height: 1.7;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  h1 { font-size: 1.35rem; margin: 0 0 .2rem; letter-spacing: .01em; }
+  .sub { color: var(--text-secondary); font-size: .87rem; margin: 0 0 2rem; }
+  h2 {
+    font-size: .95rem; margin: 2.6rem 0 .3rem; letter-spacing: .02em;
+  }
+  h2 + .note { margin-top: 0; }
+  .note { color: var(--text-secondary); font-size: .84rem; margin: .1rem 0 1.1rem; }
+
+  .hero { display: flex; align-items: baseline; gap: .7rem; flex-wrap: wrap;
+          margin: 0 0 .3rem; }
+  .hero .from { font-size: 1.9rem; color: var(--text-muted);
+                font-variant-numeric: tabular-nums; }
+  .hero .arrow { font-size: 1.3rem; color: var(--text-muted); }
+  .hero .to { font-size: 3.1rem; font-weight: 700; letter-spacing: -.02em;
+              font-variant-numeric: tabular-nums; }
+  .hero .unit { font-size: 1.1rem; color: var(--text-secondary); }
+
+  .legend { display: flex; gap: 1.1rem; flex-wrap: wrap; margin: 0 0 1rem;
+            font-size: .82rem; color: var(--text-secondary); }
+  .legend span { display: inline-flex; align-items: center; gap: .4em; }
+  .swatch { width: 11px; height: 11px; border-radius: 3px; flex: none; }
+
+  .row { display: grid; grid-template-columns: 16rem 1fr;
+         gap: .8rem; align-items: center; margin-bottom: .55rem; }
+  .rlabel { font-size: .82rem; color: var(--text-secondary); text-align: right;
+            line-height: 1.35; }
+  .rlabel b { display: block; color: var(--text-primary); font-weight: 600;
+              font-size: .85rem; }
+  .bar { display: flex; height: 30px; border-radius: 4px; overflow: hidden;
+         background: var(--surface-2); }
+  .seg { position: relative; display: flex; align-items: center;
+         justify-content: center; font-size: .74rem; font-weight: 600;
+         color: #fff; font-variant-numeric: tabular-nums;
+         box-shadow: 0 0 0 2px var(--surface-1) inset;
+         border-radius: 4px; }
+  .seg:not(:first-child) { margin-left: 2px; }
+  .seg.s-ok { background: var(--ok); }
+  .seg.s-wrong { background: var(--wrong); }
+  .seg.s-unsure { background: var(--unsure); }
+  .seg small { opacity: 0; position: absolute; }
+
+  table { border-collapse: collapse; width: 100%; font-size: .84rem;
+          font-variant-numeric: tabular-nums; margin-top: .4rem; }
+  th, td { text-align: right; padding: .42rem .55rem;
+           border-bottom: 1px solid var(--line); }
+  th:first-child, td:first-child { text-align: left; }
+  thead th { color: var(--text-secondary); font-weight: 600;
+             font-size: .78rem; border-bottom: 1px solid var(--line); }
+  tbody tr:last-child td { border-bottom: none; font-weight: 700; }
+  td.dim { color: var(--text-muted); }
+
+  .timerow { display: grid; grid-template-columns: 5.5rem 1fr 3.2rem;
+             gap: .7rem; align-items: center; margin-bottom: .4rem;
+             font-size: .82rem; }
+  .tbar { height: 22px; background: var(--surface-2); border-radius: 4px;
+          overflow: hidden; }
+  .tfill { height: 100%; background: var(--ok); border-radius: 4px; }
+  .tval { font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+
+  ul.plain { padding-left: 1.1rem; margin: .3rem 0 0; }
+  ul.plain li { margin-bottom: .35rem; font-size: .86rem;
+                color: var(--text-secondary); }
+  ul.plain li b { color: var(--text-primary); font-weight: 600; }
+  .foot { margin-top: 2.6rem; padding-top: 1rem; border-top: 1px solid var(--line);
+          color: var(--text-muted); font-size: .78rem; }
+</style>
+</head>
+<body>
+<div class="viz-root">
+<div class="wrap">
+
+  <h1>話者帰属の精度推移</h1>
+  <p class="sub">Chiba 3人会話 9本・相槌を除く実質発話 1202件／2026-07-26</p>
+
+  <div class="hero">
+    <span class="from">54.4%</span>
+    <span class="arrow">→</span>
+    <span class="to">89.9%</span>
+    <span class="unit">正解</span>
+  </div>
+  <p class="note">
+    同じ日のうちに、正解が 35.5 ポイント上がり、誤帰属は 16.3%→7.0%、
+    未確定は 29.2%→3.2% に下がりました。新規録音も API コストも使っていません
+    （すべて手持ちの記録と正解データでの測定です）。
+  </p>
+
+  <h2>何をしたら何が変わったか</h2>
+  <p class="note">帯の長さがそのまま割合です（合計100%）。</p>
+
+  <div class="legend">
+    <span><i class="swatch" style="background:var(--ok)"></i>正解</span>
+    <span><i class="swatch" style="background:var(--wrong)"></i>誤帰属</span>
+    <span><i class="swatch" style="background:var(--unsure)"></i>未確定</span>
+  </div>
+
+  <div id="bars"></div>
+
+  <h2>数字</h2>
+  <table>
+    <thead>
+      <tr><th>段階</th><th>正解</th><th>誤帰属</th><th>未確定</th>
+          <th>開発5本</th><th>検証4本</th></tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+
+  <h2>効いた理由は「いつ判定するか」だった</h2>
+  <p class="note">
+    最後の一手（遡及訂正）の根拠です。誤りはセッションの立ち上がりに極端に
+    偏っていました。10分経てば9割出ているのに、序盤に決めた帰属を一度も
+    見直していなかった、というだけの話でした。棒は各時間帯の正解率です。
+  </p>
+  <div id="times"></div>
+
+  <h2>試して、効かなかったもの</h2>
+  <p class="note">同じ仮説で再挑戦しないよう、否定的結果も記録しています。</p>
+  <ul class="plain">
+    <li><b>区切りの整列（構造変更）</b> — Soniox の区切りが話者境界をまたぐのは
+      26%あるが、失う時間は5.9%。誤帰属の22%しか説明せず、規模に見合わない</li>
+    <li><b>参照の作り方を変える</b> — 発話ごとに保持して最大類似（77.6%）も、
+      上位2本の平均（78.0%）も、現状の30秒連結1本（78.5%）を超えなかった</li>
+    <li><b>問い合わせ音声に文脈を足す</b> — 78.5%→64.0%と大幅に悪化。再判定が
+      必要な発話は、まさにまとめる基準が壊れている発話だった</li>
+    <li><b>埋め込みモデルを大きくする</b> — ReDimNet b2→b3 は全体+0.7ptだが
+      開発セットではむしろ低下し、計算は2.7倍遅い</li>
+  </ul>
+
+  <div class="foot">
+    測定はすべて開発5本／検証4本に分けて確認しています。
+    詳細は <code>docs/design/handoff_2026-07-14_unregistered_speakers.md</code>
+    の §27〜§28。テスト 1019 件全緑。
+  </div>
+
+</div>
+</div>
+
+<script>
+const STAGES = [
+  { name: "この日の開始時点", detail: "席落ちは未確定のまま",
+    ok: 54.4, wrong: 16.3, unsure: 29.2, dev: null, val: null },
+  { name: "席落ちを席の音声で拾う", detail: "§27.8 / §27.9",
+    ok: 62.0, wrong: 19.7, unsure: 18.3, dev: null, val: null },
+  { name: "棄権した発話も拾う・蓄積中に門番", detail: "§27.11",
+    ok: 71.0, wrong: 19.7, unsure: 9.3, dev: 66.3, val: 76.9 },
+  { name: "ラベルしか根拠が無い判定を上書き", detail: "§27.12",
+    ok: 79.2, wrong: 13.6, unsure: 7.1, dev: 77.1, val: 82.0 },
+  { name: "序盤の判定を後から貼り直す", detail: "§28.5（2分ごと）",
+    ok: 89.9, wrong: 7.0, unsure: 3.2, dev: 89.5, val: 90.3 },
+];
+
+const TIMES = [
+  { label: "0〜1分", v: 29, n: 107 },
+  { label: "1〜2分", v: 69, n: 109 },
+  { label: "2〜5分", v: 77, n: 379 },
+  { label: "5〜10分", v: 90, n: 607 },
+];
+
+const bars = document.getElementById("bars");
+for (const s of STAGES) {
+  const row = document.createElement("div");
+  row.className = "row";
+  row.innerHTML = `
+    <div class="rlabel"><b>${s.name}</b>${s.detail}</div>
+    <div class="bar">
+      <div class="seg s-ok" style="width:${s.ok}%"
+           title="正解 ${s.ok.toFixed(1)}%">${s.ok.toFixed(1)}</div>
+      <div class="seg s-wrong" style="width:${s.wrong}%"
+           title="誤帰属 ${s.wrong.toFixed(1)}%">${s.wrong.toFixed(1)}</div>
+      <div class="seg s-unsure" style="width:${s.unsure}%"
+           title="未確定 ${s.unsure.toFixed(1)}%">${s.unsure.toFixed(1)}</div>
+    </div>`;
+  bars.appendChild(row);
+}
+
+const tbody = document.getElementById("tbody");
+for (const s of STAGES) {
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td>${s.name}</td>
+    <td>${s.ok.toFixed(1)}%</td>
+    <td>${s.wrong.toFixed(1)}%</td>
+    <td>${s.unsure.toFixed(1)}%</td>
+    <td class="dim">${s.dev === null ? "—" : s.dev.toFixed(1) + "%"}</td>
+    <td class="dim">${s.val === null ? "—" : s.val.toFixed(1) + "%"}</td>`;
+  tbody.appendChild(tr);
+}
+
+const times = document.getElementById("times");
+for (const t of TIMES) {
+  const row = document.createElement("div");
+  row.className = "timerow";
+  row.innerHTML = `
+    <div class="tval">${t.label}</div>
+    <div class="tbar" title="${t.n}発話"><div class="tfill"
+         style="width:${t.v}%"></div></div>
+    <div class="tval">${t.v}%</div>`;
+  times.appendChild(row);
+}
+</script>
+</body>
+</html>
