@@ -415,9 +415,9 @@ def test_sys_records_do_not_consume_a_seat(tmp_path):
     s = _make_state_with_diag(tmp_path, max_speakers=2)
     s.records.append({"ms": 0, "end_ms": 500, "speaker": "@diar:1", "text": "x"})
     s.disp_name("@diar:1")                      # 参加者A（席1）
-    assert s._known_human_slot_count() == 1
+    assert len(s._known_human_slots()) == 1
     s.add_sys(100, "この声を「参加者A」として追跡開始")
-    assert s._known_human_slot_count() == 1     # sys は席を作らない
+    assert len(s._known_human_slots()) == 1     # sys は席を作らない
     # 2人目は席が空いているので通る（旧実装では "?" に落ちていた）
     assert s.constrain_human_speaker_key("@diar:2") == "@diar:2"
 
@@ -584,3 +584,34 @@ def test_compaction_is_idempotent(tmp_path):
 
     assert st.compact_anonymous_labels() == 0
     assert st.anonymous_labels == before
+
+
+def test_previously_registered_voice_still_needs_a_free_seat(tmp_path):
+    """過去の会議で登録された人物も、席が無ければ入れない（handoff §28.9）.
+
+    voices.json は**セッションをまたいで**プロファイルを保持する。以前は
+    「実名リネーム済みの人物は既存の席保持者」として実名キーを無条件に
+    通していたため、今回まだ一度も喋っていない過去の登録者が上限を素通り
+    した。実会話では上限3に対し8人が表示され、そこには名前の聞き間違いで
+    できた「壁」「朱色」も含まれていた。
+    """
+    s = _make_state_with_diag(tmp_path, max_speakers=2)
+    s.records.append({"ms": 0, "end_ms": 500, "speaker": "@diar:1", "text": "x"})
+    s.disp_name("@diar:1")
+    s.records.append({"ms": 600, "end_ms": 900, "speaker": "松井", "text": "y"})
+
+    # ここまでで2席（参加者A と 松井）。過去の登録者は入れない
+    assert s.constrain_human_speaker_key("壁") == "?"
+    # 既に喋っている実名は当然そのまま通る
+    assert s.constrain_human_speaker_key("松井") == "松井"
+
+
+def test_renamed_person_keeps_their_seat(tmp_path):
+    """会議中にリネームした人は席を失わない（rekey はラベルを解放するため）."""
+    s = _make_state_with_diag(tmp_path, max_speakers=1)
+    s.records.append({"ms": 0, "end_ms": 500, "speaker": "人物1", "text": "x"})
+    s.disp_name("人物1")
+    s.rekey("人物1", "田中")
+
+    assert s.constrain_human_speaker_key("田中") == "田中"
+    assert s.constrain_human_speaker_key("人物2") == "?"   # 上限1なので他は入れない

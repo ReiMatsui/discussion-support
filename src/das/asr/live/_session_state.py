@@ -344,8 +344,8 @@ class SessionState:
             return self.anonymous_labels.get(key, key)
         return key
 
-    def _known_human_slot_count(self) -> int:
-        """既に席（表示ラベル）を持つ人の数を数える.
+    def _known_human_slots(self) -> set[str]:
+        """既に席を持っている人の集合を返す（表示ラベル、または実名キー）.
 
         records には話者を持たないレコードも混ざる（add_sys のシステム
         メッセージ: 「この声を『参加者A』として追跡開始」「注意: 想定話者数の
@@ -363,7 +363,7 @@ class SessionState:
                 slot = self._human_slot_key(str(r["speaker"]))
                 if slot:
                     slots.add(slot)
-        return len(slots)
+        return slots
 
     def constrain_human_speaker_key(self, key) -> str:
         """参加人数上限を超える新規話者を「未確定」に落とす（統一席ルール）.
@@ -398,14 +398,20 @@ class SessionState:
         # （→2026-07-14 の保護は素通し無しで成立）、新規は種別（@diar/#/人物N）
         # を問わず席が無ければ入れない（→参加者Cは生まれず未確定+警告になる。
         # 声紋の二重登録された人物の発話は、合流(dedupe)か上限の引き上げで回収）。
-        if not (is_provisional_key(key) or looks_like_system_name(key)):
-            return key   # 実名リネーム済みの人物は既存の席保持者
         max_speakers = self._max_human_speakers()
         if max_speakers is None:
             return key
-        if key in self.anonymous_labels:
-            return key   # 既に席を持つ
-        if self._known_human_slot_count() >= max_speakers:
+        slots = self._known_human_slots()
+        slot = self._human_slot_key(key)
+        if slot is not None and slot in slots:
+            return key   # 既に席を持つ（表示ラベル持ち、または今回喋った実名）
+        # 実名キーも席を要求する（2026-07-26 修正）。以前は「実名リネーム済みの
+        # 人物は既存の席保持者」として無条件に通していたが、voices.json は
+        # **セッションをまたいで**プロファイルを保持するため、過去の会議で
+        # 登録された人物（聞き間違いの「壁」「朱色」等を含む）が今回まだ一度も
+        # 喋っていないのに素通りし、上限3の会話で8人が表示された（実会話で確認）。
+        # 「今回のセッションで既に席に着いているか」で判定するのが正しい。
+        if len(slots) >= max_speakers:
             self._note_constrain_drop(key, max_speakers)
             return UNSURE_SPEAKER
         return key
