@@ -86,6 +86,19 @@ def _voiceprint_claim(d, sp_id) -> tuple[str | None, float | None]:
     return None, None
 
 
+def voiceprint_endorses(d, sp_id) -> bool:
+    """その発話自身の声紋1位候補が帰属先と一致し、弱い裏付けがあるか（§18.8）.
+
+    「候補が一致するか」が唯一の強い弁別子で、しきい値は無意味に低い類似の
+    偽承認を塞ぐ緩い床（_constants の校正メモ参照）。ステップ3d と、
+    RecvLoop.flush の「蓄積中」門番の両方がこの1つの述語を使う——二重定義を
+    作らないため（handoff §27.11）。
+    """
+    return (d is not None and d.get("name") == sp_id
+            and float(d.get("sim") or 0.0)
+            >= CLUSTER_IMPURE_RECOVERY_ENDORSE_MIN_SIM)
+
+
 def _cluster_attribution(s: SessionState, resolved, *, d, wav,
                          start_ms: int, end_ms: int,
                          diarization_events, rec_extra: dict) -> str:
@@ -115,16 +128,13 @@ def _cluster_attribution(s: SessionState, resolved, *, d, wav,
     # 測ったデータもないため広げない（データなき拡張はしない）。_classify に
     # UNSURE を返す新しい kind を足す場合は、この境界を再検討すること。
     if (s.cluster_namer is not None and sp_id != UNSURE_SPEAKER
-            and d and d.get("kind") == "ラベル不純"):
-        endorsed = (d.get("name") == sp_id
-                    and float(d.get("sim") or 0.0)
-                    >= CLUSTER_IMPURE_RECOVERY_ENDORSE_MIN_SIM)
-        if not endorsed:
-            rec_extra["speaker_source"] = "cluster_impure_label"
-            rec_extra["speaker_confidence"] = 0.0
-            rec_extra["speaker_reason"] = (
-                "impure_stt_label_without_voiceprint_endorsement")
-            return UNSURE_SPEAKER
+            and d and d.get("kind") == "ラベル不純"
+            and not voiceprint_endorses(d, sp_id)):
+        rec_extra["speaker_source"] = "cluster_impure_label"
+        rec_extra["speaker_confidence"] = 0.0
+        rec_extra["speaker_reason"] = (
+            "impure_stt_label_without_voiceprint_endorsement")
+        return UNSURE_SPEAKER
     return sp_id
 
 

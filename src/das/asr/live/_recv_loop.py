@@ -13,7 +13,11 @@ if TYPE_CHECKING:
 
 import contextlib
 
-from ._attribution import _VOICEPRINT_RELIABLE_KINDS, decide_speaker
+from ._attribution import (
+    _VOICEPRINT_RELIABLE_KINDS,
+    decide_speaker,
+    voiceprint_endorses,
+)
 from ._constants import (
     _BACKCHANNEL_RE,
     RESET,
@@ -329,6 +333,22 @@ class RecvLoop:
         # この発話1件に限って席の実音声と比べ、最も似た人へ寄せる（確定は
         # 書かない＝可逆。§15.12 の「不可逆な操作は高確信を要求」と衝突しない）。
         if s.seat_audio is not None and not _is_backchannel:
+            # 「蓄積中」の門番（handoff §27.11）。声紋が育っていない発話の帰属は
+            # 裏付け（1位候補が帰属先と一致）が無いと当てにならず、実測で
+            # 裏付けあり 12正解/1誤り に対し裏付けなし 2正解/29誤り だった。
+            # 単独では「誤帰属 -2.7pt と引き換えに未確定 +2.7pt」の交換にしか
+            # ならないので §27.6 で一度保留にしたが、切った先を下の席の音声が
+            # 拾い直すので純増になる（正解 +9.0pt・誤帰属は横ばい）。
+            # §18.8 の3d門番と同じ述語（voiceprint_endorses）を使う。3dより
+            # 適用範囲が広い（経路を問わない）のは、そう測ったから。
+            if (final_sp_id != UNSURE_SPEAKER and d is not None
+                    and d.get("kind") == "蓄積中"
+                    and not voiceprint_endorses(d, sp_id)):
+                final_sp_id = UNSURE_SPEAKER
+                rec_extra["speaker_source"] = "accumulating_without_endorsement"
+                rec_extra["speaker_confidence"] = 0.0
+                rec_extra["speaker_reason"] = (
+                    "voiceprint_still_accumulating_without_endorsement")
             if final_sp_id != UNSURE_SPEAKER:
                 # 参照は「声紋層が高信頼だった発話」だけで作る。全発話で作ると
                 # 席の参照そのものが汚れる（実測: ある席は GT 純度 38%）。
@@ -336,7 +356,13 @@ class RecvLoop:
                 # 67%→70%、誤帰属の増分も 3.9→3.4pt に下がる（handoff §27.9）。
                 if d is not None and d.get("kind") in _VOICEPRINT_RELIABLE_KINDS:
                     s.seat_audio.observe(final_sp_id, wav)
-            elif sp_id != UNSURE_SPEAKER:
+            elif (sp_id != UNSURE_SPEAKER
+                  or (d is not None and d.get("kind") == "ラベル不純")):
+                # 上流が決めていた（席上限で落ちた）ぶんに加え、声紋層が
+                # 「ラベル不純」で棄権したぶんも席の音声で判定する。
+                # 棄権の理由は人物プロファイルとの照合が弱かったことで、
+                # 参照を席の実音声にすると分離が良くなる（§27.4）。実測で
+                # 未確定 18.3%→9.3%、正解 62.0%→71.0%（handoff §27.11）。
                 picked = s.seat_audio.nearest(wav)
                 if picked is not None:
                     final_sp_id = picked[0]

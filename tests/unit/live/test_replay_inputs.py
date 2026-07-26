@@ -572,7 +572,8 @@ def test_seat_reference_ignores_low_confidence_attributions(tmp_path,
     loop.cur_text = "これは検証用の発言です"
     loop.cur_ms, loop.cur_end = 1000, 3000
 
-    loop.flush()      # tracker.last の kind は「蓄積中」＝高信頼ではない
+    state.tracker.last = {"kind": "ラベル継続", "label": "1"}
+    loop.flush()      # 高信頼ではない kind（門番の対象外を選ぶ）
 
     assert state.records[-1]["speaker"] == "人物1"     # 帰属自体は従来どおり
     assert "人物1" not in state.seat_audio._embeddings   # 参照に入っていない
@@ -584,3 +585,82 @@ def test_seat_reference_ignores_low_confidence_attributions(tmp_path,
     loop.flush()
 
     assert "人物1" in state.seat_audio._embeddings   # 高信頼なら参照に入る
+
+
+def test_accumulating_without_endorsement_is_gated_then_reassigned(
+        tmp_path, monkeypatch):
+    """「蓄積中」は裏付けが無ければ切り、席の音声で拾い直す（handoff §27.11）.
+
+    実測: 裏付けあり 12正解/1誤り、裏付けなし 2正解/29誤り。門番単独は
+    「誤帰属 -2.7pt と引き換えに未確定 +2.7pt」の交換にしかならないが、
+    切った先を席の音声が拾うので純増になる（正解 +9.0pt・誤帰属は横ばい）。
+    """
+    from das.asr.live._seat_audio import SeatAudio
+    state = _state_for_recording(tmp_path, [])
+    state.seat_audio = SeatAudio(_SeatTracker(), ref_sec=30.0, min_ref_sec=1.0)
+    for key, tag in (("人物1", 1.0), ("人物2", -1.0)):
+        state.seat_audio.observe(key, np.full(SR * 2, tag, dtype=np.float32))
+    loop = RecvLoop(state, _Args(), backend=None)
+    monkeypatch.setattr("das.asr.live._recv_loop.decide_speaker",
+                        lambda *a, **k: "人物2")
+    monkeypatch.setattr(state, "constrain_human_speaker_key", lambda k: k)
+    # 裏付けなし（1位候補が帰属先と一致しない）の「蓄積中」
+    state.tracker.last = {"kind": "蓄積中", "label": "1", "name": "人物1",
+                          "sim": 0.9}
+    state.asr_pcm_buf = bytearray(np.full(SR * 10, 20000, dtype="<i2").tobytes())
+    loop.cur_speaker = "1"
+    loop.cur_text = "これは検証用の発言です"
+    loop.cur_ms, loop.cur_end = 1000, 3000
+
+    loop.flush()
+
+    # 上流の人物2 は裏付けが無いので通さず、声（正のタグ＝人物1）へ寄せ直す
+    assert state.records[-1]["speaker"] == "人物1"
+    assert state.records[-1]["speaker_source"] == "seat_assign"
+
+
+def test_accumulating_with_endorsement_is_kept(tmp_path, monkeypatch):
+    """裏付けのある「蓄積中」は従来どおり通す（門番は無差別に切らない）."""
+    from das.asr.live._seat_audio import SeatAudio
+    state = _state_for_recording(tmp_path, [])
+    state.seat_audio = SeatAudio(_SeatTracker(), ref_sec=30.0, min_ref_sec=1.0)
+    for key, tag in (("人物1", 1.0), ("人物2", -1.0)):
+        state.seat_audio.observe(key, np.full(SR * 2, tag, dtype=np.float32))
+    loop = RecvLoop(state, _Args(), backend=None)
+    monkeypatch.setattr("das.asr.live._recv_loop.decide_speaker",
+                        lambda *a, **k: "人物2")
+    monkeypatch.setattr(state, "constrain_human_speaker_key", lambda k: k)
+    state.tracker.last = {"kind": "蓄積中", "label": "1", "name": "人物2",
+                          "sim": 0.9}      # 1位候補が帰属先と一致＝裏付けあり
+    state.asr_pcm_buf = bytearray(np.full(SR * 10, 20000, dtype="<i2").tobytes())
+    loop.cur_speaker = "1"
+    loop.cur_text = "これは検証用の発言です"
+    loop.cur_ms, loop.cur_end = 1000, 3000
+
+    loop.flush()
+
+    assert state.records[-1]["speaker"] == "人物2"
+
+
+def test_impure_label_abstention_is_resolved_by_seat_audio(tmp_path,
+                                                           monkeypatch):
+    """「ラベル不純」で棄権した発話も席の音声で判定する（未確定の主因）."""
+    from das.asr.live._seat_audio import SeatAudio
+    state = _state_for_recording(tmp_path, [])
+    state.seat_audio = SeatAudio(_SeatTracker(), ref_sec=30.0, min_ref_sec=1.0)
+    for key, tag in (("人物1", 1.0), ("人物2", -1.0)):
+        state.seat_audio.observe(key, np.full(SR * 2, tag, dtype=np.float32))
+    loop = RecvLoop(state, _Args(), backend=None)
+    # 上流も constrain も未確定（席の問題ではなく声紋層の棄権）
+    monkeypatch.setattr("das.asr.live._recv_loop.decide_speaker",
+                        lambda *a, **k: UNSURE_SPEAKER)
+    state.tracker.last = {"kind": "ラベル不純", "label": "1"}
+    state.asr_pcm_buf = bytearray(np.full(SR * 10, -20000, dtype="<i2").tobytes())
+    loop.cur_speaker = "1"
+    loop.cur_text = "これは検証用の発言です"
+    loop.cur_ms, loop.cur_end = 1000, 3000
+
+    loop.flush()
+
+    assert state.records[-1]["speaker"] == "人物2"
+    assert state.records[-1]["speaker_source"] == "seat_assign"
