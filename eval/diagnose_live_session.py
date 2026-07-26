@@ -94,19 +94,33 @@ def report_fragmentation(rec: dict) -> None:
     """クラスタ分裂の実測（項目2の決着をつける数字）."""
     print("\n== B. クラスタ分裂（マイク直の土台の壊れ方） ==")
     utts = rec["utts"]
-    if not any("diar" in u for u in utts):
-        print("  ✗ 窓が記録されていないため測定不可")
-        return
-    # 窓は decide_speaker の先頭で記録されるので、声紋が勝った発話でも
-    # クラスタの所属が残る（Phase 0 の盲点が無い）
     sec_by_cluster: dict[str, float] = defaultdict(float)
     utt_by_cluster: Counter = Counter()
-    for u in utts:
-        dur = max(0, int(u["end"]) - int(u["ms"])) / 1000.0
-        for src, spk, _s, _e in u.get("diar", []):
-            key = f"{src}:{spk}"
-            sec_by_cluster[key] += dur
-            utt_by_cluster[key] += 1
+    lower_bound = not any("diar" in u for u in utts)
+    if lower_bound:
+        # 旧ラン（窓の記録が無い）: 発行済みの @diar:N キーから**下限**を測る。
+        # 見えるのは「3秒のヒステリシスを超え、かつ少なくとも1発話を取った
+        # クラスタ」だけで、声紋が勝った発話のクラスタ所属と、キーを得る前に
+        # 消えたクラスタは見えない。つまり真の分裂はこれ以上にしかならない
+        # ——**下限が既に大きければ「分裂が支配的」の結論は動かない**。
+        print("  ※ 窓の記録が無い旧ランのため、発行済み @diar:N からの"
+              "**下限**を測る（真の分裂はこれ以上）")
+        for u in utts:
+            k = str(u.get("key", ""))
+            if not k.startswith("@diar:"):
+                continue
+            dur = max(0, int(u["end"]) - int(u["ms"])) / 1000.0
+            sec_by_cluster[k] += dur
+            utt_by_cluster[k] += 1
+    else:
+        # 窓は decide_speaker の先頭で記録されるので、声紋が勝った発話でも
+        # クラスタの所属が残る（Phase 0 の盲点が無い）
+        for u in utts:
+            dur = max(0, int(u["end"]) - int(u["ms"])) / 1000.0
+            for src, spk, _s, _e in u.get("diar", []):
+                key = f"{src}:{spk}"
+                sec_by_cluster[key] += dur
+                utt_by_cluster[key] += 1
     if not sec_by_cluster:
         print("  クラスタが1つも観測されていない（diarization が供給されていない）")
         return
@@ -120,12 +134,19 @@ def report_fragmentation(rec: dict) -> None:
         if acc >= total * 0.9:
             break
     expected = rec["config"].get("diarization_max_speakers")
-    print(f"  観測クラスタ数: {len(ordered)}")
-    print(f"  実質クラスタ数（発話時間の90%を覆う数）: {effective}")
+    suffix = "（下限）" if lower_bound else ""
+    print(f"  観測クラスタ数{suffix}: {len(ordered)}")
+    print(f"  実質クラスタ数{suffix}（発話時間の90%を覆う数）: {effective}")
     if expected:
         print(f"  想定話者数: {expected} → 分裂率: {effective / expected:.1f}倍"
-              f"（1.0が理想。Chibaのスピーカー再生は約1.0〜1.5、"
-              f"実会話1723は約5.0）")
+              f"（1.0が理想）")
+    else:
+        print("  想定話者数が記録に無いため分裂率は出せない"
+              "（旧ランは構成を残していない）")
+    print("    既存ログの下限実測（2026-07-25 時点。いずれも旧形式のため下限）:")
+    print("      スピーカー再生(Chiba 11本): 0.3〜1.7倍・平均1.0倍")
+    print("      マイク直の実会話(5本):      1.0〜3.0倍・平均1.9倍")
+    print("      ただし旧ログはクラスタ所属の観測カバー率が3〜82%と低く決定的ではない")
     print("  クラスタ別の内訳（上位8）:")
     for k, v in ordered[:8]:
         print(f"    {k:<24} {v:6.1f}秒 / {utt_by_cluster[k]:3d}発話"

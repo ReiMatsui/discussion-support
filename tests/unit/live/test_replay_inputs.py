@@ -336,13 +336,27 @@ def test_diagnosis_measures_cluster_fragmentation(tmp_path):
     assert effective == 2       # 実質は2＝想定話者数と一致（分裂していない）
 
 
-def test_diagnosis_reports_old_recordings_as_unmeasurable(tmp_path, capsys):
-    """入力の無い旧ランでは「測定不可」と明示する（黙って0を出さない）."""
+def test_diagnosis_marks_old_recordings_as_a_lower_bound(tmp_path, capsys):
+    """旧ランでは再生不可を明示し、分裂は「下限」として測る（黙って断定しない）.
+
+    旧ランで見えるのは「ヒステリシスを超え、かつ少なくとも1発話を取った
+    クラスタ」だけ。声紋が勝った発話のクラスタ所属と、キーを得る前に消えた
+    クラスタは見えないので、真の分裂はこれ以上にしかならない。下限と明示した
+    うえで出す（下限が既に大きければ結論は動かないため、使い道はある）。
+    """
     import diagnose_live_session as diag
 
-    utts = [{"ms": 1000, "end": 3000, "label": "1", "key": "?",
-             "final_key": "?", "kind": "蓄積中"}]
-    _write_recording(tmp_path, "old", utts, [(1000, "旧ランの発言")],
+    utts = [
+        {"ms": 1000, "end": 5000, "label": "1", "key": "@diar:1",
+         "final_key": "@diar:1", "kind": "蓄積中"},
+        {"ms": 6000, "end": 10000, "label": "2", "key": "@diar:2",
+         "final_key": "@diar:2", "kind": "蓄積中"},
+        # 声紋が勝った発話はクラスタ所属が見えない（下限になる理由）
+        {"ms": 11000, "end": 15000, "label": "1", "key": "人物1",
+         "final_key": "人物1", "kind": "声紋一致"},
+    ]
+    _write_recording(tmp_path, "old", utts,
+                     [(u["ms"], "旧ランの発言") for u in utts],
                      config={"type": "session_config"})
 
     rec = diag.read_diag("old", root=tmp_path)
@@ -350,4 +364,5 @@ def test_diagnosis_reports_old_recordings_as_unmeasurable(tmp_path, capsys):
     diag.report_fragmentation(rec)
     out = capsys.readouterr().out
     assert "判定の入力が記録されていない" in out
-    assert "測定不可" in out
+    assert "下限" in out
+    assert "観測クラスタ数（下限）: 2" in out   # 人物1 の発話は数えられない
