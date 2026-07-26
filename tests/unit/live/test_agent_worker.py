@@ -1027,12 +1027,23 @@ def test_structuring_checker_rejudges_after_pending_reset(monkeypatch):
     state = FakeState(agent, None)
     state.records = [{"speaker": "A", "text": "議論"}]
 
+    # 蓄積の消費→復帰は「一度ずつ」進める。以前は if/elif を毎回の poll
+    # （50ms間隔）で評価していたため、消費と復帰が 50ms 周期で振動し、
+    # 1秒tick のチェッカーがどちらの状態を観測するかが運任せになっていた。
+    # 高水位マークのリセットは「閾値未満を観測する」ことでしか起きないので、
+    # 振動していると再判定に到達しないことがあり 3回に2回落ちていた。
+    phase = {"n": 0, "at": 0.0}
+
     def _cycle_once():
-        if len(calls) >= 1 and agent._pending:
+        now = time.monotonic()
+        if phase["n"] == 0 and calls:
             agent._pending.clear()   # trigger 相当: 蓄積を消費
-        elif len(calls) >= 1 and not agent._pending:
-            # 蓄積を閾値まで戻す（新しい発話が進んだ状況）
+            phase.update(n=1, at=now)
+        elif phase["n"] == 1 and now - phase["at"] > 1.5:
+            # チェッカーが「閾値未満」を1tick以上観測してから戻す
+            # （＝高水位マークのリセットを確実に踏ませる）。
             agent._pending = [{"text": str(i)} for i in range(agent.trigger_n)]
+            phase["n"] = 2
         return len(calls) >= 2
 
     # チェッカーは1秒tickなので、並列実行の負荷でも取りこぼさないよう余裕を持たせる。
