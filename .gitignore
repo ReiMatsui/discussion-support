@@ -41,16 +41,9 @@ htmlcov/
 *.swp
 .DS_Store
 
-# Project data (runs は大きくなるので除外)
-data/runs/
 *.sqlite
 *.sqlite3
 *.db
-
-data/eval/
-data/runs/
-!data/eval/.gitkeep
-!data/runs/.gitkeep
 
 # 一時的な検証スペース (本体に組み込む前の実験置き場、後で削除する)
 experiments/
@@ -71,23 +64,23 @@ test_wavs/
 *.m4a
 *.webm
 transcripts/
-data/overlap_test/
 live_transcriber.html
-
-# 評価用コーパス（ライセンス配布物・大容量。取得/前処理はスクリプトで再現可能:
-# CallHome=eval §14 の経路, Chiba=eval/prep_chiba.py）
-data/callhome/
-data/chiba/*
-!data/chiba/results.csv
-data/sakura/
-data/sakura_raw/
 
 # ドキュメント成果物（別管理）
 *.docx
 *.pptx
 *.log
 
-# 評価用コーパス（大容量・再取得可能。eval/fetch_callhome_jpn.py / eval/prep_sakura.py 参照）
-data/callhome/
-data/sakura/
-data/sakura_raw/
+# 測定の中間キャッシュ（eval/error_anatomy.py が生成する。再生成できる）
+eval/_error_anatomy.json
+
+# --- data/ は原則すべて追跡しない -------------------------------------
+# 評価用コーパス（CallHome/Chiba/Sakura）・録音・実行結果・生成物が入る場所で、
+# 大容量だったり個人データだったりする。取得・前処理はスクリプトで再現できる
+# （eval/fetch_callhome_jpn.py, eval/prep_chiba.py, eval/prep_sakura.py）。
+# 例外は**コードが既定で参照する文書**だけ: --docs の既定が data/docs で、
+# README の `das ingest-docs data/docs/` もこれを指す。除外すると新規クローンで
+# 既定の流れが動かなくなるため残す。
+data/*
+!data/docs/
+!data/docs_policy/
