@@ -1760,10 +1760,6 @@ class _AfEarlyGenGate:
         return self._holding
 
     @property
-    def held_kind(self) -> str | None:
-        return self._held_kind
-
-    @property
     def last_release_ms(self) -> float | None:
         """直近の release で計測した hold→再生の所要 ms (未 release なら None)。"""
         return self._last_release_ms

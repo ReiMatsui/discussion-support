@@ -376,7 +376,6 @@ def realtime_url(model: str | None = None) -> str:
     return f"wss://api.openai.com/v1/realtime?model={model or REALTIME_MODEL}"
 
 
-REALTIME_URL = realtime_url()
 AGENT_SPEAKER = "ファシリテーター"   # recordsに使うスピーカーキー
 UNSURE_SPEAKER = "?"   # 短い発話で話者を確定できないときのキー（表示は「未確定」）
 # pyannote Live-1 のようにセッション序盤でラベルが揺れる（一人の発話が複数の
@@ -484,7 +483,6 @@ PYANNOTE_CLUSTER_OVERLAP_MIN_RATIO = 0.2
 
 # --- ファシリテーターの通常トリガー ---
 _AGENT_TRIGGER = 10           # N発話ごとに応答検討(facilitator)
-_AGENT_SILENCE = 5.0          # N秒沈黙で応答検討(facilitator, Partnerなし)
 _AGENT_DEBATE_SILENCE = 15.0  # N秒沈黙で応答検討(debate — Partner会話が主なので長め)
 _AGENT_CONV_SILENCE = 1.5     # N秒沈黙で応答(conversation — 発話断片をまとめる)
 _INTERRUPT_MIN_CHARS = 8      # ファシリテーター割り込みの最小文字数
@@ -531,7 +529,6 @@ _TRIAGE_BACKLOG_MAX = 8       # 1tickで連続処理する上限。遅延を有�
 #                              古いバックログは分類せず負注釈でスキップする
 
 # --- 事実誤りの短い補正 ---
-_FACTCHECK_WINDOW = 3         # 判定に使う直近発話数
 _FACTCHECK_CHECK_SEC = 0.5    # LLM判定の最小間隔（事実誤りは早めに補足）
 _FACTCHECK_COOLDOWN = 2.0     # 訂正介入の最小間隔（短い補正なので通常介入より短く）
 _FACTCHECK_MIN_CHARS = 8      # 短すぎる発話は事前除外

@@ -21,7 +21,6 @@ from ._constants import (
     _MANUAL_CALL_MAX_CHARS,
     _PROACTIVITY_DEFAULT,
     _PROACTIVITY_PROFILES,
-    AGENT_SPEAKER,
     AGENT_VOICES,
     CLEAR_LINE,
     DIM,
@@ -37,7 +36,11 @@ from ._constants import (
 from ._diarization import DiarizationEvent, DiarizationProvider, SpeakerResolver
 from ._participation import participation_stats
 from ._seat_audio import SeatAudio
-from ._speaker_keys import is_provisional_key, looks_like_system_name
+from ._speaker_keys import (
+    NON_PARTICIPANT_KEYS,
+    is_provisional_key,
+    looks_like_system_name,
+)
 from ._voice_profiles import VoiceProfiles
 from .agents._partner import ConversationPartner
 from .agents._realtime import RealtimeAgent
@@ -331,7 +334,7 @@ class SessionState:
         return value if isinstance(value, int) and value > 0 else None
 
     def _human_slot_key(self, key: str) -> str | None:
-        if key in (AGENT_SPEAKER, "パートナー", UNSURE_SPEAKER):
+        if key in NON_PARTICIPANT_KEYS:
             return None
         if is_provisional_key(key) or looks_like_system_name(key):
             return self.anonymous_labels.get(key, key)
@@ -372,7 +375,7 @@ class SessionState:
         未確定に落とし、参加人数(diarization_max_speakers)には依存しない。
         """
         key = str(key)
-        if key in (AGENT_SPEAKER, "パートナー", UNSURE_SPEAKER):
+        if key in NON_PARTICIPANT_KEYS:
             return key
         tracker = self.tracker
         if tracker is not None and not getattr(tracker, "auto", True):
@@ -687,7 +690,7 @@ class SessionState:
             _seen: set[str] = set()
             for r in raw:
                 key = str(r.get("speaker", "")) if "speaker" in r else ""
-                if not key or key in (AGENT_SPEAKER, "パートナー", UNSURE_SPEAKER):
+                if not key or key in NON_PARTICIPANT_KEYS:
                     continue  # AI話者・未確定はリネーム対象外
                 name = self.disp_name(key)
                 if name in _seen:
@@ -708,7 +711,7 @@ class SessionState:
                 )
                 topics.append({"topic": t.get("topic", ""), "speaker": display_speaker})
         stats = participation_stats(
-            raw, exclude_speakers=(AGENT_SPEAKER, "パートナー", UNSURE_SPEAKER))
+            raw, exclude_speakers=NON_PARTICIPANT_KEYS)
         participation = [
             {"speaker": self.disp_name(sp),
              "color": key_colors.get(str(sp), "#888"),
