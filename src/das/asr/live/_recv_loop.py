@@ -20,6 +20,7 @@ from ._constants import (
     UNSURE_SPEAKER,
     fmt_ts,
 )
+from ._speaker_keys import is_ai_key
 from ._ui import _print_line
 from ._voice_profiles import _best_text_similarity
 
@@ -252,8 +253,7 @@ class RecvLoop:
                 _classify_flags = {"ov": _overlapped, "enr": _enroll,
                                    "chars": len(self.cur_text.strip())}
             # --- 声紋ベースのAIエコー除去 ---
-            if (sp_id is not None
-                    and sp_id.startswith("__") and sp_id.endswith("__")):
+            if sp_id is not None and is_ai_key(sp_id):
                 if self.args.vp_debug:
                     _print_line(f"# AI声紋エコー除去: sp={sp_id}"
                                 f" ({self.cur_text.strip()[:40]}...)")
