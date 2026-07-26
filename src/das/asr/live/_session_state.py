@@ -669,6 +669,41 @@ class SessionState:
                         self.color_of(r["speaker"])
         return changed
 
+    def compact_anonymous_labels(self) -> int:
+        """発言の無くなったキーが押さえている表示文字を解放し、詰め直す.
+
+        **なぜ要るのか**: 表示ラベル（参加者A/B/…）は「未使用の最小文字」を
+        キーに割り当てる。ところが席の割当てや遡及訂正で発話が別のキーへ
+        移ると、**元のキーは1件も発話を持たないまま文字だけ押さえ続ける**。
+        その結果、参加者が1人しか居ないのに「参加者B」から始まる、という
+        気持ちの悪い表示になる（2026-07-26 に実会話で確認）。
+
+        やること: records に1件も現れないキーを台帳から落とし、残ったキーへ
+        **初出順**に文字を振り直す。初出順を保つので、既に見えている人同士の
+        文字が入れ替わることはない（空いた文字へ順に詰まるだけ）。
+
+        実名で表示されているキーは `rekey` の時点で台帳から抜けているため、
+        ここでは扱わない（ユーザーが付けた名前には触れない）。
+
+        戻り値: 変わった件数（0 なら呼び出し側は保存も通知もしない）。
+        """
+        with self.state_lock:
+            first_seen: dict[str, int] = {}
+            for i, r in enumerate(self.records):
+                key = str(r.get("speaker", "")) if "speaker" in r else ""
+                if key and key in self.anonymous_labels and key not in first_seen:
+                    first_seen[key] = i
+            ordered = sorted(first_seen, key=lambda k: first_seen[k])
+            fresh = {k: f"参加者{self._anonymous_suffix(i)}"
+                     for i, k in enumerate(ordered)}
+            if fresh == self.anonymous_labels:
+                return 0
+            changed = sum(1 for k, v in fresh.items()
+                          if self.anonymous_labels.get(k) != v)
+            changed += sum(1 for k in self.anonymous_labels if k not in fresh)
+            self.anonymous_labels = fresh
+            return changed
+
     def add_sys(self, ms, text: str):
         """システムイベントを議事録のタイムラインに残す."""
         with self.state_lock:

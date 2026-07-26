@@ -511,3 +511,76 @@ def test_diarization_key_issue_is_serialized_with_rekey(tmp_path):
     s.state_lock.release()
     t.join(timeout=1.0)
     assert issued == ["@diar:2"]
+
+
+# ---------------------------------------------------------------------------
+# 表示ラベルの詰め直し（handoff §28.6）
+# ---------------------------------------------------------------------------
+
+def _label_state(tmp_path):
+    import datetime
+
+    from das.asr.live._session_state import SessionState
+
+    class _Args:
+        lang = "ja"
+        vp_debug = False
+        diarization = "pyannote"
+        diarization_max_speakers = 3
+        vp_cluster_naming = True
+        stt = "soniox"
+
+    st = SessionState(
+        args=_Args(), started=datetime.datetime(2026, 7, 26),
+        out_path=str(tmp_path / "o.md"), html_path=str(tmp_path / "o.html"),
+        diag_path=str(tmp_path / "o.diag"), turns_path=str(tmp_path / "o.turns"),
+        wav_path=str(tmp_path / "o.wav"), serve=False)
+    st.save = lambda *a, **k: None
+    return st
+
+
+def test_labels_start_from_a_after_utterances_move_away(tmp_path):
+    """発言の無くなったキーが押さえていた文字を解放する.
+
+    席の割当てや遡及訂正で発話が別のキーへ移ると、元のキーは1件も発話を
+    持たないまま文字だけ押さえ続ける。その結果、参加者が1人しか居ないのに
+    「参加者B」から始まる（2026-07-26 に実会話で確認）。
+    """
+    st = _label_state(tmp_path)
+    # #1 が先に参加者A を取り、その後で発話が 人物2 へ移った状況
+    assert st.disp_name("#1") == "参加者A"
+    assert st.disp_name("人物2") == "参加者B"
+    st.records = [{"ms": 1000, "speaker": "人物2", "text": "こんにちは"}]
+
+    assert st.compact_anonymous_labels() > 0
+    assert st.disp_name("人物2") == "参加者A"     # 1人なのでAから始まる
+    assert "#1" not in st.anonymous_labels        # 幻のキーは台帳から消える
+
+
+def test_compaction_keeps_the_order_people_appeared_in(tmp_path):
+    """初出順は保つ（既に見えている人同士の文字が入れ替わらない）."""
+    st = _label_state(tmp_path)
+    for k in ("#1", "人物1", "人物2", "人物3"):
+        st.disp_name(k)                            # A/B/C/D を確保
+    st.records = [{"ms": 1000, "speaker": "人物2", "text": "先に喋った"},
+                  {"ms": 2000, "speaker": "人物1", "text": "後から喋った"}]
+
+    st.compact_anonymous_labels()
+
+    assert st.disp_name("人物2") == "参加者A"      # 初出が早い方がA
+    assert st.disp_name("人物1") == "参加者B"
+    assert st.anonymous_labels.keys() == {"人物1", "人物2"}
+
+
+def test_compaction_is_idempotent(tmp_path):
+    """既に詰まっていれば何もしない（毎回の呼び出しで表示が揺れない）."""
+    st = _label_state(tmp_path)
+    st.records = [{"ms": 1000, "speaker": "人物1", "text": "あ"},
+                  {"ms": 2000, "speaker": "人物2", "text": "い"}]
+    st.disp_name("人物1")
+    st.disp_name("人物2")
+    st.compact_anonymous_labels()
+    before = dict(st.anonymous_labels)
+
+    assert st.compact_anonymous_labels() == 0
+    assert st.anonymous_labels == before

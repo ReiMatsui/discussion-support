@@ -147,6 +147,9 @@ class RecvLoop:
         if not s.retro.due(self.cur_ms / 1000.0):
             return
         changed = s.apply_retro_attribution(s.retro.revise())
+        # 貼り直しで発言の無くなったキーが表示文字を押さえ続けると、参加者が
+        # 1人しか居ないのに「参加者B」から始まる。空いた文字を詰め直す。
+        s.compact_anonymous_labels()
         if not changed:
             return
         s.add_sys(self.cur_ms,
