@@ -784,3 +784,68 @@ def test_retro_is_absent_without_seat_audio(tmp_path):
     state = _state_for_recording(tmp_path, [])
     assert state.seat_audio is None
     assert state.retro is None
+
+
+# ---------------------------------------------------------------------------
+# 参加人数の上限（handoff §28.7）
+# ---------------------------------------------------------------------------
+
+class _MintingTracker(_Tracker):
+    """毎回「自動登録」で新しい人物を鋳造するフェイク."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.n = 0
+
+    def classify(self, wav, speaker, *, overlapped, count, chars, enroll=True):
+        self.n += 1
+        key = f"人物{self.n}"
+        self.last = {"kind": "自動登録", "label": str(self.n), "name": key,
+                     "rename": None}
+        return key
+
+
+def test_auto_registration_does_not_steal_a_seat_when_full(tmp_path):
+    """満席のときの自動登録が、通知経由で席を横取りしない（handoff §28.7）.
+
+    通知は `disp_name` で表示名を作るが、これは未割当ての匿名キーに
+    ラベル文字を**割り当てる副作用**を持つ。constrain より前に呼ぶと
+    「既にラベルを持つ人は常に通す」規則によって上限を超えた席が居座る
+    （実会話で --max-speakers 3 に対し 参加者D まで出た）。
+    """
+    state = _state_for_recording(tmp_path, [])
+    state.tracker = _MintingTracker()
+    state.args.diarization_max_speakers = 3
+    loop = RecvLoop(state, _Args(), backend=None)
+    state.asr_pcm_buf = bytearray(np.full(SR * 20, 8000, dtype="<i2").tobytes())
+
+    for i in range(5):                     # 3席しかないのに5人ぶん鋳造される
+        loop.cur_speaker = str(i + 1)
+        loop.cur_text = f"{i + 1}人目の発言です"
+        loop.cur_ms, loop.cur_end = 1000 + i * 4000, 3000 + i * 4000
+        loop.flush()
+
+    labels = set(state.anonymous_labels.values())
+    assert len(labels) <= 3, f"上限3のはずが {sorted(labels)}"
+    assert "参加者D" not in labels
+    # 席を得られなかった発話は未確定で記録される
+    assert any(r.get("speaker") == UNSURE_SPEAKER
+               for r in state.records if "speaker" in r)
+
+
+def test_tracking_notice_only_for_speakers_that_got_a_seat(tmp_path):
+    """「追跡開始」の通知は、席を得られた人にだけ出す."""
+    state = _state_for_recording(tmp_path, [])
+    state.tracker = _MintingTracker()
+    state.args.diarization_max_speakers = 2
+    loop = RecvLoop(state, _Args(), backend=None)
+    state.asr_pcm_buf = bytearray(np.full(SR * 20, 8000, dtype="<i2").tobytes())
+
+    for i in range(4):
+        loop.cur_speaker = str(i + 1)
+        loop.cur_text = f"{i + 1}人目の発言です"
+        loop.cur_ms, loop.cur_end = 1000 + i * 4000, 3000 + i * 4000
+        loop.flush()
+
+    notices = [r for r in state.records if "追跡開始" in str(r.get("sys", ""))]
+    assert len(notices) == 2       # 席の数だけ

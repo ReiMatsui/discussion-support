@@ -173,6 +173,8 @@ class RecvLoop:
         partner = s.partner
         # 相槌（「はい」等）は声紋の人物確定に使わず、UIでも薄く折りたためるよう印を付ける
         _is_backchannel = bool(_BACKCHANNEL_RE.match(self.cur_text.strip()))
+        # 自動登録の通知は constrain の後に出す（席を得られた場合だけ）。
+        _minted_key: str | None = None
         # --- テキスト類似度エコー判定（安全網, F2で前倒し） ---
         # 声紋トラッカーの副作用（文字数蓄積・自動登録）より前に評価する。エコーと
         # 判定したら classify を呼ばずに破棄し、漏れ込んだAI音声で匿名話者が蓄積・
@@ -297,19 +299,24 @@ class RecvLoop:
                 self.cur_end = None
                 return
             if d and d["kind"] == "補正":
+                # peek_disp_name（割当てなし）を使う。ここは説明文のためだけの
+                # 参照で、constrain より前にラベル文字を確保してしまうと、席の
+                # 無いキーが席持ちとして居座る（下の 自動登録 と同じ事故）。
                 note = (f"声紋でラベル{d['label']}の取り違えを修正"
-                        f"（類似{d['sim']:.2f}、放置なら{s.disp_name(d['prev'])}の発言になっていた）")
+                        f"（類似{d['sim']:.2f}、"
+                        f"放置なら{s.peek_disp_name(d['prev'])}の発言になっていた）")
                 rec_extra = {"vp": "補正", "note": note}
                 _print_line(f"# ⚡補正: {note}")
             elif d and d["kind"] == "自動登録":
                 if d["rename"]:
                     s.rekey(*d["rename"])
                 self._link_mint_to_cluster(d["name"])
-                display_name = s.disp_name(d["name"])
-                s.add_sys(self.cur_ms, f"この声を「{display_name}」として追跡開始"
-                                       "（名前は右側の登録欄から設定できます）")
-                _print_line(f"# この声を「{display_name}」として追跡します"
-                            "（名前は右側の登録欄から設定できます）")
+                # **通知は constrain の後に出す**。ここで disp_name を呼ぶと、
+                # 席が満杯でも新しい人物にラベル文字が付いてしまい、
+                # constrain の「既にラベルを持つ人は常に通す」規則によって
+                # 上限を超えた席が恒久的に居座る（実会話で --max-speakers 3 に
+                # 対し 参加者D まで出た。handoff §28.7）。
+                _minted_key = d["name"]
             elif d and d["kind"] == "合流":
                 if d["rename"]:
                     s.rekey(*d["rename"])
@@ -446,6 +453,14 @@ class RecvLoop:
             # 直後の代入で消えるデッドコードだったので削除)。
             rec_extra["bc"] = True
         sp_id = final_sp_id   # constrain 済み（diag の final_key と同一値）
+        if _minted_key is not None and sp_id == _minted_key:
+            # 席を得られた場合だけ「追跡開始」を告げる。落ちた場合は席が無い
+            # という警告（_note_constrain_drop）が別に出る。
+            _disp = s.disp_name(_minted_key)
+            s.add_sys(self.cur_ms, f"この声を「{_disp}」として追跡開始"
+                                   "（名前は右側の登録欄から設定できます）")
+            _print_line(f"# この声を「{_disp}」として追跡します"
+                        "（名前は右側の登録欄から設定できます）")
         with s.state_lock:
             s.records.append({"ms": self.cur_ms, "end_ms": self.cur_end,
                               "speaker": sp_id, "text": self.cur_text.strip(),
