@@ -199,6 +199,116 @@ def counterfactual(run: str, gate_kinds: set[str]) -> dict | None:
     return {"run": run, "before": _score(_cur), "after": _score(_cf)}
 
 
+def seat_recovery(run: str) -> dict | None:
+    """席落ち（constrain で落ちた未確定）を回収したら何が起きるかを測る.
+
+    「未確定を減らす」打ち手には2種類あり、**混ぜて考えると判断を誤る**:
+
+      (a) 精度とのトレードオフ: 門番を緩める。未確定は減るが誤帰属が増える
+      (b) トレードオフではない: 上流が既にキーを決めていたのに constrain
+          （参加人数上限・closed roster）で落とした分を回収する。これは
+          帳簿の問題であって判定の問題ではない
+
+    本関数が測るのは (b) の上限。``final_key`` が未確定で ``key`` が
+    決まっている発話について、``key`` をそのまま採用したらどうなるかを見る。
+    上流のキーが GT と合っているなら、席の問題を直すだけで正解が増える
+    （誤帰属は上流自身の誤り分しか増えない）。
+
+    二重帳簿の根治（§21 の鋳造リンク）はまさにこの席を空ける施策であり、
+    ここで返る値がその投資対効果の見積りになる。
+    """
+    loaded = load_run(run)
+    if loaded is None:
+        return None
+    utts, code_by_ms = loaded
+    rows = [(u, code_by_ms.get(u["ms"])) for u in utts]
+    rows = [(u, c) for u, c in rows if c in GT_CODES
+            and not _BACKCHANNEL_RE.match(str(u["_text"]).strip())]
+    if not rows or not any(u.get("final_key") is not None for u, _ in rows):
+        return None      # final_key の無い旧ランでは席落ちを分離できない
+
+    def _score(final_of) -> dict:
+        pairs = [(final_of(u), c) for u, c in rows]
+        _a, mapping = _gtlib.best_mapping(pairs, GT_CODES, unsure=UNSURE_SPEAKER)
+        n = len(pairs)
+        ok = sum(1 for f, c in pairs if mapping.get(f) == c)
+        uns = sum(1 for f, _ in pairs if f == UNSURE_SPEAKER)
+        return {"acc": ok / n, "unsure": uns / n,
+                "wrong": (n - ok - uns) / n, "n": n}
+
+    def _cur(u: dict) -> str:
+        return str(u["final_key"])
+
+    def _recovered(u: dict) -> str:
+        # constrain 前のキーをそのまま採る＝席が足りていた世界
+        return str(u["final_key"]) if str(u["final_key"]) != UNSURE_SPEAKER \
+            else str(u.get("key"))
+
+    dropped = sum(1 for u, _ in rows if str(u["final_key"]) == UNSURE_SPEAKER
+                  and str(u.get("key")) != UNSURE_SPEAKER)
+    return {"run": run, "before": _score(_cur), "after": _score(_recovered),
+            "dropped": dropped}
+
+
+def merge_ceiling(run: str) -> dict | None:
+    """クラスタ分裂を「完全に」統合できたら何が起きるかの上限を測る.
+
+    `seat_recovery` は席落ちを**そのまま**通す＝分裂したクラスタが別人として
+    出るので、未確定が誤帰属に化けるだけだった。本当に必要なのは通すことでは
+    なく**統合**（名寄せ）である。ここでは GT を使って各分裂クラスタを
+    「その多数派話者の席」へ寄せた場合の成績を出す。実装可能な上限であって
+    達成値ではない（実際の名寄せは声紋で決めるので、これより下がる）。
+
+    この上限が大きければ、名寄せは**精度と未確定を同時に改善する**打ち手＝
+    トレードオフではない、と言える。門番の調整（誤帰属↔未確定の交換）とは
+    性質が違うので分けて測る。
+    """
+    loaded = load_run(run)
+    if loaded is None:
+        return None
+    utts, code_by_ms = loaded
+    rows = [(u, code_by_ms.get(u["ms"])) for u in utts]
+    rows = [(u, c) for u, c in rows if c in GT_CODES
+            and not _BACKCHANNEL_RE.match(str(u["_text"]).strip())]
+    if not rows or not any(u.get("final_key") is not None for u, _ in rows):
+        return None
+
+    def _score(final_of) -> dict:
+        pairs = [(final_of(u), c) for u, c in rows]
+        _a, mapping = _gtlib.best_mapping(pairs, GT_CODES, unsure=UNSURE_SPEAKER)
+        n = len(pairs)
+        ok = sum(1 for f, c in pairs if mapping.get(f) == c)
+        uns = sum(1 for f, _ in pairs if f == UNSURE_SPEAKER)
+        return {"acc": ok / n, "unsure": uns / n,
+                "wrong": (n - ok - uns) / n, "n": n}
+
+    def _cur(u: dict) -> str:
+        return str(u["final_key"])
+
+    # 席のあるキー（GTコードが付いたキー）と、分裂クラスタの多数派話者
+    _a, seat_map = _gtlib.best_mapping([(_cur(u), c) for u, c in rows],
+                                       GT_CODES, unsure=UNSURE_SPEAKER)
+    seat_of_code = {v: k for k, v in seat_map.items() if v}
+    frag: dict[str, Counter] = {}
+    for u, code in rows:
+        if _cur(u) != UNSURE_SPEAKER or str(u.get("key")) == UNSURE_SPEAKER:
+            continue
+        frag.setdefault(str(u["key"]), Counter())[code] += 1
+    merged = {k: seat_of_code.get(cc.most_common(1)[0][0])
+              for k, cc in frag.items()}
+
+    def _merge(u: dict) -> str:
+        cur = _cur(u)
+        if cur != UNSURE_SPEAKER:
+            return cur
+        return merged.get(str(u.get("key"))) or cur
+
+    n_pure = sum(1 for cc in frag.values()
+                 if cc.most_common(1)[0][1] / sum(cc.values()) >= 0.9)
+    return {"run": run, "before": _score(_cur), "after": _score(_merge),
+            "frags": len(frag), "pure": n_pure}
+
+
 def endorse_table(runs: list[str], kinds: set[str]) -> dict:
     """kind ごとに「裏付けの有無 × 結末」を数える（§18.8 が採否を決めた表）.
 
@@ -307,6 +417,12 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--split", type=int, default=0, metavar="N",
                    help="先頭N本を開発セット・残りを検証セットとして分けて集計"
                         "（§18.8 と同じ作法。ランは名前順＝時刻順）")
+    p.add_argument("--seat-recovery", action="store_true",
+                   help="席落ち（constrain で落ちた分）を回収したときの成績。"
+                        "門番を緩める打ち手と違い、精度とのトレードオフではない")
+    p.add_argument("--merge-ceiling", action="store_true",
+                   help="分裂クラスタを多数派話者の席へ完全に統合できた場合の上限。"
+                        "精度と未確定を同時に改善しうる打ち手かを判定する")
     p.add_argument("--prefix", default=None,
                    help="この文字列で始まるランだけを対象にする"
                         "（例: 2026-07-20 で新コードの記録ランに限定）")
@@ -316,6 +432,40 @@ def main(argv: list[str] | None = None) -> None:
         runs = [r for r in runs if r.startswith(args.prefix)]
     if not runs:
         raise SystemExit("# --run か --all を指定")
+    if args.merge_ceiling:
+        rs = [r for r in (merge_ceiling(x) for x in runs) if r]
+        if not rs:
+            raise SystemExit("# final_key を持つラン（2026-07-14以降）が必要")
+        print("# クラスタ名寄せの上限: 分裂クラスタを多数派話者の席へ完全に統合")
+        print("  （GT を使った上限。実際は声紋で寄せるのでこれより下がる）")
+        print(f"{'run':<20}{'分裂':>5}{'うち純':>7}{'正解(前→後)':>18}"
+              f"{'誤帰属(前→後)':>20}{'未確定(前→後)':>20}")
+        for c in rs:
+            b, a = c["before"], c["after"]
+            print(f"{c['run']:<20}{c['frags']:>5}{c['pure']:>7}"
+                  f"{b['acc']:>8.1%}→{a['acc']:<8.1%}"
+                  f"{b['wrong']:>9.1%}→{a['wrong']:<9.1%}"
+                  f"{b['unsure']:>9.1%}→{a['unsure']:<9.1%}")
+        if len(rs) > 1:
+            _print_cf_mean(rs, "平均")
+        return
+    if args.seat_recovery:
+        rs = [r for r in (seat_recovery(x) for x in runs) if r]
+        if not rs:
+            raise SystemExit("# final_key を持つラン（2026-07-14以降）が必要")
+        print("# 席落ちの回収: constrain 前のキーをそのまま採ったら何が起きるか")
+        print("  （門番を緩める打ち手と違い、判定は変えない。席の帳簿の問題）")
+        print(f"{'run':<20}{'落ちた数':>8}{'正解(前→後)':>18}"
+              f"{'誤帰属(前→後)':>20}{'未確定(前→後)':>20}")
+        for c in rs:
+            b, a = c["before"], c["after"]
+            print(f"{c['run']:<20}{c['dropped']:>8}"
+                  f"{b['acc']:>8.1%}→{a['acc']:<8.1%}"
+                  f"{b['wrong']:>9.1%}→{a['wrong']:<9.1%}"
+                  f"{b['unsure']:>9.1%}→{a['unsure']:<9.1%}")
+        if len(rs) > 1:
+            _print_cf_mean(rs, "平均")
+        return
     if args.gate_kinds:
         kinds = {k.strip() for k in args.gate_kinds.split(",") if k.strip()}
         _print_endorse_table(runs, kinds)
