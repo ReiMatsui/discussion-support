@@ -144,6 +144,13 @@ class SeatAudio:
                           "margin": round(sim - second, 3), "n_seats": len(cands)}
         return key, sim, sim - second
 
+    def n_ready(self) -> int:
+        """判定に使える（参照が育った）席の数（診断用）."""
+        with self._lock:
+            return sum(1 for k, v in self._embeddings.items()
+                       if v is not None
+                       and self._seconds.get(k, 0.0) >= self.min_ref_sec)
+
     # -- 台帳の一貫性 -------------------------------------------------
 
     def rename(self, old: str, new: str) -> None:

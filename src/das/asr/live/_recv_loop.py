@@ -428,6 +428,16 @@ class RecvLoop:
                     s.retro.remember(self.cur_ms, _emb)
                 picked = (s.seat_audio.nearest_from(_emb)
                           if _emb is not None else None)
+                if picked is None:
+                    # なぜ席で判定できなかったかを残す（診断のみ）。実会話で
+                    # 「ラベル不純/継続」178件のうち53件が判定できず未確定の
+                    # まま残っており、それが未確定18%の主因だった。短い発話に
+                    # 偏る（中央値0.30秒 対 0.66秒）が、合成音声では0.06秒でも
+                    # 埋め込みは計算できるため、原因が声紋計算なのか席の不足
+                    # なのかを記録から切り分ける（handoff §28.13）。
+                    diag_extra["seat_miss"] = (
+                        "no_embedding" if _emb is None
+                        else f"few_seats:{s.seat_audio.n_ready()}")
                 if picked is not None:
                     final_sp_id = picked[0]
                     rec_extra["speaker_source"] = "seat_assign"
