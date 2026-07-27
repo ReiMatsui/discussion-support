@@ -414,7 +414,27 @@ class SessionState:
         if len(slots) >= max_speakers:
             self._note_constrain_drop(key, max_speakers)
             return UNSURE_SPEAKER
+        self._note_seat_admitted(key, slots, max_speakers)
         return key
+
+    def _note_seat_admitted(self, key: str, slots: set, max_speakers: int) -> None:
+        """新しく席に着いた瞬間を diag に残す（診断のみ・挙動不変）.
+
+        2026-07-27 の実会話で「上限3なのに4人目が席に着いた」が起きたが、
+        ロジック単体では正しく落ちる（`constrain_human_speaker_key` に同じ
+        並びを直接与えると4人目は未確定になる）。ライブ特有の経路——
+        rekey で新しいキーへ移った直後、遡及訂正のラベル詰め直しの直後など
+        ——で席の集合がどう見えていたかを記録しないと原因が絞れない。
+        記録するのは「そのとき席をどう数えたか」そのもの。
+        """
+        with contextlib.suppress(OSError), \
+                open(self.diag_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "type": "seat_admitted", "key": key,
+                "slots": sorted(str(x) for x in slots),
+                "max_speakers": max_speakers,
+                "labels": dict(self.anonymous_labels),
+            }, ensure_ascii=False, default=str) + "\n")
 
     def _note_constrain_drop(self, key: str, max_speakers: int) -> None:
         """上限で未確定化した事実を可視化する（帰属の挙動は一切変えない）.
