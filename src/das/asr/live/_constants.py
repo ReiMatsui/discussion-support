@@ -54,6 +54,12 @@ h1 {{ font-size: 1.2rem; }} .meta {{ color: #6b7280; font-size: .85rem; }}
 .profile-toggle {{ width: 14px; height: 14px; border-radius: 50%;
                   border: 2px solid #d1d5db; flex-shrink: 0; transition: all .15s; }}
 .profile-item.active .profile-toggle {{ background: #2563eb; border-color: #2563eb; }}
+.profile-name {{ flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+                white-space: nowrap; }}
+.profile-del {{ color: #9ca3af; font-size: .95em; line-height: 1; padding: 0 .15em;
+               border-radius: 3px; flex-shrink: 0; }}
+.profile-del:hover {{ color: #dc2626; background: #fee2e2; }}
+.sidebar-hint {{ display: block; font-size: .68rem; color: #b6b4ae; font-weight: 400; }}
 .stats-section {{ margin-bottom: .8rem; }}
 .stats-group {{ margin-bottom: .6rem; }}
 .stats-label {{ font-size: .7rem; color: #9ca3af; margin-bottom: .2rem; }}
@@ -132,6 +138,20 @@ function setAgentVoice(sel) {{
 function setAgentTrigger(inp) {{
   var v = parseInt(inp.value);
   if (v > 0) _agentCfg({{trigger_n: v}});
+}}
+async function forgetProfile(el) {{
+  var name = el.dataset.name;
+  if (!confirm('「' + name + '」の登録した声を削除します。\n' +
+               'この会議の表示は変わりませんが、以後この声には照合しません。')) return;
+  try {{
+    var res = await fetch('/api/forget', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{name: name}})
+    }});
+    if (res.ok) location.reload();
+    else {{ var d = await res.json(); alert(d.error || '削除失敗'); }}
+  }} catch(e) {{}}
 }}
 async function toggleProfile(el) {{
   var name = el.dataset.name;

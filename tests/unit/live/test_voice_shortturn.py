@@ -208,3 +208,43 @@ def test_short_turn_continuation_records_the_top_candidate():
     # §18.8 の裏付け判定そのものなので、別のキーとして残すことに意味がある
     assert "name" in vp.last and "prev" in vp.last
     assert vp.sp_map["1"] == "B"             # 副作用は無い
+
+
+def test_forget_removes_the_profile_for_good():
+    """登録した声を完全に削除する（voices.json からも消える）.
+
+    voices.json はセッションをまたいで残るため、名前の聞き間違いで作られた
+    プロファイルが溜まり続ける（実会話で24人まで増えた）。無効化はセッション
+    内で照合を止めるだけなので、消す操作が別に要る（handoff §28.15）。
+    """
+    import json
+    import tempfile
+    from pathlib import Path
+
+    vp = _tracker(_unit(1, 0, 0))
+    vp.path = str(Path(tempfile.mkdtemp()) / "voices.json")
+    vp.profiles = {"黒田": _unit(1, 0, 0), "壁": _unit(0, 1, 0),
+                   "人物1": _unit(0, 0, 1)}
+    vp._active_keys = {"黒田", "壁", "人物1"}
+    vp.sp_map = {"1": "壁", "2": "黒田"}
+
+    assert vp.forget("壁") is True
+
+    assert "壁" not in vp.profiles
+    assert "壁" not in vp._active_keys
+    assert vp.sp_map == {"2": "黒田"}          # ラベルの対応も切る
+    saved = json.loads(Path(vp.path).read_text(encoding="utf-8"))
+    assert "壁" not in saved and "黒田" in saved
+    assert "人物1" not in saved                # 匿名は元から保存しない
+
+
+def test_forget_refuses_anonymous_and_unknown():
+    """匿名の人物Nと未登録の名前は削除しない（消しても作り直されるため）."""
+    vp = _tracker(_unit(1, 0, 0))
+    vp.profiles = {"人物1": _unit(0, 0, 1)}
+    vp._active_keys = {"人物1"}
+
+    assert vp.forget("人物1") is False
+    assert vp.forget("居ない人") is False
+    assert vp.forget("") is False
+    assert "人物1" in vp.profiles

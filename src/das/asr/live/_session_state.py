@@ -1401,12 +1401,19 @@ class SessionState:
                     for n in all_names:
                         cls = 'profile-item active' if n in active_names else 'profile-item'
                         items.append(
-                            f'<div class="{cls}" data-name="{_html.escape(n)}" '
-                            f'onclick="toggleProfile(this)">'
-                            f'<span class="profile-toggle"></span>'
-                            f'{_html.escape(n)}</div>')
+                            f'<div class="{cls}" data-name="{_html.escape(n)}">'
+                            f'<span class="profile-toggle" '
+                            f'onclick="toggleProfile(this.parentElement)"></span>'
+                            f'<span class="profile-name" '
+                            f'onclick="toggleProfile(this.parentElement)">'
+                            f'{_html.escape(n)}</span>'
+                            f'<span class="profile-del" title="この声の登録を削除"'
+                            f' onclick="forgetProfile(this.parentElement)">×</span>'
+                            f'</div>')
                     profile_panel = ('<div class="profile-section">'
-                                     '<p class="sidebar-title">プロファイル</p>'
+                                     '<p class="sidebar-title">プロファイル'
+                                     '<span class="sidebar-hint">'
+                                     'クリックで有効/無効・×で削除</span></p>'
                                      + ''.join(items) + '</div>')
             stats_panel = ''
             talk_rs = [r for r in rs if "speaker" in r and r.get("text")]

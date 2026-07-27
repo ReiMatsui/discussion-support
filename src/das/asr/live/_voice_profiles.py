@@ -1027,6 +1027,36 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
             if not is_minted_key(name):
                 self._active_keys.discard(name)
 
+    def forget(self, name: str) -> bool:
+        """名前付きプロファイルを完全に削除する（voices.json からも消す）.
+
+        **なぜ要るのか**: voices.json はセッションをまたいで残るため、名前の
+        登録時に聞き間違えたもの（実会話で「壁」「朱色」「ペンタて」等）が
+        溜まり続ける。無効化（deactivate）はセッション内で照合対象から外す
+        だけで、次の会議ではまた有効になる。UI から消す手段が無かったので
+        24人まで増えていた（handoff §28.9）。
+
+        匿名の人物N は対象外（そのセッション限りの戸籍であり、削除しても
+        次の発話でまた作られる。消したいのは名前付きの登録だけ）。
+
+        既にこの会議で発言している人を消しても、過去のレコードは動かさない
+        （表示キーはそのまま）。消えるのは「以後この声に照合しない」だけ。
+        """
+        name = str(name).strip()
+        with self._lock:
+            if not name or is_minted_key(name) or name not in self.profiles:
+                return False
+            self.profiles.pop(name, None)
+            self._active_keys.discard(name)
+            self.own_sims.pop(name, None)
+            self.own_embs.pop(name, None)
+            self._own_updates.pop(name, None)
+            for k, v in list(self.sp_map.items()):
+                if v == name:
+                    self.sp_map.pop(k, None)
+            self._persist()
+            return True
+
     def active_profile_names(self) -> list[str]:
         """現在アクティブな名前付きプロファイルの一覧（UI表示用）."""
         return sorted(k for k in self._active_keys if not is_minted_key(k) and k in self.profiles)

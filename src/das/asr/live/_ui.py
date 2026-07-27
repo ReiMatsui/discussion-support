@@ -310,6 +310,28 @@ class _UIHandler:
                         _print_line(f"# {name} を無効化（UIから）")
                         s.save()
                     self._json(200, {"ok": True, "name": name, "active": active})
+                elif self.path == "/api/forget":
+                    # 登録した声を完全に削除する（voices.json からも消す）。
+                    # 無効化(/activate)はセッション内で照合を止めるだけで、
+                    # 次の会議ではまた有効になる。名前の聞き間違いで作られた
+                    # プロファイルが溜まり続けるので、消す手段を用意する
+                    # （実会話で24人まで増えていた。handoff §28.9）。
+                    body = self._read_json()
+                    name = str(body.get("name", "")).strip()
+                    if not name:
+                        self._json(400, {"error": "name を指定してください"})
+                        return
+                    if s.tracker is None:
+                        self._json(400, {"error": "声紋照合が無効です"})
+                        return
+                    if not s.tracker.forget(name):
+                        self._json(404, {"error": f"「{name}」は登録されていません"})
+                        return
+                    s.add_sys(s.elapsed_ms(),
+                              f"「{name}」の登録した声を削除しました")
+                    s.save()
+                    _print_line(f"# {name} の声紋を削除しました（UIから）")
+                    self._json(200, {"ok": True, "name": name})
                 elif self.path == "/api/enroll":
                     # 会議前の事前登録: 直近の音声(その人が単独で喋った分)で声紋を作る
                     import numpy as np

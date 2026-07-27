@@ -72,6 +72,13 @@ class _FakeTracker:
     def is_active_human(self, key):
         return key in self.profiles and key not in self.inactive
 
+    def forget(self, name):
+        if name not in self.profiles or str(name).startswith("人物"):
+            return False
+        self.profiles.pop(name)
+        self.inactive.discard(name)
+        return True
+
 
 class _FakeBackend:
     name = "soniox"
@@ -1384,5 +1391,54 @@ def test_bad_field_value_returns_500_with_reason_not_traceback():
         # サーバは生きていて次のリクエストを普通に処理できる
         status2, body2 = _raw_post(port, "/api/diarization", None)
         assert status2 == 200 and body2["ok"] is True
+    finally:
+        httpd.shutdown()
+
+
+# --- 登録した声の削除（handoff §28.15） -------------------------------------
+
+def test_http_forget_removes_a_registered_voice():
+    """/api/forget が登録した声を完全に削除する.
+
+    無効化（/activate）はセッション内で照合を止めるだけで、次の会議では
+    また有効になる。名前の聞き間違いで作られたプロファイル（実会話で
+    「壁」「朱色」等）が溜まり続けるため、消す手段が要る。
+    """
+    s = _make_state()
+    s.tracker = _FakeTracker()
+    s.tracker.profiles = {"黒田": 1, "壁": 1, "人物1": 1}
+    httpd, port = _serve(s)
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/forget",
+            data=json.dumps({"name": "壁"}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req) as r:
+            out = json.loads(r.read())
+        assert out["ok"] is True and out["name"] == "壁"
+        assert "壁" not in s.tracker.profiles
+        assert "黒田" in s.tracker.profiles       # 他は消さない
+        # 削除した事実は議事録にも残す（黙って消さない）
+        assert any("壁" in str(r.get("sys", "")) for r in s.records)
+    finally:
+        httpd.shutdown()
+
+
+def test_http_forget_rejects_unknown_name():
+    """登録されていない名前は404で返す（黙って成功にしない）."""
+    s = _make_state()
+    s.tracker = _FakeTracker()
+    s.tracker.profiles = {"黒田": 1}
+    httpd, port = _serve(s)
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/forget",
+            data=json.dumps({"name": "居ない人"}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            urllib.request.urlopen(req)
+            raise AssertionError("404 になるはず")
+        except urllib.error.HTTPError as e:
+            assert e.code == 404
     finally:
         httpd.shutdown()
