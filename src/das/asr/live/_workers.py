@@ -2810,6 +2810,14 @@ def _run_sender(state: SessionState, backend: STTBackend):
 
     送信先は state.stt_ws を毎回参照する。STT接続を作り直しても追従し、
     作り直し中(古いwsが閉じている瞬間)の送信エラーは無視する（音声を捨てる）。
+
+    録音wavには**STTへ送れたチャンクだけ**を書く。発話の ms は送信済み音声の
+    バイト位置（`asr_pcm_total_bytes // 32`）そのものなので、こうすると wav の
+    位置と ms が 1:1 で対応し、後から wav を ms で切って採点・アノテーション
+    できる。送れなかった分まで書くと wav だけが先へずれ、そのずれは二度と
+    戻らない（実測: 4分の会議で +1.5秒→+2.5秒、短い発話のオラクル精度が
+    偶然以下まで落ちた）。捨てた量は `pcm_total_bytes - asr_pcm_total_bytes`
+    で分かり、`finalize_wav` が知らせる。
     """
     seq = 0
     while True:
@@ -2829,18 +2837,18 @@ def _run_sender(state: SessionState, backend: STTBackend):
                 trim = len(state.pcm_buf) - state._PCM_KEEP_BYTES
                 del state.pcm_buf[:trim]
                 state.pcm_buf_offset += trim
-        if not setup_capture_only and state.pcm_file is not None:
-            try:
-                state.pcm_file.write(pcm)
-                state.pcm_file.flush()
-            except OSError:
-                pass
         if ws is not None:
             try:
                 ws.send(pcm)
             except Exception:
                 pass
             else:
+                if state.pcm_file is not None:
+                    try:
+                        state.pcm_file.write(pcm)
+                        state.pcm_file.flush()
+                    except OSError:
+                        pass
                 with state.buf_lock:
                     state.asr_pcm_buf.extend(pcm)
                     state.asr_pcm_total_bytes += len(pcm)

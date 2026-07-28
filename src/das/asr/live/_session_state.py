@@ -908,12 +908,22 @@ class SessionState:
             self.pcm_file = None
 
     def finalize_wav(self) -> str | None:
-        """録音wavのヘッダを確定して閉じる。保存したパスを返す（短すぎ/失敗ならNone）."""
+        """録音wavのヘッダを確定して閉じる。保存したパスを返す（短すぎ/失敗ならNone）.
+
+        中身は「STTへ送れた音声」だけなので、長さは `asr_pcm_total_bytes`。
+        取り込んだのに送れなかった分（接続断・送信失敗）は録音に入らない——
+        入れると wav と発話 ms がずれ、後から採点にもアノテーションにも
+        使えなくなるため。捨てた秒数はここで知らせる。
+        """
         if self.pcm_file is None:
             return None
+        dropped = max(self.pcm_total_bytes - self.asr_pcm_total_bytes, 0)
+        if dropped > SR * 2:  # 1秒以上こぼれたときだけ知らせる
+            print(f"# 録音: STTへ送れず録音に含めなかった音声 "
+                  f"{dropped / (SR * 2):.1f}秒", flush=True)
         try:
             self.pcm_file.flush()
-            data_size = self.pcm_total_bytes
+            data_size = self.asr_pcm_total_bytes
             self.pcm_file.seek(4)
             self.pcm_file.write(struct.pack("<I", 36 + data_size))
             self.pcm_file.seek(40)

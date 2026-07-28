@@ -115,6 +115,37 @@ def test_open_wav_resets_asr_buffer_offsets() -> None:
     assert state._stt_connection_audio_base_bytes == 0
 
 
+def test_recording_holds_only_sent_audio_so_wav_matches_utterance_ms(
+        tmp_path) -> None:
+    """録音wavは「STTへ送れた音声」だけを持ち、長さが ms の原点と一致する.
+
+    発話の ms は送信済みバイト数そのもの。送れなかったチャンクまで録音に
+    混ぜると wav だけが先へずれ、後から wav を ms で切ったときに隣の話者の
+    声を掴む（実測で短い発話のオラクル精度が偶然以下まで落ちた）。
+    """
+    import wave
+
+    state = _make_state()
+    state.wav_path = str(tmp_path / "rec.wav")
+    state.open_wav()  # type: ignore[no-untyped-call]
+    ws = _WS(fail_first=True)
+    state.stt_ws = ws  # type: ignore[assignment]
+    dropped = b"\x01\x00" * 16000        # 送信に失敗する1秒
+    kept = b"\x02\x00" * (16000 * 12)    # 送れる12秒（短い録音は破棄されるため）
+
+    state.audio_q.put(dropped)
+    state.audio_q.put(kept)
+    state.audio_q.put(None)
+    _run_sender(state, _Backend())  # type: ignore[arg-type]
+    state.finalize_wav()
+
+    with wave.open(state.wav_path) as w:
+        frames = w.readframes(w.getnframes())
+    assert frames == kept, "送れなかった音声が録音に混ざっている"
+    # wav の末尾位置(ms) と、次の発話に振られる ms の原点が一致すること
+    assert len(frames) // 32 == state.current_asr_ms()
+
+
 def test_stt_connection_start_sets_timestamp_offset() -> None:
     state = _make_state()
     state.asr_pcm_total_bytes = 16000 * 2 * 12
