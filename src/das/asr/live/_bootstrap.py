@@ -614,67 +614,45 @@ def vp_mint_cluster_link_disabled_warning(
 # メインのセッション起動
 # ---------------------------------------------------------------------------
 
-def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
-    """セッションを初期化し、STT受信ループを実行する.
+def _build_tracker(args) -> VoiceProfiles | None:
+    """声紋モデルを読み込む（読めない場合は順に代替モデルへ落とす）.
 
-    on_utterance_ref は [callable | None] の1要素リスト。
-    live.py の ON_UTTERANCE をセッション内から参照するために使う。
+    どのモデルも読めなければ None を返し、声紋照合なしで進む——起動そのものは
+    止めない（文字起こしは動くため）。ただし黙って落ちると「人物が確定しない
+    のはなぜか」が分からないので、警告と復旧手順を必ず出す。
     """
-    from das.asr.live import _SYS_HOOK_REF  # 遅延import（循環回避）
-
-    load_env()
-    if args.wav and not os.path.exists(args.wav):
-        raise SystemExit(f"音声ファイルがありません: {args.wav}\n"
-                         "（テスト音声は scripts/make_overlap_testset.py 等で先に生成してください）")
-
-    backend = build_backend(args)
-    _serve = args.port > 0
-
-    try:
-        from websockets.sync.client import connect
-    except ImportError as exc:
-        raise SystemExit("uv add websockets を実行してください") from exc
-
-    started = datetime.datetime.now()
-    if args.out:
-        out_path = args.out
-    else:
-        os.makedirs("transcripts", exist_ok=True)
-        out_path = os.path.join("transcripts", started.strftime("%Y-%m-%d_%H%M") + ".md")
-    html_path = os.path.splitext(out_path)[0] + ".html"
-    diag_path = os.path.splitext(out_path)[0] + ".diag.jsonl"
-    turns_path = os.path.splitext(out_path)[0] + ".turns.jsonl"
-
-    # --- 声紋モデル読み込み ---
+    if args.no_vp:
+        return None
     tracker: VoiceProfiles | None = None
-    if not args.no_vp:
-        print("# 声紋モデルを読み込み中…", flush=True)
-        for vp_model in dict.fromkeys([args.vp_model, "ecapa", "resemblyzer"]):
-            try:
-                tracker = VoiceProfiles(path=args.voices, thresh=args.vp_match,
-                                        auto=not args.vp_no_auto, model=vp_model)
-                if vp_model != args.vp_model:
-                    print(f"# 注意: {args.vp_model} を読み込めなかったため {vp_model} で動作します"
-                          f"（依存: uv add speechbrain torchaudio / redimnetは初回ネット接続必要）",
-                          flush=True)
-                print(f"# 声紋モデル: {vp_model}", flush=True)
-                break
-            except Exception as e:
-                print(f"#   {vp_model}: 読み込み失敗 ({type(e).__name__})", flush=True)
-                continue
-        if tracker is None:
-            print("# 警告: 声紋照合がOFFです！ 依存が未導入のため人物の確定・補正は行われません。", flush=True)
-            print("#   有効化するには: uv add speechbrain torchaudio  →  再起動", flush=True)
-        elif tracker.profiles:
-            print(f"# 声紋プロファイル: {', '.join(tracker.profiles)}（{args.voices}）", flush=True)
-        else:
-            print("# 声紋プロファイル: なし。未知の声は名前未登録の参加者として自動追跡、"
-                  f"ブラウザUIで名前を登録すると次回から自動表示（{args.voices}）", flush=True)
-        if tracker is not None:
-            tracker.set_max_human_speakers(args.diarization_max_speakers)
+    print("# 声紋モデルを読み込み中…", flush=True)
+    for vp_model in dict.fromkeys([args.vp_model, "ecapa", "resemblyzer"]):
+        try:
+            tracker = VoiceProfiles(path=args.voices, thresh=args.vp_match,
+                                    auto=not args.vp_no_auto, model=vp_model)
+            if vp_model != args.vp_model:
+                print(f"# 注意: {args.vp_model} を読み込めなかったため {vp_model} で動作します"
+                      f"（依存: uv add speechbrain torchaudio / redimnetは初回ネット接続必要）",
+                      flush=True)
+            print(f"# 声紋モデル: {vp_model}", flush=True)
+            break
+        except Exception as e:
+            print(f"#   {vp_model}: 読み込み失敗 ({type(e).__name__})", flush=True)
+            continue
+    if tracker is None:
+        print("# 警告: 声紋照合がOFFです！ 依存が未導入のため人物の確定・補正は行われません。", flush=True)
+        print("#   有効化するには: uv add speechbrain torchaudio  →  再起動", flush=True)
+    elif tracker.profiles:
+        print(f"# 声紋プロファイル: {', '.join(tracker.profiles)}（{args.voices}）", flush=True)
+    else:
+        print("# 声紋プロファイル: なし。未知の声は名前未登録の参加者として自動追跡、"
+              f"ブラウザUIで名前を登録すると次回から自動表示（{args.voices}）", flush=True)
+    if tracker is not None:
+        tracker.set_max_human_speakers(args.diarization_max_speakers)
+    return tracker
 
-    # --- SessionState ---
-    wav_path = os.path.splitext(out_path)[0] + ".wav"
+
+def _build_diarizer(args):
+    """--diarization の指定に応じて話者分離の供給元を作る（未指定なら None）."""
     diarizer = None
     warning = vp_cluster_naming_disabled_warning(args.diarization, args.vp_cluster_naming)
     if warning:
@@ -722,7 +700,17 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
               f"（latency={args.sortformer_latency} device={args.sortformer_device}。"
               f"注: 話者は最大4人・マイク残響環境では現行pyannote構成より弱い実測。"
               f"docs/design/sortformer_feasibility_2026-07-22.md）", flush=True)
+    return diarizer
 
+
+def _build_cluster_layer(args, tracker):
+    """ハイブリッド構成（クラスタ単位の声紋名前付け＋席の音声）を組む.
+
+    戻り値: (cluster_namer, seat_audio)。条件を満たさなければ (None, None) で、
+    Soniox単独・pyannote単独の挙動は変わらない。
+    """
+    cluster_namer = None
+    seat_audio = None
     # --- ハイブリッド構成: 匿名クラスタ単位の声紋名前付け ---
     # (docs/design/pyannote_live1_trial_2026-07-09.md §9)。匿名クラスタ型の
     # diarization（pyannote / sortformer）かつ --vp-cluster-naming 指定時、
@@ -751,6 +739,180 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
         else:
             print("# 注意: --vp-cluster-naming は声紋照合(tracker)が無効なため無視されます"
                   "（--no-vp解除 or 依存導入が必要）", flush=True)
+    return cluster_namer, seat_audio
+
+
+def _start_llm_workers(state, args, *, oai_key: str, oai_model: str,
+                       out_path: str, explicit_agenda: bool) -> None:
+    """LLM を使う常駐ワーカーを起動する（APIキーが無ければ何も起こさない）.
+
+    どれも会議の進行を助けるための背景処理で、話者の帰属には関わらない。
+    エージェントが居ないときは論点抽出だけを動かす——他は介入するための
+    判断材料であり、介入先が無ければ API を叩くだけ無駄になる。
+    """
+    if oai_key:
+        threading.Thread(target=_run_topic_worker,
+                        args=(state, oai_key, oai_model), daemon=True).start()
+        print("# 論点抽出: 有効（5発話ごとにLLMで分析）", flush=True)
+        if state.agent is not None:
+            threading.Thread(target=_run_drift_checker,
+                            args=(state, oai_key, oai_model), daemon=True).start()
+            print("# 脱線検出: 有効（3発話ごとに並列チェック）", flush=True)
+            threading.Thread(target=_run_triage_worker,
+                            args=(state, oai_key, oai_model), daemon=True).start()
+            print("# 発話分類: 有効（fact候補・ファシリテーター呼びかけをLLMで判定）",
+                  flush=True)
+            threading.Thread(target=_run_fact_checker,
+                            args=(state, oai_key, oai_model), daemon=True).start()
+            print("# 事実誤り補正: 有効（高確信の定義・式だけ短く補足）", flush=True)
+            # --- 参加度の声かけ（発言の少ない人を誘う, S4） ---
+            threading.Thread(target=_run_participation_checker,
+                            args=(state, oai_key, oai_model), daemon=True).start()
+            print("# 参加度の声かけ: 有効（発話量の偏りを監視）", flush=True)
+            # --- 整理介入の価値判定（count の無条件介入を置換, C3） ---
+            threading.Thread(target=_run_structuring_checker,
+                            args=(state, oai_key, oai_model), daemon=True).start()
+            print("# 整理介入: 有効（N発話到達時にLLMで価値判定）", flush=True)
+            # --- AF ランタイム + AF 介入 (H1 フェーズ3/4) ---
+            # extraction/linking を毎発話回すため API コストが増える。**既定では
+            # 無効**で、--af または DAS_AF_RUNTIME=1 のときだけ常駐＋介入する
+            # (モード方針 2026-07-03: 既定 OFF・ルールベースモード恒久維持)。
+            _af_enabled = (
+                os.environ.get("DAS_AF_RUNTIME") == "1"
+                or bool(getattr(args, "af", False))
+            )
+            if _af_enabled:
+                _af_snapshot = os.path.splitext(out_path)[0] + ".af.json"
+                threading.Thread(
+                    target=run_af_runtime,
+                    args=(state, oai_key, oai_model),
+                    kwargs={
+                        "docs_dir": args.docs,
+                        "snapshot_path": _af_snapshot,
+                    },
+                    daemon=True,
+                ).start()
+                # AF checker: AF から介入候補を作り Controller 採否へ流す (フェーズ4)
+                threading.Thread(
+                    target=_run_af_checker, args=(state,), daemon=True,
+                ).start()
+                print("# AF 介入: 有効（--af / DAS_AF_RUNTIME=1）", flush=True)
+            # --- 議題未指定なら冒頭アジェンダ自動検出（S3） ---
+            if not explicit_agenda:
+                threading.Thread(target=_run_agenda_detector,
+                                args=(state, oai_key, oai_model),
+                                daemon=True).start()
+                print("# 議題自動検出: 有効（冒頭の発話から推定）", flush=True)
+    else:
+        print("# 論点抽出: 無効（OPENAI_API_KEYが未設定）", flush=True)
+
+
+def _receive_until_stopped(state, args, backend, connect_stt) -> None:
+    """STT受信ループを回し、切断と会議のリセットに耐えて回り続ける.
+
+    抜ける条件は2つだけ——停止要求か、STT側の終了(finished)。切断は再接続
+    （回数に応じて待ちを伸ばす）、リセット要求は接続を張り直して次の会議へ。
+    どちらの場合も RecvLoop を作り直す——組み立て途中の発話や直近の区間を
+    持ち越すと、前の会議の断片が新しい会議に混ざる。
+    """
+    import contextlib as _contextlib
+
+    # 受信ループ。reset要求が来たらSTTを張り直して次の会議へ。
+    recv = RecvLoop(state, args, backend)
+    reconnect_attempts = 0
+    while not state.stop.is_set():
+        status = recv.run(state.stt_ws)
+        if state.stop.is_set():
+            break
+        if state.reset_requested.is_set():
+            reconnect_attempts = 0
+            print("# STTセッションを作り直しています…", flush=True)
+            with _contextlib.suppress(Exception):
+                if state.stt_ws is not None:
+                    state.stt_ws.close()
+            state.stt_ws = None
+            state.reset_for_new_meeting()
+            if state.diarization_provider is not None:
+                with _contextlib.suppress(Exception):
+                    state.diarization_provider.close()
+                state.diarization_provider.start()
+            if state.waiting_to_start:
+                state.resetting = False
+                state.rev += 1
+                print("# 開始前設定: 確認後に「会議を開始」を押してください", flush=True)
+                while not state.stop.is_set() and not state.start_requested.wait(timeout=0.2):
+                    pass
+                if state.stop.is_set():
+                    break
+            state.stt_ws = connect_stt()
+            recv = RecvLoop(state, args, backend)
+            state.reset_requested.clear()
+            state.resetting = False
+            state.rev += 1
+            print("# 新しい会議を開始しました", flush=True)
+        elif status == "disconnected":
+            reconnect_attempts += 1
+            delay = min(5.0, 0.5 * reconnect_attempts)
+            print(f"# STTに再接続中… ({reconnect_attempts}回目)", flush=True)
+            with _contextlib.suppress(Exception):
+                if state.stt_ws is not None:
+                    state.stt_ws.close()
+            if state.diarization_provider is not None:
+                with _contextlib.suppress(Exception):
+                    state.diarization_provider.close()
+                state.diarization_provider.start()
+            time.sleep(delay)
+            try:
+                state.stt_ws = connect_stt()
+            except Exception as e:
+                print(f"# STT再接続に失敗: {e}", flush=True)
+                continue
+            recv = RecvLoop(state, args, backend)
+            print("# STTに再接続しました", flush=True)
+        else:
+            reconnect_attempts = 0
+            if status == "finished":
+                break
+
+
+def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
+    """セッションを初期化し、STT受信ループを実行する.
+
+    on_utterance_ref は [callable | None] の1要素リスト。
+    live.py の ON_UTTERANCE をセッション内から参照するために使う。
+    """
+    from das.asr.live import _SYS_HOOK_REF  # 遅延import（循環回避）
+
+    load_env()
+    if args.wav and not os.path.exists(args.wav):
+        raise SystemExit(f"音声ファイルがありません: {args.wav}\n"
+                         "（テスト音声は scripts/make_overlap_testset.py 等で先に生成してください）")
+
+    backend = build_backend(args)
+    _serve = args.port > 0
+
+    try:
+        from websockets.sync.client import connect
+    except ImportError as exc:
+        raise SystemExit("uv add websockets を実行してください") from exc
+
+    started = datetime.datetime.now()
+    if args.out:
+        out_path = args.out
+    else:
+        os.makedirs("transcripts", exist_ok=True)
+        out_path = os.path.join("transcripts", started.strftime("%Y-%m-%d_%H%M") + ".md")
+    html_path = os.path.splitext(out_path)[0] + ".html"
+    diag_path = os.path.splitext(out_path)[0] + ".diag.jsonl"
+    turns_path = os.path.splitext(out_path)[0] + ".turns.jsonl"
+
+    # --- 声紋モデル読み込み ---
+    tracker = _build_tracker(args)
+
+    # --- SessionState ---
+    wav_path = os.path.splitext(out_path)[0] + ".wav"
+    diarizer = _build_diarizer(args)
+    cluster_namer, seat_audio = _build_cluster_layer(args, tracker)
 
     state = SessionState(args=args, started=started, out_path=out_path,
                          html_path=html_path, diag_path=diag_path,
@@ -906,61 +1068,9 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
                                  daemon=True).start()
         threading.Thread(target=_run_stdin_commands, args=(state,),
                          daemon=True).start()
-        if _oai_key:
-            threading.Thread(target=_run_topic_worker,
-                            args=(state, _oai_key, _oai_model), daemon=True).start()
-            print("# 論点抽出: 有効（5発話ごとにLLMで分析）", flush=True)
-            if state.agent is not None:
-                threading.Thread(target=_run_drift_checker,
-                                args=(state, _oai_key, _oai_model), daemon=True).start()
-                print("# 脱線検出: 有効（3発話ごとに並列チェック）", flush=True)
-                threading.Thread(target=_run_triage_worker,
-                                args=(state, _oai_key, _oai_model), daemon=True).start()
-                print("# 発話分類: 有効（fact候補・ファシリテーター呼びかけをLLMで判定）",
-                      flush=True)
-                threading.Thread(target=_run_fact_checker,
-                                args=(state, _oai_key, _oai_model), daemon=True).start()
-                print("# 事実誤り補正: 有効（高確信の定義・式だけ短く補足）", flush=True)
-                # --- 参加度の声かけ（発言の少ない人を誘う, S4） ---
-                threading.Thread(target=_run_participation_checker,
-                                args=(state, _oai_key, _oai_model), daemon=True).start()
-                print("# 参加度の声かけ: 有効（発話量の偏りを監視）", flush=True)
-                # --- 整理介入の価値判定（count の無条件介入を置換, C3） ---
-                threading.Thread(target=_run_structuring_checker,
-                                args=(state, _oai_key, _oai_model), daemon=True).start()
-                print("# 整理介入: 有効（N発話到達時にLLMで価値判定）", flush=True)
-                # --- AF ランタイム + AF 介入 (H1 フェーズ3/4) ---
-                # extraction/linking を毎発話回すため API コストが増える。**既定では
-                # 無効**で、--af または DAS_AF_RUNTIME=1 のときだけ常駐＋介入する
-                # (モード方針 2026-07-03: 既定 OFF・ルールベースモード恒久維持)。
-                _af_enabled = (
-                    os.environ.get("DAS_AF_RUNTIME") == "1"
-                    or bool(getattr(args, "af", False))
-                )
-                if _af_enabled:
-                    _af_snapshot = os.path.splitext(out_path)[0] + ".af.json"
-                    threading.Thread(
-                        target=run_af_runtime,
-                        args=(state, _oai_key, _oai_model),
-                        kwargs={
-                            "docs_dir": args.docs,
-                            "snapshot_path": _af_snapshot,
-                        },
-                        daemon=True,
-                    ).start()
-                    # AF checker: AF から介入候補を作り Controller 採否へ流す (フェーズ4)
-                    threading.Thread(
-                        target=_run_af_checker, args=(state,), daemon=True,
-                    ).start()
-                    print("# AF 介入: 有効（--af / DAS_AF_RUNTIME=1）", flush=True)
-                # --- 議題未指定なら冒頭アジェンダ自動検出（S3） ---
-                if not _explicit_agenda:
-                    threading.Thread(target=_run_agenda_detector,
-                                    args=(state, _oai_key, _oai_model),
-                                    daemon=True).start()
-                    print("# 議題自動検出: 有効（冒頭の発話から推定）", flush=True)
-        else:
-            print("# 論点抽出: 無効（OPENAI_API_KEYが未設定）", flush=True)
+        _start_llm_workers(state, args, oai_key=_oai_key,
+                           oai_model=_oai_model, out_path=out_path,
+                           explicit_agenda=_explicit_agenda)
         if state.agent is not None:
             _connect_agent(state, _on_agent_text)
         if state.partner is not None:
@@ -996,62 +1106,7 @@ def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
                     state.stt_ws.close()
         state.request_reset = _request_reset
 
-        # 受信ループ。reset要求が来たらSTTを張り直して次の会議へ。
-        recv = RecvLoop(state, args, backend)
-        reconnect_attempts = 0
-        while not state.stop.is_set():
-            status = recv.run(state.stt_ws)
-            if state.stop.is_set():
-                break
-            if state.reset_requested.is_set():
-                reconnect_attempts = 0
-                print("# STTセッションを作り直しています…", flush=True)
-                with _contextlib.suppress(Exception):
-                    if state.stt_ws is not None:
-                        state.stt_ws.close()
-                state.stt_ws = None
-                state.reset_for_new_meeting()
-                if state.diarization_provider is not None:
-                    with _contextlib.suppress(Exception):
-                        state.diarization_provider.close()
-                    state.diarization_provider.start()
-                if state.waiting_to_start:
-                    state.resetting = False
-                    state.rev += 1
-                    print("# 開始前設定: 確認後に「会議を開始」を押してください", flush=True)
-                    while not state.stop.is_set() and not state.start_requested.wait(timeout=0.2):
-                        pass
-                    if state.stop.is_set():
-                        break
-                state.stt_ws = _connect_stt()
-                recv = RecvLoop(state, args, backend)
-                state.reset_requested.clear()
-                state.resetting = False
-                state.rev += 1
-                print("# 新しい会議を開始しました", flush=True)
-            elif status == "disconnected":
-                reconnect_attempts += 1
-                delay = min(5.0, 0.5 * reconnect_attempts)
-                print(f"# STTに再接続中… ({reconnect_attempts}回目)", flush=True)
-                with _contextlib.suppress(Exception):
-                    if state.stt_ws is not None:
-                        state.stt_ws.close()
-                if state.diarization_provider is not None:
-                    with _contextlib.suppress(Exception):
-                        state.diarization_provider.close()
-                    state.diarization_provider.start()
-                time.sleep(delay)
-                try:
-                    state.stt_ws = _connect_stt()
-                except Exception as e:
-                    print(f"# STT再接続に失敗: {e}", flush=True)
-                    continue
-                recv = RecvLoop(state, args, backend)
-                print("# STTに再接続しました", flush=True)
-            else:
-                reconnect_attempts = 0
-                if status == "finished":
-                    break
+        _receive_until_stopped(state, args, backend, _connect_stt)
     except KeyboardInterrupt:
         # Ctrl+C はトレースバックを出さず、UIの停止ボタンと同じ扱いで安全に終了する
         # （ブラウザタブを閉じてしまった場合も、タブを開き直すか Ctrl+C で停止できる）。
