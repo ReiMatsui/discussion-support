@@ -1,0 +1,443 @@
+{
+ "diag": [
+  {
+   "key": "人物1",
+   "labels": {},
+   "max_speakers": 3,
+   "slots": [],
+   "type": "seat_admitted"
+  },
+  {
+   "chars": 11,
+   "diar": [
+    [
+     "pyannote",
+     "SPEAKER_00",
+     1000,
+     5000
+    ]
+   ],
+   "end": 5000,
+   "enr": false,
+   "final_key": "人物1",
+   "key": "人物1",
+   "kind": "声紋一致",
+   "label": "1",
+   "ms": 1000,
+   "name": "人物1",
+   "ov": false,
+   "sim": 0.82,
+   "src": "voiceprint",
+   "why": "voiceprint_high_confidence"
+  },
+  {
+   "chars": 2,
+   "diar": [
+    [
+     "pyannote",
+     "SPEAKER_00",
+     5200,
+     5600
+    ]
+   ],
+   "end": 5600,
+   "enr": false,
+   "final_key": "?",
+   "key": "人物1",
+   "kind": "声紋一致",
+   "label": "1",
+   "ms": 5200,
+   "name": "人物1",
+   "ov": false,
+   "sim": 0.8,
+   "src": "voiceprint",
+   "why": "voiceprint_high_confidence"
+  },
+  {
+   "key": "人物2",
+   "labels": {
+    "人物1": "参加者A"
+   },
+   "max_speakers": 3,
+   "slots": [
+    "参加者A"
+   ],
+   "type": "seat_admitted"
+  },
+  {
+   "chars": 10,
+   "diar": [
+    [
+     "pyannote",
+     "SPEAKER_01",
+     6000,
+     11000
+    ]
+   ],
+   "end": 11000,
+   "enr": false,
+   "final_key": "人物2",
+   "key": "人物2",
+   "kind": "声紋一致",
+   "label": "2",
+   "ms": 6000,
+   "name": "人物2",
+   "ov": false,
+   "sim": 0.79,
+   "src": "voiceprint",
+   "why": "voiceprint_high_confidence"
+  },
+  {
+   "chars": 11,
+   "diar": [
+    [
+     "pyannote",
+     "SPEAKER_00",
+     11500,
+     15500
+    ]
+   ],
+   "end": 15500,
+   "enr": false,
+   "final_key": "人物1",
+   "key": "人物1",
+   "kind": "補正",
+   "label": "2",
+   "ms": 11500,
+   "name": "人物1",
+   "ov": false,
+   "prev": "人物2",
+   "sim": 0.77,
+   "src": "voiceprint",
+   "why": "voiceprint_high_confidence"
+  },
+  {
+   "key": "人物3",
+   "labels": {
+    "人物1": "参加者A",
+    "人物2": "参加者B"
+   },
+   "max_speakers": 3,
+   "slots": [
+    "参加者A",
+    "参加者B"
+   ],
+   "type": "seat_admitted"
+  },
+  {
+   "chars": 12,
+   "diar": [
+    [
+     "pyannote",
+     "SPEAKER_02",
+     16000,
+     21000
+    ]
+   ],
+   "end": 21000,
+   "enr": false,
+   "final_key": "人物3",
+   "key": "人物3",
+   "kind": "自動登録",
+   "label": "3",
+   "ms": 16000,
+   "name": "人物3",
+   "ov": false,
+   "rename": null,
+   "sim": 0.74,
+   "src": "voiceprint",
+   "why": "voiceprint_high_confidence"
+  },
+  {
+   "chars": 12,
+   "diar": [
+    [
+     "pyannote",
+     "SPEAKER_01",
+     21500,
+     24500
+    ]
+   ],
+   "end": 24500,
+   "enr": false,
+   "final_key": "人物2",
+   "key": "?",
+   "kind": "ラベル不純",
+   "label": "3",
+   "ms": 21500,
+   "name": "人物2",
+   "ov": false,
+   "seat": {
+    "key": "人物2",
+    "margin": 1.0,
+    "n_seats": 3,
+    "sim": 1.0
+   },
+   "sim": 0.31,
+   "src": "cluster_impure_label",
+   "why": "impure_stt_label_without_voiceprint_endorsement"
+  },
+  {
+   "count": 1,
+   "key": "@diar:2",
+   "max_speakers": 3,
+   "slots": [
+    "参加者A",
+    "参加者B",
+    "参加者C"
+   ],
+   "type": "constrain_drop"
+  },
+  {
+   "chars": 11,
+   "diar": [
+    [
+     "pyannote",
+     "SPEAKER_03",
+     25000,
+     28000
+    ]
+   ],
+   "end": 28000,
+   "enr": false,
+   "final_key": "人物3",
+   "key": "@diar:2",
+   "kind": "蓄積中",
+   "label": "4",
+   "ms": 25000,
+   "name": "人物3",
+   "ov": false,
+   "seat": {
+    "key": "人物3",
+    "margin": 0.0,
+    "n_seats": 3,
+    "sim": 1.0
+   },
+   "sim": 0.2,
+   "src": "pyannote",
+   "why": "diarization_overlap_1.00"
+  },
+  {
+   "count": 1,
+   "key": "@diar:3",
+   "max_speakers": 3,
+   "slots": [
+    "参加者A",
+    "参加者B",
+    "参加者C"
+   ],
+   "type": "constrain_drop"
+  },
+  {
+   "chars": 11,
+   "diar": [
+    [
+     "pyannote",
+     "SPEAKER_04",
+     28500,
+     32500
+    ]
+   ],
+   "end": 32500,
+   "enr": false,
+   "final_key": "人物3",
+   "key": "@diar:3",
+   "kind": "ラベル継続",
+   "label": "5",
+   "ms": 28500,
+   "name": "人物5",
+   "ov": false,
+   "seat": {
+    "key": "人物3",
+    "margin": 0.0,
+    "n_seats": 3,
+    "sim": 1.0
+   },
+   "sim": 0.4,
+   "src": "pyannote",
+   "why": "diarization_overlap_1.00"
+  },
+  {
+   "chars": 11,
+   "diar": [
+    [
+     "pyannote",
+     "SPEAKER_00",
+     33000,
+     36000
+    ]
+   ],
+   "end": 36000,
+   "enr": false,
+   "final_key": "人物1",
+   "key": "人物1",
+   "kind": "声紋一致",
+   "label": "1",
+   "ms": 33000,
+   "name": "人物1",
+   "ov": false,
+   "sim": 0.85,
+   "src": "voiceprint",
+   "why": "voiceprint_high_confidence"
+  },
+  {
+   "end": 40000,
+   "ms": 37000,
+   "sim": 0.9,
+   "src": "agent",
+   "text": "エコーとして捨てられる文です",
+   "type": "echo_drop"
+  },
+  {
+   "end": 44000,
+   "key": "__AI__",
+   "ms": 41000,
+   "sim": 0.91,
+   "src": "voiceprint",
+   "text": "AIの声が漏れ込んだ文です",
+   "type": "echo_drop"
+  },
+  {
+   "count": 1,
+   "key": "@diar:4",
+   "max_speakers": 3,
+   "slots": [
+    "参加者A",
+    "参加者B",
+    "参加者C"
+   ],
+   "type": "constrain_drop"
+  },
+  {
+   "diar": [
+    [
+     "pyannote",
+     "SPEAKER_00",
+     45000,
+     48000
+    ]
+   ],
+   "end": 48000,
+   "final_key": "人物3",
+   "key": "@diar:4",
+   "label": "",
+   "ms": 45000,
+   "seat": {
+    "key": "人物3",
+    "margin": 0.0,
+    "n_seats": 3,
+    "sim": 1.0
+   },
+   "src": "pyannote",
+   "why": "diarization_overlap_1.00"
+  }
+ ],
+ "labels": {
+  "人物1": "参加者A",
+  "人物2": "参加者B",
+  "人物3": "参加者C"
+ },
+ "records": [
+  {
+   "end_ms": 5000,
+   "ms": 1000,
+   "speaker": "人物1",
+   "speaker_confidence": 1.0,
+   "speaker_reason": "voiceprint_high_confidence",
+   "speaker_source": "voiceprint",
+   "text": "今日の目的を確認します"
+  },
+  {
+   "bc": true,
+   "end_ms": 5600,
+   "ms": 5200,
+   "speaker": "?",
+   "speaker_confidence": 1.0,
+   "speaker_reason": "voiceprint_high_confidence",
+   "speaker_source": "voiceprint",
+   "text": "はい"
+  },
+  {
+   "end_ms": 11000,
+   "ms": 6000,
+   "speaker": "人物2",
+   "speaker_confidence": 1.0,
+   "speaker_reason": "voiceprint_high_confidence",
+   "speaker_source": "voiceprint",
+   "text": "では私から報告します"
+  },
+  {
+   "end_ms": 15500,
+   "ms": 11500,
+   "note": "声紋でラベル2の取り違えを修正（類似0.77、放置なら参加者Bの発言になっていた）",
+   "speaker": "人物1",
+   "speaker_confidence": 1.0,
+   "speaker_reason": "voiceprint_high_confidence",
+   "speaker_source": "voiceprint",
+   "text": "先週の数字はこうでした",
+   "vp": "補正"
+  },
+  {
+   "ms": 16000,
+   "sys": "この声を「参加者C」として追跡開始（名前は右側の登録欄から設定できます）"
+  },
+  {
+   "end_ms": 21000,
+   "ms": 16000,
+   "speaker": "人物3",
+   "speaker_confidence": 1.0,
+   "speaker_reason": "voiceprint_high_confidence",
+   "speaker_source": "voiceprint",
+   "text": "こちらでも確認しています"
+  },
+  {
+   "diarization_raw_speaker": "SPEAKER_01",
+   "end_ms": 24500,
+   "ms": 21500,
+   "speaker": "人物2",
+   "speaker_confidence": 1.0,
+   "speaker_reason": "label_only_kind_resolved_by_seat_audio",
+   "speaker_source": "seat_assign",
+   "text": "補足すると条件が違います"
+  },
+  {
+   "diarization_raw_speaker": "SPEAKER_03",
+   "end_ms": 28000,
+   "ms": 25000,
+   "speaker": "人物3",
+   "speaker_confidence": 1.0,
+   "speaker_reason": "seat_full_nearest_seat_audio",
+   "speaker_source": "seat_assign",
+   "text": "私はまだ話していません"
+  },
+  {
+   "diarization_raw_speaker": "SPEAKER_04",
+   "end_ms": 32500,
+   "ms": 28500,
+   "speaker": "人物3",
+   "speaker_confidence": 1.0,
+   "speaker_reason": "label_only_kind_resolved_by_seat_audio",
+   "speaker_source": "seat_assign",
+   "text": "四人目として発言します"
+  },
+  {
+   "end_ms": 36000,
+   "ms": 33000,
+   "speaker": "人物1",
+   "speaker_confidence": 1.0,
+   "speaker_reason": "voiceprint_high_confidence",
+   "speaker_source": "voiceprint",
+   "text": "まとめると三点あります"
+  },
+  {
+   "diarization_raw_speaker": "SPEAKER_00",
+   "end_ms": 48000,
+   "ms": 45000,
+   "speaker": "人物3",
+   "speaker_confidence": 1.0,
+   "speaker_reason": "seat_full_nearest_seat_audio",
+   "speaker_source": "seat_assign",
+   "text": "話者が付かなかった発話です"
+  }
+ ]
+}
