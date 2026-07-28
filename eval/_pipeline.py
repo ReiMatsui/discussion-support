@@ -63,16 +63,29 @@ def read_wav(path: Path) -> np.ndarray:
     return np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
 
 
-def gt_rows(run: str) -> list[tuple[dict, str]] | None:
+def gt_rows(run: str, *, align: str = "time") -> list[tuple[dict, str]] | None:
     """採点対象の (発話, GTコード) を時刻順で返す（相槌は除く）.
 
     相槌を分母に入れると実会話の未確定率が3倍に見える。§28.14 で実際に
     誤った報告をしたので、除外はここに固定する。
+
+    `align` は正解の割り当て方:
+
+      "time" 時間の重なり（従来）。8割を一人が占めるときだけ正解を付ける。
+             重なりの多い場面が丸ごと落ちる。
+      "text" 文章の一致（`_textgt`）。「この一文は誰のものか」で決めるので
+             重なっていても答えが出る。落ちるのは相づちだけ。
     """
     loaded = dec.load_run(run)
     if loaded is None:
         return None
     utts, code_by_ms = loaded
+    if align == "text":
+        import _textgt
+        by_text = _textgt.codes_by_ms(run, utts)
+        if by_text is None:
+            return None
+        code_by_ms = by_text
     rows = [(u, code_by_ms.get(u["ms"])) for u in utts]
     rows = [(u, c) for u, c in rows if c in dec.GT_CODES
             and not dec._BACKCHANNEL_RE.match(str(u["_text"]).strip())]
@@ -148,14 +161,15 @@ def pick_nearest(emb, refs: dict) -> str | None:
 # ------------------------------------------------------------ 再生
 
 
-def replay_seats(run: str, vp, *, wav_path: Path | None = None) -> dict | None:
+def replay_seats(run: str, vp, *, wav_path: Path | None = None,
+                 align: str = "time") -> dict | None:
     """席の参照の推移と、貼り直せる発話の声紋を1回だけ計算する.
 
     席の参照は「高信頼で確定した発話」だけから作られ、その集合は予定表に
     依存しない。したがって推移を保存しておけば、どの予定表でも再利用できる
     （条件を増やしても埋め込みの計算は増えない）。
     """
-    rows = gt_rows(run)
+    rows = gt_rows(run, align=align)
     wav_path = wav_path or ROOT / "transcripts" / f"{run}.wav"
     if rows is None or not wav_path.exists():
         return None
