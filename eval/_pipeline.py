@@ -211,11 +211,14 @@ def apply_schedule(steps: list[dict], schedule=RETRO_SCHEDULE_SEC,
     貼り直しは保存済みの声紋と席の参照の内積だけで、埋め込みの計算は要らない。
     間隔を詰めない理由は計算量ではなく、表示が頻繁に書き換わること（UX）だけ。
 
-    `pick` は寄せ先の選び方（既定は現行の rank-1）、`name` は `replay_seats`
-    の `query` が付けた声紋の名前。どちらも**最初の判定と貼り直しの両方**に
-    同じものが使われる——片方だけ替えると、その差が案の効果に混ざる。
+    `pick` は寄せ先の選び方で、``pick(声紋, 席の参照, その発話の記録)`` の形。
+    第3引数を渡すのは、長さや kind で条件を変える案（短い発話にだけ棄権を
+    許す等）を、選び方の差し替えだけで測れるようにするため。`name` は
+    `replay_seats` の `query` が付けた声紋の名前。どちらも**最初の判定と
+    貼り直しの両方**に同じものが使われる——片方だけ替えると、その差が案の
+    効果に混ざる。
     """
-    pick = pick or pick_nearest
+    pick = pick or (lambda emb, refs, _st: pick_nearest(emb, refs))
     final: list[str] = []
     remembered: list[int] = []
     idx = 0
@@ -223,7 +226,7 @@ def apply_schedule(steps: list[dict], schedule=RETRO_SCHEDULE_SEC,
     for i, st in enumerate(steps):
         cur = st["base"]
         if st["revisable"]:
-            got = pick(st["embs"].get(name), st["refs"])
+            got = pick(st["embs"].get(name), st["refs"], st)
             cur = got if got is not None else cur
             remembered.append(i)
         final.append(cur)
@@ -232,7 +235,8 @@ def apply_schedule(steps: list[dict], schedule=RETRO_SCHEDULE_SEC,
             next_at = (schedule[idx] if idx < len(schedule)
                        else st["elapsed"] + interval)
             for j in remembered:
-                got = pick(steps[j]["embs"].get(name), st["refs"])
+                got = pick(steps[j]["embs"].get(name), st["refs"],
+                           steps[j])
                 if got is not None:
                     final[j] = got
     return final
