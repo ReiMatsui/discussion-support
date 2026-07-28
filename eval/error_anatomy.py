@@ -34,66 +34,39 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import _gtlib  # noqa: E402
 import _pipeline as pipe  # noqa: E402
-import cluster_merge_feasibility as feas  # noqa: E402
+import _textgt  # noqa: E402
 import decompose_attribution as dec  # noqa: E402
 import segment_boundary_ceiling as seg  # noqa: E402
 
-from das.asr.live._attribution import _VOICEPRINT_RELIABLE_KINDS  # noqa: E402
-from das.asr.live._constants import SR, UNSURE_SPEAKER  # noqa: E402
-from das.asr.live._recv_loop import _LABEL_ONLY_KINDS  # noqa: E402
-from das.asr.live._seat_audio import SeatAudio  # noqa: E402
+from das.asr.live._constants import UNSURE_SPEAKER  # noqa: E402
 
 CACHE = ROOT / "eval" / "_error_anatomy.json"
 
 
-def compute(run: str, vp) -> list[dict] | None:
-    """本番と同じ順序で1ラン流し、発話ごとの結末と属性を返す."""
-    loaded = dec.load_run(run)
-    wav_path = ROOT / "transcripts" / f"{run}.wav"
-    if loaded is None or not wav_path.exists():
-        return None
-    utts, code_by_ms = loaded
-    rows = [(u, code_by_ms.get(u["ms"])) for u in utts]
-    rows = [(u, c) for u, c in rows if c in dec.GT_CODES
-            and not dec._BACKCHANNEL_RE.match(str(u["_text"]).strip())]
-    if not rows or not any(u.get("final_key") is not None for u, _ in rows):
-        return None
-    rows.sort(key=lambda r: int(r[0]["ms"]))
-    pcm = feas.read_wav(wav_path)
+def compute(run: str, vp, align: str = "text") -> list[dict] | None:
+    """本番と同じ順序で1ラン流し、発話ごとの結末と属性を返す.
 
-    # またぎ判定のための GT 区間
-    gt_path = ROOT / "eval" / f"gt_{run}.json"
-    conv = json.loads(gt_path.read_text(encoding="utf-8")).get("transplanted_from")
+    再生・遡及訂正・採点は `_pipeline` に一本化してある（書き写すとずれる）。
+    `align` は正解の当て方で、既定は文章の一致——時間の重なりだと重なりの多い
+    場面が丸ごと落ち、残った易しい側だけを見ることになる（§34）。
+    """
+    data = pipe.replay_seats(run, vp, align=align)
+    if data is None:
+        return None
+    steps = data["steps"]
+    final = pipe.apply_schedule(steps)
+    pairs = [(f, st["code"]) for f, st in zip(final, steps, strict=True)]
+    _a, m = _gtlib.best_mapping(pairs, dec.GT_CODES, unsure=UNSURE_SPEAKER)
+
+    # またぎ判定のための GT 区間（Sonioxの区切りが話者境界をまたいでいるか）
+    conv = _textgt.source_of(run)
     spans = seg.gt_spans(conv) if conv else []
 
-    seat = SeatAudio(vp)
-    pick: dict[int, str] = {}
-    for u, _c in rows:
-        a, b = int(u["ms"]), int(u.get("end") or u["ms"])
-        wav = pcm[int(a / 1000 * SR):int(b / 1000 * SR)]
-        final = str(u["final_key"])
-        kind = u.get("kind")
-        if final != UNSURE_SPEAKER and kind == "蓄積中" and not dec.endorsed(u):
-            final = UNSURE_SPEAKER
-        if kind in _LABEL_ONLY_KINDS or (final == UNSURE_SPEAKER
-                                         and str(u.get("key")) != UNSURE_SPEAKER):
-            got = seat.nearest(wav)
-            if got is not None:
-                pick[int(u["ms"])] = got[0]
-        elif final != UNSURE_SPEAKER and kind in _VOICEPRINT_RELIABLE_KINDS:
-            seat.observe(final, wav)
-
-    def _final(u):
-        # 規則は eval/_pipeline.resolved_key に一本化（書き写すとずれる）
-        return pipe.resolved_key(u, pick.get(int(u["ms"])))
-
-    _a, m = _gtlib.best_mapping([(_final(u), c) for u, c in rows],
-                                dec.GT_CODES, unsure=UNSURE_SPEAKER)
-    t0 = int(rows[0][0]["ms"])
     out = []
-    for u, code in rows:
-        a, b = int(u["ms"]), int(u.get("end") or u["ms"])
-        f = _final(u)
+    for f, st in zip(final, steps, strict=True):
+        u = st["utt"]
+        a = int(u["ms"])
+        b = int(u.get("end") or a)
         by_sp: Counter = Counter()
         for x, y, sp in spans:
             ov = min(b, y) - max(a, x)
@@ -103,30 +76,42 @@ def compute(run: str, vp) -> list[dict] | None:
         top = by_sp.most_common(1)[0][1] if by_sp else dur
         out.append({
             "run": run, "ms": a, "dur_ms": max(0, b - a),
-            "elapsed_s": (a - t0) / 1000,
-            "ov": bool(u.get("ov")), "gt": code,
+            "elapsed_s": st["elapsed"],
+            "chars": len(str(u.get("_text") or "")),
+            "ov": bool(u.get("ov")), "gt": st["code"],
             "outcome": ("未確定" if f == UNSURE_SPEAKER
-                        else "正解" if m.get(f) == code else "誤帰属"),
+                        else "正解" if m.get(f) == st["code"] else "誤帰属"),
             "straddle": bool(len(by_sp) > 1 and (dur - top) / dur > 0.10),
             "kind": u.get("kind"),
+            "src": u.get("src"),
         })
     return out
 
 
 def _slice(rows, key, label):
+    """断面ごとに、件数と文字数の両方で内訳を出す.
+
+    件数だけだと短い相づちに数字が支配され、文字数だけだと1回の長い取り違えが
+    大きく見える。両方を並べて初めて「どこを直すと読み手に効くか」が分かる。
+    """
     tab: dict = {}
     for r in rows:
         k = key(r)
         d = tab.setdefault(k, Counter())
         d[r["outcome"]] += 1
         d["n"] += 1
+        d["w"] += r.get("chars", 0)
+        d["w" + r["outcome"]] += r.get("chars", 0)
     print(f"\n## {label}")
-    print(f"{'区分':<16}{'発話':>6}{'正解':>8}{'誤帰属':>8}{'未確定':>8}")
+    print(f"{'区分':<14}{'発話':>6}{'正解':>7}{'誤帰属':>7}{'未確定':>7}"
+          f"{'   ':>3}{'文字':>7}{'正解':>7}{'誤帰属':>7}{'未確定':>7}")
     for k in sorted(tab):
         d = tab[k]
-        n = d["n"]
-        print(f"{k!s:<16}{n:>6}{d['正解'] / n:>8.0%}"
-              f"{d['誤帰属'] / n:>8.0%}{d['未確定'] / n:>8.0%}")
+        n, w = d["n"], max(1, d["w"])
+        print(f"{k!s:<14}{n:>6}{d['正解'] / n:>7.0%}"
+              f"{d['誤帰属'] / n:>7.0%}{d['未確定'] / n:>7.0%}{'   ':>3}"
+              f"{w:>7}{d['w正解'] / w:>7.0%}{d['w誤帰属'] / w:>7.0%}"
+              f"{d['w未確定'] / w:>7.0%}")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -134,6 +119,9 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--prefix", default="2026-07-20")
     p.add_argument("--report", action="store_true", help="保存済みを読んで切るだけ")
     p.add_argument("--model", default="redimnet")
+    p.add_argument("--align", default="text",
+                   choices=("text", "time"),
+                   help="正解の当て方（既定: 文章の一致。§34）")
     args = p.parse_args(argv)
 
     if args.report and CACHE.exists():
@@ -142,14 +130,21 @@ def main(argv: list[str] | None = None) -> None:
         from das.asr.live._voice_profiles import VoiceProfiles
         vp = VoiceProfiles(model=args.model)
         runs = [r for r in sorted(dec.discover()) if r.startswith(args.prefix)]
-        rows = [x for r in runs for x in (compute(r, vp) or [])]
+        rows = [x for r in runs for x in (compute(r, vp, args.align) or [])]
         CACHE.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
         print(f"# {len(rows)}件を {CACHE} に保存")
 
     n = len(rows)
     c = Counter(r["outcome"] for r in rows)
-    print(f"\n# 全体（{n}発話）  正解 {c['正解'] / n:.1%}"
-          f" / 誤帰属 {c['誤帰属'] / n:.1%} / 未確定 {c['未確定'] / n:.1%}")
+    w = sum(r.get("chars", 0) for r in rows) or 1
+    wc = Counter()
+    for r in rows:
+        wc[r["outcome"]] += r.get("chars", 0)
+    print(f"\n# 全体（{n}発話・{w}文字）")
+    print(f"#   件数  正解 {c['正解'] / n:.1%} / 誤帰属 {c['誤帰属'] / n:.1%}"
+          f" / 未確定 {c['未確定'] / n:.1%}")
+    print(f"#   文字  正解 {wc['正解'] / w:.1%} / 誤帰属 {wc['誤帰属'] / w:.1%}"
+          f" / 未確定 {wc['未確定'] / w:.1%}")
 
     def bucket_time(r):
         e = r["elapsed_s"]
@@ -171,6 +166,8 @@ def main(argv: list[str] | None = None) -> None:
     _slice(rows, lambda r: r["gt"], "GT話者")
     _slice(rows, lambda r: "またぎ" if r["straddle"] else "またぎなし",
            "Sonioxの区切りが話者境界をまたいでいるか（精度の上限）")
+    _slice(rows, lambda r: r.get("kind") or "（なし）", "声紋判定の種別")
+    _slice(rows, lambda r: r.get("src") or "（なし）", "どの経路で決まったか")
 
     # 遡及訂正の見積り: 序盤の誤りが「後半の参照」で直るなら何pt返るか
     early = [r for r in rows if r["elapsed_s"] < 120]
