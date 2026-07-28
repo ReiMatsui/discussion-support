@@ -74,6 +74,28 @@ class RecvLoop:
         self.cur_last_token_time: float = time.monotonic()
         self.recent_segs: list[tuple] = []
 
+    def _note_echo_drop(self, src: str, *, sim: float | None = None,
+                        key: str | None = None) -> None:
+        """エコーとして捨てた発話を diag に1行残す.
+
+        捨てた発話は records にも turns にも残らないので、ここで書かないと
+        「記録が無いのに登録通知だけある」状態を後から追えない。テキスト安全網
+        （agent/partner/retired）と声紋照合の3経路で同じ形の行を出す——経路に
+        よって記録の有無が違うと、記録から挙動を再生できない（handoff §23）。
+        """
+        row: dict[str, object] = {
+            "ms": self.cur_ms, "end": self.cur_end,
+            "type": "echo_drop", "src": src,
+            "text": self.cur_text.strip()[:40],
+        }
+        if sim is not None:
+            row["sim"] = round(sim, 3)
+        if key is not None:
+            row["key"] = key
+        with contextlib.suppress(OSError), \
+                open(self.state.diag_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
+
     def overlaps_other(self, start, end, label) -> bool:
         if start is None or end is None:
             return False
@@ -210,16 +232,7 @@ class RecvLoop:
                     _print_line(f"# テキスト安全網エコー除去({_src_name})"
                                 f" sim={sim:.2f}"
                                 f" ({self.cur_text.strip()[:40]}...)")
-                # 破棄した発話も echo_drop として diag に1行残す（「記録が無いのに
-                # 登録通知だけある」状態を後から追えるようにする）。
-                with contextlib.suppress(OSError), \
-                        open(s.diag_path, "a", encoding="utf-8") as f:
-                    f.write(json.dumps({
-                        "ms": self.cur_ms, "end": self.cur_end,
-                        "type": "echo_drop", "src": _src_name,
-                        "sim": round(sim, 3),
-                        "text": self.cur_text.strip()[:40],
-                    }, ensure_ascii=False, default=str) + "\n")
+                self._note_echo_drop(_src_name, sim=sim)
                 self.cur_text = ""
                 self.cur_ms = None
                 self.cur_end = None
@@ -234,14 +247,7 @@ class RecvLoop:
                     _print_line(f"# テキスト安全網エコー除去(retired)"
                                 f" sim={sim:.2f}"
                                 f" ({self.cur_text.strip()[:40]}...)")
-                with contextlib.suppress(OSError), \
-                        open(s.diag_path, "a", encoding="utf-8") as f:
-                    f.write(json.dumps({
-                        "ms": self.cur_ms, "end": self.cur_end,
-                        "type": "echo_drop", "src": "retired",
-                        "sim": round(sim, 3),
-                        "text": self.cur_text.strip()[:40],
-                    }, ensure_ascii=False, default=str) + "\n")
+                self._note_echo_drop("retired", sim=sim)
                 self.cur_text = ""
                 self.cur_ms = None
                 self.cur_end = None
@@ -304,6 +310,9 @@ class RecvLoop:
                 if self.args.vp_debug:
                     _print_line(f"# AI声紋エコー除去: sp={sp_id}"
                                 f" ({self.cur_text.strip()[:40]}...)")
+                self._note_echo_drop(
+                    "voiceprint", key=str(sp_id),
+                    sim=d.get("sim") if isinstance(d, dict) else None)
                 self.cur_text = ""
                 self.cur_ms = None
                 self.cur_end = None

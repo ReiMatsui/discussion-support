@@ -106,6 +106,29 @@ def test_echo_drop_is_logged_to_diag(tmp_path):
     assert "まず" in drops[0]["text"]
 
 
+def test_voiceprint_echo_drop_is_logged_to_diag(tmp_path):
+    """声紋がAIと判定して捨てた発話も diag に残る.
+
+    テキスト安全網だけが記録を残し、声紋経路は黙って捨てていた。捨てられた
+    発話は records にも turns にも残らないので、記録から挙動を再生する
+    （handoff §23）ときにこの経路だけ穴になる。
+    """
+    tracker = _RecordingTracker(ret="__AI__", kind="声紋一致")
+    state = _make_state(tmp_path, tracker=tracker)
+    loop = _loop_with(state, text="では次の議題に移ります")
+
+    loop.flush()  # type: ignore[no-untyped-call]
+
+    assert state.records == []      # 捨てられている
+    with open(state.diag_path, encoding="utf-8") as f:
+        lines = [json.loads(x) for x in f.read().splitlines() if x.strip()]
+    drops = [x for x in lines if x.get("type") == "echo_drop"]
+    assert len(drops) == 1, "声紋経路のエコー除去が記録されていない"
+    assert drops[0]["src"] == "voiceprint"
+    assert drops[0]["key"] == "__AI__"
+    assert "では次の議題" in drops[0]["text"]
+
+
 def test_ai_active_suppresses_registration_enroll(tmp_path):
     """安全網に引っかからない(sim低)漏れ込みでも、AI発話中は enroll=False で蓄積・
     自動登録を抑止する（照合・話者判定自体は count=True で行う, D2/P2-2）."""
