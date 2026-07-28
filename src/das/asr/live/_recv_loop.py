@@ -453,12 +453,17 @@ class RecvLoop:
                     rec_extra["speaker_confidence"] = round(picked[1], 3)
                     rec_extra["speaker_reason"] = _reason
                     diag_extra["seat"] = s.seat_audio.last_pick
-        if tracker is not None and tracker.last is not None:
+        # 判定の根拠は `d`（この発話の classify 結果）だけを書く。tracker.last を
+        # 直に読むと、STT が話者ラベルを返さなかった発話（classify を呼ばない
+        # 経路。`d` は None にしてある）で**前の発話の判定**が書かれてしまい、
+        # 記録が実態とずれる。採点も分析も diag の kind を信じて動くので、
+        # ここがずれると全部が静かに狂う。
+        if tracker is not None and (d is not None or stt_speaker_unknown):
             try:
                 with open(s.diag_path, "a", encoding="utf-8") as f:
                     f.write(json.dumps({"ms": self.cur_ms, "end": self.cur_end, "label": label,
                                         "key": sp_id, "final_key": final_sp_id,
-                                        **tracker.last, **diag_extra},
+                                        **(d or {}), **diag_extra},
                                        ensure_ascii=False, default=str) + "\n")
             except OSError:
                 pass

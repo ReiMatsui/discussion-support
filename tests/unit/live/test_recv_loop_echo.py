@@ -129,6 +129,33 @@ def test_voiceprint_echo_drop_is_logged_to_diag(tmp_path):
     assert "では次の議題" in drops[0]["text"]
 
 
+def test_diag_does_not_carry_the_previous_verdict(tmp_path):
+    """STTが話者ラベルを返さない発話に、前の発話の判定を書かないこと.
+
+    その経路は classify を呼ばない（判定の根拠が無い）。にもかかわらず
+    tracker.last を直に書いていたため、直前の発話の kind/sim が
+    そのまま残った。採点も分析も diag の kind を信じて動くので、
+    ここがずれると静かに全部が狂う。
+    """
+    tracker = _RecordingTracker(ret="人物1", kind="声紋一致")
+    state = _make_state(tmp_path, tracker=tracker)
+
+    loop = _loop_with(state, text="こちらは普通の発言です")
+    loop.flush()  # type: ignore[no-untyped-call]
+
+    loop.cur_speaker = ""            # STT が話者を返さなかった
+    loop.cur_text = "話者不明の発言"
+    loop.cur_ms, loop.cur_end = 4000, 6000
+    loop.flush()  # type: ignore[no-untyped-call]
+
+    with open(state.diag_path, encoding="utf-8") as f:
+        rows = [json.loads(x) for x in f.read().splitlines() if x.strip()]
+    unknown = [r for r in rows if r.get("ms") == 4000]
+    assert unknown, "話者不明の発話が diag に残っていない"
+    assert unknown[0].get("kind") is None, "前の発話の判定が書かれている"
+    assert unknown[0]["final_key"] == "?"
+
+
 def test_ai_active_suppresses_registration_enroll(tmp_path):
     """安全網に引っかからない(sim低)漏れ込みでも、AI発話中は enroll=False で蓄積・
     自動登録を抑止する（照合・話者判定自体は count=True で行う, D2/P2-2）."""
