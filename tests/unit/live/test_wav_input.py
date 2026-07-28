@@ -10,8 +10,8 @@ import wave
 
 import numpy as np
 
-from das.asr.live._constants import SR
 from das.asr.live._audio_io import _load_wav_mono_16k
+from das.asr.live._constants import SR
 
 
 def _write_wav(path, data_i16: np.ndarray, sr: int, n_ch: int = 1) -> None:

@@ -10,11 +10,13 @@ import threading
 import time
 
 from das.asr.live._constants import _DRIFT_PENDING_TTL
-from das.asr.live._workers import (
+from das.asr.live._intervention import (
     _build_candidates,
     _log_intervention_event,
     _log_voice_call_diag,
     _PendingInterventions,
+)
+from das.asr.live._workers import (
     _run_agent_worker,
 )
 
@@ -135,7 +137,7 @@ class FakeState:
 def test_recent_agent_texts_returns_tail_of_agent_utterances():
     """records からファシリテーター発話の末尾n件だけを古い順で返す."""
     from das.asr.live._constants import AGENT_SPEAKER
-    from das.asr.live._workers import _recent_agent_texts
+    from das.asr.live._intervention import _recent_agent_texts
     state = FakeState(FakeAgent(), None)
     state.records = [
         {"speaker": "A", "text": "人間の発話"},
@@ -517,7 +519,7 @@ def test_pending_manual_call_cleared_when_intervention_disabled():
 
 def test_candidate_brief_includes_manual_tracking_fields():
     """review ログの manual 候補には source/request/queued_at が載る（観測性）."""
-    from das.asr.live._workers import _build_candidates, _candidate_brief
+    from das.asr.live._intervention import _build_candidates, _candidate_brief
 
     agent = FakeAgent()
     pending = _PendingInterventions()
@@ -599,9 +601,9 @@ def test_fact_request_triggers_before_drift():
 
 def test_fact_request_is_held_during_cooldown(monkeypatch):
     """事実補正はクールダウン中でも破棄せず、明けたら発火する."""
-    import das.asr.live._workers as workers
+    import das.asr.live._intervention as interv
 
-    monkeypatch.setattr(workers, "_FACTCHECK_COOLDOWN", 1.0)
+    monkeypatch.setattr(interv, "_FACTCHECK_COOLDOWN", 1.0)
     agent = FakeAgent()
     state = FakeState(agent, None)
 
@@ -639,9 +641,9 @@ def test_fact_request_is_held_during_cooldown(monkeypatch):
 
 def test_fact_requests_are_drained_fifo_not_overwritten(monkeypatch):
     """busy中に複数の事実補正が積まれても、最後の1件で上書きせず順番に処理する."""
-    import das.asr.live._workers as workers
+    import das.asr.live._intervention as interv
 
-    monkeypatch.setattr(workers, "_FACTCHECK_COOLDOWN", 0.0)
+    monkeypatch.setattr(interv, "_FACTCHECK_COOLDOWN", 0.0)
     agent = FakeAgent()
     state = FakeState(agent, None)
     state.factcheck_requests.put({
@@ -1159,7 +1161,7 @@ def test_unconfirmed_speaker_interrupts_ai():
 
 def test_as_bool_normalizes_llm_output():
     """T9-1: LLM が文字列 'false'/'no' を返しても bool として正しく False にする。"""
-    from das.asr.live._workers import _as_bool
+    from das.asr.live._intervention import _as_bool
     assert _as_bool(True) is True
     assert _as_bool(False) is False
     assert _as_bool("true") is True
@@ -1285,7 +1287,7 @@ def test_every_normal_spec_matches_the_agent_trigger_signature():
     """
     import inspect
 
-    from das.asr.live._workers import _NORMAL_SPECS
+    from das.asr.live._intervention import _NORMAL_SPECS
     from das.asr.live.agents._realtime import RealtimeAgent
     accepted = set(inspect.signature(RealtimeAgent.trigger).parameters) - {"self"}
     for kind, spec in _NORMAL_SPECS.items():
@@ -1300,7 +1302,7 @@ def test_normal_specs_cover_every_firing_reason():
     発話しない（＝原因の分からない沈黙）になる。_NORMAL_KINDS を唯一の出所として
     突き合わせる。
     """
-    from das.asr.live._workers import _NORMAL_KINDS, _NORMAL_SPECS
+    from das.asr.live._intervention import _NORMAL_KINDS, _NORMAL_SPECS
     assert set(_NORMAL_KINDS) <= set(_NORMAL_SPECS)
 
 
@@ -1310,13 +1312,13 @@ def test_specs_that_invite_someone_also_record_it():
     記帳するかどうかを別欄で持たず `invite_target` を渡すかから導くことで、
     「指名するのに記録し忘れる」（handoff §22.1 の2）が構造的に起きなくなる。
     """
-    from das.asr.live._workers import _NORMAL_SPECS
+    from das.asr.live._intervention import _NORMAL_SPECS
     inviting = {k for k, s in _NORMAL_SPECS.items() if "invite_target" in s.trigger}
     assert inviting == {"invite", "af_l1", "af_l2"}
 
 
 def test_conversation_is_the_only_kind_without_intervention_ceremony():
     """会話モードの応答だけが timing/表示を伴わない（介入の体裁を取らない）."""
-    from das.asr.live._workers import _NORMAL_SPECS
+    from das.asr.live._intervention import _NORMAL_SPECS
     silent = {k for k, s in _NORMAL_SPECS.items() if s.policy is None}
     assert silent == {"conversation"}

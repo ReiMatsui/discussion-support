@@ -18,7 +18,7 @@ from das.asr.live._facilitation import (
     fact_expires_at,
     policy_for,
 )
-from das.asr.live._workers import (
+from das.asr.live._intervention import (
     _build_candidates,
     _controller_barge_in_decision,
     _controller_normal_decision,

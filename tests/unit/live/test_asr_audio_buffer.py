@@ -4,8 +4,8 @@ from __future__ import annotations
 import datetime
 from typing import Any
 
-from das.asr.live._session_state import SessionState
 from das.asr.live._audio_io import _run_sender
+from das.asr.live._session_state import SessionState
 
 
 class _Backend:

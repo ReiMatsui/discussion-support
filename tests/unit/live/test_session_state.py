@@ -282,7 +282,7 @@ def test_effective_silence_is_zero_while_active_partial():
     """partial 非空かつ直近更新中は「フロア占有」= 沈黙 0 を返す."""
     import time as _t
 
-    from das.asr.live._workers import _effective_silence
+    from das.asr.live._intervention import _effective_silence
     s = _make_state()
     last = [0.0]                # 実際には大きな沈黙が経過している状態
     now = _t.monotonic()
@@ -295,7 +295,7 @@ def test_effective_silence_normal_when_no_partial():
     """partial が空なら従来どおり now - last_utt_time を返す."""
     import time as _t
 
-    from das.asr.live._workers import _effective_silence
+    from das.asr.live._intervention import _effective_silence
     s = _make_state()
     last = [0.0]
     now = _t.monotonic()
@@ -307,7 +307,7 @@ def test_effective_silence_ignores_stale_partial():
     """partial が10秒以上変化していなければ stale として無視し、通常の沈黙を返す."""
     import time as _t
 
-    from das.asr.live._workers import _effective_silence
+    from das.asr.live._intervention import _effective_silence
     s = _make_state()
     last = [0.0]
     now = _t.monotonic()
