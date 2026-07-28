@@ -336,21 +336,26 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
     # AI声紋判定用の閾値（人間より高め — TTS音声はスピーカー経由でも特徴が明瞭）
     AI_THRESH: ClassVar[dict] = {"resemblyzer": 0.80, "ecapa": 0.42, "redimnet": 0.50}
 
-    def __init__(self, path: str = "voices.json", thresh: float | None = None,
-                 min_sec: float = 1.0, margin: float = 0.05, auto: bool = True,
-                 consist: float | None = None, dedupe: float | None = None,
-                 model: str = "resemblyzer"):
-        self.model = model
+    @staticmethod
+    def _load_embedder(model: str):
+        """声紋モデルを読み、波形 -> 生の埋め込み の関数を返す.
+
+        `__init__` から切り出してある。読み込みは重い（redimnet は初回に
+        GitHub からコードと重み20MBを取りに行く）ので、判定の筋道だけを
+        試したいときはここを通らずに済ませたい。
+        """
         if model == "ecapa":
             import torch
             from speechbrain.inference.speaker import EncoderClassifier
-            enc = EncoderClassifier.from_hparams(source="speechbrain/spkrec-ecapa-voxceleb")
+            enc = EncoderClassifier.from_hparams(
+                source="speechbrain/spkrec-ecapa-voxceleb")
 
             def _embed_raw(wav):
                 with torch.no_grad():
-                    return enc.encode_batch(torch.from_numpy(wav).float().unsqueeze(0)).squeeze().numpy()
-            self._embed_raw = _embed_raw
-        elif model == "redimnet":
+                    return enc.encode_batch(
+                        torch.from_numpy(wav).float().unsqueeze(0)).squeeze().numpy()
+            return _embed_raw
+        if model == "redimnet":
             import torch  # 初回はGitHubからコード＋重み(20MB)をダウンロード
             enc = torch.hub.load("IDRnD/ReDimNet", "ReDimNet", model_name="b2",
                                  train_type="ft_lm", dataset="vox2", trust_repo=True)
@@ -359,11 +364,20 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
             def _embed_raw(wav):
                 with torch.no_grad():
                     return enc(torch.from_numpy(wav).float().unsqueeze(0)).squeeze().numpy()
-            self._embed_raw = _embed_raw
-        else:
-            from resemblyzer import VoiceEncoder, preprocess_wav  # 初回ロード数秒
-            enc = VoiceEncoder("cpu", verbose=False)
-            self._embed_raw = lambda wav: enc.embed_utterance(preprocess_wav(wav, source_sr=SR))
+            return _embed_raw
+        from resemblyzer import VoiceEncoder, preprocess_wav  # 初回ロード数秒
+        enc = VoiceEncoder("cpu", verbose=False)
+        return lambda wav: enc.embed_utterance(preprocess_wav(wav, source_sr=SR))
+
+    def __init__(self, path: str = "voices.json", thresh: float | None = None,
+                 min_sec: float = 1.0, margin: float = 0.05, auto: bool = True,
+                 consist: float | None = None, dedupe: float | None = None,
+                 model: str = "resemblyzer", embedder=None):
+        self.model = model
+        # embedder を渡すとモデルを読まない。判定の筋道だけを試すとき
+        # （テスト・オフライン検証）に、20MBのダウンロードと数秒の初期化を
+        # 避けるための入口。**本番は渡さない**ので経路は変わらない。
+        self._embed_raw = embedder or self._load_embedder(model)
         d_th, d_dd, d_cs = self.DEFAULTS[model]
         self.path = path
         self.thresh = thresh if thresh is not None else d_th   # 即時判定のしきい値
