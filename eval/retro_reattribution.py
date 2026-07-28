@@ -42,6 +42,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import _gtlib  # noqa: E402
+import _pipeline as pipe  # noqa: E402
 import cluster_merge_feasibility as feas  # noqa: E402
 import decompose_attribution as dec  # noqa: E402
 
@@ -185,11 +186,7 @@ def _score_production(rows, pcm, vp, t0):
                                     or ms in retro._embeddings):
                     final[ms] = key
     pairs = [(final[int(u["ms"])], c) for u, c in rows if int(u["ms"]) in final]
-    _a, m = _gtlib.best_mapping(pairs, dec.GT_CODES, unsure=UNSURE_SPEAKER)
-    n = len(pairs)
-    good = sum(1 for f, c in pairs if m.get(f) == c)
-    uns = sum(1 for f, _ in pairs if f == UNSURE_SPEAKER)
-    return good / n, (n - good - uns) / n, uns / n
+    return pipe.score(pairs)[:3]
 
 
 def main(argv: list[str] | None = None) -> None:

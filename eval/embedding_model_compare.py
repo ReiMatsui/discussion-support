@@ -32,7 +32,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import _gtlib  # noqa: E402
+import _pipeline as pipe  # noqa: E402
 import cluster_merge_feasibility as feas  # noqa: E402
 import decompose_attribution as dec  # noqa: E402
 
@@ -112,23 +112,11 @@ def run_one(run: str, enc) -> tuple[float, float, float] | None:
             seat.observe(final, wav)
 
     def _final(u):
-        cur = str(u["final_key"])
-        kind = u.get("kind")
-        ms = int(u["ms"])
-        if (cur != UNSURE_SPEAKER and kind == "蓄積中" and not dec.endorsed(u)):
-            cur = UNSURE_SPEAKER
-        if kind in _LABEL_ONLY_KINDS and ms in pick:
-            return pick[ms]
-        if cur != UNSURE_SPEAKER:
-            return cur
-        return pick.get(ms, cur)
+        # 規則は eval/_pipeline.resolved_key に一本化（書き写すとずれる）
+        return pipe.resolved_key(u, pick.get(int(u["ms"])))
 
     pairs = [(_final(u), c) for u, c in rows]
-    _a, m = _gtlib.best_mapping(pairs, dec.GT_CODES, unsure=UNSURE_SPEAKER)
-    n = len(pairs)
-    good = sum(1 for f, c in pairs if m.get(f) == c)
-    uns = sum(1 for f, _ in pairs if f == UNSURE_SPEAKER)
-    return good / n, (n - good - uns) / n, uns / n
+    return pipe.score(pairs)[:3]
 
 
 def main(argv: list[str] | None = None) -> None:

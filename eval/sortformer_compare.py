@@ -38,9 +38,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import _gtlib  # noqa: E402
+import _pipeline as pipe  # noqa: E402
 import decompose_attribution as dec  # noqa: E402
-import retro_schedule as sched  # noqa: E402
 
 from das.asr.live._constants import UNSURE_SPEAKER  # noqa: E402
 
@@ -67,45 +66,18 @@ def dominant(segs, a: int, b: int) -> str:
 
 
 def score(pairs) -> tuple[float, float, float]:
-    _a, m = _gtlib.best_mapping(pairs, dec.GT_CODES, unsure=UNSURE_SPEAKER)
-    n = len(pairs)
-    good = sum(1 for f, c in pairs if m.get(f) == c)
-    uns = sum(1 for f, _ in pairs if f == UNSURE_SPEAKER)
-    return good / n, (n - good - uns) / n, uns / n
+    return pipe.score(pairs)[:3]
 
 
 def current_keys(run: str, vp) -> dict[int, str] | None:
-    """**今日の実装**で決まる最終キーを ms -> キー で返す.
+    """**今日の実装**で決まる最終キー（再現は `_pipeline` に一本化）.
 
-    diag の ``final_key`` は記録時（2026-07-20）の判定で、§27-§28 の改善が
+    diag の `final_key` は記録時（2026-07-20）の判定で、§27-§28 の改善が
     入っていない。それをそのまま「現行」として比べると 2026-07-22 と同じ
-    古い比較を繰り返すことになるので、本番の予定表・本番のクラスで計算し直す。
+    古い比較を繰り返すことになる——実際にそれで 54.4% 対 87.7% という
+    誤った結論を出した。
     """
-    data = sched.collect(run, vp)
-    if data is None:
-        return None
-    steps = data["steps"]
-    final = []
-    remembered = []
-    idx = 0
-    schedule, interval = sched.CONFIGS[1][1], sched.CONFIGS[1][2]
-    next_at = schedule[0]
-    for i, st in enumerate(steps):
-        cur = st["base"]
-        if st["revisable"]:
-            got = sched._pick(st["emb"], st["refs"])
-            cur = got if got is not None else cur
-            remembered.append(i)
-        final.append(cur)
-        if st["elapsed"] >= next_at:
-            idx += 1
-            next_at = (schedule[idx] if idx < len(schedule)
-                       else st["elapsed"] + interval)
-            for j in remembered:
-                got = sched._pick(steps[j]["emb"], st["refs"])
-                if got is not None:
-                    final[j] = got
-    return {int(st["ms"]): f for st, f in zip(steps, final, strict=True)}
+    return pipe.current_keys(run, vp)
 
 
 def compare(run: str, cur_by_ms: dict | None = None) -> dict | None:

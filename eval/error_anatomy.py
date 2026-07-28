@@ -33,6 +33,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import _gtlib  # noqa: E402
+import _pipeline as pipe  # noqa: E402
 import cluster_merge_feasibility as feas  # noqa: E402
 import decompose_attribution as dec  # noqa: E402
 import segment_boundary_ceiling as seg  # noqa: E402
@@ -83,16 +84,8 @@ def compute(run: str, vp) -> list[dict] | None:
             seat.observe(final, wav)
 
     def _final(u):
-        cur = str(u["final_key"])
-        kind = u.get("kind")
-        ms = int(u["ms"])
-        if cur != UNSURE_SPEAKER and kind == "蓄積中" and not dec.endorsed(u):
-            cur = UNSURE_SPEAKER
-        if kind in _LABEL_ONLY_KINDS and ms in pick:
-            return pick[ms]
-        if cur != UNSURE_SPEAKER:
-            return cur
-        return pick.get(ms, cur)
+        # 規則は eval/_pipeline.resolved_key に一本化（書き写すとずれる）
+        return pipe.resolved_key(u, pick.get(int(u["ms"])))
 
     _a, m = _gtlib.best_mapping([(_final(u), c) for u, c in rows],
                                 dec.GT_CODES, unsure=UNSURE_SPEAKER)

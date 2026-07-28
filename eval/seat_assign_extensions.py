@@ -32,6 +32,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import _gtlib  # noqa: E402
+import _pipeline as pipe  # noqa: E402
 import cluster_merge_feasibility as feas  # noqa: E402
 import decompose_attribution as dec  # noqa: E402
 
@@ -79,11 +80,7 @@ def collect_run(run: str, vp) -> dict | None:
 
 def score(rows, final_of) -> tuple[float, float, float]:
     pairs = [(final_of(u), c) for u, c in rows]
-    _a, m = _gtlib.best_mapping(pairs, dec.GT_CODES, unsure=dec.UNSURE_SPEAKER)
-    n = len(pairs)
-    good = sum(1 for f, c in pairs if m.get(f) == c)
-    uns = sum(1 for f, _ in pairs if f == dec.UNSURE_SPEAKER)
-    return good / n, (n - good - uns) / n, uns / n
+    return pipe.score(pairs)[:3]
 
 
 def make_final(data: dict, *, extend_abstain: bool, gate_accum: bool,

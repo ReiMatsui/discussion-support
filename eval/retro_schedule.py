@@ -22,24 +22,12 @@ import argparse
 import sys
 from pathlib import Path
 
-import numpy as np
-
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import _gtlib  # noqa: E402
-import cluster_merge_feasibility as feas  # noqa: E402
+import _pipeline as pipe  # noqa: E402
 import decompose_attribution as dec  # noqa: E402
-
-from das.asr.live._attribution import _VOICEPRINT_RELIABLE_KINDS  # noqa: E402
-from das.asr.live._constants import (  # noqa: E402
-    SEAT_AUDIO_MIN_REF_SEC,
-    SR,
-    UNSURE_SPEAKER,
-)
-from das.asr.live._recv_loop import _LABEL_ONLY_KINDS  # noqa: E402
-from das.asr.live._seat_audio import SeatAudio  # noqa: E402
 
 # (名前, 予定表, 以後の間隔秒)。間隔 0 は「発話ごと」
 CONFIGS = (
@@ -52,81 +40,17 @@ CONFIGS = (
 
 
 def collect(run: str, vp) -> dict | None:
-    """席の参照の推移と、貼り直せる発話の声紋を1回だけ計算する.
-
-    席の参照は「高信頼で確定した発話」だけから作られ、その集合は予定表に
-    依存しない。したがって推移を保存しておけば、どの予定表でも再利用できる。
-    """
-    loaded = dec.load_run(run)
-    wav_path = ROOT / "transcripts" / f"{run}.wav"
-    if loaded is None or not wav_path.exists():
-        return None
-    utts, code_by_ms = loaded
-    rows = [(u, code_by_ms.get(u["ms"])) for u in utts]
-    rows = [(u, c) for u, c in rows if c in dec.GT_CODES
-            and not dec._BACKCHANNEL_RE.match(str(u["_text"]).strip())]
-    if not rows or not any(u.get("final_key") is not None for u, _ in rows):
-        return None
-    rows.sort(key=lambda r: int(r[0]["ms"]))
-    pcm = feas.read_wav(wav_path)
-    t0 = int(rows[0][0]["ms"])
-    seat = SeatAudio(vp)
-    steps = []      # 発話ごとの (経過秒, GT, 可変か, 声紋, その時点の参照)
-    for u, code in rows:
-        a, b = int(u["ms"]), int(u.get("end") or u["ms"])
-        wav = pcm[int(a / 1000 * SR):int(b / 1000 * SR)]
-        cur = str(u["final_key"])
-        kind = u.get("kind")
-        if cur != UNSURE_SPEAKER and kind == "蓄積中" and not dec.endorsed(u):
-            cur = UNSURE_SPEAKER
-        revisable = (kind in _LABEL_ONLY_KINDS
-                     or (cur == UNSURE_SPEAKER
-                         and str(u.get("key")) != UNSURE_SPEAKER))
-        emb = seat.embed(wav) if revisable else None
-        if not revisable and cur != UNSURE_SPEAKER \
-                and kind in _VOICEPRINT_RELIABLE_KINDS:
-            seat.observe(cur, wav)
-        refs = {k: v for k, v in seat._embeddings.items()
-                if seat._seconds.get(k, 0.0) >= SEAT_AUDIO_MIN_REF_SEC}
-        steps.append({"ms": a, "elapsed": (a - t0) / 1000.0, "code": code,
-                      "base": cur, "revisable": revisable, "emb": emb,
-                      "refs": dict(refs)})
-    return {"run": run, "steps": steps}
-
-
-def _pick(emb, refs):
-    if emb is None or len(refs) < 2:
-        return None
-    return max(((float(np.dot(emb, v)), k) for k, v in refs.items()))[1]
+    """席の参照の推移を1回だけ計算する（再現の本体は `_pipeline`）."""
+    return pipe.replay_seats(run, vp)
 
 
 def evaluate(data, schedule, interval) -> tuple[float, float, float]:
+    """予定表を1つ当てて (正解, 誤帰属, 未確定) を返す."""
     steps = data["steps"]
-    final = []
-    remembered = []          # (index, emb)
-    idx = 0
-    next_at = schedule[0] if schedule else interval
-    for i, st in enumerate(steps):
-        cur = st["base"]
-        if st["revisable"]:
-            got = _pick(st["emb"], st["refs"])
-            cur = got if got is not None else cur
-            remembered.append(i)
-        final.append(cur)
-        if st["elapsed"] >= next_at:
-            idx += 1
-            next_at = (schedule[idx] if idx < len(schedule)
-                       else st["elapsed"] + interval)
-            for j in remembered:
-                got = _pick(steps[j]["emb"], st["refs"])
-                if got is not None:
-                    final[j] = got
-    pairs = [(final[i], steps[i]["code"]) for i in range(len(steps))]
-    _a, m = _gtlib.best_mapping(pairs, dec.GT_CODES, unsure=UNSURE_SPEAKER)
-    n = len(pairs)
-    good = sum(1 for f, c in pairs if m.get(f) == c)
-    uns = sum(1 for f, _ in pairs if f == UNSURE_SPEAKER)
-    return good / n, (n - good - uns) / n, uns / n
+    final = pipe.apply_schedule(steps, schedule, interval)
+    acc, wrong, uns, _n = pipe.score(
+        [(f, st["code"]) for f, st in zip(final, steps, strict=True)])
+    return acc, wrong, uns
 
 
 def main(argv: list[str] | None = None) -> None:

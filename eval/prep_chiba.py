@@ -174,7 +174,7 @@ def main() -> None:
     print(f"  GT: {gt_path.relative_to(ROOT)} / {turns_path.relative_to(ROOT)}")
     print(f"  音声: {mix_path.relative_to(ROOT)}")
     print("\n次の手順（実機）:")
-    print(f"  uv run das listen-soniox --hybrid --max-speakers 3 \\")
+    print("  uv run das listen-soniox --hybrid --max-speakers 3 \\")
     print(f"      --wav {mix_path.relative_to(ROOT)} --soniox-args \"--no-agent\"")
     print(f"  uv run python eval/eval_speaker_gt.py {gt_path.relative_to(ROOT)} <新セッション名>")
 

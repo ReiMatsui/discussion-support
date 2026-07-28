@@ -35,7 +35,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import _gtlib  # noqa: E402
+import _pipeline as pipe  # noqa: E402
 import cluster_merge_feasibility as feas  # noqa: E402
 import decompose_attribution as dec  # noqa: E402
 
@@ -146,23 +146,14 @@ def evaluate(data, method: str) -> tuple[float, float, float]:
     picks = data["picks"]
 
     def _final(u):
-        cur = str(u["final_key"])
-        kind = u.get("kind")
-        got = picks.get(int(u["ms"]), {}).get(method)
-        if kind in _LABEL_ONLY and got:
-            return got
-        if cur != dec.UNSURE_SPEAKER:
-            return cur
-        if str(u.get("key")) != dec.UNSURE_SPEAKER and got:
-            return got
-        return cur
+        # 規則は eval/_pipeline.resolved_key に一本化。
+        # 以前ここだけ「蓄積中の門番」を通しておらず、同じ
+        # 「今日の実装」を名乗る数字が2種類あった。
+        return pipe.resolved_key(u, picks.get(int(u["ms"]), {}).get(method))
+
 
     pairs = [(_final(u), c) for u, c in rows]
-    _a, m = _gtlib.best_mapping(pairs, dec.GT_CODES, unsure=dec.UNSURE_SPEAKER)
-    n = len(pairs)
-    good = sum(1 for f, c in pairs if m.get(f) == c)
-    uns = sum(1 for f, _ in pairs if f == dec.UNSURE_SPEAKER)
-    return good / n, (n - good - uns) / n, uns / n
+    return pipe.score(pairs)[:3]
 
 
 def main(argv: list[str] | None = None) -> None:
