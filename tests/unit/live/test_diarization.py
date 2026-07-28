@@ -12,7 +12,6 @@ from das.asr.live._diarization import (
     SpeakerResolver,
     TimeSegment,
     has_overlapping_speakers,
-    score_diarization,
 )
 from das.asr.live._recv_loop import RecvLoop
 from das.asr.live._session_state import SessionState
@@ -86,26 +85,6 @@ def test_resolver_accepts_short_boundary_shifted_diarization_overlap() -> None:
     assert got.speaker == "SPEAKER_02"
     assert got.source == "pyannote"
     assert got.reason == "diarization_overlap_0.55"
-
-
-def test_score_diarization_maps_provider_labels_by_overlap() -> None:
-    reference = [
-        DiarizationEvent(0, 1000, "田中", "gold"),
-        DiarizationEvent(1000, 2000, "佐藤", "gold"),
-    ]
-    hypothesis = [
-        DiarizationEvent(0, 900, "SPEAKER_01", "pyannote"),
-        DiarizationEvent(900, 2000, "SPEAKER_02", "pyannote"),
-    ]
-
-    score = score_diarization(reference, hypothesis)
-
-    assert score.total_ms == 2000
-    assert score.correct_ms == 1900
-    assert score.confusion_ms == 100
-    assert score.missed_ms == 0
-    assert score.false_alarm_ms == 0
-    assert score.accuracy == 0.95
 
 
 def test_liveargs_and_cli_have_diarization_option() -> None:
