@@ -18,6 +18,12 @@ from typing import Any
 
 from das.asr.live._af_runtime import run_af_runtime
 from das.asr.live._assemblyai_diarization import AssemblyAIStreamingDiarizationProvider
+from das.asr.live._audio_io import (
+    _run_from_mic,
+    _run_from_wav,
+    _run_sender,
+)
+from das.asr.live._cluster_naming import ClusterVoiceNamer
 from das.asr.live._constants import (
     _AGENDA_PROMPT,
     _DRIFT_PROMPT,
@@ -28,7 +34,6 @@ from das.asr.live._constants import (
     _TRIAGE_PROMPT,
     OPENAI_API,
 )
-from das.asr.live._cluster_naming import ClusterVoiceNamer
 from das.asr.live._diarization import SpeakerResolver
 from das.asr.live._pyannote_diarization import PyannoteStreamingDiarizationProvider
 from das.asr.live._recv_loop import RecvLoop
@@ -46,10 +51,7 @@ from das.asr.live._workers import (
     _run_agenda_detector,
     _run_drift_checker,
     _run_fact_checker,
-    _run_from_mic,
-    _run_from_wav,
     _run_participation_checker,
-    _run_sender,
     _run_stdin_commands,
     _run_structuring_checker,
     _run_topic_worker,
