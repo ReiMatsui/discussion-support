@@ -88,7 +88,7 @@ def collect(run: str, vp) -> dict | None:
             seat.observe(cur, wav)
         refs = {k: v for k, v in seat._embeddings.items()
                 if seat._seconds.get(k, 0.0) >= SEAT_AUDIO_MIN_REF_SEC}
-        steps.append({"elapsed": (a - t0) / 1000.0, "code": code,
+        steps.append({"ms": a, "elapsed": (a - t0) / 1000.0, "code": code,
                       "base": cur, "revisable": revisable, "emb": emb,
                       "refs": dict(refs)})
     return {"run": run, "steps": steps}
