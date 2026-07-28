@@ -297,10 +297,6 @@ class LinkingAgent(BaseAgent):
 
     # --- 公開 ---------------------------------------------------------
 
-    @property
-    def quality_log(self) -> RetrievalQualityLog:
-        """Retrieval 品質ログ。事後分析用。"""
-        return self._quality_log
 
     @property
     def embeddings(self) -> dict[UUID, list[float]]:

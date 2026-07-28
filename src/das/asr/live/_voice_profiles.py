@@ -509,17 +509,6 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
         return {k: v for k, v in self.profiles.items()
                 if k in self._active_keys and k not in ai}
 
-    def is_active_human(self, key: str) -> bool:
-        """key が現在照合対象のアクティブな人間プロファイルか（人物N含む・AI声紋除く）.
-
-        SessionState.constrain_human_speaker_key の「声紋で実在が裏付けられた
-        キーはスロット選別の対象外」判定用の公開API。profiles 全体（inactive・
-        voices.json 残留分を含む）で判定すると、無効化済みプロファイルまで
-        参加人数上限を素通りする穴になる（2026-07-15 レビューで確定）ため、
-        アクティブ集合に限定する。
-        """
-        with self._lock:
-            return key in self._active_human()
 
     def _rank_active(self, emb: np.ndarray, active: dict):
         """active内で最も似た人物の (cand, sim, second) を返す（空ならNone）."""

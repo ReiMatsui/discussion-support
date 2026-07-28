@@ -115,9 +115,6 @@ def _outgoing_edges(store: GraphStore, node_id: UUID) -> list[Edge]:
     return [e for e in store.edges() if e.src_id == node_id]
 
 
-def _node_belongs_to_speaker(node: Node, speaker: str) -> bool:
-    return node.author == speaker
-
 
 def _argument_chain_max_depth(
     store: GraphStore, root_id: UUID, visited: set[UUID] | None = None

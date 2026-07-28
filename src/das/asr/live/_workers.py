@@ -1191,7 +1191,6 @@ class _AgentWorker:
         self.was_in_echo = state._was_in_echo
         self.diag_tick = 0
         self.last_intervention_at = 0.0   # 直近の介入時刻（cooldown の時計）
-        self.last_fact_at = 0.0
         self.last_invited: str | None = None   # 直近に声をかけた相手（連続回避）
         self.last_agent_reconnect_at = 0.0
         self.pending = _PendingInterventions()
@@ -1358,6 +1357,8 @@ class _AgentWorker:
         agent = self.agent
         try:
             now = time.monotonic()
+            # 同じ沈黙時間を4回計算していた（1tickに4回。判定は同じ）
+            silence = _effective_silence(s, now, self.last_utt_time)
             with s.topics_lock:   # topics 読み出しは lock 取得で統一 (T9-5)
                 af_topics = list(s.topics) if s.topics else None
             partner_busy = bool(
@@ -1366,7 +1367,7 @@ class _AgentWorker:
             status, payload = _af_gate_status(
                 self.controller, self.pending, agent,
                 now=now,
-                silence_elapsed=_effective_silence(s, now, self.last_utt_time),
+                silence_elapsed=silence,
                 recent_interventions=list(self.recent_interventions),
                 cooldown=cooldown,
                 last_intervention_at=self.last_intervention_at,
@@ -1378,7 +1379,7 @@ class _AgentWorker:
                 agent=agent,
                 af=payload,
                 status=status,
-                silence=_effective_silence(s, now, self.last_utt_time),
+                silence=silence,
                 new_utterance=af_new_utt,
                 agent_busy=bool(agent._responding or agent.ai_speaking),
                 now=now,
@@ -1405,7 +1406,7 @@ class _AgentWorker:
                     s, kind, "af 即時配信",
                     timing=_intervention_timing_metadata(
                         kind=kind, now=now,
-                        silence_elapsed=_effective_silence(s, now, self.last_utt_time),
+                        silence_elapsed=silence,
                         pause_required=policy_for(kind).pause,
                         policy="af_intervention"))
             elif action == "release":   # フロア成立 → 生成先行分を一斉再生
@@ -1420,7 +1421,7 @@ class _AgentWorker:
                     s, self.af_held_kind, "af release",
                     timing=_intervention_timing_metadata(
                         kind=self.af_held_kind, now=now,
-                        silence_elapsed=_effective_silence(s, now, self.last_utt_time),
+                        silence_elapsed=silence,
                         pause_required=policy_for(self.af_held_kind).pause,
                         policy="af_intervention",
                         hold_to_release_ms=self.af_gate.last_release_ms))
@@ -1462,7 +1463,6 @@ class _AgentWorker:
                 agent=agent,
                 state=s,
                 now=now,
-                last_fact_at=self.last_fact_at,
                 last_intervention_at=self.last_intervention_at,
                 silence_elapsed=silence_elapsed,
                 partner_busy=partner_busy,
@@ -1537,8 +1537,7 @@ class _AgentWorker:
             agent.trigger(topics=topics, fact_correction=decision.fact,
                           retry_intervention=False)
             self.pending.facts.popleft()
-            self.last_fact_at = time.monotonic()
-            self.note_intervention(self.last_fact_at, "fact", correction)
+            self.note_intervention(time.monotonic(), "fact", correction)
             return True
         if decision.reason == "manual" and decision.manual is not None:
             manual = decision.manual

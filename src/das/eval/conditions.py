@@ -429,11 +429,6 @@ class ConditionFullProposal:
 
         return list(self._last_items)
 
-    @property
-    def last_decision_kind(self) -> str:
-        """直近の info_provider 呼び出しが返した介入種別 (skip/l1/l2)。"""
-
-        return self._last_decision_kind
 
     async def setup(self, *, docs_dir: Path | None = None) -> None:
         store = NetworkXGraphStore()

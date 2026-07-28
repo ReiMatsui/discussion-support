@@ -544,7 +544,7 @@ class _FakeProactivityState:
 
 def _barge(agent, pending, state, **kw):
     defaults = dict(
-        now=time.monotonic(), last_fact_at=0.0, last_intervention_at=0.0,
+        now=time.monotonic(), last_intervention_at=0.0,
         silence_elapsed=10.0, partner_busy=False, in_echo_window=False,
         cooldown=25.0, recent_interventions=[], silence_summarize=18.0,
         last_invited=None, epoch=7)

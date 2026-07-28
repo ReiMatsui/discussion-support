@@ -142,7 +142,7 @@ def main(**kwargs):
     # click のハイフン付きオプション名をアンダースコアに正規化
     mapped = {k.replace("-", "_"): v for k, v in kwargs.items()}
     args = LiveArgs(**mapped)
-    run_session(args, on_utterance_ref=[ON_UTTERANCE])
+    run_session(args)
 
 
 if __name__ == "__main__":

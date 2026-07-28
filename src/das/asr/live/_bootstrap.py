@@ -875,11 +875,12 @@ def _receive_until_stopped(state, args, backend, connect_stt) -> None:
                 break
 
 
-def run_session(args: LiveArgs, *, on_utterance_ref: list) -> None:
+def run_session(args: LiveArgs) -> None:
     """セッションを初期化し、STT受信ループを実行する.
 
-    on_utterance_ref は [callable | None] の1要素リスト。
-    live.py の ON_UTTERANCE をセッション内から参照するために使う。
+    発話ごとのフック（ON_UTTERANCE）は `_recv_loop` が live モジュールから
+    直接読む。以前はここで参照を渡していたが、本文では一度も使って
+    いなかった（2026-07-28 の棚卸しで発見）。
     """
     from das.asr.live import _SYS_HOOK_REF  # 遅延import（循環回避）
 

@@ -732,7 +732,6 @@ def _controller_barge_in_decision(
     agent,
     state: SessionState,
     now: float,
-    last_fact_at: float,
     last_intervention_at: float,
     silence_elapsed: float,
     partner_busy: bool,
