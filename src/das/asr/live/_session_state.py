@@ -85,7 +85,14 @@ class SessionState:
         self.html_color_idx: dict[str, int] = {}
         self.html_color_seq = 0
         self.records: list[dict] = []
-        self.state_lock = threading.Lock()
+        # 再入可能にする理由: 表示名の割当て（`_anonymous_label_for`）は
+        # `disp_name` 経由で **ロックを持ったまま**呼ばれる箇所がある
+        # （write_md / write_html / write_turns は records を走査しながら
+        # 表示名を引く）。その割当て自身もロックで守らないと、UI スレッドの
+        # リネーム（`set_display_name` の pop）と重なって
+        # 「dictionary changed size during iteration」で受信スレッドが落ちる。
+        # 素の Lock のままだと守った瞬間に自分自身で待って止まるため RLock。
+        self.state_lock = threading.RLock()
         # 会議世代カウンタ（H2）。reset_for_new_meeting が state_lock 内で +1 する。
         # 各 worker はスナップショット取得時に epoch を読み、副作用（feed/キュー投入/
         # カーソル書き戻し）の直前に一致を再確認する。リセットを跨いだ古い計算結果を
@@ -300,19 +307,22 @@ class SessionState:
             n -= 1
 
     def _anonymous_label_for(self, key: str) -> str:
-        if key not in self.anonymous_labels:
-            # 「累積数」ではなく「未使用の最小文字」を割り振る。幻の話者キー
-            # （AI回り込み・重なり由来の一時キー）が統合で消えれば、その文字は次の
-            # 新規話者が再利用でき、連番の飛び・len ベースの重複が構造的に消える。
-            used = set(self.anonymous_labels.values())
-            i = 0
-            while True:
-                label = f"参加者{self._anonymous_suffix(i)}"
-                if label not in used:
-                    self.anonymous_labels[key] = label
-                    break
-                i += 1
-        return self.anonymous_labels[key]
+        # ロックを取る理由は state_lock の定義箇所のコメント参照（辞書を
+        # 走査しながら書き換えるので、他スレッドの pop と重なると落ちる）。
+        with self.state_lock:
+            if key not in self.anonymous_labels:
+                # 「累積数」ではなく「未使用の最小文字」を割り振る。幻の話者キー
+                # （AI回り込み・重なり由来の一時キー）が統合で消えれば、その文字は次の
+                # 新規話者が再利用でき、連番の飛び・len ベースの重複が構造的に消える。
+                used = set(self.anonymous_labels.values())
+                i = 0
+                while True:
+                    label = f"参加者{self._anonymous_suffix(i)}"
+                    if label not in used:
+                        self.anonymous_labels[key] = label
+                        break
+                    i += 1
+            return self.anonymous_labels[key]
 
     def _displays_real_name(self, key: str) -> bool:
         """key が実名（話者N/人物N でも #/@diar 匿名キーでもない名前）で表示されるか."""
@@ -355,8 +365,8 @@ class SessionState:
         出るので、上限2の2人会話では実際に座れるのが1人だけになっていた）。
         話者を持つレコードだけを数える。
         """
-        slots = set(self.anonymous_labels.values())
         with self.state_lock:
+            slots = set(self.anonymous_labels.values())
             for r in self.records:
                 if "speaker" not in r:
                     continue
