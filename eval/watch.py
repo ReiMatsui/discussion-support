@@ -120,9 +120,13 @@ def attach_truth(session: str, turns: list[dict],
             t["mark"] = "ok"
         else:
             t["mark"] = "ng"
-        # 画面に出す正解の話者名。採点対象外（相槌・重なり・範囲外）は空欄。
-        t["gt"] = (names.get(code, code) if code in GT_CODES
-                   else ("複数人" if code == "MULTI" else ""))
+        # 画面に出す正解の話者名。単一の正解が決まった行だけ入れる。
+        # 重なり（MULTI）と範囲外は空にして、代わりに「一番かぶっていた人」の
+        # 参考表示（gt_hint）を出す——「正解 複数人」と書くと、主に喋っている
+        # 人が居るのに正解が複数人だ、と読めてしまう（2026-07-28 の指摘）。
+        t["gt"] = names.get(code, code) if code in GT_CODES else ""
+        if code == "MULTI":
+            t["overlap"] = True
     # 「参加者A = 話者C」の対応。これを出さないと、判定と正解の名前が
     # 揃っていないのに ○ が付いて見え、読む人が混乱する。
     pairing = {k: names.get(v, v) for k, v in sorted(mapping.items())}
@@ -209,7 +213,7 @@ PAGE = r"""<!DOCTYPE html>
   .t .ts{font-size:11px;color:var(--sub);width:52px;flex-shrink:0;
          font-variant-numeric:tabular-nums}
   .t .who{width:96px;flex-shrink:0;font-weight:600;font-size:13px}
-  .t .gt{width:84px;flex-shrink:0;font-size:12px;color:var(--sub)}
+  .t .gt{width:112px;flex-shrink:0;font-size:12px;color:var(--sub)}
   .t .gt b{color:#111827;font-weight:600}
   .t .gt .hint{color:#b0b6bf}
   .t .tx{flex:1;line-height:1.55}
@@ -235,7 +239,7 @@ PAGE = r"""<!DOCTYPE html>
     <label class="legend"><input type="checkbox" id="all"> 最初から全部見せる</label>
     <label class="legend" id="todaybox" style="display:none">
       <input type="checkbox" id="today"> 今日の実装で見る</label>
-    <span class="legend">判定 → 正解 → ○（一致）/ ×（誤帰属）/ ―（未確定）。薄い字（例 話者B? 70%）は「一番かぶっていた人」の参考表示で、重なりが大きく単一の正解を割り当てられないため採点対象外</span>
+    <span class="legend">判定 → 正解 → ○（一致）/ ×（誤帰属）/ ―（未確定）。薄い字（例 重なり 話者B? 70%）は「その区間で一番長く喋っていた人」の参考表示。重なりが大きく単一の正解を割り当てられないので採点対象外</span>
   </div>
 </header>
 <div id="list"></div>
@@ -276,9 +280,10 @@ function render(){
             :mark==="ng"?'<span class="mk ng">×</span>'
             :mark==="unsure"?'<span class="mk unsure">―</span>'
             :'<span class="mk"></span>';
+    const hint = t.gt_hint
+      ? `<span class="hint">${t.overlap?"重なり ":""}${t.gt_hint}</span>` : "";
     const gtCell = hasGt
-      ? `<div class="gt">${t.gt?("正解 <b>"+t.gt+"</b>")
-          :(t.gt_hint?('<span class="hint">'+t.gt_hint+'</span>'):"")}</div>` : "";
+      ? `<div class="gt">${t.gt?("正解 <b>"+t.gt+"</b>"):hint}</div>` : "";
     d.innerHTML=`<div class="ts">${fmt(t.ms/1000)}</div>`
       +`<div class="who" style="color:${colorOf(who(t))}">${who(t)}</div>`
       +`<div class="tx">${t.text}</div>`+gtCell+mk;
