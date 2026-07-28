@@ -20,6 +20,7 @@
     4. 上流が決めていたのに席上限で落ちた発話も席の音声で決め直す（§27.8）
     5. 席の参照は「声紋層が高信頼だった発話」だけから作る（§27.9）
     6. 予定表の時刻が来たら、控えてある声紋を今の参照で貼り直す（§28）
+    7. 1秒未満で1位と2位が僅差なら、寄せずに未確定にする（§36）
 """
 from __future__ import annotations
 
@@ -45,7 +46,10 @@ from das.asr.live._constants import (  # noqa: E402
     UNSURE_SPEAKER,
 )
 from das.asr.live._recv_loop import _LABEL_ONLY_KINDS  # noqa: E402
-from das.asr.live._seat_audio import SeatAudio  # noqa: E402
+from das.asr.live._seat_audio import (  # noqa: E402
+    SeatAudio,
+    declines_short,
+)
 
 __all__ = ["apply_schedule", "current_keys", "gt_rows", "pick_nearest",
            "read_wav", "replay_seats", "resolved_key", "score"]
@@ -147,15 +151,27 @@ def is_revisable(u: dict) -> bool:
     return cur == UNSURE_SPEAKER and str(u.get("key")) != UNSURE_SPEAKER
 
 
-def pick_nearest(emb, refs: dict) -> str | None:
+def pick_nearest(emb, refs: dict, st: dict | None = None) -> str | None:
     """席の参照のうち最も似ている1人（席が2つ未満なら選ばない）.
 
-    しきい値は課さない。閉集合の割当てなので「誰でもない」という選択肢は
-    適用条件（席上限で落ちた発話に限る）が既に排除している（§27.7）。
+    類似度そのものの下限は課さない。閉集合の割当てなので「誰でもない」という
+    選択肢は適用条件（席上限で落ちた発話に限る）が既に排除している（§27.7）。
+
+    ただし**短くて僅差なら未確定を返す**（§36）。判定は本番と同じ述語
+    （`_seat_audio.declines_short`）を呼ぶ——ここに条件を書き写すと、また
+    「今日の実装」を名乗る数字が2種類できる。`st` を渡さない呼び出しは
+    長さが分からないので、この棄権は掛からない。
     """
     if emb is None or len(refs) < 2:
         return None
-    return max(((float(np.dot(emb, v)), k) for k, v in refs.items()))[1]
+    ranked = sorted(((float(np.dot(emb, v)), k) for k, v in refs.items()),
+                    reverse=True)
+    picked = (ranked[0][1], ranked[0][0], ranked[0][0] - ranked[1][0])
+    dur = None
+    if st is not None:
+        u = st["utt"]
+        dur = max(0, int(u.get("end") or u["ms"]) - int(u["ms"]))
+    return UNSURE_SPEAKER if declines_short(picked, dur) else picked[0]
 
 
 # ------------------------------------------------------------ 再生
@@ -218,7 +234,7 @@ def apply_schedule(steps: list[dict], schedule=RETRO_SCHEDULE_SEC,
     貼り直しの両方**に同じものが使われる——片方だけ替えると、その差が案の
     効果に混ざる。
     """
-    pick = pick or (lambda emb, refs, _st: pick_nearest(emb, refs))
+    pick = pick or pick_nearest
     final: list[str] = []
     remembered: list[int] = []
     idx = 0

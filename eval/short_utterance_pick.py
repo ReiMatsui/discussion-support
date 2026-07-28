@@ -7,9 +7,12 @@
 
 **問い**: そこに棄権を許すと割に合うか。
 
-    rank1    いまの実装（1位を無条件に採る）
+    rank1    採用前の挙動（1位を無条件に採る）
     margin   1位と2位の差が小さければ未確定に落とす
     floor    1位の類似そのものが低ければ未確定に落とす
+
+測った結果、**1秒未満だけ・差0.03** を採用した（§36）。以後この表の
+「いまの実装」はその棄権則込みで、「棄権なし（旧）」が採用前の基準である。
 
 棄権は誤帰属だけでなく正解も削る。したがって見るべきは「誤帰属が何pt減った
 か」ではなく、**未確定に移った分のうち何割が誤帰属だったか**である。半々なら
@@ -77,13 +80,19 @@ def gate(*, margin: float = 0.0, floor: float = 0.0, short_only: bool = False):
             return None
         if short_only and _dur_ms(st) >= SHORT_MS:
             return s[0][1]
-        if s[0][0] < floor or s[0][0] - s[1][0] < margin:
+        # 条件が0のときは掛けない。`s[0][0] < 0` は類似度が負のとき成立して
+        # しまい、条件0＝素の rank-1 にならない（実際に基準が0.2ptずれた）。
+        if (floor and s[0][0] < floor) or (margin and s[0][0] - s[1][0] < margin):
             return UNSURE_SPEAKER
         return s[0][1]
     return pick
 
 
 VARIANTS: list[tuple[str, object]] = [
+    # 「棄権なし」は §36 で採用する前の挙動（gate() は条件0＝素の rank-1）。
+    # 採用後も比較の基準として残す——基準が消えると、次の案が何と比べて
+    # 良いのか分からなくなる。
+    ("棄権なし（旧）", gate()),
     ("いまの実装", None),
     ("差 0.03未満は未確定", gate(margin=0.03)),
     ("差 0.05未満は未確定", gate(margin=0.05)),
@@ -127,7 +136,7 @@ def _table(label: str, by_variant: dict[str, list[dict]],
     print(f"{'案':<22}{'件数':>6}{'正解':>7}{'誤帰属':>7}{'未確定':>7}"
           f"{'  ':>2}{'文字':>7}{'正解':>7}{'誤帰属':>7}{'未確定':>7}"
           f"{'  ':>2}{'棄権の内訳':>12}")
-    ref = (base or by_variant)["いまの実装"]
+    ref = (base or by_variant)["棄権なし（旧）"]
     for name, _p in VARIANTS:
         rows = [r for r in by_variant[name] if keep(r)]
         if not rows:

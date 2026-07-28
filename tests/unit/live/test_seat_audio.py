@@ -229,3 +229,59 @@ def test_retro_reset_clears_remembered_voices():
     retro.reset()
     assert retro.revise() == {}
     assert retro.due(119.0) is False       # 予定も先頭に戻る
+
+
+# -- 短くて僅差なら黙る（handoff §36） --------------------------------
+
+
+def test_short_and_close_call_declines():
+    """1秒未満で1位と2位が僅差なら、寄せずに黙る.
+
+    残る誤帰属の81%は1秒未満の発話で、その大半がこの割当てを通る。
+    実測では、棄権に回った分の63%が誤帰属だった（正解を削る分より多い）。
+    """
+    from das.asr.live._seat_audio import declines_short
+    sa = _ready(min_ref_sec=1.0)
+    picked = sa.nearest(_audio(0.0, 0.5))      # どちらつかず＝僅差
+    assert picked is not None                  # 選ぶこと自体はできる
+    assert declines_short(picked, 500) is True
+
+
+def test_long_utterance_keeps_the_close_call():
+    """同じ僅差でも、1秒以上の発話なら寄せる.
+
+    長い発話に同じ棄権則を掛けると、棄権の7割が正解の取りこぼしになる。
+    """
+    from das.asr.live._seat_audio import declines_short
+    sa = _ready(min_ref_sec=1.0)
+    picked = sa.nearest(_audio(0.0, 2.0))
+    assert declines_short(picked, 2000) is False
+
+
+def test_short_but_clear_call_is_kept():
+    """短くても差がはっきりしていれば寄せる（短さ自体は理由にならない）."""
+    from das.asr.live._seat_audio import declines_short
+    sa = _ready(min_ref_sec=1.0)
+    picked = sa.nearest(_audio(1.0, 0.3))
+    assert declines_short(picked, 300) is False
+
+
+def test_retro_pulls_a_close_short_call_back_to_unsure():
+    """貼り直しでも棄権則が効く（効かないと引き戻せず半分しか働かない）."""
+    from das.asr.live._constants import UNSURE_SPEAKER
+    from das.asr.live._seat_audio import RetroAttributor
+    sa = _ready(min_ref_sec=1.0)
+    retro = RetroAttributor(sa, schedule=(120.0,), interval=300.0)
+    retro.remember(1000, sa.embed(_audio(0.0, 0.4)), 400)   # 短くて僅差
+    retro.remember(2000, sa.embed(_audio(-1.0, 0.4)), 400)  # 短いが明確
+    assert retro.revise() == {1000: UNSURE_SPEAKER, 2000: "人物2"}
+
+
+def test_retro_without_a_length_behaves_as_before():
+    """長さを控えていない発話は、これまでどおり寄せる（後方互換）."""
+    from das.asr.live._constants import UNSURE_SPEAKER
+    from das.asr.live._seat_audio import RetroAttributor
+    sa = _ready(min_ref_sec=1.0)
+    retro = RetroAttributor(sa, schedule=(120.0,), interval=300.0)
+    retro.remember(1000, sa.embed(_audio(0.0, 0.4)))   # 僅差だが長さは不明
+    assert retro.revise()[1000] != UNSURE_SPEAKER

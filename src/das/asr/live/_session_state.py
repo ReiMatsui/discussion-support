@@ -690,7 +690,10 @@ class SessionState:
                     continue
                 r["speaker"] = new_key
                 r["speaker_source"] = "seat_assign_retro"
-                r["unsure"] = False
+                # 貼り直しは未確定へ**戻す**こともある（短くて僅差の発話。
+                # handoff §36）。ここを常に False にすると、引き戻した発話が
+                # 未確定の見た目にならない。
+                r["unsure"] = str(new_key) == UNSURE_SPEAKER
                 applied[ms] = str(new_key)
             if applied:
                 for r in self.records:

@@ -24,6 +24,7 @@ from ._constants import (
     UNSURE_SPEAKER,
     fmt_ts,
 )
+from ._seat_audio import declines_short
 from ._speaker_keys import is_ai_key
 from ._ui import _print_line
 from ._voice_profiles import _best_text_similarity
@@ -425,8 +426,10 @@ class RecvLoop:
             return final_sp_id
         # 声紋は1回だけ計算し、判定にも遡及訂正の控えにも使い回す。
         emb = s.seat_audio.embed(wav)
+        dur_ms = (None if self.cur_ms is None or self.cur_end is None
+                  else max(0, int(self.cur_end) - int(self.cur_ms)))
         if s.retro is not None:
-            s.retro.remember(self.cur_ms, emb)
+            s.retro.remember(self.cur_ms, emb, dur_ms)
         picked = s.seat_audio.nearest_from(emb) if emb is not None else None
         if picked is None:
             # なぜ席で判定できなかったかを残す（診断のみ）。実会話で
@@ -439,6 +442,15 @@ class RecvLoop:
                 "no_embedding" if emb is None
                 else f"few_seats:{s.seat_audio.n_ready()}")
             return final_sp_id
+        if declines_short(picked, dur_ms):
+            # 短くて僅差なら名前を出さない（handoff §36）。相槌の長さの発話で
+            # 誤った名前を出すより、未確定のほうが読み手を惑わせない。
+            diag_extra["seat"] = s.seat_audio.last_pick
+            diag_extra["seat_miss"] = f"short_margin:{picked[2]:.3f}"
+            rec_extra["speaker_source"] = "seat_assign_declined_short"
+            rec_extra["speaker_confidence"] = 0.0
+            rec_extra["speaker_reason"] = "short_utterance_margin_too_small"
+            return UNSURE_SPEAKER
         rec_extra["speaker_source"] = "seat_assign"
         rec_extra["speaker_confidence"] = round(picked[1], 3)
         rec_extra["speaker_reason"] = reason

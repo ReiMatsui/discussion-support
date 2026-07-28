@@ -37,10 +37,24 @@ from ._constants import (
     RETRO_SCHEDULE_SEC,
     SEAT_AUDIO_MIN_REF_SEC,
     SEAT_AUDIO_REF_SEC,
+    SEAT_AUDIO_SHORT_MIN_MARGIN,
+    SEAT_AUDIO_SHORT_MS,
     SR,
     UNSURE_SPEAKER,
 )
 from ._speaker_keys import is_ai_key
+
+
+def declines_short(picked: tuple[str, float, float] | None,
+                   dur_ms: int | None) -> bool:
+    """短い発話で1位と2位が僅差なら、寄せずに未確定にする（handoff §36）.
+
+    最初の判定と遡及訂正の**両方**が同じ述語を使う必要がある。片方だけに
+    入れると、貼り直しの時点で棄権が上書きされて消える。
+    """
+    return (picked is not None and dur_ms is not None
+            and dur_ms < SEAT_AUDIO_SHORT_MS
+            and picked[2] < SEAT_AUDIO_SHORT_MIN_MARGIN)
 
 
 class SeatAudio:
@@ -231,16 +245,24 @@ class RetroAttributor:
         self.schedule = tuple(schedule)
         self.interval = float(interval)
         self._embeddings: dict[int, np.ndarray] = {}   # ms -> 声紋
+        self._durations: dict[int, int] = {}           # ms -> 発話長(ms)
         self._next_idx = 0
         self._next_at = self.schedule[0] if self.schedule else self.interval
         self._lock = threading.RLock()
 
-    def remember(self, ms: int | None, emb: np.ndarray | None) -> None:
-        """後で決め直せるように、この発話の声紋を控える."""
+    def remember(self, ms: int | None, emb: np.ndarray | None,
+                 dur_ms: int | None = None) -> None:
+        """後で決め直せるように、この発話の声紋と長さを控える.
+
+        長さも持つのは、貼り直しでも短い発話の棄権則（`declines_short`）を
+        効かせるため。音声そのものは持ち直さない（声紋は192次元で足りる）。
+        """
         if ms is None or emb is None:
             return
         with self._lock:
             self._embeddings[int(ms)] = emb
+            if dur_ms is not None:
+                self._durations[int(ms)] = int(dur_ms)
 
     def due(self, elapsed_sec: float) -> bool:
         """貼り直しの時刻に達したか（達したら次回の時刻へ進める）."""
@@ -259,14 +281,21 @@ class RetroAttributor:
 
         呼び出し側（`SessionState.apply_retro_attribution`）が records を
         書き換える。ここは判定だけで副作用を持たない。
+
+        僅差の短い発話は**未確定を返す**（黙ったままにするのではなく）。
+        最初の判定で寄せてしまった発話を、参照が育った後に引き戻せなければ
+        棄権則が半分しか効かない。
         """
         with self._lock:
             items = list(self._embeddings.items())
+            durations = dict(self._durations)
         out: dict[int, str] = {}
         for ms, emb in items:
             got = self.seat.nearest_from(emb)
-            if got is not None:
-                out[ms] = got[0]
+            if got is None:
+                continue
+            out[ms] = (UNSURE_SPEAKER if declines_short(got, durations.get(ms))
+                       else got[0])
         return out
 
     def rename(self, old: str, new: str) -> None:
@@ -275,6 +304,7 @@ class RetroAttributor:
     def reset(self) -> None:
         with self._lock:
             self._embeddings.clear()
+            self._durations.clear()
             self._next_idx = 0
             self._next_at = (self.schedule[0] if self.schedule
                              else self.interval)
