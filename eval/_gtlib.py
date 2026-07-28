@@ -92,8 +92,14 @@ def best_mapping(pairs: list[tuple[str, str]], gts, *,
 
     pairs は (システムラベル, GT話者) の列。unsure（未確定の番兵）は対応の
     候補から除外され、どの対応でも不正解として分母にだけ入る。探索は
-    permutation の総当たり（ラベル数・話者数とも実用上3前後のため十分速い）。
+    permutation の総当たり。
+
+    `gts` のうち **その録音に出てこないコード** は先に落とす。出てこない話者に
+    対応させても正解は1件も増えないので結果は変わらず、話者コードを増やした
+    （4人以上の会議に対応した）ときの総当たりが跳ね上がるのを防ぐ。
     """
+    present = {g for _, g in pairs}
+    gts = [g for g in gts if g in present]
     real = sorted({p for p, _ in pairs if p != unsure})
     best_acc, best_map = 0.0, {}
     for k in range(min(len(gts), len(real)) + 1):

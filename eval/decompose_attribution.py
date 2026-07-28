@@ -46,7 +46,10 @@ import _gtlib  # noqa: E402
 
 from das.asr.live._constants import _BACKCHANNEL_RE, UNSURE_SPEAKER  # noqa: E402
 
-GT_CODES = ("S1", "S2", "S3")
+# 注釈ツールは9人まで付けられる（4人以上の会議・雑談のため）。ここを3人に
+# 固定していると、S4 以降の発話が「GTなし」として黙って分母から落ちる。
+# 出てこないコードは best_mapping が先に捨てるので、3人の録音の数字は不変。
+GT_CODES = tuple(f"S{i}" for i in range(1, 10))
 
 # 声紋層が棄権した理由（VoiceProfiles._classify の kind）→ 分解上のラベル
 _ABSTAIN = {
