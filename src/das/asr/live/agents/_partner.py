@@ -8,6 +8,7 @@ import json
 import queue
 import threading
 import time
+from typing import ClassVar
 
 import numpy as np
 
@@ -77,6 +78,18 @@ class ConversationPartner(_RealtimeBase):
         "already an active response",
         "active response already",
     )
+
+    # イベント種別 -> 処理。1種別1関数にして、`_handle` は振り分けだけにする
+    # （かつては1つの if 連鎖で、深さ9の入れ子になっていた）。
+    _EVENT_HANDLERS: ClassVar[dict[str, str]] = {
+        "response.output_item.added": "_on_item_added",
+        "response.output_audio.delta": "_on_audio_delta",
+        "response.output_audio_transcript.delta": "_on_transcript_delta",
+        "response.output_audio_transcript.done": "_on_transcript_done",
+        "response.output_audio.done": "_on_audio_done",
+        "response.done": "_on_response_done",
+        "error": "_on_error",
+    }
 
     @property
     def in_echo_window(self) -> bool:
@@ -221,75 +234,78 @@ class ConversationPartner(_RealtimeBase):
 
     # --- WebSocket受信 ---
 
-    def _handle(self, ev: dict):
-        etype = ev.get("type", "")
+    def _handle(self, ev: dict) -> None:
+        """届いたイベントを種別ごとの処理へ回す（知らない種別は無視）."""
+        name = self._EVENT_HANDLERS.get(ev.get("type", ""))
+        if name is not None:
+            getattr(self, name)(ev)
 
-        if etype == "response.output_item.added":
-            item = ev.get("item", {})
-            self._current_item_id = item.get("id")
-            self._played_bytes = 0
-            self._play_epoch += 1  # 応答世代を進める（Bug 6）
-            # 新応答の開始 → 前の中断状態を解除（response.done取りこぼし時の固着防止）
+    def _on_item_added(self, ev: dict) -> None:
+        item = ev.get("item", {})
+        self._current_item_id = item.get("id")
+        self._played_bytes = 0
+        self._play_epoch += 1  # 応答世代を進める（Bug 6）
+        # 新応答の開始 → 前の中断状態を解除（response.done取りこぼし時の固着防止）
+        self._interrupted = False
+
+    def _on_audio_delta(self, ev: dict) -> None:
+        if self._interrupted:
+            return  # interrupt後の残留チャンクを破棄
+        chunk = ev.get("delta", "")
+        if chunk:
+            self._q_put(base64.b64decode(chunk))
+            self.ai_speaking = True
+            self._responding = True
+
+    def _on_transcript_delta(self, ev: dict) -> None:
+        if self._interrupted:
+            return
+        self._ai_text_buf += ev.get("delta", "")
+
+    def _on_transcript_done(self, ev: dict) -> None:
+        transcript = ev.get("transcript", "") or self._ai_text_buf
+        self._ai_text_buf = ""
+        if transcript:
+            # エコー判定用には常に記録（中断されたテキストもASRに拾われうる）
+            self._recent_ai_texts.append(transcript)
+            # 中断された応答は議事録に載せない（音声が再生されていない）
+            if not self._interrupted and self.on_ai_utterance:
+                self.on_ai_utterance(transcript)
+
+    def _on_audio_done(self, ev: dict) -> None:
+        if not self._interrupted:
+            self._q_put(None)
+
+    def _on_response_done(self, ev: dict) -> None:
+        resp = ev.get("response", {})
+        status = resp.get("status", "")
+        if status == "cancelled":
+            # キャンセル済み応答: テキストをエコー判定用に記録、
+            # _respondingはリセットしない（直後にrequest_responseで
+            # 新しい応答が来る場合があるため）
+            if self._ai_text_buf:
+                partial = self._ai_text_buf.strip()
+                if partial:
+                    self._recent_ai_texts.append(partial)
+            self._ai_text_buf = ""
+            self._interrupted = False
+        else:
+            # 正常完了 or その他
+            self._ai_text_buf = ""
+            self._responding = False
             self._interrupted = False
 
-        elif etype == "response.output_audio.delta":
-            if self._interrupted:
-                return  # interrupt後の残留チャンクを破棄
-            chunk = ev.get("delta", "")
-            if chunk:
-                self._q_put(base64.b64decode(chunk))
-                self.ai_speaking = True
-                self._responding = True
-
-        elif etype == "response.output_audio_transcript.delta":
-            if self._interrupted:
-                return
-            self._ai_text_buf += ev.get("delta", "")
-
-        elif etype == "response.output_audio_transcript.done":
-            transcript = ev.get("transcript", "") or self._ai_text_buf
-            self._ai_text_buf = ""
-            if transcript:
-                # エコー判定用には常に記録（中断されたテキストもASRに拾われうる）
-                self._recent_ai_texts.append(transcript)
-                # 中断された応答は議事録に載せない（音声が再生されていない）
-                if not self._interrupted and self.on_ai_utterance:
-                    self.on_ai_utterance(transcript)
-
-        elif etype == "response.output_audio.done":
-            if not self._interrupted:
-                self._q_put(None)
-
-        elif etype == "response.done":
-            resp = ev.get("response", {})
-            status = resp.get("status", "")
-            if status == "cancelled":
-                # キャンセル済み応答: テキストをエコー判定用に記録、
-                # _respondingはリセットしない（直後にrequest_responseで
-                # 新しい応答が来る場合があるため）
-                if self._ai_text_buf:
-                    partial = self._ai_text_buf.strip()
-                    if partial:
-                        self._recent_ai_texts.append(partial)
-                self._ai_text_buf = ""
-                self._interrupted = False
-            else:
-                # 正常完了 or その他
-                self._ai_text_buf = ""
-                self._responding = False
-                self._interrupted = False
-
-        elif etype == "error":
-            msg = ev.get("error", {}).get("message", "unknown")
-            low = msg.lower()
-            if any(s in low for s in self._BENIGN_ERROR_SUBSTRINGS):
-                # cancel/create と VAD 自動応答の競合など。実害がないので静かに無視。
-                return
-            print(f"# Partner エラー: {msg}", flush=True)
-            # 想定外エラーで応答生成が中断された場合、_responding の固着を防ぐ
-            # （固着すると in_echo_window が True のままになり進行が止まる）。
-            if self._responding:
-                self._responding = False
-                self._interrupted = False
+    def _on_error(self, ev: dict) -> None:
+        msg = ev.get("error", {}).get("message", "unknown")
+        low = msg.lower()
+        if any(s in low for s in self._BENIGN_ERROR_SUBSTRINGS):
+            # cancel/create と VAD 自動応答の競合など。実害がないので静かに無視。
+            return
+        print(f"# Partner エラー: {msg}", flush=True)
+        # 想定外エラーで応答生成が中断された場合、_responding の固着を防ぐ
+        # （固着すると in_echo_window が True のままになり進行が止まる）。
+        if self._responding:
+            self._responding = False
+            self._interrupted = False
 
     # close() は _RealtimeBase の共通実装を使用（R3c）

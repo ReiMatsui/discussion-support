@@ -8,6 +8,7 @@ import json
 import queue
 import threading
 import time
+from typing import ClassVar
 
 import numpy as np
 
@@ -129,6 +130,18 @@ class RealtimeAgent(_RealtimeBase):
         "already has an active response",
     )
 
+    # イベント種別 -> 処理。1種別1関数にして、`_handle` は振り分けだけにする
+    # （かつては1つの if 連鎖で、深さ9の入れ子になっていた）。
+    _EVENT_HANDLERS: ClassVar[dict[str, str]] = {
+        "response.output_item.added": "_on_item_added",
+        "response.output_audio.delta": "_on_audio_delta",
+        "response.output_audio_transcript.delta": "_on_transcript_delta",
+        "response.output_audio_transcript.done": "_on_transcript_done",
+        "response.output_audio.done": "_on_audio_done",
+        "response.done": "_on_response_done",
+        "error": "_on_error",
+    }
+
     @property
     def _prompt(self) -> str:
         return _PROMPT_CONVERSATION if self.mode == "conversation" else _PROMPT_FACILITATOR
@@ -228,93 +241,96 @@ class RealtimeAgent(_RealtimeBase):
 
     # --- WebSocket受信 ---
 
-    def _handle(self, ev: dict):
-        etype = ev.get("type", "")
+    def _handle(self, ev: dict) -> None:
+        """届いたイベントを種別ごとの処理へ回す（知らない種別は無視）."""
+        name = self._EVENT_HANDLERS.get(ev.get("type", ""))
+        if name is not None:
+            getattr(self, name)(ev)
 
-        if etype == "response.output_item.added":
-            # 新しい出力アイテム開始 — item_idを記録、再生カウンタをリセット
-            item = ev.get("item", {})
-            self._current_item_id = item.get("id")
-            self._played_bytes = 0
-            self._play_epoch += 1  # 応答世代を進める（Bug 6）
-            self._speech_started = False  # この応答の on_speech_start 未通知
-            # 新応答の開始 → 前の中断状態(_interrupted)を解除する。
-            # これにより _interrupted のリセットが response.done の到着に依存せず、
-            # done取りこぼし時に次応答が無音になる固着を防ぐ（堅牢化）。
-            self._interrupted = False
+    def _on_item_added(self, ev: dict) -> None:
+        # 新しい出力アイテム開始 — item_idを記録、再生カウンタをリセット
+        item = ev.get("item", {})
+        self._current_item_id = item.get("id")
+        self._played_bytes = 0
+        self._play_epoch += 1  # 応答世代を進める（Bug 6）
+        self._speech_started = False  # この応答の on_speech_start 未通知
+        # 新応答の開始 → 前の中断状態(_interrupted)を解除する。
+        # これにより _interrupted のリセットが response.done の到着に依存せず、
+        # done取りこぼし時に次応答が無音になる固着を防ぐ（堅牢化）。
+        self._interrupted = False
 
-        elif etype == "response.output_audio.delta":
-            if self._interrupted:
-                return  # キャンセル後の残留チャンクを破棄
-            chunk = ev.get("delta", "")
-            if chunk:
-                pcm = base64.b64decode(chunk)
-                # 再生ゲート（フェーズ6）: hold 中は再生キューへ流さず貯める
-                # (ai_speaking / on_speech_start は release まで発火しない)。
-                if self._hold_playback:
-                    self._held_audio.append((self._play_epoch, pcm))
-                    return
-                # Speaker分離（Phase3）: 採択済み候補を話すだけなので、テキスト確認を
-                # 待たずに即再生する。最初の音声で発話開始を通知（Partner停止用）。
-                if not self._speech_started:
-                    self._speech_started = True
-                    # trigger → 発話開始の遅延を確定（§3.5 予算検証用）。
-                    if self._speak_trigger_at:
-                        self._last_speak_latency_ms = round(
-                            (time.monotonic() - self._speak_trigger_at) * 1000, 1)
-                        self._speak_trigger_at = 0.0
-                    self._log_state("→SPEAKING (first audio)")
-                    if self.on_speech_start:
-                        with contextlib.suppress(Exception):
-                            self.on_speech_start()
-                self._q_put(pcm)
-                self.ai_speaking = True
+    def _on_audio_delta(self, ev: dict) -> None:
+        if self._interrupted:
+            return  # キャンセル後の残留チャンクを破棄
+        chunk = ev.get("delta", "")
+        if chunk:
+            pcm = base64.b64decode(chunk)
+            # 再生ゲート（フェーズ6）: hold 中は再生キューへ流さず貯める
+            # (ai_speaking / on_speech_start は release まで発火しない)。
+            if self._hold_playback:
+                self._held_audio.append((self._play_epoch, pcm))
+                return
+            # Speaker分離（Phase3）: 採択済み候補を話すだけなので、テキスト確認を
+            # 待たずに即再生する。最初の音声で発話開始を通知（Partner停止用）。
+            if not self._speech_started:
+                self._speech_started = True
+                # trigger → 発話開始の遅延を確定（§3.5 予算検証用）。
+                if self._speak_trigger_at:
+                    self._last_speak_latency_ms = round(
+                        (time.monotonic() - self._speak_trigger_at) * 1000, 1)
+                    self._speak_trigger_at = 0.0
+                self._log_state("→SPEAKING (first audio)")
+                if self.on_speech_start:
+                    with contextlib.suppress(Exception):
+                        self.on_speech_start()
+            self._q_put(pcm)
+            self.ai_speaking = True
 
-        elif etype == "response.output_audio_transcript.delta":
-            if not self._interrupted:
-                self._ai_text_buf += ev.get("delta", "")
+    def _on_transcript_delta(self, ev: dict) -> None:
+        if not self._interrupted:
+            self._ai_text_buf += ev.get("delta", "")
 
-        elif etype == "response.output_audio_transcript.done":
-            transcript = ev.get("transcript", "") or self._ai_text_buf
-            self._ai_text_buf = ""
-            if transcript:
-                self._recent_ai_texts.append(transcript)
-                if not self._interrupted and self.on_ai_utterance:
-                    self.on_ai_utterance(transcript)
+    def _on_transcript_done(self, ev: dict) -> None:
+        transcript = ev.get("transcript", "") or self._ai_text_buf
+        self._ai_text_buf = ""
+        if transcript:
+            self._recent_ai_texts.append(transcript)
+            if not self._interrupted and self.on_ai_utterance:
+                self.on_ai_utterance(transcript)
 
-        elif etype == "response.output_audio.done":
-            if not self._interrupted:
-                if self._hold_playback:
-                    self._held_audio.append((self._play_epoch, None))
-                else:
-                    self._q_put(None)   # 再生終端マーカー（現epochタグ付き）
+    def _on_audio_done(self, ev: dict) -> None:
+        if not self._interrupted:
+            if self._hold_playback:
+                self._held_audio.append((self._play_epoch, None))
+            else:
+                self._q_put(None)   # 再生終端マーカー（現epochタグ付き）
 
-        elif etype == "response.done":
-            # F1(保険): cancel で transcript.done が来ない場合でも、中断中に溜まった
-            # 発話済みバッファをエコー参照へ退避してからクリアする（D1）。
-            if self._interrupted:
-                _delivered = self._ai_text_buf.strip()
-                if _delivered and (not self._recent_ai_texts
-                                   or self._recent_ai_texts[-1] != _delivered):
-                    self._recent_ai_texts.append(_delivered)
-            self._ai_text_buf = ""
+    def _on_response_done(self, ev: dict) -> None:
+        # F1(保険): cancel で transcript.done が来ない場合でも、中断中に溜まった
+        # 発話済みバッファをエコー参照へ退避してからクリアする（D1）。
+        if self._interrupted:
+            _delivered = self._ai_text_buf.strip()
+            if _delivered and (not self._recent_ai_texts
+                               or self._recent_ai_texts[-1] != _delivered):
+                self._recent_ai_texts.append(_delivered)
+        self._ai_text_buf = ""
+        self._responding = False
+        self._interrupted = False     # 次の応答に備えてリセット
+        self._current_item_id = None
+        self._active_intervention_fallback = ""
+        self._log_state("→IDLE (response.done)")
+
+    def _on_error(self, ev: dict) -> None:
+        msg = ev.get("error", {}).get("message", "unknown")
+        low = msg.lower()
+        if any(s in low for s in self._BENIGN_ERROR_SUBSTRINGS):
+            return  # response.cancel空振り等の良性エラーは静かに無視（Fix 10）
+        print(f"# AI Agent エラー: {msg}", flush=True)
+        # エラーでresponse生成が中断された場合、_respondingをリセット
+        # （固着するとtrigger()が永遠にスキップされる）
+        if self._responding:
             self._responding = False
-            self._interrupted = False     # 次の応答に備えてリセット
-            self._current_item_id = None
-            self._active_intervention_fallback = ""
-            self._log_state("→IDLE (response.done)")
-
-        elif etype == "error":
-            msg = ev.get("error", {}).get("message", "unknown")
-            low = msg.lower()
-            if any(s in low for s in self._BENIGN_ERROR_SUBSTRINGS):
-                return  # response.cancel空振り等の良性エラーは静かに無視（Fix 10）
-            print(f"# AI Agent エラー: {msg}", flush=True)
-            # エラーでresponse生成が中断された場合、_respondingをリセット
-            # （固着するとtrigger()が永遠にスキップされる）
-            if self._responding:
-                self._responding = False
-                self._interrupted = False
+            self._interrupted = False
 
     # --- 発話送信 ---
 
