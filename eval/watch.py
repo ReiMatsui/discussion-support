@@ -63,15 +63,29 @@ def _labels_from_other_session(gt_from: str, turns: list[dict]) -> tuple[dict, d
         sys.exit(f"# {gt_from} の正解（{gt_path.name}）か turns がありません")
     gt = json.loads(gt_path.read_text(encoding="utf-8"))
     tl = _gtlib.gt_timeline(_gtlib.read_jsonl(src_turns), gt.get("labels") or {})
+    names = gt.get("speaker_names") or {}
     labels = {}
     for t in turns:
-        code = _gtlib.gt_code_by_timeline(int(t["ms"]), int(t["end_ms"]), tl)
+        ms, end = int(t["ms"]), int(t["end_ms"])
+        code = _gtlib.gt_code_by_timeline(ms, end, tl)
         if code:
             labels[str(t["turn_id"])] = code
+        # 採点には使わないが、画面で目視できるように「一番かぶっていた人」を
+        # 割合つきで添える。長い発話ほど他の人の相づちが重なるので、支配80%の
+        # 線に届かず MULTI になる——採点対象から外すのは正しいが、**見る側には
+        # 手がかりが残っていない**のが不便だった（2026-07-28 の指摘）。
+        # 採点規則そのものは動かさない（データ無しでしきい値は変えない）。
+        if code not in GT_CODES:
+            ovs = {c: sum(max(0, min(end, b) - max(ms, a)) for a, b in ivs)
+                   for c, ivs in tl.items()}
+            total = sum(ovs.values())
+            if total > 0:
+                top, share = max(ovs.items(), key=lambda x: x[1])
+                t["gt_hint"] = f"{names.get(top, top)}? {share / total:.0%}"
     n = sum(1 for v in labels.values() if v in GT_CODES)
     print(f"# 正解を {gt_from} から移し替えました: "
           f"{n}/{len(turns)}発話に正解あり（残りは重なり/範囲外）", flush=True)
-    return labels, (gt.get("speaker_names") or {})
+    return labels, names
 
 
 def attach_truth(session: str, turns: list[dict],
@@ -197,6 +211,7 @@ PAGE = r"""<!DOCTYPE html>
   .t .who{width:96px;flex-shrink:0;font-weight:600;font-size:13px}
   .t .gt{width:84px;flex-shrink:0;font-size:12px;color:var(--sub)}
   .t .gt b{color:#111827;font-weight:600}
+  .t .gt .hint{color:#b0b6bf}
   .t .tx{flex:1;line-height:1.55}
   .t .mk{width:20px;text-align:center;flex-shrink:0;font-weight:700}
   .ok{color:#16a34a}.ng{color:#dc2626}.unsure{color:#9ca3af}
@@ -220,7 +235,7 @@ PAGE = r"""<!DOCTYPE html>
     <label class="legend"><input type="checkbox" id="all"> 最初から全部見せる</label>
     <label class="legend" id="todaybox" style="display:none">
       <input type="checkbox" id="today"> 今日の実装で見る</label>
-    <span class="legend">判定 → 正解 → ○（一致）/ ×（誤帰属）/ ―（未確定）。正解が空欄の行は採点対象外（相槌・重なり・正解の範囲外）</span>
+    <span class="legend">判定 → 正解 → ○（一致）/ ×（誤帰属）/ ―（未確定）。薄い字（例 話者B? 70%）は「一番かぶっていた人」の参考表示で、重なりが大きく単一の正解を割り当てられないため採点対象外</span>
   </div>
 </header>
 <div id="list"></div>
@@ -262,7 +277,8 @@ function render(){
             :mark==="unsure"?'<span class="mk unsure">―</span>'
             :'<span class="mk"></span>';
     const gtCell = hasGt
-      ? `<div class="gt">${t.gt?("正解 <b>"+t.gt+"</b>"):""}</div>` : "";
+      ? `<div class="gt">${t.gt?("正解 <b>"+t.gt+"</b>")
+          :(t.gt_hint?('<span class="hint">'+t.gt_hint+'</span>'):"")}</div>` : "";
     d.innerHTML=`<div class="ts">${fmt(t.ms/1000)}</div>`
       +`<div class="who" style="color:${colorOf(who(t))}">${who(t)}</div>`
       +`<div class="tx">${t.text}</div>`+gtCell+mk;
