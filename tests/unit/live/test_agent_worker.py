@@ -255,7 +255,7 @@ def test_agent_worker_reconnects_disconnected_enabled_agent():
     agent._connected = False
     state = FakeState(agent, None)
 
-    _run_worker_briefly(state, until=lambda: agent.connect_calls > 0, timeout=1.5)
+    _run_worker_briefly(state, until=lambda: agent.connect_calls > 0, timeout=1.0)
 
     assert agent.connect_calls == 1
     assert agent._connected is True
@@ -311,7 +311,7 @@ def test_intervention_disabled_skips_facilitator_but_keeps_partner_context():
     state.intervention_enabled = False
     state.records = [{"speaker": "#1", "text": "この点は違うと思います", "ms": 0}]
 
-    _run_worker_briefly(state, until=lambda: bool(partner.injected), timeout=1.5)
+    _run_worker_briefly(state, until=lambda: bool(partner.injected), timeout=1.0)
 
     assert agent.feeds == []
     assert agent.trigger_calls == []
@@ -891,7 +891,7 @@ def test_drift_runs_after_warmup(monkeypatch):
 # ファシリテーターイベントワーカー（受信スレッドの切り離し）
 # ---------------------------------------------------------------------------
 
-def _run_event_worker_briefly(state, on_text, *, until, timeout=2.0):
+def _run_event_worker_briefly(state, on_text, *, until, timeout=1.5):
     from das.asr.live._workers import _run_facilitator_event_worker
     t = threading.Thread(target=_run_facilitator_event_worker,
                          args=(state, on_text), daemon=True)
@@ -1058,7 +1058,7 @@ def test_structuring_checker_rejudges_after_pending_reset(monkeypatch):
 # 事実補正の confidence ゲート (T2): high のみ採用する
 # ---------------------------------------------------------------------------
 
-def _run_fact_briefly(state, *, until, timeout=2.0):
+def _run_fact_briefly(state, *, until, timeout=1.0):
     from das.asr.live._workers import _run_fact_checker
     t = threading.Thread(target=_run_fact_checker,
                          args=(state, "key", "model"), daemon=True)
@@ -1086,7 +1086,7 @@ def _run_fact_with_confidence(monkeypatch, confidence):
     monkeypatch.setattr(bs, "check_fact_correction", lambda utts, k, m: dict(result))
     state = _fact_state()
     _run_fact_briefly(state, until=lambda: not state.factcheck_requests.empty(),
-                      timeout=1.5)
+                      timeout=1.0)
     return state
 
 

@@ -45,6 +45,7 @@ from ._constants import (
     _TRIAGE_MIN_CHARS,
     AGENT_SPEAKER,
     SR,
+    WORKER_TICK_SEC,
 )
 from ._facilitation import (
     FacilitationController,
@@ -306,7 +307,7 @@ def _run_triage_worker(state: SessionState, oai_key: str,
     _backlog_warned = False
     _known_epoch = getattr(state, "meeting_epoch", 0)  # 会議リセット検知用 (T3)
     while not state.stop.is_set():
-        time.sleep(0.25)
+        time.sleep(WORKER_TICK_SEC)
         agent = state.agent
         if not oai_key or agent is None or not agent.enabled:
             continue
@@ -461,7 +462,7 @@ def _run_fact_checker(state: SessionState, oai_key: str, oai_model: str):
     _retry_counts: dict[int, int] = {}
     _known_epoch = getattr(state, "meeting_epoch", 0)  # 会議リセット検知用 (T3)
     while not state.stop.is_set():
-        time.sleep(0.25)
+        time.sleep(WORKER_TICK_SEC)
         agent = state.agent
         if not oai_key or agent is None or not agent.enabled:
             continue
@@ -1735,7 +1736,7 @@ class _AgentWorker:
         """停止が要求されるまで、1tick=0.25秒で段を順に回す."""
         s = self.state
         while not s.stop.is_set():
-            time.sleep(0.25)
+            time.sleep(WORKER_TICK_SEC)
             self.diag_tick += 1
             partner = s.partner   # 動的参照: 実行中の接続/切断に追従（F3）
             if not self._agent_ready():
