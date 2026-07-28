@@ -48,18 +48,48 @@ def load_turns(session: str) -> list[dict]:
     return out
 
 
-def attach_truth(session: str, turns: list[dict]) -> dict:
-    """正解があれば、行ごとの ○/×/― を付ける（無ければ何もしない）.
+def _labels_from_other_session(gt_from: str, turns: list[dict]) -> tuple[dict, dict]:
+    """別セッションの正解を、この録音の区切りへ時間で移し替える.
+
+    **なぜ必要か**: 同じ音声を流し直すと、STT の区切りが前回と変わるので
+    `turn_id` は対応しない。正解は「誰がいつ喋っていたか」という時間の事実
+    なので、いったんタイムラインに直してから、今回の各発話に一番かぶっている
+    話者を割り当てる。規則は `eval/transplant_gt.py`・採点系と同じ
+    （支配80%・カバレッジ30%。満たさない発話は採点対象外）。
+    """
+    gt_path = ROOT / "eval" / f"gt_{gt_from}.json"
+    src_turns = ROOT / "transcripts" / f"{gt_from}.turns.jsonl"
+    if not gt_path.exists() or not src_turns.exists():
+        sys.exit(f"# {gt_from} の正解（{gt_path.name}）か turns がありません")
+    gt = json.loads(gt_path.read_text(encoding="utf-8"))
+    tl = _gtlib.gt_timeline(_gtlib.read_jsonl(src_turns), gt.get("labels") or {})
+    labels = {}
+    for t in turns:
+        code = _gtlib.gt_code_by_timeline(int(t["ms"]), int(t["end_ms"]), tl)
+        if code:
+            labels[str(t["turn_id"])] = code
+    n = sum(1 for v in labels.values() if v in GT_CODES)
+    print(f"# 正解を {gt_from} から移し替えました: "
+          f"{n}/{len(turns)}発話に正解あり（残りは重なり/範囲外）", flush=True)
+    return labels, (gt.get("speaker_names") or {})
+
+
+def attach_truth(session: str, turns: list[dict],
+                 gt_from: str | None = None) -> dict:
+    """正解があれば、行ごとの正解話者と ○/×/― を付ける（無ければ何もしない）.
 
     表示名（参加者A・実名）と正解のコード（S1…）に共通の名前空間は無いので、
     最も当たる1:1対応を取ってから突き合わせる——採点側（`_gtlib.best_mapping`）
     と同じ規則にして、画面の印象と数字が食い違わないようにする。
     """
-    gt_path = ROOT / "eval" / f"gt_{session}.json"
-    if not gt_path.exists():
-        return {"has_gt": False, "names": {}, "labels": {}}
-    gt = json.loads(gt_path.read_text(encoding="utf-8"))
-    labels = gt.get("labels") or {}
+    if gt_from:
+        labels, names = _labels_from_other_session(gt_from, turns)
+    else:
+        gt_path = ROOT / "eval" / f"gt_{session}.json"
+        if not gt_path.exists():
+            return {"has_gt": False, "names": {}, "labels": {}}
+        gt = json.loads(gt_path.read_text(encoding="utf-8"))
+        labels, names = (gt.get("labels") or {}), (gt.get("speaker_names") or {})
     pairs = []
     for t in turns:
         code = labels.get(str(t["turn_id"]))
@@ -76,9 +106,14 @@ def attach_truth(session: str, turns: list[dict]) -> dict:
             t["mark"] = "ok"
         else:
             t["mark"] = "ng"
-        t["gt"] = code or ""
-    return {"has_gt": True, "names": gt.get("speaker_names") or {},
-            "labels": labels}
+        # 画面に出す正解の話者名。採点対象外（相槌・重なり・範囲外）は空欄。
+        t["gt"] = (names.get(code, code) if code in GT_CODES
+                   else ("複数人" if code == "MULTI" else ""))
+    # 「参加者A = 話者C」の対応。これを出さないと、判定と正解の名前が
+    # 揃っていないのに ○ が付いて見え、読む人が混乱する。
+    pairing = {k: names.get(v, v) for k, v in sorted(mapping.items())}
+    return {"has_gt": True, "names": names, "labels": labels,
+            "pairing": pairing}
 
 
 def attach_today(session: str, turns: list[dict], labels: dict) -> bool:
@@ -159,7 +194,9 @@ PAGE = r"""<!DOCTYPE html>
   .t.now{box-shadow:0 0 0 3px #2563eb22;border-color:#2563eb}
   .t .ts{font-size:11px;color:var(--sub);width:52px;flex-shrink:0;
          font-variant-numeric:tabular-nums}
-  .t .who{width:104px;flex-shrink:0;font-weight:600;font-size:13px}
+  .t .who{width:96px;flex-shrink:0;font-weight:600;font-size:13px}
+  .t .gt{width:84px;flex-shrink:0;font-size:12px;color:var(--sub)}
+  .t .gt b{color:#111827;font-weight:600}
   .t .tx{flex:1;line-height:1.55}
   .t .mk{width:20px;text-align:center;flex-shrink:0;font-weight:700}
   .ok{color:#16a34a}.ng{color:#dc2626}.unsure{color:#9ca3af}
@@ -183,7 +220,7 @@ PAGE = r"""<!DOCTYPE html>
     <label class="legend"><input type="checkbox" id="all"> 最初から全部見せる</label>
     <label class="legend" id="todaybox" style="display:none">
       <input type="checkbox" id="today"> 今日の実装で見る</label>
-    <span class="legend">○ 正解 / × 誤帰属 / ― 未確定（「今日の実装」では相槌など採点対象外は — になります）</span>
+    <span class="legend">判定 → 正解 → ○（一致）/ ×（誤帰属）/ ―（未確定）。正解が空欄の行は採点対象外（相槌・重なり・正解の範囲外）</span>
   </div>
 </header>
 <div id="list"></div>
@@ -203,8 +240,9 @@ async function boot(){
   const info=await (await fetch("/info")).json();
   T=info.turns; dur=info.duration; peaks=info.peaks; hasGt=info.has_gt;
   $("title").textContent=info.title;
+  const pr=Object.entries(info.pairing||{}).map(([a,b])=>`${a}=${b}`).join(" / ");
   $("meta").textContent=`${T.length}発話・${(dur/60).toFixed(1)}分`
-    + (hasGt?"（正解つき）":"（正解なし）");
+    + (hasGt?`（正解つき　対応: ${pr}）`:"（正解なし）");
   audio=new Audio("/audio"); audio.preload="auto";
   audio.addEventListener("timeupdate",onTime);
   audio.addEventListener("ended",()=>$("play").textContent="▶ 再生");
@@ -223,9 +261,11 @@ function render(){
             :mark==="ng"?'<span class="mk ng">×</span>'
             :mark==="unsure"?'<span class="mk unsure">―</span>'
             :'<span class="mk"></span>';
+    const gtCell = hasGt
+      ? `<div class="gt">${t.gt?("正解 <b>"+t.gt+"</b>"):""}</div>` : "";
     d.innerHTML=`<div class="ts">${fmt(t.ms/1000)}</div>`
       +`<div class="who" style="color:${colorOf(who(t))}">${who(t)}</div>`
-      +`<div class="tx">${t.text}</div>`+mk;
+      +`<div class="tx">${t.text}</div>`+gtCell+mk;
     d.style.borderLeftColor=colorOf(who(t));
     L.appendChild(d);
   });
@@ -291,10 +331,11 @@ boot();
 
 class _State:
     def __init__(self, title, wav, turns, peaks, duration, has_gt,
-                 has_today=False):
+                 has_today=False, pairing=None):
         self.title, self.wav, self.turns = title, wav, turns
         self.peaks, self.duration, self.has_gt = peaks, duration, has_gt
         self.has_today = has_today
+        self.pairing = pairing or {}
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -319,7 +360,7 @@ class _Handler(BaseHTTPRequestHandler):
         elif self.path.startswith("/info"):
             body = {"title": s.title, "turns": s.turns, "peaks": s.peaks,
                     "duration": s.duration, "has_gt": s.has_gt,
-                    "has_today": s.has_today}
+                    "has_today": s.has_today, "pairing": s.pairing}
             self._send(200, json.dumps(body, ensure_ascii=False).encode(),
                        "application/json; charset=utf-8")
         elif self.path.startswith("/audio"):
@@ -350,6 +391,9 @@ def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("session", help="収録セッション名（例 2026-07-20_1623）")
     p.add_argument("--port", type=int, default=8766)
+    p.add_argument("--gt-from", default=None, metavar="セッション",
+                   help="別セッションの正解を時間で移し替えて使う"
+                        "（同じ音声を流し直したときはこれ）")
     p.add_argument("--today", action="store_true",
                    help="今日の実装ならどう出るかも並べる（声紋モデルを読む）")
     p.add_argument("--no-open", action="store_true")
@@ -359,14 +403,15 @@ def main(argv: list[str] | None = None) -> None:
     if not wav_src.exists():
         sys.exit(f"# {wav_src} がありません")
     turns = load_turns(args.session)
-    truth = attach_truth(args.session, turns)
+    truth = attach_truth(args.session, turns, args.gt_from)
     has_today = False
     if args.today:
         has_today = attach_today(args.session, turns, truth["labels"])
     wav, y = prepare_audio(wav_src, None)
     state = _State(title=args.session, wav=wav, turns=turns,
                    peaks=peaks_of(y), duration=len(y) / 16000,
-                   has_gt=truth["has_gt"], has_today=has_today)
+                   has_gt=truth["has_gt"], has_today=has_today,
+                   pairing=truth.get("pairing"))
     _Handler.state = state
     srv = ThreadingHTTPServer(("127.0.0.1", args.port), _Handler)
     url = f"http://127.0.0.1:{args.port}/"
