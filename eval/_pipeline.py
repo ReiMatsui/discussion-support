@@ -162,12 +162,18 @@ def pick_nearest(emb, refs: dict) -> str | None:
 
 
 def replay_seats(run: str, vp, *, wav_path: Path | None = None,
-                 align: str = "time") -> dict | None:
+                 align: str = "time", query=None) -> dict | None:
     """席の参照の推移と、貼り直せる発話の声紋を1回だけ計算する.
 
     席の参照は「高信頼で確定した発話」だけから作られ、その集合は予定表に
     依存しない。したがって推移を保存しておけば、どの予定表でも再利用できる
     （条件を増やしても埋め込みの計算は増えない）。
+
+    `query` は「席と比べる音声を何にするか」の差し込み口で、全発話について
+    ``query(発話, 音声, 決め直す対象か) -> {名前: 音声}`` の形で呼ばれる。
+    複数案を1つの辞書で返せるようにしてあるのは、案ごとに流し直すと席の参照
+    まで作り直しになり、埋め込みの計算が案の数だけ増えるため。既定は現行の
+    「その発話の音声だけ」（名前は空文字）。
     """
     rows = gt_rows(run, align=align)
     wav_path = wav_path or ROOT / "transcripts" / f"{run}.wav"
@@ -182,25 +188,34 @@ def replay_seats(run: str, vp, *, wav_path: Path | None = None,
         wav = pcm[int(a / 1000 * SR):int(b / 1000 * SR)]
         revisable = is_revisable(u)
         base = resolved_key(u)
-        emb = seat.embed(wav) if revisable else None
+        want = (query(u, wav, revisable) if query
+                else ({"": wav} if revisable else {}))
+        embs = {k: seat.embed(v) for k, v in (want or {}).items()}
         if not revisable and base != UNSURE_SPEAKER \
                 and u.get("kind") in _VOICEPRINT_RELIABLE_KINDS:
             seat.observe(base, wav)
         refs = {k: v for k, v in seat._embeddings.items()
                 if seat._seconds.get(k, 0.0) >= SEAT_AUDIO_MIN_REF_SEC}
         steps.append({"ms": a, "elapsed": (a - t0) / 1000.0, "code": code,
-                      "base": base, "revisable": revisable, "emb": emb,
+                      "base": base, "revisable": revisable,
+                      "emb": embs.get(""), "embs": embs,
                       "refs": dict(refs), "utt": u})
     return {"run": run, "steps": steps}
 
 
 def apply_schedule(steps: list[dict], schedule=RETRO_SCHEDULE_SEC,
-                   interval: float = RETRO_INTERVAL_SEC) -> list[str]:
+                   interval: float = RETRO_INTERVAL_SEC, *,
+                   pick=None, name: str = "") -> list[str]:
     """予定表どおりに遡及訂正を掛け、発話ごとの最終キーを返す（§28）.
 
     貼り直しは保存済みの声紋と席の参照の内積だけで、埋め込みの計算は要らない。
     間隔を詰めない理由は計算量ではなく、表示が頻繁に書き換わること（UX）だけ。
+
+    `pick` は寄せ先の選び方（既定は現行の rank-1）、`name` は `replay_seats`
+    の `query` が付けた声紋の名前。どちらも**最初の判定と貼り直しの両方**に
+    同じものが使われる——片方だけ替えると、その差が案の効果に混ざる。
     """
+    pick = pick or pick_nearest
     final: list[str] = []
     remembered: list[int] = []
     idx = 0
@@ -208,7 +223,7 @@ def apply_schedule(steps: list[dict], schedule=RETRO_SCHEDULE_SEC,
     for i, st in enumerate(steps):
         cur = st["base"]
         if st["revisable"]:
-            got = pick_nearest(st["emb"], st["refs"])
+            got = pick(st["embs"].get(name), st["refs"])
             cur = got if got is not None else cur
             remembered.append(i)
         final.append(cur)
@@ -217,7 +232,7 @@ def apply_schedule(steps: list[dict], schedule=RETRO_SCHEDULE_SEC,
             next_at = (schedule[idx] if idx < len(schedule)
                        else st["elapsed"] + interval)
             for j in remembered:
-                got = pick_nearest(steps[j]["emb"], st["refs"])
+                got = pick(steps[j]["embs"].get(name), st["refs"])
                 if got is not None:
                     final[j] = got
     return final
