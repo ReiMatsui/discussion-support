@@ -188,124 +188,361 @@ class RecvLoop:
                   f"これまでの声を聞き直して、{len(applied)}件の話者を再判定しました")
         _print_line(f"# 遡及訂正: {len(applied)}件の話者を再判定しました")
 
-    def flush(self):
+    # ------------------------------------------------------------------
+    # flush の各段（順番と各段の役割は flush の docstring を参照）
+    # ------------------------------------------------------------------
+
+    def _clear_current(self, *, reset_timer: bool = False) -> None:
+        """組み立て中の発話を捨てる（確定でも破棄でも共通の後始末）.
+
+        `reset_timer` はトークンが来なくなってからの強制flush（`_FLUSH_TIMEOUT`）
+        の起点。**エコー破棄では触らない**——破棄はタイマーを進める理由に
+        ならず、触ると強制flushの間隔が黙って延びる。
+        """
+        self.cur_text = ""
+        self.cur_ms = None
+        self.cur_end = None
+        if reset_timer:
+            self.cur_last_token_time = time.monotonic()
+
+    def _text_echo_match(self, *, use_intervals: bool) -> tuple[str, float] | None:
+        """テキストの近さでAIのエコーを見つける（安全網。声紋より前に効かせる）.
+
+        声紋トラッカーの副作用（文字数の蓄積・自動登録）より前に評価する。
+        エコーと判定したら classify を呼ばずに捨てるので、漏れ込んだAI音声で
+        匿名話者が育って登録される事故を防げる（D2）。
+
+        AI再生区間との重なりでエコー窓を判定する（P2-1）。STT確定が遅れて
+        壁時計のエコー窓を過ぎた回り込みも、発話区間 [cur_ms, cur_end] が
+        記録済みの再生区間と重なれば拾う。ms が無い/記録が無いときは従来の
+        壁時計（in_echo_window）に倒す。
+
+        戻り値: (どの経路で見つけたか, 類似度) または None。
+        """
+        s = self.state
+        for name, src in (("agent", s.agent), ("partner", s.partner)):
+            if src is None:
+                continue
+            if name == "agent":
+                in_echo = (s.overlaps_ai_speech(self.cur_ms, self.cur_end,
+                                                source="agent")
+                           if use_intervals else src.in_echo_window)
+                if not in_echo:
+                    continue
+            sim = src._best_similarity(self.cur_text)
+            if sim > 0.35:
+                return name, sim
+        # パートナー切断直後もエコー参照を短時間保持する（P2-4）。partner が
+        # None になってもテキスト安全網が効くよう、TTL 内の退役テキストとも照合。
+        retired = s.recent_retired_echo_texts()
+        if retired:
+            sim = _best_text_similarity(self.cur_text.strip(), retired)
+            if sim > 0.35:
+                return "retired", sim
+        return None
+
+    def _utterance_audio(self) -> np.ndarray:
+        """この発話の区間の音声を、STTへ送った音声のバッファから切り出す.
+
+        ms はここへ送ったバイト位置そのもの（16kHz・16bit なので 32 bytes/ms）。
+        区間が不明・長さゼロなら空配列を返す——呼び先（声紋・席）は空を
+        「計算できない」として扱う。
+        """
+        s = self.state
+        if not (self.cur_ms is not None and self.cur_end is not None
+                and self.cur_end > self.cur_ms):
+            return np.zeros(0, dtype=np.float32)
+        with s.buf_lock:
+            abs_start = self.cur_ms * 32
+            abs_end = self.cur_end * 32
+            rel_start = max(abs_start - s.asr_pcm_buf_offset, 0)
+            rel_end = max(abs_end - s.asr_pcm_buf_offset, 0)
+            seg = bytes(s.asr_pcm_buf[rel_start: rel_end])
+        return np.frombuffer(seg, dtype="<i2").astype(np.float32) / 32768.0
+
+    def _classify_utterance(self, wav, *, label: str, is_backchannel: bool,
+                            use_intervals: bool) -> tuple:
+        """声紋層にこの発話を判定させる（戻り: キー・診断・記録用・入力条件）.
+
+        登録は声ごとの累積文字数で判定するので、この発話の文字数を渡す。
+        F2: エコー窓中（AIが発話中/直後）は enroll=False で蓄積・自動登録を
+        抑止する。室内音響でAI声紋照合(AI_THRESH)が外れた漏れ込みが「新規
+        話者の蓄積」に化けるのを塞ぐ。話者判定自体は従来どおり行う。正当な
+        人間発話の登録がエコー窓ぶん遅れるのは許容（登録は累積制のため軽微）。
+        count: 相槌は照合ごとスキップ。
+
+        agent 側は再生区間の重なりで判定（P2-1, ms/記録が無ければ壁時計）。
+        partner 側は従来どおり壁時計。
+        """
+        s = self.state
+        agent, partner = s.agent, s.partner
+        agent_active = (
+            s.overlaps_ai_speech(self.cur_ms, self.cur_end, source="agent")
+            if use_intervals
+            else (agent is not None
+                  and (agent.ai_speaking or agent.in_echo_window))
+        )
+        ai_active = (
+            agent_active
+            or (partner is not None
+                and (partner.ai_speaking or partner.in_echo_window))
+        )
+        overlapped = self.overlaps_other(self.cur_ms, self.cur_end, label)
+        enroll = (not is_backchannel) and not ai_active
+        sp_id = s.tracker.classify(
+            wav, self.cur_speaker,
+            overlapped=overlapped,
+            count=not is_backchannel,
+            enroll=enroll,
+            chars=len(self.cur_text.strip()))
+        # classify に実際に渡した条件（オフライン再生用, handoff §23）。
+        # overlapped は発話系列から再現できるが、enroll はエコー窓＝AI再生
+        # 区間に依存し記録からは再現できないため必ず残す。
+        flags = {"ov": overlapped, "enr": enroll,
+                 "chars": len(self.cur_text.strip())}
+        return sp_id, s.tracker.last, {}, flags
+
+    def _apply_voiceprint_effects(self, d, rec_extra: dict) -> str | None:
+        """声紋判定に伴う台帳の更新と通知（戻り: 鋳造した人物キー、無ければ None）."""
+        s = self.state
+        if d and d["kind"] == "補正":
+            # peek_disp_name（割当てなし）を使う。ここは説明文のためだけの
+            # 参照で、constrain より前にラベル文字を確保してしまうと、席の
+            # 無いキーが席持ちとして居座る（下の 自動登録 と同じ事故）。
+            note = (f"声紋でラベル{d['label']}の取り違えを修正"
+                    f"（類似{d['sim']:.2f}、"
+                    f"放置なら{s.peek_disp_name(d['prev'])}の発言になっていた）")
+            rec_extra["vp"] = "補正"
+            rec_extra["note"] = note
+            _print_line(f"# ⚡補正: {note}")
+        elif d and d["kind"] == "自動登録":
+            if d["rename"]:
+                s.rekey(*d["rename"])
+            self._link_mint_to_cluster(d["name"])
+            # **通知は constrain の後に出す**。ここで disp_name を呼ぶと、
+            # 席が満杯でも新しい人物にラベル文字が付いてしまい、
+            # constrain の「既にラベルを持つ人は常に通す」規則によって
+            # 上限を超えた席が恒久的に居座る（実会話で --max-speakers 3 に
+            # 対し 参加者D まで出た。handoff §28.7）。
+            return d["name"]
+        elif d and d["kind"] == "合流":
+            if d["rename"]:
+                s.rekey(*d["rename"])
+            if self.args.vp_debug:
+                _print_line(f"# 合流: ラベル{d['label']}→{d['name']}")
+        elif self.args.vp_debug and d:
+            extra = f" 類似{d['sim']:.2f}({d['name']})" if "sim" in d else ""
+            _print_line(f"# vp判定[{d['kind']}]{extra}")
+        return None
+
+    def _decide_and_constrain(self, sp_id, *, d, wav, label: str,
+                              is_backchannel: bool, rec_extra: dict,
+                              classify_flags: dict) -> tuple[str, str, dict]:
+        """帰属を決め（`decide_speaker`）、人数上限を適用する.
+
+        戻り値は (上限適用前のキー, 適用後のキー, diag へ併記する入力)。
+        上限前後の**両方**を返すのは、diag に併記して「resolver は正しいキーを
+        選んだのに上限で未確定に落ちた」事象を後から切り分けるため。従来の
+        diag は上限前の key しか持たず、この区別ができなかった。
+
+        `diag_extra` には「判定の入力」を集める（records ではなく diag へ）。
+        目的はオフライン再生: これが無いとクラスタ層の入力が実行後に失われ、
+        記録から本番コードを回せない（handoff §23）。判定の**出力**の側
+        （speaker_source / reason）も併記する——records は終了時に永続化
+        されないため、これが無いと「この誤帰属は門番で止められる経路か、
+        それとも STT フォールバックか」を後から分けられない（§26.6）。
+        短いキー名なのは diag が1発話1行で膨らむため。
+        """
+        s = self.state
+        diag_extra: dict[str, object] = dict(classify_flags)
+        sp_id = decide_speaker(
+            s, sp_id=sp_id, d=d, wav=wav,
+            start_ms=self.cur_ms, end_ms=self.cur_end,
+            rec_extra=rec_extra, vp_debug=self.args.vp_debug,
+            diag_extra=diag_extra,
+        )
+        if rec_extra.get("speaker_source") is not None:
+            diag_extra["src"] = rec_extra["speaker_source"]
+            diag_extra["why"] = rec_extra.get("speaker_reason")
+        if self.cur_ms is not None and self.cur_end is not None:
+            self.recent_segs.append((self.cur_ms, self.cur_end, label))
+            del self.recent_segs[:-12]
+        final_sp_id = s.constrain_human_speaker_key(
+            UNSURE_SPEAKER if is_backchannel else sp_id)
+        return sp_id, final_sp_id, diag_extra
+
+    def _assign_seat(self, final_sp_id: str, *, sp_id, d, wav,
+                     rec_extra: dict, diag_extra: dict) -> str:
+        """席上限で落ちた発話・ラベル頼りの発話を、席の実音声で決め直す.
+
+        上流はキーを決めていたのに席上限で落ちた発話は、実測で**全て**
+        `@diar:N`＝既に席を持つ人の分裂だった（新しい参加者ではない）。
+        参加人数の設定上そこに新しい参加者は入れないので、残る問いは
+        「席を持つN人のうち誰か」だけになる。この発話1件に限って席の実音声と
+        比べ、最も似た人へ寄せる（確定は書かない＝可逆。§15.12 の「不可逆な
+        操作は高確信を要求」と衝突しない。handoff §27）。
+        """
+        s = self.state
+        # 「蓄積中」の門番（handoff §27.11）。声紋が育っていない発話の帰属は
+        # 裏付け（1位候補が帰属先と一致）が無いと当てにならず、実測で
+        # 裏付けあり 12正解/1誤り に対し裏付けなし 2正解/29誤り だった。
+        # 単独では「誤帰属 -2.7pt と引き換えに未確定 +2.7pt」の交換にしか
+        # ならないので §27.6 で一度保留にしたが、切った先を下の席の音声が
+        # 拾い直すので純増になる（正解 +9.0pt・誤帰属は横ばい）。
+        # §18.8 の3d門番と同じ述語（voiceprint_endorses）を使う。3dより
+        # 適用範囲が広い（経路を問わない）のは、そう測ったから。
+        if (final_sp_id != UNSURE_SPEAKER and d is not None
+                and d.get("kind") == "蓄積中"
+                and not voiceprint_endorses(d, sp_id)):
+            final_sp_id = UNSURE_SPEAKER
+            rec_extra["speaker_source"] = "accumulating_without_endorsement"
+            rec_extra["speaker_confidence"] = 0.0
+            rec_extra["speaker_reason"] = (
+                "voiceprint_still_accumulating_without_endorsement")
+        kind = d.get("kind") if d is not None else None
+        if kind in _LABEL_ONLY_KINDS:
+            # 根拠がSTTラベルしかない kind は、上流のキーを信用せず
+            # 席の実音声で決め直す（handoff §27.12）。
+            #   ラベル不純: そのラベルが複数人を混載していると分かっている
+            #   ラベル継続: 声紋照合が成立せず、ラベルの過去の対応を
+            #               引き継いでいるだけ
+            # どちらも「ラベルに基づく推測」であり、声を直接比べたほうが
+            # 強い。実測で 正解 71.0%→79.2% / 誤帰属 19.7%→13.6%
+            # （検証4本では 82.0%）。棄権していた分（未確定）も
+            # 決めていた分（誤帰属の48%を占めていた）も同じ規則で扱う。
+            reason = "label_only_kind_resolved_by_seat_audio"
+        elif final_sp_id == UNSURE_SPEAKER and sp_id != UNSURE_SPEAKER:
+            # 上流は決めていたのに席上限で落ちた分（§27.8 の本体）。
+            reason = "seat_full_nearest_seat_audio"
+        else:
+            # 参照は「声紋層が高信頼だった発話」だけで作る。全発話で作ると
+            # 席の参照そのものが汚れる（実測: ある席は GT 純度 38%）。
+            # 高信頼4種に絞ると純度は 95-100% に上がり、寄せ先の的中も
+            # 67%→70%、誤帰属の増分も 3.9→3.4pt に下がる（handoff §27.9）。
+            if (final_sp_id != UNSURE_SPEAKER
+                    and kind in _VOICEPRINT_RELIABLE_KINDS):
+                s.seat_audio.observe(final_sp_id, wav)
+            return final_sp_id
+        # 声紋は1回だけ計算し、判定にも遡及訂正の控えにも使い回す。
+        emb = s.seat_audio.embed(wav)
+        if s.retro is not None:
+            s.retro.remember(self.cur_ms, emb)
+        picked = s.seat_audio.nearest_from(emb) if emb is not None else None
+        if picked is None:
+            # なぜ席で判定できなかったかを残す（診断のみ）。実会話で
+            # 「ラベル不純/継続」178件のうち53件が判定できず未確定の
+            # まま残っており、それが未確定18%の主因だった。短い発話に
+            # 偏る（中央値0.30秒 対 0.66秒）が、合成音声では0.06秒でも
+            # 埋め込みは計算できるため、原因が声紋計算なのか席の不足
+            # なのかを記録から切り分ける（handoff §28.13）。
+            diag_extra["seat_miss"] = (
+                "no_embedding" if emb is None
+                else f"few_seats:{s.seat_audio.n_ready()}")
+            return final_sp_id
+        rec_extra["speaker_source"] = "seat_assign"
+        rec_extra["speaker_confidence"] = round(picked[1], 3)
+        rec_extra["speaker_reason"] = reason
+        diag_extra["seat"] = s.seat_audio.last_pick
+        return picked[0]
+
+    def _write_utterance_diag(self, *, label: str, sp_id, final_sp_id,
+                              d, diag_extra: dict) -> None:
+        """1発話1行の diag を書く（判定の入力と出力）.
+
+        判定の根拠は `d`（この発話の classify 結果）だけを書く。
+        `tracker.last` を直に読むと、STT が話者ラベルを返さなかった発話
+        （classify を呼ばない経路。`d` は None にしてある）で**前の発話の
+        判定**が書かれてしまい、記録が実態とずれる。採点も分析も diag の
+        kind を信じて動くので、ここがずれると全部が静かに狂う。
+        """
+        with contextlib.suppress(OSError), \
+                open(self.state.diag_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"ms": self.cur_ms, "end": self.cur_end,
+                                "label": label,
+                                "key": sp_id, "final_key": final_sp_id,
+                                **(d or {}), **diag_extra},
+                               ensure_ascii=False, default=str) + "\n")
+
+    def _write_cluster_naming_diag(self) -> None:
+        """クラスタ確定イベントを diag に残し、実地検証で観測可能にする.
+
+        (handoff §4-2) 書いたら消費（None化）して同一イベントの重複出力を
+        防ぐ。cluster_namer が無い経路（従来モード）は不変。
+        """
+        s = self.state
+        namer_diag = getattr(s.cluster_namer, "last_match", None)
+        if namer_diag is None:
+            return
+        s.cluster_namer.last_match = None
+        with contextlib.suppress(OSError), \
+                open(s.diag_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"ms": self.cur_ms, "end": self.cur_end,
+                                "type": "cluster_naming", **namer_diag},
+                               ensure_ascii=False, default=str) + "\n")
+
+    def _commit_record(self, sp_id: str, rec_extra: dict) -> None:
+        """確定した発話を records に積み、画面と外部フックへ流す."""
         from das.asr.live import ON_UTTERANCE
 
         s = self.state
+        with s.state_lock:
+            s.records.append({"ms": self.cur_ms, "end_ms": self.cur_end,
+                              "speaker": sp_id, "text": self.cur_text.strip(),
+                              **rec_extra})
+            c = s.color_of(sp_id)
+        if ON_UTTERANCE is not None:
+            with contextlib.suppress(Exception):
+                ON_UTTERANCE(s.disp_name(sp_id), self.cur_text.strip())
+        _print_line(f"{c}[{fmt_ts(self.cur_ms)}] {s.disp_name(sp_id)}{RESET}: "
+                    f"{self.cur_text.strip()}")
+
+    def flush(self):
+        """組み立て中の発話を確定し、話者を決めて records に積む.
+
+        段の順番には理由がある（入れ替えると壊れる）:
+
+          1. エコー破棄（テキスト）— 声紋の副作用より**前**。エコーで匿名話者が
+             育って自動登録されるのを防ぐ（D2）
+          2. 音声の切り出し → 3. 声紋判定 → 4. エコー破棄（声紋）
+          5. 声紋に伴う台帳更新（補正・鋳造・合流）。鋳造の通知だけは後回し
+          6. 帰属の決定（`decide_speaker`）→ 7. 人数上限（`constrain`）
+          8. 席の実音声による決め直し（上限で落ちた分・ラベル頼りの分）
+          9. 記録（diag）→ 10. records へ積む → 11. 遡及訂正 → 12. 保存
+        """
+        s = self.state
         if not self.cur_text.strip():
-            self.cur_text = ""
-            self.cur_ms = None
-            self.cur_end = None
-            self.cur_last_token_time = time.monotonic()
+            self._clear_current(reset_timer=True)
             return
         label = str(self.cur_speaker)
         stt_speaker_unknown = _is_unknown_stt_speaker(self.cur_speaker)
         tracker = s.tracker
-        agent = s.agent
-        partner = s.partner
         # 相槌（「はい」等）は声紋の人物確定に使わず、UIでも薄く折りたためるよう印を付ける
         _is_backchannel = bool(_BACKCHANNEL_RE.match(self.cur_text.strip()))
-        # 自動登録の通知は constrain の後に出す（席を得られた場合だけ）。
         _minted_key: str | None = None
-        # --- テキスト類似度エコー判定（安全網, F2で前倒し） ---
-        # 声紋トラッカーの副作用（文字数蓄積・自動登録）より前に評価する。エコーと
-        # 判定したら classify を呼ばずに破棄し、漏れ込んだAI音声で匿名話者が蓄積・
-        # 自動登録されるのを防ぐ（D2）。判定に必要なのは cur_text と agent/partner
-        # だけで、声紋判定への依存はない。
-        # AI再生区間との重なりでエコー窓を判定する（P2-1）。STT確定が遅れて壁時計の
-        # エコー窓を過ぎた回り込みも、発話区間 [cur_ms, cur_end] が記録済みの再生区間と
-        # 重なれば拾う。ms が無い/記録が無いときは従来の壁時計（in_echo_window）に倒す。
         _ms_known = self.cur_ms is not None and self.cur_end is not None
         _use_intervals = _ms_known and s.has_ai_speech_intervals()
-        for _src_name, _src in [("agent", agent), ("partner", partner)]:
-            if _src is None:
-                continue
-            if _src_name == "agent":
-                _agent_echo = (s.overlaps_ai_speech(self.cur_ms, self.cur_end,
-                                                    source="agent")
-                               if _use_intervals else _src.in_echo_window)
-                if not _agent_echo:
-                    continue
-            sim = _src._best_similarity(self.cur_text)
-            if sim > 0.35:
-                if self.args.vp_debug:
-                    _print_line(f"# テキスト安全網エコー除去({_src_name})"
-                                f" sim={sim:.2f}"
-                                f" ({self.cur_text.strip()[:40]}...)")
-                self._note_echo_drop(_src_name, sim=sim)
-                self.cur_text = ""
-                self.cur_ms = None
-                self.cur_end = None
-                return
-        # パートナー切断直後もエコー参照を短時間保持する（P2-4）。partner が None に
-        # なってもテキスト安全網が効くよう、TTL 内の退役テキストとも照合する。
-        _retired = s.recent_retired_echo_texts()
-        if _retired:
-            sim = _best_text_similarity(self.cur_text.strip(), _retired)
-            if sim > 0.35:
-                if self.args.vp_debug:
-                    _print_line(f"# テキスト安全網エコー除去(retired)"
-                                f" sim={sim:.2f}"
-                                f" ({self.cur_text.strip()[:40]}...)")
-                self._note_echo_drop("retired", sim=sim)
-                self.cur_text = ""
-                self.cur_ms = None
-                self.cur_end = None
-                return
+
+        # --- 1. テキスト類似度によるエコー破棄（安全網, F2で前倒し） ---
+        echo = self._text_echo_match(use_intervals=_use_intervals)
+        if echo is not None:
+            if self.args.vp_debug:
+                _print_line(f"# テキスト安全網エコー除去({echo[0]})"
+                            f" sim={echo[1]:.2f}"
+                            f" ({self.cur_text.strip()[:40]}...)")
+            self._note_echo_drop(echo[0], sim=echo[1])
+            self._clear_current()
+            return
+
         if tracker is not None:
-            if self.cur_ms is not None and self.cur_end is not None and self.cur_end > self.cur_ms:
-                with s.buf_lock:
-                    abs_start = self.cur_ms * 32
-                    abs_end = self.cur_end * 32
-                    rel_start = max(abs_start - s.asr_pcm_buf_offset, 0)
-                    rel_end = max(abs_end - s.asr_pcm_buf_offset, 0)
-                    seg = bytes(s.asr_pcm_buf[rel_start: rel_end])
-                wav = np.frombuffer(seg, dtype="<i2").astype(np.float32) / 32768.0
-            else:
-                wav = np.zeros(0, dtype=np.float32)
-            _classify_flags: dict[str, object] = {}
+            # --- 2-3. 音声の切り出しと声紋判定 ---
+            wav = self._utterance_audio()
             if stt_speaker_unknown:
-                sp_id = UNSURE_SPEAKER
-                d = None
-                rec_extra: dict[str, object] = {}
+                sp_id, d, rec_extra, _classify_flags = UNSURE_SPEAKER, None, {}, {}
             else:
-                # 登録は声ごとの累積文字数で判定するので、この発話の文字数を渡す。
-                # F2: エコー窓中（AIが発話中/直後）は count=False で蓄積・自動登録を
-                # 抑止する。室内音響でAI声紋照合(AI_THRESH)が外れた漏れ込みが「新規
-                # 話者の蓄積」に化けるのを塞ぐ。話者判定自体は従来どおり行う。正当な
-                # 人間発話の登録がエコー窓ぶん遅れるのは許容（登録は累積制のため軽微）。
-                # agent 側は再生区間の重なりで判定（P2-1, ms/記録が無ければ壁時計）。
-                # partner 側は従来どおり壁時計。
-                _agent_active = (
-                    s.overlaps_ai_speech(self.cur_ms, self.cur_end, source="agent")
-                    if _use_intervals
-                    else (agent is not None
-                          and (agent.ai_speaking or agent.in_echo_window))
-                )
-                _ai_active = (
-                    _agent_active
-                    or (partner is not None
-                        and (partner.ai_speaking or partner.in_echo_window))
-                )
-                # count: 相槌は照合ごとスキップ。enroll: エコー窓中は照合・補正は
-                # するが蓄積・登録はしない（P2-2）。エコー窓直後の人間の返答が声紋
-                # 補正なしのラベル追従に落ちるのを防ぐ。
-                _overlapped = self.overlaps_other(self.cur_ms, self.cur_end, label)
-                _enroll = (not _is_backchannel) and not _ai_active
-                sp_id = tracker.classify(
-                    wav, self.cur_speaker,
-                    overlapped=_overlapped,
-                    count=not _is_backchannel,
-                    enroll=_enroll,
-                    chars=len(self.cur_text.strip()))
-                d = tracker.last
-                rec_extra: dict[str, object] = {}
-                # classify に実際に渡した条件（オフライン再生用, handoff §23）。
-                # overlapped は発話系列から再現できるが、enroll はエコー窓＝AI再生
-                # 区間に依存し記録からは再現できないため必ず残す。
-                _classify_flags = {"ov": _overlapped, "enr": _enroll,
-                                   "chars": len(self.cur_text.strip())}
-            # --- 声紋ベースのAIエコー除去 ---
+                sp_id, d, rec_extra, _classify_flags = self._classify_utterance(
+                    wav, label=label, is_backchannel=_is_backchannel,
+                    use_intervals=_use_intervals)
+            # --- 4. 声紋によるAIエコー破棄 ---
             if sp_id is not None and is_ai_key(sp_id):
                 if self.args.vp_debug:
                     _print_line(f"# AI声紋エコー除去: sp={sp_id}"
@@ -313,179 +550,43 @@ class RecvLoop:
                 self._note_echo_drop(
                     "voiceprint", key=str(sp_id),
                     sim=d.get("sim") if isinstance(d, dict) else None)
-                self.cur_text = ""
-                self.cur_ms = None
-                self.cur_end = None
+                self._clear_current()
                 return
-            if d and d["kind"] == "補正":
-                # peek_disp_name（割当てなし）を使う。ここは説明文のためだけの
-                # 参照で、constrain より前にラベル文字を確保してしまうと、席の
-                # 無いキーが席持ちとして居座る（下の 自動登録 と同じ事故）。
-                note = (f"声紋でラベル{d['label']}の取り違えを修正"
-                        f"（類似{d['sim']:.2f}、"
-                        f"放置なら{s.peek_disp_name(d['prev'])}の発言になっていた）")
-                rec_extra = {"vp": "補正", "note": note}
-                _print_line(f"# ⚡補正: {note}")
-            elif d and d["kind"] == "自動登録":
-                if d["rename"]:
-                    s.rekey(*d["rename"])
-                self._link_mint_to_cluster(d["name"])
-                # **通知は constrain の後に出す**。ここで disp_name を呼ぶと、
-                # 席が満杯でも新しい人物にラベル文字が付いてしまい、
-                # constrain の「既にラベルを持つ人は常に通す」規則によって
-                # 上限を超えた席が恒久的に居座る（実会話で --max-speakers 3 に
-                # 対し 参加者D まで出た。handoff §28.7）。
-                _minted_key = d["name"]
-            elif d and d["kind"] == "合流":
-                if d["rename"]:
-                    s.rekey(*d["rename"])
-                if self.args.vp_debug:
-                    _print_line(f"# 合流: ラベル{d['label']}→{d['name']}")
-            elif self.args.vp_debug and d:
-                extra = f" 類似{d['sim']:.2f}({d['name']})" if "sim" in d else ""
-                _print_line(f"# vp判定[{d['kind']}]{extra}")
+            # --- 5. 声紋判定に伴う台帳更新・通知 ---
+            _minted_key = self._apply_voiceprint_effects(d, rec_extra)
         else:
             sp_id = _stt_speaker_key(self.cur_speaker)
             rec_extra: dict[str, object] = {}
             d = None
             wav = None
             _classify_flags = {}
-        # --- 話者帰属の決定（声紋→Resolver→クラスタ確定/匿名キー） ---
-        # 判定フローは _attribution.decide_speaker に一本化（構成ごとの分岐・
-        # 各ステップの根拠はモジュール docstring 参照）。constrain（参加人数
-        # 上限・closed roster）はこの後の final_sp_id 計算で適用する。
-        # diag_extra には「判定の入力」を集める（records ではなく diag に出す）。
-        # 目的はオフライン再生: これが無いとクラスタ層の入力が実行後に失われ、
-        # 記録から本番コードを回せない（handoff §23）。
-        diag_extra: dict[str, object] = dict(_classify_flags)
-        sp_id = decide_speaker(
-            s, sp_id=sp_id, d=d, wav=wav,
-            start_ms=self.cur_ms, end_ms=self.cur_end,
-            rec_extra=rec_extra, vp_debug=self.args.vp_debug,
-            diag_extra=diag_extra,
-        )
-        # 判定がどの経路で決まったかを diag にも残す（診断のみ・挙動不変）。
-        # speaker_source は records にしか無く、records は終了時に永続化されない
-        # （transcripts に残るのは diag/turns/wav だけ）。そのため
-        # eval/decompose_attribution.py が「この誤帰属は 3d の門番で止められる
-        # 経路か、それとも STT フォールバックか」を分けられなかった
-        # （handoff §26.6）。短いキー名なのは diag が1発話1行で膨らむため。
-        if rec_extra.get("speaker_source") is not None:
-            diag_extra["src"] = rec_extra["speaker_source"]
-            diag_extra["why"] = rec_extra.get("speaker_reason")
-        if self.cur_ms is not None and self.cur_end is not None:
-            self.recent_segs.append((self.cur_ms, self.cur_end, label))
-            del self.recent_segs[:-12]
-        # constrain 後に records へ入る最終キーを先に計算し、diag へ併記する。
-        # 従来の diag は constrain 前の key しか持たず、「resolver は正しいキーを
-        # 選んだのに constrain で未確定に落ちた」事象の切り分けができなかった
-        # (docs/design/handoff_2026-07-14_unregistered_speakers.md 参照)。
-        # 既存フィールド（key 等）は変えず final_key を追加のみ（diag 消費側の互換維持）。
-        final_sp_id = s.constrain_human_speaker_key(
-            UNSURE_SPEAKER if _is_backchannel else sp_id)
-        # --- 席落ちの割当て（クラスタ分裂の回収。handoff §27。ハイブリッド限定） ---
-        # 上流はキーを決めていたのに席上限で落ちた発話は、実測で**全て**
-        # @diar:N＝既に席を持つ人の分裂だった。参加人数の設定上そこに新しい
-        # 参加者は入れないので、残る問いは「席を持つN人のうち誰か」だけになる。
-        # この発話1件に限って席の実音声と比べ、最も似た人へ寄せる（確定は
-        # 書かない＝可逆。§15.12 の「不可逆な操作は高確信を要求」と衝突しない）。
+
+        # --- 6-7. 帰属の決定と人数上限 ---
+        sp_id, final_sp_id, diag_extra = self._decide_and_constrain(
+            sp_id, d=d, wav=wav, label=label, is_backchannel=_is_backchannel,
+            rec_extra=rec_extra, classify_flags=_classify_flags)
+
+        # --- 8. 席の実音声による決め直し（ハイブリッド限定） ---
         if s.seat_audio is not None and not _is_backchannel:
-            # 「蓄積中」の門番（handoff §27.11）。声紋が育っていない発話の帰属は
-            # 裏付け（1位候補が帰属先と一致）が無いと当てにならず、実測で
-            # 裏付けあり 12正解/1誤り に対し裏付けなし 2正解/29誤り だった。
-            # 単独では「誤帰属 -2.7pt と引き換えに未確定 +2.7pt」の交換にしか
-            # ならないので §27.6 で一度保留にしたが、切った先を下の席の音声が
-            # 拾い直すので純増になる（正解 +9.0pt・誤帰属は横ばい）。
-            # §18.8 の3d門番と同じ述語（voiceprint_endorses）を使う。3dより
-            # 適用範囲が広い（経路を問わない）のは、そう測ったから。
-            if (final_sp_id != UNSURE_SPEAKER and d is not None
-                    and d.get("kind") == "蓄積中"
-                    and not voiceprint_endorses(d, sp_id)):
-                final_sp_id = UNSURE_SPEAKER
-                rec_extra["speaker_source"] = "accumulating_without_endorsement"
-                rec_extra["speaker_confidence"] = 0.0
-                rec_extra["speaker_reason"] = (
-                    "voiceprint_still_accumulating_without_endorsement")
-            _kind = d.get("kind") if d is not None else None
-            if _kind in _LABEL_ONLY_KINDS:
-                # 根拠がSTTラベルしかない kind は、上流のキーを信用せず
-                # 席の実音声で決め直す（handoff §27.12）。
-                #   ラベル不純: そのラベルが複数人を混載していると分かっている
-                #   ラベル継続: 声紋照合が成立せず、ラベルの過去の対応を
-                #               引き継いでいるだけ
-                # どちらも「ラベルに基づく推測」であり、声を直接比べたほうが
-                # 強い。実測で 正解 71.0%→79.2% / 誤帰属 19.7%→13.6%
-                # （検証4本では 82.0%）。棄権していた分（未確定）も
-                # 決めていた分（誤帰属の48%を占めていた）も同じ規則で扱う。
-                _reason = "label_only_kind_resolved_by_seat_audio"
-            elif final_sp_id == UNSURE_SPEAKER and sp_id != UNSURE_SPEAKER:
-                # 上流は決めていたのに席上限で落ちた分（§27.8 の本体）。
-                _reason = "seat_full_nearest_seat_audio"
-            else:
-                _reason = None
-                # 参照は「声紋層が高信頼だった発話」だけで作る。全発話で作ると
-                # 席の参照そのものが汚れる（実測: ある席は GT 純度 38%）。
-                # 高信頼4種に絞ると純度は 95-100% に上がり、寄せ先の的中も
-                # 67%→70%、誤帰属の増分も 3.9→3.4pt に下がる（handoff §27.9）。
-                if (final_sp_id != UNSURE_SPEAKER
-                        and _kind in _VOICEPRINT_RELIABLE_KINDS):
-                    s.seat_audio.observe(final_sp_id, wav)
-            if _reason is not None:
-                # 声紋は1回だけ計算し、判定にも遡及訂正の控えにも使い回す。
-                _emb = s.seat_audio.embed(wav)
-                if s.retro is not None:
-                    s.retro.remember(self.cur_ms, _emb)
-                picked = (s.seat_audio.nearest_from(_emb)
-                          if _emb is not None else None)
-                if picked is None:
-                    # なぜ席で判定できなかったかを残す（診断のみ）。実会話で
-                    # 「ラベル不純/継続」178件のうち53件が判定できず未確定の
-                    # まま残っており、それが未確定18%の主因だった。短い発話に
-                    # 偏る（中央値0.30秒 対 0.66秒）が、合成音声では0.06秒でも
-                    # 埋め込みは計算できるため、原因が声紋計算なのか席の不足
-                    # なのかを記録から切り分ける（handoff §28.13）。
-                    diag_extra["seat_miss"] = (
-                        "no_embedding" if _emb is None
-                        else f"few_seats:{s.seat_audio.n_ready()}")
-                if picked is not None:
-                    final_sp_id = picked[0]
-                    rec_extra["speaker_source"] = "seat_assign"
-                    rec_extra["speaker_confidence"] = round(picked[1], 3)
-                    rec_extra["speaker_reason"] = _reason
-                    diag_extra["seat"] = s.seat_audio.last_pick
-        # 判定の根拠は `d`（この発話の classify 結果）だけを書く。tracker.last を
-        # 直に読むと、STT が話者ラベルを返さなかった発話（classify を呼ばない
-        # 経路。`d` は None にしてある）で**前の発話の判定**が書かれてしまい、
-        # 記録が実態とずれる。採点も分析も diag の kind を信じて動くので、
-        # ここがずれると全部が静かに狂う。
+            final_sp_id = self._assign_seat(
+                final_sp_id, sp_id=sp_id, d=d, wav=wav,
+                rec_extra=rec_extra, diag_extra=diag_extra)
+
+        # --- 9. 記録 ---
         if tracker is not None and (d is not None or stt_speaker_unknown):
-            try:
-                with open(s.diag_path, "a", encoding="utf-8") as f:
-                    f.write(json.dumps({"ms": self.cur_ms, "end": self.cur_end, "label": label,
-                                        "key": sp_id, "final_key": final_sp_id,
-                                        **(d or {}), **diag_extra},
-                                       ensure_ascii=False, default=str) + "\n")
-            except OSError:
-                pass
-        # クラスタ確定イベントを diag に残し、実地検証で観測可能にする
-        # (docs/design/handoff_2026-07-14_unregistered_speakers.md §4-2)。
-        # 書いたら消費（None化）して同一イベントの重複出力を防ぐ。
-        # cluster_namer が無い経路（従来モード）は不変。
-        _namer_diag = getattr(s.cluster_namer, "last_match", None)
-        if _namer_diag is not None:
-            s.cluster_namer.last_match = None
-            with contextlib.suppress(OSError), \
-                    open(s.diag_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps({"ms": self.cur_ms, "end": self.cur_end,
-                                    "type": "cluster_naming", **_namer_diag},
-                                   ensure_ascii=False, default=str) + "\n")
+            self._write_utterance_diag(label=label, sp_id=sp_id,
+                                       final_sp_id=final_sp_id, d=d,
+                                       diag_extra=diag_extra)
+        self._write_cluster_naming_diag()
         if _is_backchannel:
             # 相槌は、話している人とは別人の可能性が高い（Aの話中にBが「はい」）。
             # 未確定化は final_sp_id の計算（constrain 入力を UNSURE にする）で
             # 済んでいるため、ここでは UI 折りたたみ用の bc フラグだけ付ける
-            # (docs/design/attribution_logic_review_2026-07.md D1: 旧 sp_id 上書きは
+            # (attribution_logic_review_2026-07.md D1: 旧 sp_id 上書きは
             # 直後の代入で消えるデッドコードだったので削除)。
             rec_extra["bc"] = True
+
+        # --- 10-12. records へ積み、遡及訂正して保存する ---
         sp_id = final_sp_id   # constrain 済み（diag の final_key と同一値）
         if _minted_key is not None and sp_id == _minted_key:
             # 席を得られた場合だけ「追跡開始」を告げる。落ちた場合は席が無い
@@ -495,21 +596,10 @@ class RecvLoop:
                                    "（名前は右側の登録欄から設定できます）")
             _print_line(f"# この声を「{_disp}」として追跡します"
                         "（名前は右側の登録欄から設定できます）")
-        with s.state_lock:
-            s.records.append({"ms": self.cur_ms, "end_ms": self.cur_end,
-                              "speaker": sp_id, "text": self.cur_text.strip(),
-                              **rec_extra})
-            c = s.color_of(sp_id)
-        if ON_UTTERANCE is not None:
-            with contextlib.suppress(Exception):
-                ON_UTTERANCE(s.disp_name(sp_id), self.cur_text.strip())
-        _print_line(f"{c}[{fmt_ts(self.cur_ms)}] {s.disp_name(sp_id)}{RESET}: {self.cur_text.strip()}")
+        self._commit_record(sp_id, rec_extra)
         self._maybe_retro_reattribute()
         s.save()
-        self.cur_text = ""
-        self.cur_ms = None
-        self.cur_end = None
-        self.cur_last_token_time = time.monotonic()
+        self._clear_current(reset_timer=True)
 
     def run(self, ws) -> RecvStatus:
         """WebSocket受信ループのメイン.
