@@ -5,7 +5,7 @@
     uv run python eval/eval_speaker_gt.py eval/gt_2026-07-14_142016.json
     uv run python eval/eval_speaker_gt.py eval/gt_2026-07-14_142016.json 2026-07-14_180000
 
-GT は eval/gt_annotator_*.html で作成した JSON（labels: {turn_id: S1|S2|S3|MULTI|UNK}）。
+GT は eval/annotate.py で作成した JSON（labels: {turn_id: S1|S2|S3|MULTI|UNK}）。
 対応する transcripts/<session>.turns.jsonl / .diag.jsonl を自動で読む。
 
 第2引数に別セッション名を渡すと、同じ音声を --wav で再実行したランを評価できる:

@@ -84,3 +84,5 @@ eval/_error_anatomy.json
 data/*
 !data/docs/
 !data/docs_policy/
+
+eval/_annot_audio/

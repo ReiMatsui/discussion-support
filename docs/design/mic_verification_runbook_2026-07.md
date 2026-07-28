@@ -101,11 +101,10 @@ Phase 0 の予測は GT11本平均で 実質 +9pt / 未確定 −15pt（§21）�
 ```bash
 SESSION=<セッション名>   # 例: 2026-07-18_1030
 
-# 1) 正解アノテーターを生成（今回整備した eval/make_gt_annotator.py）
-uv run python eval/make_gt_annotator.py $SESSION
-# → eval/gt_annotator_$SESSION.html をブラウザで開き、
-#    transcripts/$SESSION.wav を選択、発話ごとに S1/S2/S3/MULTI/UNK を付与、
-#    書き出したJSONを eval/gt_$SESSION.json に保存
+# 1) 正解を付ける（ブラウザが開く。音声もサーバから配られるので選択不要）
+uv run python eval/annotate.py $SESSION
+# → 1〜9 で話者、S で直前と同じ、0 不明、M 複数人。
+#    eval/gt_$SESSION.json へ自動保存されるので、途中でやめて再開できる。
 
 # 2) 採点
 uv run python eval/eval_speaker_gt.py eval/gt_$SESSION.json

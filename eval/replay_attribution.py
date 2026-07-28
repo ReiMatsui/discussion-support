@@ -363,7 +363,7 @@ def build_argparser() -> argparse.ArgumentParser:
                     "（pyannoteクラスタは対象外＝声紋のみの上限性能）",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     p.add_argument("--gt", default=str(ROOT / "eval" / "gt_2026-07-14_142016.json"),
-                   help="GT JSON（gt_annotator 形式 or timeline形式）")
+                   help="GT JSON（annotate.py 形式 or timeline形式）")
     p.add_argument("--wav", default=None,
                    help="wavパス（省略時は transcripts/<session>.wav）")
     p.add_argument("--from-session", default=None, metavar="SESSION",
