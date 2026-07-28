@@ -120,6 +120,51 @@ def test_rename_follows_so_the_old_key_is_not_resurrected():
     assert picked is not None and picked[0] == "田中"
 
 
+def test_merge_keeps_the_longer_reference():
+    """合流（両方に席がある付け替え）で、参照が短くならないこと.
+
+    rekey は改名だけでなく「分裂したクラスタを1人に束ねる」合流でも呼ばれる。
+    素直に移すと、統合先が貯めた長い参照が統合元の短い参照で消える。
+    """
+    sa = SeatAudio(_Tracker(), ref_sec=30.0, min_ref_sec=1.0)
+    sa.observe("人物1", _audio(1.0, 12.0))    # 統合先: 12秒
+    sa.observe("@diar:2", _audio(1.0, 2.0))   # 統合元: 2秒（同じ人）
+    sa.observe("人物2", _audio(-1.0, 5.0))
+
+    sa.rename("@diar:2", "人物1")
+
+    assert sa._seconds["人物1"] == 12.0, "短いほうの参照で上書きされた"
+    assert "@diar:2" not in sa._seconds, "旧キーが残ると旧キーへ寄せてしまう"
+
+
+def test_merge_does_not_freeze_a_short_reference():
+    """凍結の印だけが残って、短い参照のまま育たなくなる事故を防ぐ."""
+    sa = SeatAudio(_Tracker(), ref_sec=5.0, min_ref_sec=1.0)
+    sa.observe("@diar:2", _audio(1.0, 6.0))   # 統合元は凍結済み（6秒）
+    sa.observe("人物1", _audio(1.0, 2.0))     # 統合先は育ち途中（2秒）
+
+    sa.rename("@diar:2", "人物1")
+
+    assert sa._seconds["人物1"] == 6.0        # 長いほう（凍結済み）が残る
+    assert "人物1" in sa._frozen
+
+    # 逆向き: 統合元が短いときは、凍結の印を持ち込ませない
+    sa2 = SeatAudio(_Tracker(), ref_sec=5.0, min_ref_sec=1.0)
+    sa2.observe("人物1", _audio(1.0, 6.0))    # 統合先が凍結済み（6秒）
+    sa2.observe("@diar:2", _audio(1.0, 1.0))  # 統合元は1秒
+    sa2.rename("@diar:2", "人物1")
+    assert sa2._seconds["人物1"] == 6.0
+    assert "人物1" in sa2._frozen
+
+
+def test_rename_of_an_unknown_key_leaves_the_target_alone():
+    """席を持たないキーの付け替えで、統合先の参照を消さないこと."""
+    sa = _ready()
+    sa.rename("@diar:9", "人物1")
+    picked = sa.nearest(_audio(1.0, 1.0))
+    assert picked is not None and picked[0] == "人物1"
+
+
 def test_reset_clears_everything():
     sa = _ready()
     sa.reset()

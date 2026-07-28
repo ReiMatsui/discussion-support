@@ -158,16 +158,34 @@ class SeatAudio:
 
         追従しないと、リネーム後に旧キーへ寄せてしまい、消えたはずの人格が
         復活する（`_cluster_naming.rename_confirmed` と同じ事情）。
+
+        **統合先が既に席を持っている場合は、長いほうの参照を残す**。付け替えは
+        単なる改名だけでなく「分裂したクラスタを1人に束ねる」合流でも呼ばれる
+        ので、両方に参照があることがある。素直に移すと統合先の参照（30秒まで
+        貯めた綺麗なもの）が統合元の数秒の参照で消え、しかも凍結の印だけが
+        残って**短い参照のまま二度と育たない**。参照は長いほど分離がよいので、
+        短くなる方向へは動かさない。
         """
         if old == new:
             return
+        stores = (self._buffers, self._embeddings, self._seconds)
         with self._lock:
-            for store in (self._buffers, self._embeddings, self._seconds):
-                if old in store:
-                    store[new] = store.pop(old)
-            if old in self._frozen:
+            if not any(old in st for st in stores):
                 self._frozen.discard(old)
-                self._frozen.add(new)
+                return
+            # 統合先が無ければ get は 0.0 になり、素直な移動になる。
+            if self._seconds.get(old, 0.0) >= self._seconds.get(new, 0.0):
+                for st in stores:
+                    st.pop(new, None)
+                    if old in st:
+                        st[new] = st[old]
+                if old in self._frozen:
+                    self._frozen.add(new)
+                else:
+                    self._frozen.discard(new)   # 短い参照を凍結させない
+            for st in stores:
+                st.pop(old, None)               # 旧キーは必ず消す
+            self._frozen.discard(old)
 
     def reset(self) -> None:
         """会議リセット時に参照をすべて捨てる."""
