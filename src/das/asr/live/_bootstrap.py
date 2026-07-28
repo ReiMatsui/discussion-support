@@ -651,6 +651,12 @@ def _build_tracker(args) -> VoiceProfiles | None:
     return tracker
 
 
+def _speaker_cap_hint(args) -> str:
+    """起動ログに出す「 max_speakers=N」（未指定なら空）."""
+    return (f" max_speakers={args.diarization_max_speakers}"
+            if args.diarization_max_speakers else "")
+
+
 def _build_diarizer(args):
     """--diarization の指定に応じて話者分離の供給元を作る（未指定なら None）."""
     diarizer = None
@@ -669,11 +675,8 @@ def _build_diarizer(args):
             pyannote_key,
             max_speakers=args.diarization_max_speakers,
         )
-        hint = (
-            f" max_speakers={args.diarization_max_speakers}"
-            if args.diarization_max_speakers else ""
-        )
-        print(f"# 話者分離: pyannoteAI streaming を使用{hint}", flush=True)
+        print(f"# 話者分離: pyannoteAI streaming を使用"
+              f"{_speaker_cap_hint(args)}", flush=True)
     elif args.diarization == "assemblyai":
         assemblyai_key = os.environ.get("ASSEMBLYAI_API_KEY")
         if not assemblyai_key:
@@ -682,11 +685,8 @@ def _build_diarizer(args):
             assemblyai_key,
             max_speakers=args.diarization_max_speakers,
         )
-        hint = (
-            f" max_speakers={args.diarization_max_speakers}"
-            if args.diarization_max_speakers else ""
-        )
-        print(f"# 話者分離: AssemblyAI streaming を使用{hint}", flush=True)
+        print(f"# 話者分離: AssemblyAI streaming を使用"
+              f"{_speaker_cap_hint(args)}", flush=True)
     elif args.diarization == "sortformer":
         # ローカル Streaming Sortformer（opt-in 検証用, 2026-07-22）。
         # NeMo 専用 venv のサブプロセスで動くため API キーは不要。

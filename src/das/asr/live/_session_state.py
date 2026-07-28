@@ -206,17 +206,7 @@ class SessionState:
         self.start_requested = threading.Event()
 
         # PCMバッファ
-        self.pcm_buf = bytearray()
-        self.pcm_buf_offset = 0
-        self.pcm_total_bytes = 0
-        # 声紋判定用: STT WebSocket に実際に送信できたPCMだけを保持する。
-        # 録音用バッファとは分けることで、接続リセット中に捨てた音声や送信失敗音声で
-        # STTタイムスタンプと声紋切り出し位置がずれるのを防ぐ。
-        self.asr_pcm_buf = bytearray()
-        self.asr_pcm_buf_offset = 0
-        self.asr_pcm_total_bytes = 0
-        self.stt_time_offset_ms = 0
-        self._stt_connection_audio_base_bytes = 0
+        self._reset_pcm_buffers()
         self._PCM_KEEP_BYTES = SR * 2 * 120
         self.buf_lock = threading.Lock()
         self.pcm_file = None  # IO[bytes] | None
@@ -889,20 +879,33 @@ class SessionState:
     # ------------------------------------------------------------------
     # 録音(WAV)の開始・確定
     # ------------------------------------------------------------------
+    def _reset_pcm_buffers(self) -> None:
+        """PCMバッファと、それに紐づく位置・オフセットを初期状態へ戻す.
+
+        **1箇所にまとめる理由**: これは起動時（__init__）と、STT接続を作り直す
+        たび（open_wav）の両方で必要になる。片方に項目を足し忘れると、新しい
+        STTのタイムスタンプ（ms=0起点）と古いバッファ位置が食い違い、声紋の
+        切り出しが静かにずれる——実際に録音と発話msがずれた事故があった（§30）。
+        """
+        self.pcm_buf = bytearray()
+        self.pcm_buf_offset = 0
+        self.pcm_total_bytes = 0
+        # 声紋判定用: STT WebSocket に実際に送信できたPCMだけを保持する。
+        # 録音用バッファとは分けることで、接続リセット中に捨てた音声や送信失敗音声で
+        # STTタイムスタンプと声紋切り出し位置がずれるのを防ぐ。
+        self.asr_pcm_buf = bytearray()
+        self.asr_pcm_buf_offset = 0
+        self.asr_pcm_total_bytes = 0
+        self.stt_time_offset_ms = 0
+        self._stt_connection_audio_base_bytes = 0
+
     def open_wav(self):
         """録音wavを開きヘッダを書く。PCMバッファ関連もリセットする.
 
         STT接続を作り直す際、新しいSTTのタイムスタンプ(ms=0起点)と
         PCMバッファの位置を揃えるため、バッファのオフセット類も0に戻す。
         """
-        self.pcm_buf = bytearray()
-        self.pcm_buf_offset = 0
-        self.pcm_total_bytes = 0
-        self.asr_pcm_buf = bytearray()
-        self.asr_pcm_buf_offset = 0
-        self.asr_pcm_total_bytes = 0
-        self.stt_time_offset_ms = 0
-        self._stt_connection_audio_base_bytes = 0
+        self._reset_pcm_buffers()
         with self._ai_speech_lock:
             self._ai_speech_intervals.clear()
             self._ai_speech_open.clear()
