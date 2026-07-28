@@ -27,7 +27,18 @@ if [ ! -f "$BUNDLE" ]; then
 fi
 
 echo "# 取り込み元: $BUNDLE"
+echo "#   更新日時: $(date -r "$BUNDLE" '+%Y-%m-%d %H:%M' 2>/dev/null || echo '不明')"
 git fetch "$BUNDLE" main:refs/remotes/cloud/main --force
+
+# バンドルの先端を必ず見せる。既定のパスに古いバンドルが残っていると
+# 「Already up to date」だけが出て、取り込めたのか古いのか分からない
+# （2026-07-28 に実際に起きた）。
+echo "# バンドルの先端: $(git log --oneline -1 refs/remotes/cloud/main)"
+if [ "$(git rev-parse HEAD)" = "$(git rev-parse refs/remotes/cloud/main)" ]; then
+    echo "# 取り込むものはありません（手元は既にこの先端です）。"
+    echo "#   新しい作業を待っているなら、このバンドル自体が古い可能性があります。"
+    exit 0
+fi
 
 if git merge-base --is-ancestor HEAD refs/remotes/cloud/main; then
     :
