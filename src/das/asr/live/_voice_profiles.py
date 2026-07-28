@@ -724,6 +724,16 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
 
     def _classify(self, wav: np.ndarray, sp, overlapped: bool,
                   count: bool = True, chars: int = 0, enroll: bool = True) -> str:
+        """判定の骨組み。3つの経路のどれかで決まり、決まらなければ最後の砦へ.
+
+            長尺（min_sec 以上）  → _match_long   … 照合・補正・自動登録
+            短尺（short_floor 〜）→ _match_short  … 厳格照合だけ（登録はしない）
+            それ以外              … 照合しない
+
+        どの経路も「決まらなかった」ときは `None` を返し、`_fallback_key` が
+        ラベルの継続・不純・継続不可を見て最終キーを決める。`kind` は判定の
+        種別で、下流（席の割当て）がこれで分岐するため、経路ごとに必ず入れる。
+        """
         sp = str(sp)
         prev = self.sp_map.get(sp)
         # 初期値「照合なし」は「中尺/長尺の照合経路に入らなかった」ことを示す
@@ -735,120 +745,165 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
         if overlapped and wav.size >= SR * self.min_sec:
             kind = "重なりスキップ"
         elif count and wav.size >= SR * self.min_sec:
-            emb = self._embed(wav)
-            if emb is None:
-                kind = "声紋計算不可"
-            else:
-                self._update_room_stats(sp, emb)   # 部屋の同一/別人分布を実測(表示・診断用)
-                if enroll:
-                    # 手動登録用の直近サンプル。エコー窓中(enroll=False)は溜めない。
-                    self.label_embs.setdefault(sp, []).append(emb)
-                    del self.label_embs[sp][:-10]    # 直近10発話だけ保持
-                th, cs = self.thresh, self.consist
-                active = self._active_human()
-                info = {"n_prof": len(active), "n_all": len(self.profiles)}   # 診断ログ用
-                # ① AI声紋の先行チェック（エコー除去用 — 人間より高い閾値）
-                ai = self._ai_echo(emb, active)
-                if ai is not None:
-                    self.sp_map[sp] = ai[0]
-                    self._note("AI声紋一致", label=sp, sim=round(ai[1], 3), key=ai[0])
-                    return ai[0]
-                # ② 通常の話者照合（人間のプロファイルのみ）
-                ranked = self._rank_active(emb, active)
-                if ranked is not None:
-                    cand, sim, second = ranked
-                    info.update(sim=round(sim, 3), second=round(second, 3), name=cand, prev=prev)
-                    strict = wav.size < SR * self.strict_sec
-                    bonus = self.short_bonus if strict else 0.0
-                    need_th = self._person_th(cand, th) + bonus
-                    # margin は全帯共通の1本（short_margin_mult は ablation で
-                    # 出力ビット一致を確認して削除。review P3）。
-                    need_mg = self.margin
-                    # 人物別しきい値の学習履歴は person_th 判定の手前で記録する
-                    # （固定基準のみ。理由は _record_reference_sim docstring）。
-                    if sim >= th + bonus and sim - second >= need_mg:
-                        self._record_reference_sim(cand, sim)
-                    if sim >= need_th and sim - second >= need_mg:
-                        self.sp_map[sp] = cand
-                        self._record_label_success(sp, cand)
-                        self._track_own_emb(cand, emb)   # 事後回収（二峰性監視）の材料
-                        self._note("補正" if (prev is not None and not is_label_key(prev)
-                                              and prev != cand) else "声紋一致", label=sp, **info)
-                        return cand
-                # 既知の誰にも確信を持って一致しなかった → ラベル継続。ラベルの
-                # 現在の対応（直近の声紋照合成功で決まった人物 or #ラベル）を維持する。
-                # 旧仕様は「その人物と再一致しなければ prev を破棄して #ラベルへ」
-                # だったが、実測（eval/replay_attribution.py, 2026-07-14_142016）では
-                # 中尺発話の声紋が本人でもしきい値に届かず（本人一致 0.17〜0.45）、
-                # 一度の不一致で人物対応が壊れて同一人物が #ラベルと人物Nに分裂し、
-                # 1:1帰属精度44%の主因になっていた。継続化で54%（他の変更と合わせ79%）。
-                # 対応先が継続不可（remap等で消えた・deactivate済み・AI声紋）の
-                # 場合だけは継続を断つ（判定は _continuation_target に統一。3経路共通）。
-                if (prev is not None and not is_label_key(prev)
-                        and self._continuation_target(prev) is None):
-                    prev = None
-                # 登録: 発話数ではなく「声ごとのクリーンな発声の累積文字数」で確定する。
-                # 長い発話は窓分割して複数サンプル化（連続発話でも登録が進み、内部一貫性も確認）。
-                # 不純ラベル（直近の照合成功が複数人物に割れている）の音声は登録・
-                # 蓄積に使わない: 混載ラベル由来のプロファイルが既存人物へ交互に
-                # 合流してプロファイル自体を汚染し、クラスタ照合まで巻き込む
-                # （Chiba 0532 実測: 同一ラベルから人物1へ11回/人物2へ4回の合流、
-                #  handoff §15.7-15.8）。
-                enrollable = (enroll and self.auto and chars > 0
-                              and self._label_pure(sp))
-                kind = "蓄積中" if enrollable else "未確定"
-                if enrollable:
-                    ecs = cs + self.enroll_consist_bonus
-                    samples = self._segment_samples(wav, emb, chars)
-                    target = self._enroll_accumulate(samples, sp, prev, ecs)
-                    if target is not None:
-                        return target
+            key, kind, prev = self._match_long(wav, sp, prev, chars, enroll, info)
+            if key is not None:
+                return key
         elif count and not overlapped and wav.size >= SR * self.short_floor:
-            # 短い発話の取り違え安定化: 既知の2人以上を厳格に区別できるときだけ正す。
-            # overlapped（重なり発話）は除外: 声が混ざった埋め込みは classify docstring
-            # のとおりデタラメで、中尺は「重なりスキップ」なのに短発話だけ照合・補正
-            # （sp_map 書き換え）まで走っていた（2026-07-15 レビューで確定）。重なりは
-            # 発話長によらず声での判定をせず、下のラベル継続へ落とす。
-            # 登録・蓄積はしない（声が短く不安定なため、登録に混ぜると精度が落ちる）。
-            # ハイブリッド構成(hybrid=True)では既知1人でも照合を試みる。声紋一致92%
-            # に対し前話者追従28%（transcripts/2026-07-14_1729 GT評価）のため、
-            # 登録済みプロファイルが1人しか居ない蓄積期でも「声紋で当てられる短発話」
-            # を追従に落とさない。しきい値は同じ厳格運用（誤爆は増やさない）。
-            active = self._active_human()
-            if len(active) >= 2 or (self.hybrid and active):
-                emb = self._embed(wav)
-                ranked = self._rank_active(emb, active) if emb is not None else None
-                if ranked is not None:
-                    cand, sim, second = ranked
-                    info.update(sim=round(sim, 3), second=round(second, 3),
-                                name=cand, short=True)
-                    strict_th = self._person_th(cand, self.thresh) + self.short_bonus
-                    if (sim >= strict_th
-                            and sim - second >= self.margin):
-                        self.sp_map[sp] = cand
-                        self._record_label_success(sp, cand)
-                        self._note("補正" if (prev is not None and not is_label_key(prev)
-                                              and prev != cand) else "声紋一致",
-                                   label=sp, sim=round(sim, 3), second=round(second, 3),
-                                   name=cand, prev=prev, short=True)
-                        return cand
-                # 厳格に決められない短い発話はラベル継続（そのラベルの現在の人物対応を
-                # 維持）。対応先は声紋照合の成功でしか書き換わらないため根拠なしの
-                # 決めつけではない（classify docstring の実測根拠を参照）。
-                # 継続の門番は _trusted_continuation（ラベル信頼度）に統一。
-                cont = self._trusted_continuation(sp, prev)
-                if cont is not None:
-                    # 1位候補と sim を診断に残す（**info。挙動は不変）。
-                    # ここは照合を実際に行った上で「厳格に決められなかった」経路
-                    # なので候補は手元にあるのに、これまで捨てていた。そのため
-                    # handoff §26.4 の測定で「ラベル継続」だけ裏付けの弁別力を
-                    # 評価できず（138件すべて name 無し）、誤帰属の27.7%を占める
-                    # この kind に対して §18.8 型の門番を設計できなかった。
-                    # tracker.last の name/sim を読む側は kind で分岐しているため
-                    # （自動登録・ラベル不純）、ここに足しても判定は変わらない。
-                    self._note("ラベル継続", label=sp,
-                               **{**info, "prev": cont, "short": True})
-                    return cont
+            key = self._match_short(wav, sp, prev, info)
+            if key is not None:
+                return key
+        return self._fallback_key(sp, prev, kind, info)
+
+    # -- 長尺の経路 ---------------------------------------------------
+
+    def _match_long(self, wav: np.ndarray, sp: str, prev, chars: int,
+                    enroll: bool, info: dict) -> tuple[str | None, str, object]:
+        """min_sec 以上の発話を照合し、決まればキーを返す.
+
+        戻り値は (決まったキー or None, kind, 更新後の prev)。prev を返すのは、
+        照合に失敗したときに「継続できない対応」を切る判断がここで付くため
+        （下流の `_fallback_key` に持ち越す）。
+        """
+        emb = self._embed(wav)
+        if emb is None:
+            return None, "声紋計算不可", prev
+        self._update_room_stats(sp, emb)   # 部屋の同一/別人分布を実測(表示・診断用)
+        if enroll:
+            # 手動登録用の直近サンプル。エコー窓中(enroll=False)は溜めない。
+            self.label_embs.setdefault(sp, []).append(emb)
+            del self.label_embs[sp][:-10]    # 直近10発話だけ保持
+        active = self._active_human()
+        info.update(n_prof=len(active), n_all=len(self.profiles))   # 診断ログ用
+        # ① AI声紋の先行チェック（エコー除去用 — 人間より高い閾値）
+        ai = self._ai_echo(emb, active)
+        if ai is not None:
+            self.sp_map[sp] = ai[0]
+            self._note("AI声紋一致", label=sp, sim=round(ai[1], 3), key=ai[0])
+            return ai[0], "AI声紋一致", prev
+        # ② 通常の話者照合（人間のプロファイルのみ）
+        hit = self._match_known(emb, wav, sp, prev, info)
+        if hit is not None:
+            return hit, "声紋一致", prev
+        # 既知の誰にも確信を持って一致しなかった → ラベル継続。ラベルの
+        # 現在の対応（直近の声紋照合成功で決まった人物 or #ラベル）を維持する。
+        # 旧仕様は「その人物と再一致しなければ prev を破棄して #ラベルへ」
+        # だったが、実測（eval/replay_attribution.py, 2026-07-14_142016）では
+        # 中尺発話の声紋が本人でもしきい値に届かず（本人一致 0.17〜0.45）、
+        # 一度の不一致で人物対応が壊れて同一人物が #ラベルと人物Nに分裂し、
+        # 1:1帰属精度44%の主因になっていた。継続化で54%（他の変更と合わせ79%）。
+        # 対応先が継続不可（remap等で消えた・deactivate済み・AI声紋）の
+        # 場合だけは継続を断つ（判定は _continuation_target に統一。3経路共通）。
+        if (prev is not None and not is_label_key(prev)
+                and self._continuation_target(prev) is None):
+            prev = None
+        # 登録: 発話数ではなく「声ごとのクリーンな発声の累積文字数」で確定する。
+        # 長い発話は窓分割して複数サンプル化（連続発話でも登録が進み、内部一貫性も確認）。
+        # 不純ラベル（直近の照合成功が複数人物に割れている）の音声は登録・
+        # 蓄積に使わない: 混載ラベル由来のプロファイルが既存人物へ交互に
+        # 合流してプロファイル自体を汚染し、クラスタ照合まで巻き込む
+        # （Chiba 0532 実測: 同一ラベルから人物1へ11回/人物2へ4回の合流、
+        #  handoff §15.7-15.8）。
+        enrollable = (enroll and self.auto and chars > 0
+                      and self._label_pure(sp))
+        if not enrollable:
+            return None, "未確定", prev
+        ecs = self.consist + self.enroll_consist_bonus
+        samples = self._segment_samples(wav, emb, chars)
+        target = self._enroll_accumulate(samples, sp, prev, ecs)
+        return target, "蓄積中", prev
+
+    def _match_known(self, emb, wav: np.ndarray, sp: str, prev,
+                     info: dict) -> str | None:
+        """既知の人物に確信を持って一致するか（しなければ None）.
+
+        しきい値は2つ揃って初めて通す: 本人しきい値（短い発話は上乗せ）と、
+        2位との差。片方だけでは、似た声の相手に静かに吸い込まれる。
+        """
+        ranked = self._rank_active(emb, self._active_human())
+        if ranked is None:
+            return None
+        cand, sim, second = ranked
+        info.update(sim=round(sim, 3), second=round(second, 3), name=cand, prev=prev)
+        strict = wav.size < SR * self.strict_sec
+        bonus = self.short_bonus if strict else 0.0
+        need_th = self._person_th(cand, self.thresh) + bonus
+        # margin は全帯共通の1本（short_margin_mult は ablation で
+        # 出力ビット一致を確認して削除。review P3）。
+        need_mg = self.margin
+        # 人物別しきい値の学習履歴は person_th 判定の手前で記録する
+        # （固定基準のみ。理由は _record_reference_sim docstring）。
+        if sim >= self.thresh + bonus and sim - second >= need_mg:
+            self._record_reference_sim(cand, sim)
+        if not (sim >= need_th and sim - second >= need_mg):
+            return None
+        self.sp_map[sp] = cand
+        self._record_label_success(sp, cand)
+        self._track_own_emb(cand, emb)   # 事後回収（二峰性監視）の材料
+        self._note("補正" if (prev is not None and not is_label_key(prev)
+                             and prev != cand) else "声紋一致", label=sp, **info)
+        return cand
+
+    # -- 短尺の経路 ---------------------------------------------------
+
+    def _match_short(self, wav: np.ndarray, sp: str, prev,
+                     info: dict) -> str | None:
+        """短い発話の取り違え安定化: 既知の2人以上を厳格に区別できるときだけ正す.
+
+        overlapped（重なり発話）はここへ来ない: 声が混ざった埋め込みは
+        classify docstring のとおりデタラメで、中尺は「重なりスキップ」なのに
+        短発話だけ照合・補正（sp_map 書き換え）まで走っていた（2026-07-15
+        レビューで確定）。重なりは発話長によらず声での判定をせず、ラベル継続へ落とす。
+        登録・蓄積はしない（声が短く不安定なため、登録に混ぜると精度が落ちる）。
+
+        ハイブリッド構成(hybrid=True)では既知1人でも照合を試みる。声紋一致92%
+        に対し前話者追従28%（transcripts/2026-07-14_1729 GT評価）のため、
+        登録済みプロファイルが1人しか居ない蓄積期でも「声紋で当てられる短発話」
+        を追従に落とさない。しきい値は同じ厳格運用（誤爆は増やさない）。
+        """
+        active = self._active_human()
+        if not (len(active) >= 2 or (self.hybrid and active)):
+            return None
+        emb = self._embed(wav)
+        ranked = self._rank_active(emb, active) if emb is not None else None
+        if ranked is not None:
+            cand, sim, second = ranked
+            info.update(sim=round(sim, 3), second=round(second, 3),
+                        name=cand, short=True)
+            strict_th = self._person_th(cand, self.thresh) + self.short_bonus
+            if sim >= strict_th and sim - second >= self.margin:
+                self.sp_map[sp] = cand
+                self._record_label_success(sp, cand)
+                self._note("補正" if (prev is not None and not is_label_key(prev)
+                                     and prev != cand) else "声紋一致",
+                           label=sp, sim=round(sim, 3), second=round(second, 3),
+                           name=cand, prev=prev, short=True)
+                return cand
+        # 厳格に決められない短い発話はラベル継続（そのラベルの現在の人物対応を
+        # 維持）。対応先は声紋照合の成功でしか書き換わらないため根拠なしの
+        # 決めつけではない（classify docstring の実測根拠を参照）。
+        # 継続の門番は _trusted_continuation（ラベル信頼度）に統一。
+        cont = self._trusted_continuation(sp, prev)
+        if cont is None:
+            return None
+        # 1位候補と sim を診断に残す（**info。挙動は不変）。ここは照合を実際に
+        # 行った上で「厳格に決められなかった」経路なので候補は手元にあるのに、
+        # これまで捨てていた。そのため handoff §26.4 の測定で「ラベル継続」だけ
+        # 裏付けの弁別力を評価できず（138件すべて name 無し）、誤帰属の27.7%を
+        # 占めるこの kind に対して §18.8 型の門番を設計できなかった。
+        # tracker.last の name/sim を読む側は kind で分岐しているため
+        # （自動登録・ラベル不純）、ここに足しても判定は変わらない。
+        self._note("ラベル継続", label=sp, **{**info, "prev": cont, "short": True})
+        return cont
+
+    # -- 最後の砦 -----------------------------------------------------
+
+    def _fallback_key(self, sp: str, prev, kind: str, info: dict) -> str:
+        """どの照合でも決まらなかった発話の最終キーを決める.
+
+        優先順位は「ラベルの継続 > 未確定」ではなく、**未確定を選ぶ理由が
+        あるかを先に見る**。誤帰属より未確定を優先するという方針（§15.3）が
+        効くのはここで、ラベルが複数人を混載していれば継続そのものを断つ。
+        """
         # 声紋で決められない発話（相槌・短発話・声紋計算不可の短経路）はラベル継続:
         # そのラベルの現在の対応（声紋照合の成功で確定した人物 or #ラベル）を返す。
         # なお相槌テキストの最終的な表示は呼び出し側（RecvLoop.flush）が未確定に
