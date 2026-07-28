@@ -1322,3 +1322,31 @@ def test_conversation_is_the_only_kind_without_intervention_ceremony():
     from das.asr.live._intervention import _NORMAL_SPECS
     silent = {k for k, s in _NORMAL_SPECS.items() if s.policy is None}
     assert silent == {"conversation"}
+
+
+def test_echo_window_holds_the_floor_without_triggering():
+    """AI の声が残っている間は喋らない（自分の声を拾って会話が二重になる）.
+
+    2026-07-28 のカバレッジ確認で、この経路だけテストが通っていないと分かった。
+    エコー窓は AI が喋った直後に必ず通る道なので、黙る判断が壊れると
+    毎回の介入のあとで挙動が崩れる。
+    """
+    agent = FakeAgent()
+    agent.in_echo_window = True
+    state = FakeState(agent, None)
+    state.summarize_requests.put({"focus": "直近の整理"})
+
+    t = threading.Thread(target=_run_agent_worker, args=(state,), daemon=True)
+    t.start()
+    try:
+        time.sleep(1.0)
+        assert agent.trigger_calls == [], "エコー窓中に発火している"
+        agent.in_echo_window = False
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline and not agent.trigger_calls:
+            time.sleep(0.05)
+    finally:
+        state.stop.set()
+        t.join(timeout=2.0)
+
+    assert agent.trigger_calls, "窓が明けたら保持していた候補で発火するべき"
