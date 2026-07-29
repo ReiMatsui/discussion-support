@@ -44,6 +44,42 @@ def _char_ngrams(text: str, n: int = 3) -> set[str]:
     return {text[i:i+n] for i in range(len(text) - n + 1)}
 
 
+def _normalize(emb) -> np.ndarray | None:
+    """埋め込みをL2正規化する（1次元でない・全ゼロ・非有限は None）.
+
+    全ゼロや非有限（無音区間やモデルの異常出力）は正規化で NaN に化け、以後の
+    内積比較を全て壊す。従来は NaN 伝播で照合不成立に落ちるだけだったが、
+    クラスタ間名寄せは埋め込みを代表として**保存する**（handoff §3）ため、
+    ここで None に落として保存経路に NaN が入らないようにする。
+    """
+    if emb is None or np.asarray(emb).ndim != 1:
+        return None
+    emb = np.asarray(emb, dtype=np.float64)
+    norm = float(np.linalg.norm(emb))
+    if norm == 0.0 or not np.isfinite(norm):
+        return None
+    return emb / norm
+
+
+def make_embedder(model: str, size: str):
+    """波形 -> L2正規化済み声紋 の関数を作る（台帳を持たない）.
+
+    席の割当てだけ別のモデルにするための入口（handoff §38）。`VoiceProfiles`
+    を丸ごと作らないのは、あちらが人物台帳・しきい値・登録状態を持つため——
+    席の割当てが要るのは埋め込みだけで、状態を二重に持つと同期の問題が増える。
+    """
+    raw = VoiceProfiles._load_embedder(model, size)
+
+    def _embed(wav):
+        if wav is None or getattr(wav, "size", 0) == 0:
+            return None
+        try:
+            return _normalize(raw(wav))
+        except Exception:
+            return None
+    return _embed
+
+
 def _best_text_similarity(text: str, recent_texts: list[str],
                           streaming_buf: str = "") -> float:
     """正規化テキストとAI生成テキスト群の最大類似度を返す（0.0〜1.0）。
@@ -337,12 +373,16 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
     AI_THRESH: ClassVar[dict] = {"resemblyzer": 0.80, "ecapa": 0.42, "redimnet": 0.50}
 
     @staticmethod
-    def _load_embedder(model: str):
+    def _load_embedder(model: str, size: str = "b2"):
         """声紋モデルを読み、波形 -> 生の埋め込み の関数を返す.
 
         `__init__` から切り出してある。読み込みは重い（redimnet は初回に
         GitHub からコードと重み20MBを取りに行く）ので、判定の筋道だけを
         試したいときはここを通らずに済ませたい。
+
+        `size` は redimnet のサイズ（b2/b3/b5/b6）。声紋層は b2 で校正されて
+        いる（`DEFAULTS` のしきい値）ので、ここを替えるのは**しきい値を使わ
+        ない席の割当て**に別モデルを載せるときだけである（handoff §38）。
         """
         if model == "ecapa":
             import torch
@@ -357,7 +397,7 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
             return _embed_raw
         if model == "redimnet":
             import torch  # 初回はGitHubからコード＋重み(20MB)をダウンロード
-            enc = torch.hub.load("IDRnD/ReDimNet", "ReDimNet", model_name="b2",
+            enc = torch.hub.load("IDRnD/ReDimNet", "ReDimNet", model_name=size,
                                  train_type="ft_lm", dataset="vox2", trust_repo=True)
             enc.eval()
 
@@ -670,21 +710,10 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
         t0 = time.perf_counter()
         try:
             emb = self._embed_raw(wav)
-            if emb is None or np.asarray(emb).ndim != 1:
-                return None
         except Exception:
             return None
         self.embed_ms.append((time.perf_counter() - t0) * 1000)
-        emb = np.asarray(emb, dtype=np.float64)
-        norm = float(np.linalg.norm(emb))
-        if norm == 0.0 or not np.isfinite(norm):
-            # 全ゼロ・非有限の埋め込み（無音区間やモデルの異常出力）は正規化で
-            # NaN に化け、以後の内積比較を全て壊す。従来は NaN 伝播で照合不成立に
-            # 落ちるだけだったが、クラスタ間名寄せは埋め込みを代表として保存する
-            # (docs/design/handoff_2026-07-14_unregistered_speakers.md §3) ため、
-            # ここで None に落として保存経路に NaN が入らないようにする。
-            return None
-        return emb / norm
+        return _normalize(emb)
 
     def classify(self, wav: np.ndarray, sp, overlapped: bool = False,
                  count: bool = True, chars: int = 0, enroll: bool = True) -> str:

@@ -37,7 +37,7 @@ from das.asr.live._constants import (
 from das.asr.live._diarization import SpeakerResolver
 from das.asr.live._pyannote_diarization import PyannoteStreamingDiarizationProvider
 from das.asr.live._recv_loop import RecvLoop
-from das.asr.live._seat_audio import SeatAudio
+from das.asr.live._seat_audio import SeatAudio, seat_embedder
 from das.asr.live._session_state import SessionState
 from das.asr.live._sortformer_diarization import SortformerLocalDiarizationProvider
 from das.asr.live._ui import _UIHandler
@@ -724,7 +724,7 @@ def _build_cluster_layer(args, tracker):
             # 席落ち発話の割当て（handoff §27）。クラスタ分裂で席を得られず
             # 未確定に落ちる発話を、席を持つ人の実音声と比べて寄せ直す。
             # ハイブリッド構成に閉じるので pyannote単独・Soniox単独は不変。
-            seat_audio = SeatAudio(tracker)
+            seat_audio = SeatAudio(tracker, embedder=seat_embedder(tracker))
             # ハイブリッド時のみ、短発話(short_floor〜min_sec)の声紋照合を既知1人
             # でも試みる（VoiceProfiles.hybrid のコメント参照。実測: 声紋一致92%
             # vs 前話者追従28%, transcripts/2026-07-14_1729 GT評価）。

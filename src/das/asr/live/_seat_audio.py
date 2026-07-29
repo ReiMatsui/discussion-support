@@ -35,6 +35,7 @@ import numpy as np
 from ._constants import (
     RETRO_INTERVAL_SEC,
     RETRO_SCHEDULE_SEC,
+    SEAT_AUDIO_EMBED_SIZE,
     SEAT_AUDIO_MIN_REF_SEC,
     SEAT_AUDIO_REF_SEC,
     SEAT_AUDIO_SHORT_MIN_MARGIN,
@@ -43,6 +44,7 @@ from ._constants import (
     UNSURE_SPEAKER,
 )
 from ._speaker_keys import is_ai_key
+from ._voice_profiles import make_embedder
 
 
 def declines_short(picked: tuple[str, float, float] | None,
@@ -55,6 +57,41 @@ def declines_short(picked: tuple[str, float, float] | None,
     return (picked is not None and dur_ms is not None
             and dur_ms < SEAT_AUDIO_SHORT_MS
             and picked[2] < SEAT_AUDIO_SHORT_MIN_MARGIN)
+
+
+# 読み込み済みの埋め込み器（サイズごとに1つ。`seat_embedder` 参照）。
+_EMBEDDERS: dict[str, object] = {}
+
+
+def seat_embedder(tracker):
+    """席の割当てに使う埋め込み器を返す（声紋層と同じで良ければ None）.
+
+    席の割当てはしきい値を使わない（席を持つ人の中で1位を選ぶだけ）ので、
+    ここだけ大きいモデルにしても再校正が要らない。実測で1秒未満の発話の正解が
+    66.8%→71.0% に上がる（handoff §38）。声紋層は b2 のしきい値で校正されて
+    いるため触らない。
+
+    読み込みに失敗しても止めない——席の割当ては可逆な補助なので、声紋層と同じ
+    モデルに落ちれば従来どおり動く。
+
+    一度読んだら使い回す。本番は1セッション1回だが、オフライン検証は同じ
+    プロセスで何本も流すので、そのたびに数十MBを読み直すことになる。
+    """
+    size = SEAT_AUDIO_EMBED_SIZE
+    if not size or getattr(tracker, "model", None) != "redimnet":
+        return None
+    if size in _EMBEDDERS:
+        return _EMBEDDERS[size]
+    try:
+        got = make_embedder("redimnet", size)
+    except Exception as e:
+        print(f"# 注意: 席の割当て用の声紋モデル {size} を読めませんでした"
+              f"（{type(e).__name__}）。声紋層と同じモデルで続けます。", flush=True)
+        return None
+    print(f"# 席の割当ての声紋: ReDimNet {size}"
+          f"（声紋層は b2 のまま。handoff §38）", flush=True)
+    _EMBEDDERS[size] = got
+    return got
 
 
 class SeatAudio:
@@ -72,8 +109,12 @@ class SeatAudio:
     """
 
     def __init__(self, tracker, *, ref_sec: float = SEAT_AUDIO_REF_SEC,
-                 min_ref_sec: float = SEAT_AUDIO_MIN_REF_SEC) -> None:
+                 min_ref_sec: float = SEAT_AUDIO_MIN_REF_SEC,
+                 embedder=None) -> None:
         self.tracker = tracker
+        # 席の割当てだけ別の声紋モデルを使える（handoff §38）。既定は声紋層と
+        # 同じもの——この段はしきい値を使わないので、替えても再校正が要らない。
+        self._embed_audio = embedder or tracker.embed_audio
         self.ref_sec = float(ref_sec)
         self.min_ref_sec = float(min_ref_sec)
         self._buffers: dict[str, list[np.ndarray]] = {}
@@ -102,7 +143,7 @@ class SeatAudio:
             total = sum(a.size for a in buf)
             concat = np.concatenate(buf) if len(buf) > 1 else buf[0]
         # 埋め込みはロックの外で計算する（tracker 側のロックと入れ子にしない）。
-        emb = self.tracker.embed_audio(concat)
+        emb = self._embed_audio(concat)
         with self._lock:
             if emb is not None:
                 self._embeddings[key] = emb
@@ -136,7 +177,7 @@ class SeatAudio:
         """音声を声紋にする（遡及訂正が同じ埋め込みを取っておくために公開）."""
         if wav is None or wav.size == 0:
             return None
-        return self.tracker.embed_audio(wav)
+        return self._embed_audio(wav)
 
     def nearest_from(self, emb: np.ndarray) -> tuple[str, float, float] | None:
         """既に計算済みの声紋で寄せ先を選ぶ（本体。docstring は `nearest`）.

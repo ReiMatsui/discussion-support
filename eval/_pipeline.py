@@ -21,6 +21,7 @@
     5. 席の参照は「声紋層が高信頼だった発話」だけから作る（§27.9）
     6. 予定表の時刻が来たら、控えてある声紋を今の参照で貼り直す（§28）
     7. 1秒未満で1位と2位が僅差なら、寄せずに未確定にする（§36）
+    8. 席の割当ての声紋だけ、声紋層より大きいモデルを使う（§38）
 """
 from __future__ import annotations
 
@@ -49,6 +50,7 @@ from das.asr.live._recv_loop import _LABEL_ONLY_KINDS  # noqa: E402
 from das.asr.live._seat_audio import (  # noqa: E402
     SeatAudio,
     declines_short,
+    seat_embedder,
 )
 
 __all__ = ["apply_schedule", "current_keys", "gt_rows", "pick_nearest",
@@ -197,7 +199,9 @@ def replay_seats(run: str, vp, *, wav_path: Path | None = None,
         return None
     pcm = read_wav(wav_path)
     t0 = int(rows[0][0]["ms"])
-    seat = SeatAudio(vp)
+    # 席の埋め込み器の選び方も本番と同じ関数に任せる（§38）。ここで
+    # `SeatAudio(vp)` と書くと、本番だけ b5・再現は b2 という食い違いになる。
+    seat = SeatAudio(vp, embedder=seat_embedder(vp))
     steps = []
     for u, code in rows:
         a, b = int(u["ms"]), int(u.get("end") or u["ms"])

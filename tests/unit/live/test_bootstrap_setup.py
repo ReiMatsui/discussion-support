@@ -14,7 +14,7 @@ from typing import ClassVar
 
 import pytest
 
-from das.asr.live import _bootstrap
+from das.asr.live import _bootstrap, _seat_audio
 
 
 class _Args:
@@ -141,7 +141,8 @@ def test_cluster_layer_builds_both_and_turns_on_hybrid(monkeypatch) -> None:
             self.hybrid = on
 
     monkeypatch.setattr(_bootstrap, "ClusterVoiceNamer", lambda t: ("namer", t))
-    monkeypatch.setattr(_bootstrap, "SeatAudio", lambda t: ("seat", t))
+    monkeypatch.setattr(_bootstrap, "SeatAudio",
+                        lambda t, **kw: ("seat", t))
     tracker = _Tracker()
     namer, seat = _bootstrap._build_cluster_layer(
         _Args(diarization="pyannote", vp_cluster_naming=True), tracker)
@@ -305,3 +306,37 @@ def test_receive_loop_stops_when_asked(monkeypatch) -> None:
     monkeypatch.setattr(_Recv, "run", lambda self, ws: _run(ws))
     _bootstrap._receive_until_stopped(s, _Args(), object(), lambda: "ws")
     assert _Recv.made == 1
+
+
+# -- 席の割当てだけ別の声紋モデルを使う（handoff §38） -----------------
+
+
+def test_seat_embedder_is_skipped_for_non_redimnet() -> None:
+    """声紋層が redimnet でなければ、席も同じモデルのまま（注入しない）."""
+    class _T:
+        model = "resemblyzer"
+    assert _seat_audio.seat_embedder(_T()) is None
+
+
+def test_seat_embedder_falls_back_when_the_model_cannot_be_read(monkeypatch) -> None:
+    """読み込みに失敗しても止めない.
+
+    席の割当ては可逆な補助なので、声紋層と同じモデルに落ちれば従来どおり動く。
+    ここで例外を投げるとセッションごと起動しなくなる。
+    """
+    class _T:
+        model = "redimnet"
+
+    def _boom(*a, **k):
+        raise RuntimeError("ネットワークが無い")
+
+    monkeypatch.setattr(_seat_audio, "make_embedder", _boom)
+    assert _seat_audio.seat_embedder(_T()) is None
+
+
+def test_seat_embedder_is_injected_when_available(monkeypatch) -> None:
+    """読めたら SeatAudio にその埋め込み器が渡る."""
+    class _T:
+        model = "redimnet"
+    monkeypatch.setattr(_seat_audio, "make_embedder", lambda m, s: (m, s))
+    assert _seat_audio.seat_embedder(_T()) == ("redimnet", "b5")
