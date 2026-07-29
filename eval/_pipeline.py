@@ -130,6 +130,7 @@ def resolved_key(u: dict, pick: str | None = None, *, cap: bool = True) -> str:
     diag は席上限を掛ける前のキー（`key`）と後（`final_key`）の両方を持って
     いるので、記録から再現できる。上限が無ければ「上限で落ちた発話」も存在
     しないので、それを拾う経路（§27.8）ごと消える。
+
     """
     cur = str(u.get("key")) if not cap else str(
         u["final_key"] if u.get("final_key") is not None else u.get("key"))
@@ -195,9 +196,24 @@ def pick_nearest(emb, refs: dict, st: dict | None = None) -> str | None:
 # ------------------------------------------------------------ 再生
 
 
+def _cached(cache, ms: int, name: str, seat, wav):
+    """同じ発話の声紋を使い回す（人数を変えて何度も流すため）.
+
+    人数を変えると席の参照は変わるが、**発話1件の声紋は変わらない**。参照の
+    埋め込みは席あたり数回なので作り直しても安いが、発話ごとの声紋は本数が
+    多く、そこを毎回計算し直すと人数の掃引に何時間もかかる。
+    """
+    if cache is None:
+        return seat.embed(wav)
+    key = (ms, name)
+    if key not in cache:
+        cache[key] = seat.embed(wav)
+    return cache[key]
+
+
 def replay_seats(run: str, vp, *, wav_path: Path | None = None,
                  align: str = "time", query=None, cap: bool = True,
-                 seats: bool = True) -> dict | None:
+                 seats: bool = True, emb_cache: dict | None = None) -> dict | None:
     """席の参照の推移と、貼り直せる発話の声紋を1回だけ計算する.
 
     席の参照は「高信頼で確定した発話」だけから作られ、その集合は予定表に
@@ -231,7 +247,8 @@ def replay_seats(run: str, vp, *, wav_path: Path | None = None,
         base = resolved_key(u, cap=cap)
         want = (query(u, wav, revisable) if query
                 else ({"": wav} if revisable else {}))
-        embs = {k: seat.embed(v) for k, v in (want or {}).items()}
+        embs = {k: _cached(emb_cache, a, k, seat, v)
+                for k, v in (want or {}).items()}
         if not revisable and base != UNSURE_SPEAKER \
                 and u.get("kind") in _VOICEPRINT_RELIABLE_KINDS:
             seat.observe(base, wav)
