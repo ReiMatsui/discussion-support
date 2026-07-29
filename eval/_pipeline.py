@@ -119,16 +119,22 @@ def score(pairs: list[tuple[str, str]]) -> tuple[float, float, float, int]:
 # ------------------------------------------------ 記録1件に規則を当てる
 
 
-def resolved_key(u: dict, pick: str | None = None) -> str:
+def resolved_key(u: dict, pick: str | None = None, *, cap: bool = True) -> str:
     """記録された発話1件に、今日の規則を当てた最終キーを返す.
 
     `pick` はその発話を席の音声で決め直した結果（無ければ None）。席で
     決め直す条件もここが持つ——呼び出し側が独自に判断すると、また2種類の
     「今日の実装」ができる。
+
+    `cap=False` は**参加人数を決めていない**場合（統一席ルールを掛けない）。
+    diag は席上限を掛ける前のキー（`key`）と後（`final_key`）の両方を持って
+    いるので、記録から再現できる。上限が無ければ「上限で落ちた発話」も存在
+    しないので、それを拾う経路（§27.8）ごと消える。
     """
-    cur = str(u["final_key"] if u.get("final_key") is not None else u.get("key"))
+    cur = str(u.get("key")) if not cap else str(
+        u["final_key"] if u.get("final_key") is not None else u.get("key"))
     kind = u.get("kind")
-    # 蓄積中の門番（§27.11）
+    # 蓄積中の門番（§27.11）。人数の情報には依存しないので上限の有無に関わらず効く。
     if cur != UNSURE_SPEAKER and kind == "蓄積中" and not dec.endorsed(u):
         cur = UNSURE_SPEAKER
     # 根拠がラベルだけの kind は席の音声で決め直す（§27.12）
@@ -137,16 +143,26 @@ def resolved_key(u: dict, pick: str | None = None) -> str:
     if cur != UNSURE_SPEAKER:
         return cur
     # 上流は決めていたのに席上限で落ちた分（§27.8）
-    if str(u.get("key")) != UNSURE_SPEAKER and pick:
+    if cap and str(u.get("key")) != UNSURE_SPEAKER and pick:
         return pick
     return cur
 
 
-def is_revisable(u: dict) -> bool:
-    """席の音声で決め直す対象か（`resolved_key` が `pick` を使う条件と同じ）."""
+def is_revisable(u: dict, *, cap: bool = True, seats: bool = True) -> bool:
+    """席の音声で決め直す対象か（`resolved_key` が `pick` を使う条件と同じ）.
+
+    `seats=False` は席の割当てそのものを使わない条件。閉集合の割当てが成り
+    立つ根拠は「参加人数の設定上そこに新しい人は入らない」ことなので、人数を
+    決めていないなら本来この仕組みは正当化できない（§27）。人数の情報を一切
+    使わない場合の成績を測るときに使う。
+    """
+    if not seats:
+        return False
     kind = u.get("kind")
     if kind in _LABEL_ONLY_KINDS:
         return True
+    if not cap:
+        return False   # 上限が無ければ「上限で落ちた発話」も無い
     cur = str(u["final_key"] if u.get("final_key") is not None else u.get("key"))
     if cur != UNSURE_SPEAKER and kind == "蓄積中" and not dec.endorsed(u):
         cur = UNSURE_SPEAKER
@@ -180,12 +196,17 @@ def pick_nearest(emb, refs: dict, st: dict | None = None) -> str | None:
 
 
 def replay_seats(run: str, vp, *, wav_path: Path | None = None,
-                 align: str = "time", query=None) -> dict | None:
+                 align: str = "time", query=None, cap: bool = True,
+                 seats: bool = True) -> dict | None:
     """席の参照の推移と、貼り直せる発話の声紋を1回だけ計算する.
 
     席の参照は「高信頼で確定した発話」だけから作られ、その集合は予定表に
     依存しない。したがって推移を保存しておけば、どの予定表でも再利用できる
     （条件を増やしても埋め込みの計算は増えない）。
+
+    `cap` / `seats` は「参加人数を決めているか」の条件（`resolved_key` /
+    `is_revisable` 参照）。人数の情報にどれだけ寄りかかっているかを測るための
+    入口で、既定は本番と同じ「決めている」。
 
     `query` は「席と比べる音声を何にするか」の差し込み口で、全発話について
     ``query(発話, 音声, 決め直す対象か) -> {名前: 音声}`` の形で呼ばれる。
@@ -206,8 +227,8 @@ def replay_seats(run: str, vp, *, wav_path: Path | None = None,
     for u, code in rows:
         a, b = int(u["ms"]), int(u.get("end") or u["ms"])
         wav = pcm[int(a / 1000 * SR):int(b / 1000 * SR)]
-        revisable = is_revisable(u)
-        base = resolved_key(u)
+        revisable = is_revisable(u, cap=cap, seats=seats)
+        base = resolved_key(u, cap=cap)
         want = (query(u, wav, revisable) if query
                 else ({"": wav} if revisable else {}))
         embs = {k: seat.embed(v) for k, v in (want or {}).items()}
