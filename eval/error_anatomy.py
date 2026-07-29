@@ -10,8 +10,9 @@
   発話長       短い発話に偏るなら、短発話専用の扱い（保留して後で決める等）
   重なり       重なり発話（diag の ``ov``）に偏るなら、重なりの扱いが本丸
   話者         特定の話者に偏るなら、その人の登録・音量・座席の問題
-  またぎ       Sonioxの区切りが GT の話者境界をまたいでいる発話。ここは
-               **どの答えでも一部が誤り**になるので、精度の上限そのもの
+  またぎ       1区間に2人分の声が入っている発話。**順番にまたぐ**（区切りを
+               直せば取れる）のと**同時に喋っている**（どこで切っても分けら
+               れない）を分けて出す。混ぜると打ち手を誤る（§37）
 
 判定は本番と同じ順序で1回だけ流し、結果を JSON に落としてから切る
 （埋め込みが重いので、断面を増やすたびに再計算しない）。
@@ -34,9 +35,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import _gtlib  # noqa: E402
 import _pipeline as pipe  # noqa: E402
-import _textgt  # noqa: E402
 import decompose_attribution as dec  # noqa: E402
-import segment_boundary_ceiling as seg  # noqa: E402
+import segment_split_ceiling as split  # noqa: E402
 
 from das.asr.live._constants import UNSURE_SPEAKER  # noqa: E402
 
@@ -58,22 +58,22 @@ def compute(run: str, vp, align: str = "text") -> list[dict] | None:
     pairs = [(f, st["code"]) for f, st in zip(final, steps, strict=True)]
     _a, m = _gtlib.best_mapping(pairs, dec.GT_CODES, unsure=UNSURE_SPEAKER)
 
-    # またぎ判定のための GT 区間（Sonioxの区切りが話者境界をまたいでいるか）
-    conv = _textgt.source_of(run)
-    spans = seg.gt_spans(conv) if conv else []
+    # 「2人分入っている」発話は2種類あり、打ち手が違う（§37）。
+    #   順番にまたぐ: 1人ずつ喋っていて、区切りが境界を越えた → 区切りで直る
+    #   同時に喋る  : 声が重なっている → どこで切っても分けられない
+    # 以前はこの2つを1つの「またぎ」に混ぜており、区切りを直せば取れる分を
+    # 大きく見誤っていた（実測では前者5%・後者49%）。
+    spans = split.spans_of(run)
 
     out = []
     for f, st in zip(final, steps, strict=True):
         u = st["utt"]
         a = int(u["ms"])
         b = int(u.get("end") or a)
-        by_sp: Counter = Counter()
-        for x, y, sp in spans:
-            ov = min(b, y) - max(a, x)
-            if ov > 0:
-                by_sp[sp] += ov
-        dur = sum(by_sp.values()) or max(0, b - a)
-        top = by_sp.most_common(1)[0][1] if by_sp else dur
+        parts, overlap_ms = split.split_by_speaker(a, b, spans)
+        secs = {c: sum(y - x for x, y in v) for c, v in parts.items()}
+        solo = sum(secs.values())
+        top = max(secs.values()) if secs else 0
         out.append({
             "run": run, "ms": a, "dur_ms": max(0, b - a),
             "elapsed_s": st["elapsed"],
@@ -81,7 +81,8 @@ def compute(run: str, vp, align: str = "text") -> list[dict] | None:
             "ov": bool(u.get("ov")), "gt": st["code"],
             "outcome": ("未確定" if f == UNSURE_SPEAKER
                         else "正解" if m.get(f) == st["code"] else "誤帰属"),
-            "straddle": bool(len(by_sp) > 1 and (dur - top) / dur > 0.10),
+            "straddle": bool(solo and (solo - top) / solo > 0.10),
+            "overlapped": bool(overlap_ms > 0.10 * (solo + overlap_ms)),
             "kind": u.get("kind"),
             "src": u.get("src"),
         })
@@ -164,8 +165,10 @@ def main(argv: list[str] | None = None) -> None:
     _slice(rows, bucket_dur, "発話長")
     _slice(rows, lambda r: "重なり" if r["ov"] else "重なりなし", "重なり")
     _slice(rows, lambda r: r["gt"], "GT話者")
-    _slice(rows, lambda r: "またぎ" if r["straddle"] else "またぎなし",
-           "Sonioxの区切りが話者境界をまたいでいるか（精度の上限）")
+    _slice(rows, lambda r: "順番にまたぐ" if r["straddle"] else "またぎなし",
+           "区切りが話者境界を越えているか（区切りを直せば取れる分）")
+    _slice(rows, lambda r: "重なりあり" if r.get("overlapped") else "重なりなし",
+           "2人以上が同時に喋っているか（区切りでは分けられない分）")
     _slice(rows, lambda r: r.get("kind") or "（なし）", "声紋判定の種別")
     _slice(rows, lambda r: r.get("src") or "（なし）", "どの経路で決まったか")
 
