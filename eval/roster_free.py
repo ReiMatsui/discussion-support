@@ -114,13 +114,18 @@ def _eigengap(emb: np.ndarray) -> int:
     return int(np.argmax(gaps) + 1)
 
 
-def _silhouette_k(emb: np.ndarray) -> int:
-    """k=2..8 で切って、いちばんまとまりの良い k を選ぶ."""
+def _silhouette_k(emb: np.ndarray, max_k: int = MAX_K) -> int:
+    """k=2..max_k で切って、いちばんまとまりの良い k を選ぶ.
+
+    `max_k` は人数を**上限として**使うための入口。固定すると序盤（材料が
+    4〜5件しかない時期）に悪い割り方で固まるが、上限なら材料に応じて
+    2→3と増やせる。
+    """
     z = _linkage(emb)
     d = 1.0 - emb @ emb.T
     np.fill_diagonal(d, 0.0)
     best, best_k = -2.0, 1
-    for k in range(2, MAX_K + 1):
+    for k in range(2, max_k + 1):
         lab = fcluster(z, k, criterion="maxclust")
         if len(set(lab)) < 2:
             continue
@@ -202,9 +207,10 @@ def estimate_k_long(emb, dur, min_ms: int) -> int:
 # ------------------------------------------------ 5. 因果的にやった場合
 
 
-def causal_score(emb, code, chars, dur, ms, *, min_ms: int, k=None,
-                 every_sec: float = 30.0, retro: bool = True):
-    """その時点までの長い発話だけでまとめ直す（ライブで実際にできる形）.
+def causal_predict(emb, dur, ms, *, min_ms: int = 2000, k=None,
+                   k_max: int = MAX_K, every_sec: float = 30.0,
+                   retro: bool = True) -> dict[int, int]:
+    """その時点までの長い発話だけでまとめ直し、発話ごとの寄せ先を返す.
 
     非因果の上限（4節）は会話全体を見ている。ライブでできるのは「いままでに
     聞いた長い発話でまとめ直す」ところまでで、序盤は材料が無い。どれだけ
@@ -212,6 +218,7 @@ def causal_score(emb, code, chars, dur, ms, *, min_ms: int, k=None,
 
     `retro=True` は本番と同じ遡及訂正——まとめ直した時点で、過去の発話も
     新しい参照で貼り直す。声紋は控えてあるので計算は増えない（§28）。
+    戻り値は 添字 -> クラスタ番号（まだ決められない発話は -1）。
     """
     order = np.argsort(ms)
     refs = None
@@ -226,8 +233,8 @@ def causal_score(emb, code, chars, dur, ms, *, min_ms: int, k=None,
             seen = [j for j in order if ms[j] <= ms[i] and dur[j] >= min_ms]
             if len(seen) >= 4:
                 e = emb[seen]
-                kk = k if k is not None else _silhouette_k(e)
-                kk = min(kk, len(seen))
+                kk = min(k if k is not None else _silhouette_k(e, k_max),
+                         len(seen))
                 lab = fcluster(_linkage(e), kk, criterion="maxclust")
                 rs = []
                 for c in np.unique(lab):
@@ -243,8 +250,17 @@ def causal_score(emb, code, chars, dur, ms, *, min_ms: int, k=None,
             decided.append(int(i))
         else:
             pred[int(i)] = -1
-    pairs = [(f"c{pred[i]}" if pred[i] >= 0 else "?", code[i])
-             for i in range(len(code))]
+    return pred
+
+
+def labels_of(pred: dict[int, int], n: int) -> list[str]:
+    """寄せ先の番号を、採点で使うキー文字列にする（決まらなかった分は未確定）."""
+    return [f"c{pred[i]}" if pred.get(i, -1) >= 0 else "?" for i in range(n)]
+
+
+def causal_score(emb, code, chars, dur, ms, **kw):
+    pred = causal_predict(emb, dur, ms, **kw)
+    pairs = list(zip(labels_of(pred, len(code)), code, strict=True))
     _a, m = _gtlib.best_mapping(pairs, dec.GT_CODES, unsure="?")
     ok = [m.get(p) == c for p, c in pairs]
     un = [p == "?" for p, _c in pairs]
@@ -254,8 +270,7 @@ def causal_score(emb, code, chars, dur, ms, *, min_ms: int, k=None,
     wun = int(sum(x for x, g in zip(chars, un, strict=True) if g))
     ident = len({p for p, _c in pairs if p != "?"})
     return (sum(ok) / n, (n - sum(ok) - sum(un)) / n, sum(un) / n,
-            wok / w, (w - wok - wun) / w, wun / w, ident,
-            len(refs) if refs is not None else 0)
+            wok / w, (w - wok - wun) / w, wun / w, ident, ident)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -334,11 +349,14 @@ def main(argv: list[str] | None = None) -> None:
     print(f"{'条件':<30}{'件数:正解':>10}{'誤帰属':>8}{'未確定':>8}"
           f"{'  ':>2}{'文字:正解':>10}{'誤帰属':>8}{'未確定':>8}"
           f"{'  ':>2}{'話者数':>7}{'最終k':>7}")
-    for label, kk, rt in (("2秒以上・k推定・貼り直しあり", None, True),
-                          ("2秒以上・k推定・貼り直しなし", None, False),
-                          ("2秒以上・k=3・貼り直しあり", 3, True)):
+    for label, kk, km, rt in (
+            ("人数なし・k推定（上限8）", None, 8, True),
+            ("人数なし・k推定・貼り直しなし", None, 8, False),
+            ("人数を3に固定", 3, 8, True),
+            ("人数を上限に使う（k<=3）", None, 3, True),
+            ("人数を多めに上限（k<=5）", None, 5, True)):
         acc = [causal_score(g["emb"], g["code"], g["chars"], g["dur_ms"],
-                            g["ms"], min_ms=2000, k=kk, retro=rt)
+                            g["ms"], min_ms=2000, k=kk, k_max=km, retro=rt)
                for _r, g in data]
         n = len(acc)
         a = [sum(x[i] for x in acc) / n for i in range(8)]
