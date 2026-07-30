@@ -894,7 +894,18 @@ def _receive_until_stopped(state, args, backend, connect_stt) -> None:
                     pass
                 if state.stop.is_set():
                     break
-            state.stt_ws = connect_stt()
+            try:
+                state.stt_ws = connect_stt()
+            except Exception as e:
+                # 瞬断とリセットが重なっただけでセッション全体を落とさない。
+                # 通常の切断（disconnected 分岐）は再試行するのに、リセット
+                # 経路だけ素通しで例外が run_session まで抜けていた（レビュー
+                # 2026-07-30）。reset_requested を立てたまま continue すれば
+                # この分岐に戻ってきて再試行になる。
+                print(f"# 新しい会議のSTT接続に失敗（再試行します）: {e}",
+                      flush=True)
+                time.sleep(1.0)
+                continue
             recv = RecvLoop(state, args, backend)
             state.reset_requested.clear()
             state.resetting = False

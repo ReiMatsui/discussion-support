@@ -340,3 +340,33 @@ def test_seat_embedder_is_injected_when_available(monkeypatch) -> None:
         model = "redimnet"
     monkeypatch.setattr(_seat_audio, "make_embedder", lambda m, s: (m, s))
     assert _seat_audio.seat_embedder(_T()) == ("redimnet", "b5")
+
+
+def test_reset_survives_a_transient_stt_connect_failure(monkeypatch) -> None:
+    """リセット時のSTT接続失敗はセッションを落とさず、再試行して復帰する.
+
+    通常の切断は再試行するのに、リセット経路だけ connect が素通しで、瞬断と
+    重なるとセッション全体が落ちていた（レビュー 2026-07-30）。
+    """
+    monkeypatch.setattr(_bootstrap, "RecvLoop", _Recv)
+    monkeypatch.setattr(_bootstrap.time, "sleep", lambda *_: None)
+    s = _LoopState(["ok", "finished"])
+
+    def _run(ws):
+        if len(_Recv.script) == 2:
+            s.reset_requested.set()
+        return _Recv.script.pop(0) if _Recv.script else "finished"
+
+    monkeypatch.setattr(_Recv, "run", lambda self, ws: _run(ws))
+    attempts = []
+
+    def _connect():
+        attempts.append(1)
+        if len(attempts) < 3:
+            raise OSError("瞬断")
+        return "ws3"
+
+    _bootstrap._receive_until_stopped(s, _Args(), object(), _connect)
+    assert len(attempts) == 3, "接続を再試行していない"
+    assert s.stt_ws == "ws3"
+    assert not s.reset_requested.is_set()
