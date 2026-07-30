@@ -298,7 +298,16 @@ class PyannoteStreamingDiarizationProvider:
                 raw = self._ws.recv()
             except Exception:
                 break
-            event = self._parse_message(raw)
+            try:
+                event = self._parse_message(raw)
+            except Exception:
+                # 不正なフレーム（非JSON・非UTF-8・想定外の型）1つで reader
+                # スレッドが死ぬと、以後の diarization イベントが無言で止まり、
+                # 帰属が STT ラベルへ静かに縮退する（レビュー 2026-07-30）。
+                # フレームは捨てて読み続ける。
+                logger.warning("pyannote Live-1: 解釈できないフレームを破棄: %r",
+                               raw[:120] if isinstance(raw, (str, bytes)) else raw)
+                continue
             if event is not None:
                 self._events.put(event)
 

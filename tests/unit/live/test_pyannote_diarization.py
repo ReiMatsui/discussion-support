@@ -264,3 +264,23 @@ def test_active_starts_is_guarded_by_a_lock() -> None:
          "data": {"timestamp": 99.0, "speaker": "SPEAKER_99"}}))
     assert len(events) == 50
     assert provider._active_lock is not None
+
+
+def test_reader_survives_a_malformed_frame() -> None:
+    """不正なフレーム1つで reader が死なない（死ぬと分離が無言で全停止）."""
+    provider = PyannoteStreamingDiarizationProvider("k")
+    frames = ["これはJSONではない",
+              json.dumps({"type": "diarization_speaker_start",
+                          "data": {"timestamp": 1.0, "speaker": "SPEAKER_00"}}),
+              None]
+
+    class _WS:
+        def recv(self):
+            f = frames.pop(0)
+            if f is None:
+                raise ConnectionError("終端")
+            return f
+
+    provider._ws = _WS()
+    provider._read_loop()          # 不正フレームで例外が漏れないこと
+    assert provider.active_events(), "不正フレームの後のイベントを取りこぼした"
