@@ -1380,187 +1380,219 @@ class SessionState:
                 f.write("\n".join(lines) + "\n")
             os.replace(tmp, dst)
 
-    def write_html(self, live: bool = True, recs=None, path=None, status=None):
+    def _html_utterances(self, rs) -> str:
+        """本文（発話・システム行）。呼び出し元が state_lock を保持している."""
         import html as _html
+        parts = []
+        for r in rs:
+            if "sys" in r:
+                parts.append(f'<div class="sys">⚙ {_html.escape(r["sys"])}</div>')
+                continue
+            sp = str(r["speaker"])
+            # 監査E: 旧実装 list(colors).index() は rekey の pop で後続全員の
+            # 色がずれる（api_snapshot 側は C11/P2 で修正済みだった）。
+            # 保存用HTMLも同じ安定採番 html_color() に統一する。
+            c = self.html_color(sp)
+            badge = ""
+            if r.get("vp") == "補正":
+                note = _html.escape(r.get("note", ""))
+                badge = f'<span class="badge" title="{note}">⚡声紋補正</span>'
+            parts.append(
+                f'<div class="u"><span class="ts">{fmt_ts(r["ms"])}</span>'
+                f'<span class="who" style="color:{c}">{_html.escape(self.disp_name(sp))}</span>'
+                f'{_html.escape(r["text"])}{badge}</div>'
+            )
+        return "\n".join(parts)
+
+    def _html_speaker_panel(self, rs) -> str:
+        """サイドバー「この会議の話者」（サーブ中は名前登録の入力欄つき）."""
+        import html as _html
+        speakers = list(dict.fromkeys(r["speaker"] for r in rs if "speaker" in r))
+        sp_tags = []
+        for s in speakers:
+            dn = _html.escape(self.disp_name(s))
+            c = self.html_color(s)
+            lbl = self._speaker_label(str(s))
+            is_renameable = self._serve and self.tracker is not None and lbl is not None
+            if is_renameable:
+                sp_tags.append(
+                    f'<div class="speaker-tag">'
+                    f'<div class="speaker-name"><span class="dot" style="background:{c}"></span>{dn}</div>'
+                    f'<div class="rename-row">'
+                    f'<input class="rename-input" placeholder="名前" data-label="{_html.escape(lbl)}">'
+                    f'<button class="rename-btn" onclick="rename(this)">登録</button>'
+                    f'</div></div>')
+            else:
+                sp_tags.append(
+                    f'<div class="speaker-tag">'
+                    f'<div class="speaker-name"><span class="dot" style="background:{c}"></span>{dn}</div>'
+                    f'</div>')
+        if not sp_tags:
+            return ''
+        return ('<div class="sidebar"><p class="sidebar-title">この会議の話者</p>'
+                '<div class="speaker-panel">' + ''.join(sp_tags) + '</div></div>')
+
+    def _html_profile_panel(self) -> str:
+        """サイドバー「プロファイル」（保存済みの声の有効/無効・削除）."""
+        import html as _html
+        if not (self._serve and self.tracker is not None):
+            return ''
+        all_names = self.tracker.all_profile_names()
+        if not all_names:
+            return ''
+        active_names = set(self.tracker.active_profile_names())
+        items = []
+        for n in all_names:
+            cls = 'profile-item active' if n in active_names else 'profile-item'
+            items.append(
+                f'<div class="{cls}" data-name="{_html.escape(n)}">'
+                f'<span class="profile-toggle" '
+                f'onclick="toggleProfile(this.parentElement)"></span>'
+                f'<span class="profile-name" '
+                f'onclick="toggleProfile(this.parentElement)">'
+                f'{_html.escape(n)}</span>'
+                f'<span class="profile-del" title="この声の登録を削除"'
+                f' onclick="forgetProfile(this.parentElement)">×</span>'
+                f'</div>')
+        return ('<div class="profile-section">'
+                '<p class="sidebar-title">プロファイル'
+                '<span class="sidebar-hint">'
+                'クリックで有効/無効・×で削除</span></p>'
+                + ''.join(items) + '</div>')
+
+    def _html_stats_panel(self, rs) -> str:
+        """サイドバー「発言量」（時間・文字数・回数の3本のバー）."""
+        import html as _html
+        talk_rs = [r for r in rs if "speaker" in r and r.get("text")]
+        if not talk_rs:
+            return ''
+        sp_dur: dict[str, float] = {}
+        sp_chars: dict[str, int] = {}
+        sp_turns: dict[str, int] = {}
+        for r in talk_rs:
+            s = r["speaker"]
+            ms, end = r.get("ms"), r.get("end_ms")
+            dur = (end - ms) / 1000.0 if ms is not None and end is not None and end > ms else 0.0
+            sp_dur[s] = sp_dur.get(s, 0.0) + dur
+            sp_chars[s] = sp_chars.get(s, 0) + len(r["text"])
+            sp_turns[s] = sp_turns.get(s, 0) + 1
+        total_dur = sum(sp_dur.values()) or 1.0
+        total_chars = sum(sp_chars.values()) or 1
+        total_turns = sum(sp_turns.values()) or 1
+        ranked = sorted(sp_dur.keys(), key=lambda s: sp_dur[s], reverse=True)
+
+        def _bar_rows(data, total):
+            rows = []
+            for s in ranked:
+                v = data.get(s, 0)
+                pct = v / total * 100 if total else 0
+                c = self.html_color(s)
+                dn = _html.escape(self.disp_name(s))
+                short = dn[:2] if len(dn) > 3 else dn
+                rows.append(
+                    f'<div class="stats-row">'
+                    f'<span class="stats-name" title="{dn}">{short}</span>'
+                    f'<div class="stats-bar-bg">'
+                    f'<div class="stats-bar" style="width:{pct:.0f}%;background:{c}"></div>'
+                    f'</div>'
+                    f'<span class="stats-pct">{pct:.0f}%</span>'
+                    f'</div>')
+            return ''.join(rows)
+
+        groups = []
+        if total_dur > 0.5:
+            groups.append('<div class="stats-group">'
+                          '<div class="stats-label">発話時間</div>'
+                          + _bar_rows(sp_dur, total_dur) + '</div>')
+        groups.append('<div class="stats-group">'
+                      '<div class="stats-label">文字数</div>'
+                      + _bar_rows(sp_chars, total_chars) + '</div>')
+        groups.append('<div class="stats-group">'
+                      '<div class="stats-label">発話回数</div>'
+                      + _bar_rows(sp_turns, total_turns) + '</div>')
+        return ('<div class="stats-section">'
+                '<p class="sidebar-title">発言量</p>'
+                + ''.join(groups) + '</div>')
+
+    def _html_topics_panel(self) -> str:
+        """サイドバー「論点」（topic worker が抽出したもの）."""
+        import html as _html
+        with self.topics_lock:
+            topics = list(self.topics)
+        if not topics:
+            return ''
+        items = []
+        for t in topics:
+            tt = _html.escape(t.get("topic", ""))
+            ts = _html.escape(t.get("speaker", ""))
+            items.append(f'<div class="topic-item">'
+                         f'<div class="topic-text">{tt}</div>'
+                         f'<div class="topic-by">{ts}</div></div>')
+        return ('<div class="topics-section">'
+                '<p class="sidebar-title">論点</p>'
+                + ''.join(items) + '</div>')
+
+    def _html_agent_panel(self) -> str:
+        """サイドバー「AI Agent」（モード・声・間隔の操作）."""
+        import html as _html
+        if self.agent is None:
+            return ''
+        cur_mode = self.agent.mode
+        if self.agent._connected:
+            conn = '接続中'
+        elif self.agent._conn_error:
+            conn = f'エラー: {_html.escape(self.agent._conn_error)}'
+        else:
+            conn = '未接続'
+        mode_btns = []
+        for m, lbl in [("off", "OFF"), ("facilitator", "進行役"),
+                       ("conversation", "会話")]:
+            cls = "agent-mode-btn active" if m == cur_mode else "agent-mode-btn"
+            mode_btns.append(f'<button class="{cls}" data-mode="{m}" '
+                             f'onclick="setAgentMode(this)">{lbl}</button>')
+        voice_opts = []
+        for v in AGENT_VOICES:
+            sel = 'selected' if v == self.agent.voice else ''
+            voice_opts.append(f'<option value="{v}" {sel}>{v}</option>')
+        trigger_val = self.agent.trigger_n
+        return (
+            f'<div class="agent-section" data-mode="{cur_mode}">'
+            f'<div class="agent-header">'
+            f'<span class="agent-label">🤖 AI Agent</span>'
+            f'<span class="agent-conn">{conn}</span>'
+            f'</div>'
+            f'<div class="agent-modes">{"".join(mode_btns)}</div>'
+            f'<div class="agent-opts">'
+            f'<label class="agent-opt-label">声'
+            f'<select class="agent-select" onchange="setAgentVoice(this)">'
+            f'{"".join(voice_opts)}</select></label>'
+            f'<label class="agent-opt-label agent-trigger-row">'
+            f'間隔 <input type="number" class="agent-num" value="{trigger_val}" '
+            f'min="1" max="50" onchange="setAgentTrigger(this)">発話'
+            f'</label>'
+            f'</div></div>')
+
+    def write_html(self, live: bool = True, recs=None, path=None, status=None):
+        """議事録HTMLを組み立てて保存する（本文＋サイドバー5パネル）.
+
+        各パネルの生成は `_html_*` に分かれている。出力はゴールデンテスト
+        （test_write_html_golden）で1文字単位に固定してあるので、見た目を
+        変えるときはフィクスチャを作り直すこと。
+        """
         with self.state_lock:
             rs = self.records if recs is None else recs
-            parts = []
-            for r in rs:
-                if "sys" in r:
-                    parts.append(f'<div class="sys">⚙ {_html.escape(r["sys"])}</div>')
-                    continue
-                sp = str(r["speaker"])
-                # 監査E: 旧実装 list(colors).index() は rekey の pop で後続全員の
-                # 色がずれる（api_snapshot 側は C11/P2 で修正済みだった）。
-                # 保存用HTMLも同じ安定採番 html_color() に統一する。
-                c = self.html_color(sp)
-                badge = ""
-                if r.get("vp") == "補正":
-                    note = _html.escape(r.get("note", ""))
-                    badge = f'<span class="badge" title="{note}">⚡声紋補正</span>'
-                parts.append(
-                    f'<div class="u"><span class="ts">{fmt_ts(r["ms"])}</span>'
-                    f'<span class="who" style="color:{c}">{_html.escape(self.disp_name(sp))}</span>'
-                    f'{_html.escape(r["text"])}{badge}</div>'
-                )
-            speakers = list(dict.fromkeys(r["speaker"] for r in rs if "speaker" in r))
-            sp_tags = []
-            for s in speakers:
-                dn = _html.escape(self.disp_name(s))
-                c = self.html_color(s)
-                lbl = self._speaker_label(str(s))
-                is_renameable = self._serve and self.tracker is not None and lbl is not None
-                if is_renameable:
-                    sp_tags.append(
-                        f'<div class="speaker-tag">'
-                        f'<div class="speaker-name"><span class="dot" style="background:{c}"></span>{dn}</div>'
-                        f'<div class="rename-row">'
-                        f'<input class="rename-input" placeholder="名前" data-label="{_html.escape(lbl)}">'
-                        f'<button class="rename-btn" onclick="rename(this)">登録</button>'
-                        f'</div></div>')
-                else:
-                    sp_tags.append(
-                        f'<div class="speaker-tag">'
-                        f'<div class="speaker-name"><span class="dot" style="background:{c}"></span>{dn}</div>'
-                        f'</div>')
-            if sp_tags:
-                speaker_panel = ('<div class="sidebar"><p class="sidebar-title">この会議の話者</p>'
-                                 '<div class="speaker-panel">' + ''.join(sp_tags) + '</div></div>')
-            else:
-                speaker_panel = ''
-            profile_panel = ''
-            if self._serve and self.tracker is not None:
-                all_names = self.tracker.all_profile_names()
-                if all_names:
-                    active_names = set(self.tracker.active_profile_names())
-                    items = []
-                    for n in all_names:
-                        cls = 'profile-item active' if n in active_names else 'profile-item'
-                        items.append(
-                            f'<div class="{cls}" data-name="{_html.escape(n)}">'
-                            f'<span class="profile-toggle" '
-                            f'onclick="toggleProfile(this.parentElement)"></span>'
-                            f'<span class="profile-name" '
-                            f'onclick="toggleProfile(this.parentElement)">'
-                            f'{_html.escape(n)}</span>'
-                            f'<span class="profile-del" title="この声の登録を削除"'
-                            f' onclick="forgetProfile(this.parentElement)">×</span>'
-                            f'</div>')
-                    profile_panel = ('<div class="profile-section">'
-                                     '<p class="sidebar-title">プロファイル'
-                                     '<span class="sidebar-hint">'
-                                     'クリックで有効/無効・×で削除</span></p>'
-                                     + ''.join(items) + '</div>')
-            stats_panel = ''
-            talk_rs = [r for r in rs if "speaker" in r and r.get("text")]
-            if talk_rs:
-                sp_dur: dict[str, float] = {}
-                sp_chars: dict[str, int] = {}
-                sp_turns: dict[str, int] = {}
-                for r in talk_rs:
-                    s = r["speaker"]
-                    ms, end = r.get("ms"), r.get("end_ms")
-                    dur = (end - ms) / 1000.0 if ms is not None and end is not None and end > ms else 0.0
-                    sp_dur[s] = sp_dur.get(s, 0.0) + dur
-                    sp_chars[s] = sp_chars.get(s, 0) + len(r["text"])
-                    sp_turns[s] = sp_turns.get(s, 0) + 1
-                total_dur = sum(sp_dur.values()) or 1.0
-                total_chars = sum(sp_chars.values()) or 1
-                total_turns = sum(sp_turns.values()) or 1
-                ranked = sorted(sp_dur.keys(), key=lambda s: sp_dur[s], reverse=True)
-
-                def _bar_rows(data, total):
-                    rows = []
-                    for s in ranked:
-                        v = data.get(s, 0)
-                        pct = v / total * 100 if total else 0
-                        c = self.html_color(s)
-                        dn = _html.escape(self.disp_name(s))
-                        short = dn[:2] if len(dn) > 3 else dn
-                        rows.append(
-                            f'<div class="stats-row">'
-                            f'<span class="stats-name" title="{dn}">{short}</span>'
-                            f'<div class="stats-bar-bg">'
-                            f'<div class="stats-bar" style="width:{pct:.0f}%;background:{c}"></div>'
-                            f'</div>'
-                            f'<span class="stats-pct">{pct:.0f}%</span>'
-                            f'</div>')
-                    return ''.join(rows)
-
-                groups = []
-                if total_dur > 0.5:
-                    groups.append('<div class="stats-group">'
-                                  '<div class="stats-label">発話時間</div>'
-                                  + _bar_rows(sp_dur, total_dur) + '</div>')
-                groups.append('<div class="stats-group">'
-                              '<div class="stats-label">文字数</div>'
-                              + _bar_rows(sp_chars, total_chars) + '</div>')
-                groups.append('<div class="stats-group">'
-                              '<div class="stats-label">発話回数</div>'
-                              + _bar_rows(sp_turns, total_turns) + '</div>')
-                stats_panel = ('<div class="stats-section">'
-                               '<p class="sidebar-title">発言量</p>'
-                               + ''.join(groups) + '</div>')
-            topics_panel = ''
-            with self.topics_lock:
-                if self.topics:
-                    items = []
-                    for t in self.topics:
-                        tt = _html.escape(t.get("topic", ""))
-                        ts = _html.escape(t.get("speaker", ""))
-                        items.append(f'<div class="topic-item">'
-                                     f'<div class="topic-text">{tt}</div>'
-                                     f'<div class="topic-by">{ts}</div></div>')
-                    topics_panel = ('<div class="topics-section">'
-                                   '<p class="sidebar-title">論点</p>'
-                                   + ''.join(items) + '</div>')
-            agent_panel = ''
-            if self.agent is not None:
-                cur_mode = self.agent.mode
-                if self.agent._connected:
-                    conn = '接続中'
-                elif self.agent._conn_error:
-                    conn = f'エラー: {_html.escape(self.agent._conn_error)}'
-                else:
-                    conn = '未接続'
-                mode_btns = []
-                for m, lbl in [("off", "OFF"), ("facilitator", "進行役"),
-                               ("conversation", "会話")]:
-                    cls = "agent-mode-btn active" if m == cur_mode else "agent-mode-btn"
-                    mode_btns.append(f'<button class="{cls}" data-mode="{m}" '
-                                     f'onclick="setAgentMode(this)">{lbl}</button>')
-                voice_opts = []
-                for v in AGENT_VOICES:
-                    sel = 'selected' if v == self.agent.voice else ''
-                    voice_opts.append(f'<option value="{v}" {sel}>{v}</option>')
-                trigger_val = self.agent.trigger_n
-                agent_panel = (
-                    f'<div class="agent-section" data-mode="{cur_mode}">'
-                    f'<div class="agent-header">'
-                    f'<span class="agent-label">🤖 AI Agent</span>'
-                    f'<span class="agent-conn">{conn}</span>'
-                    f'</div>'
-                    f'<div class="agent-modes">{"".join(mode_btns)}</div>'
-                    f'<div class="agent-opts">'
-                    f'<label class="agent-opt-label">声'
-                    f'<select class="agent-select" onchange="setAgentVoice(this)">'
-                    f'{"".join(voice_opts)}</select></label>'
-                    f'<label class="agent-opt-label agent-trigger-row">'
-                    f'間隔 <input type="number" class="agent-num" value="{trigger_val}" '
-                    f'min="1" max="50" onchange="setAgentTrigger(this)">発話'
-                    f'</label>'
-                    f'</div></div>')
+            body = self._html_utterances(rs)
             doc = HTML_TMPL.format(
                 refresh='<meta http-equiv="refresh" content="2">' if live else "",
                 title=self.started.strftime("%Y-%m-%d %H:%M"),
                 status=status or ('<span class="live">● ライブ（2秒ごと自動更新）</span>'
                                   if live else "終了"),
-                speaker_panel=speaker_panel,
-                profile_panel=profile_panel,
-                stats_panel=stats_panel,
-                topics_panel=topics_panel,
-                agent_panel=agent_panel,
-                body="\n".join(parts) or '<p class="meta">（まだ発話なし）</p>',
+                speaker_panel=self._html_speaker_panel(rs),
+                profile_panel=self._html_profile_panel(),
+                stats_panel=self._html_stats_panel(rs),
+                topics_panel=self._html_topics_panel(),
+                agent_panel=self._html_agent_panel(),
+                body=body or '<p class="meta">（まだ発話なし）</p>',
             )
             dst = path or self.html_path
             tmp = dst + ".tmp"
