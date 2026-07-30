@@ -106,6 +106,10 @@ quote-style = "double"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# tests/ を跨ぐ import（例: test_sortformer_provider が test_session_state の
+# _make_state を借りる）は repo ルートが sys.path にあるときだけ通る。
+# `python -m pytest` は通り `pytest` 直叩きは落ちる、という起動方法依存を無くす。
+pythonpath = ["."]
 asyncio_mode = "auto"
 addopts = "-ra --strict-markers"
 markers = [
