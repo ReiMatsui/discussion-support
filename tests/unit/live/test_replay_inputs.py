@@ -987,3 +987,19 @@ def test_invariant_holds_without_a_speaker_limit(tmp_path):
     labels = sorted(state.anonymous_labels.values())
     expected = [f"参加者{chr(ord('A') + i)}" for i in range(len(labels))]
     assert labels == expected, f"文字が飛んでいる: {labels}"
+
+
+def test_retro_can_correct_its_own_earlier_revision(tmp_path):
+    """一度貼り直したレコードも、後のパスで貼り直せる.
+
+    最初のパス（参照が未成熟な60秒時点）の誤った貼り直しが不可侵になると、
+    予定表を複数回にした意味（§28.5）と僅差なら未確定へ戻す棄権則（§36.4）が
+    2回目以降まったく効かない（レビュー 2026-07-30）。
+    """
+    state = _retro_state(tmp_path)
+    state.records.append({"ms": 1000, "end_ms": 2000, "speaker": "人物1",
+                          "speaker_source": "seat_assign_retro",
+                          "text": "早い時点の貼り直し", "unsure": False})
+    applied = state.apply_retro_attribution({1000: "人物2"})
+    assert applied == {1000: "人物2"}, "seat_assign_retro が再訂正の対象外"
+    assert state.records[-1]["speaker"] == "人物2"

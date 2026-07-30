@@ -684,7 +684,13 @@ class SessionState:
                 if new_key is None or str(r["speaker"]) == str(new_key):
                     continue
                 src = r.get("speaker_source")
-                revisable = (src == "seat_assign"
+                # seat_assign_retro も対象に含める。含めないと、最初のパス
+                # （参照が未成熟な60秒時点）で誤って貼り直したレコードが
+                # その瞬間から不可侵になり、参照が育った後のパスで正しい席へ
+                # 引き戻せない——予定表を複数回にした意味（§28.5）と、僅差なら
+                # 未確定へ戻す棄権則（§36.4）が2回目以降まったく効かない
+                # （レビュー 2026-07-30）。
+                revisable = (src in ("seat_assign", "seat_assign_retro")
                              or str(r["speaker"]) == UNSURE_SPEAKER)
                 if not revisable:
                     continue
