@@ -87,7 +87,7 @@ def run_live(mix_path: Path, max_speakers: int, extra_soniox: str,
     """listen-soniox を実走し、新規セッション名を自動検出して返す."""
     before = {p.name for p in TRANSCRIPTS.glob("*.turns.jsonl")}
     started = datetime.datetime.now()
-    cmd = das_command() + [
+    cmd = [*das_command(),
         "listen-soniox", *_MODE_FLAGS[mode],
         "--max-speakers", str(max_speakers),
         # 帰属測定に介入系は不要: docsの事前AF化・発話ごとのAF構築の入口・

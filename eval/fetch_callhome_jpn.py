@@ -76,7 +76,7 @@ def convert_wav(raw: bytes, out_path: Path) -> float:
     if n_ch > 1:
         y = y.reshape(-1, n_ch).mean(axis=1)
     if rate != SR:
-        n_out = int(round(len(y) * SR / rate))
+        n_out = round(len(y) * SR / rate)
         y = np.interp(np.linspace(0, len(y) - 1, n_out),
                       np.arange(len(y)), y).astype(np.float32)
     with wave.open(str(out_path), "wb") as w:

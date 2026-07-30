@@ -182,7 +182,7 @@ def main(gt_path: str, session_override: str | None = None) -> None:
     # 増やすことが実測済み（§15.5）。実用判断はこの値を併読する。
     if non_bc and len(non_bc) < len(single):
         s_acc, s_map = best_mapping(non_bc)
-        s_unsure, s_wrong, s_unmapped = breakdown(non_bc, s_map)
+        s_unsure, s_wrong, _s_unmapped = breakdown(non_bc, s_map)
         print(f"\n== 相槌除外（実質発話 {len(non_bc)}件）: 精度 {s_acc:.0%}"
               f" ／ 未確定 {s_unsure:.0%} ／ 誤帰属 {s_wrong:.0%} ==")
 

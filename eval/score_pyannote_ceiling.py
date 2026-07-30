@@ -25,8 +25,9 @@ ROOT = Path(__file__).resolve().parent.parent
 def main(gt_path: str) -> None:
     gt = json.loads(Path(gt_path).read_text(encoding="utf-8"))
     session = gt["session"]
-    turns = [json.loads(l) for l in
-             open(ROOT / "transcripts" / f"{session}.turns.jsonl", encoding="utf-8")]
+    with open(ROOT / "transcripts" / f"{session}.turns.jsonl",
+              encoding="utf-8") as f:
+        turns = [json.loads(line) for line in f]
     bench_path = ROOT / "transcripts" / f"{session}.pyannote_bench.json"
     if not bench_path.exists():
         sys.exit(f"{bench_path} がありません。先に benchmark_pyannote.py を実行してください")
@@ -72,7 +73,7 @@ def main(gt_path: str) -> None:
     for k in range(min(3, len(clusters)) + 1):
         for perm in permutations(clusters, k):
             for gsel in permutations(["S1", "S2", "S3"], k):
-                m = dict(zip(perm, gsel))
+                m = dict(zip(perm, gsel, strict=False))
                 a = sum(1 for g, c in rows if m.get(c) == g) / len(rows)
                 if a > best:
                     best, bm = a, m

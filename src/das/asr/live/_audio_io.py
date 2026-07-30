@@ -45,7 +45,7 @@ def _run_from_mic(state: SessionState, device):
     state.audio_q.put(None)
 
 
-def _load_wav_mono_16k(path: str) -> "np.ndarray":
+def _load_wav_mono_16k(path: str) -> np.ndarray:
     """音声ファイルをモノラル float32 の SR(16kHz) 配列で読む.
 
     従来は librosa を使っていたが、librosa はどの依存グループにも宣言されて
@@ -90,7 +90,7 @@ def _load_wav_mono_16k(path: str) -> "np.ndarray":
         y = t.mean(dim=0).numpy().astype("float32")
     if sr != SR:
         # 線形補間による簡易リサンプル（STT入力用途には十分）
-        n_out = int(round(len(y) * SR / sr))
+        n_out = round(len(y) * SR / sr)
         y = np.interp(np.linspace(0, len(y) - 1, n_out),
                       np.arange(len(y)), y).astype("float32")
     return y

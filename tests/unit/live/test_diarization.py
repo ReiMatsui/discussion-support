@@ -554,12 +554,12 @@ class _FakeClusterNamer:
 def _make_cluster_naming_state(cluster_namer):
     import datetime
 
-    class Args:
+    class args_cls:                     # noqa: N801  引数クラス（値の入れ物）
         lang = "ja"
         vp_debug = False
 
     state = SessionState(  # type: ignore[no-untyped-call]
-        args=Args(),
+        args=args_cls(),
         started=datetime.datetime(2026, 1, 1),
         out_path="/tmp/o.md",
         html_path="/tmp/o.html",
@@ -572,7 +572,7 @@ def _make_cluster_naming_state(cluster_namer):
     )
     state.save = lambda *a, **k: None  # type: ignore[method-assign]
     state.asr_pcm_buf = bytearray(b"\0" * 16000 * 2 * 3)
-    return state, Args
+    return state, args_cls
 
 
 def test_recv_loop_cluster_naming_confirms_name_and_retroactively_renames() -> None:
@@ -583,13 +583,13 @@ def test_recv_loop_cluster_naming_confirms_name_and_retroactively_renames() -> N
             return raw
 
     namer = _FakeClusterNamer(name="田中")
-    state, Args = _make_cluster_naming_state(namer)
+    state, args_cls = _make_cluster_naming_state(namer)
     state.diarization_events = [DiarizationEvent(900, 3100, "SPEAKER_00", "pyannote")]
     # 過去にこのクラスタへ既に@diar:1が発行済み、という状況を再現する。
     state.diarization_speaker_keys["pyannote:SPEAKER_00"] = "@diar:1"
     state.records.append({"ms": 0, "end_ms": 900, "speaker": "@diar:1", "text": "前の発話"})
 
-    loop = RecvLoop(state, Args(), Backend())  # type: ignore[arg-type]
+    loop = RecvLoop(state, args_cls(), Backend())  # type: ignore[arg-type]
     loop.cur_speaker = "1"  # type: ignore[assignment]
     loop.cur_text = "これはテストです"
     loop.cur_ms = 1000
@@ -615,10 +615,10 @@ def test_recv_loop_cluster_naming_falls_back_when_unconfirmed() -> None:
             return raw
 
     namer = _FakeClusterNamer(name=None)
-    state, Args = _make_cluster_naming_state(namer)
+    state, args_cls = _make_cluster_naming_state(namer)
     state.diarization_events = [DiarizationEvent(900, 3100, "SPEAKER_00", "pyannote")]
 
-    loop = RecvLoop(state, Args(), Backend())  # type: ignore[arg-type]
+    loop = RecvLoop(state, args_cls(), Backend())  # type: ignore[arg-type]
     loop.cur_speaker = "1"  # type: ignore[assignment]
     loop.cur_text = "これはテストです"
     loop.cur_ms = 1000
@@ -641,13 +641,13 @@ def test_recv_loop_cluster_naming_marks_overlap_region_as_unsure() -> None:
             return raw
 
     namer = _FakeClusterNamer(name=None)
-    state, Args = _make_cluster_naming_state(namer)
+    state, args_cls = _make_cluster_naming_state(namer)
     state.diarization_events = [
         DiarizationEvent(1000, 3000, "SPEAKER_00", "pyannote"),
         DiarizationEvent(1000, 2000, "SPEAKER_01", "pyannote"),
     ]
 
-    loop = RecvLoop(state, Args(), Backend())  # type: ignore[arg-type]
+    loop = RecvLoop(state, args_cls(), Backend())  # type: ignore[arg-type]
     loop.cur_speaker = "1"  # type: ignore[assignment]
     loop.cur_text = "これはテストです"
     loop.cur_ms = 1000
@@ -669,10 +669,10 @@ def test_recv_loop_without_cluster_namer_keeps_legacy_behavior() -> None:
         def parse_message(self, raw, lang):
             return raw
 
-    state, Args = _make_cluster_naming_state(None)
+    state, args_cls = _make_cluster_naming_state(None)
     state.diarization_events = [DiarizationEvent(900, 3100, "SPEAKER_00", "pyannote")]
 
-    loop = RecvLoop(state, Args(), Backend())  # type: ignore[arg-type]
+    loop = RecvLoop(state, args_cls(), Backend())  # type: ignore[arg-type]
     loop.cur_speaker = "1"  # type: ignore[assignment]
     loop.cur_text = "これはテストです"
     loop.cur_ms = 1000
