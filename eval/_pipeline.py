@@ -22,6 +22,8 @@
     6. 予定表の時刻が来たら、控えてある声紋を今の参照で貼り直す（§28）
     7. 1秒未満で1位と2位が僅差なら、寄せずに未確定にする（§36）
     8. 席の割当ての声紋だけ、声紋層より大きいモデルを使う（§38）
+    9. ラベル不純で長い発話なのに best sim が低ければ未確定（未登録話者の
+       門番, §47）。遡及訂正の後に掛かり、復活しない
 """
 from __future__ import annotations
 
@@ -38,7 +40,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _gtlib  # noqa: E402
 import decompose_attribution as dec  # noqa: E402
 
-from das.asr.live._attribution import _VOICEPRINT_RELIABLE_KINDS  # noqa: E402
+from das.asr.live._attribution import (  # noqa: E402
+    _VOICEPRINT_RELIABLE_KINDS,
+    impure_lowsim,
+)
 from das.asr.live._constants import (  # noqa: E402
     RETRO_INTERVAL_SEC,
     RETRO_SCHEDULE_SEC,
@@ -53,8 +58,9 @@ from das.asr.live._seat_audio import (  # noqa: E402
     seat_embedder,
 )
 
-__all__ = ["apply_schedule", "current_keys", "gt_rows", "pick_nearest",
-           "read_wav", "replay_seats", "resolved_key", "score"]
+__all__ = ["apply_impure_lowsim_guard", "apply_schedule", "current_keys",
+           "gt_rows", "pick_nearest", "read_wav", "replay_seats",
+           "resolved_key", "score"]
 
 
 # ---------------------------------------------------------------- 素材
@@ -311,6 +317,15 @@ def apply_schedule(steps: list[dict], schedule=RETRO_SCHEDULE_SEC,
     return final
 
 
+def apply_impure_lowsim_guard(final: list[str], steps: list[dict]) -> list[str]:
+    """規則9: 未登録話者の門番を最終キーに掛ける（§47。述語は本番と共用）."""
+    return [UNSURE_SPEAKER
+            if impure_lowsim(st["utt"].get("kind"), st["utt"].get("chars"),
+                             st["utt"].get("sim"))
+            else f
+            for f, st in zip(final, steps, strict=True)]
+
+
 def current_keys(run: str, vp) -> dict[int, str] | None:
     """**今日の実装**で決まる最終キーを ms -> キー で返す.
 
@@ -321,6 +336,7 @@ def current_keys(run: str, vp) -> dict[int, str] | None:
     data = replay_seats(run, vp)
     if data is None:
         return None
-    final = apply_schedule(data["steps"])
+    final = apply_impure_lowsim_guard(apply_schedule(data["steps"]),
+                                      data["steps"])
     return {int(st["ms"]): f
             for st, f in zip(data["steps"], final, strict=True)}
