@@ -203,11 +203,14 @@ def _cluster_attribution_raw(s: SessionState, resolved, *, wav,
 def decide_speaker(s: SessionState, *, sp_id, d, wav: np.ndarray | None,
                    start_ms: int | None, end_ms: int | None,
                    rec_extra: dict, vp_debug: bool,
-                   diag_extra: dict | None = None) -> str:
+                   diag_extra: dict | None = None,
+                   stt_label: str | None = None) -> str:
     """発話の話者キーを決める統合層（constrain 前まで。フローはモジュール docstring）.
 
     引数:
       sp_id: 声紋段（VoiceProfiles.classify / STTラベル正規化）の結果キー
+      stt_label: STT の生の話者ラベル（"1" 等）。ステップ4のフォールバック
+        キーはこちらから作る——sp_id は写像済みキー（人物N 等）でありうるため
       d: tracker.last（声紋判定の診断辞書。tracker 無しなら None）
       wav: 発話区間の音声（クラスタ層の蓄積・照合に使う）
       rec_extra: records に併記する判定根拠（本関数が追記する）
@@ -262,9 +265,14 @@ def decide_speaker(s: SessionState, *, sp_id, d, wav: np.ndarray | None,
           and voiceprint_speaker is None
           and sp_id != UNSURE_SPEAKER):
         # --- 4. STT に落ちた ---
-        rec_extra["stt_raw_speaker"] = resolved.speaker
+        # フォールバックのキーは**生のSTTラベル**から作る。resolved.speaker は
+        # resolve に渡した sp_id で、ラベル継続・蓄積中では写像済みキー
+        # （人物N 等）になっている。それを渡すと台帳キー "stt:人物2" に新規
+        # @diar:N が鋳造され、同一人物が2席に分裂する（レビュー 2026-07-30）。
+        raw = stt_label if stt_label is not None else resolved.speaker
+        rec_extra["stt_raw_speaker"] = raw
         sp_id = s.key_for_stt_fallback_speaker(
-            resolved.speaker, duration_ms=end_ms - start_ms
+            raw, duration_ms=end_ms - start_ms
         )
         rec_extra["speaker_source"] = "stt_fallback"
         rec_extra["speaker_confidence"] = 0.0

@@ -360,7 +360,7 @@ class RecvLoop:
             s, sp_id=sp_id, d=d, wav=wav,
             start_ms=self.cur_ms, end_ms=self.cur_end,
             rec_extra=rec_extra, vp_debug=self.args.vp_debug,
-            diag_extra=diag_extra,
+            diag_extra=diag_extra, stt_label=label,
         )
         if rec_extra.get("speaker_source") is not None:
             diag_extra["src"] = rec_extra["speaker_source"]

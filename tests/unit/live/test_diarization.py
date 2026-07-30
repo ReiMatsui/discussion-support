@@ -322,7 +322,10 @@ def test_recv_loop_normalizes_stt_label_when_diarization_is_enabled_but_unresolv
         "end_ms": 3000,
         "speaker": "@diar:1",
         "text": "これはテストです",
-        "stt_raw_speaker": "#1",
+        # 生のSTTラベル。以前は写像済みキー(#1)が入っており、ラベル継続中は
+        # 人物N がここに入って "stt:人物N" に新規席が鋳造されていた
+        # （レビュー 2026-07-30 の修正で生ラベルに戻した）。
+        "stt_raw_speaker": "1",
         "speaker_source": "stt_fallback",
         "speaker_confidence": 0.0,
         "speaker_reason": "diarization_no_confident_overlap_stt_fallback",
@@ -683,3 +686,46 @@ def test_recv_loop_without_cluster_namer_keeps_legacy_behavior() -> None:
     rec = state.records[0]
     assert rec["speaker"] == "@diar:1"
     assert rec["speaker_source"] == "pyannote"
+
+
+def test_stt_fallback_uses_the_raw_label_not_the_mapped_key() -> None:
+    """STTフォールバックのキーは生ラベルから作る（写像済みキーだと人物が分裂）.
+
+    ラベル継続中の sp_id は 人物N（写像済みキー）でありうる。それを
+    key_for_stt_fallback_speaker に渡すと台帳キー "stt:人物N" に新規 @diar:N が
+    鋳造され、diarization の瞬断だけで同一人物が2席に分裂する
+    （レビュー 2026-07-30）。
+    """
+    from das.asr.live._attribution import decide_speaker
+
+    calls = []
+
+    class _S:
+        diarization_provider = object()
+
+        class speaker_resolver:  # noqa: N801
+            @staticmethod
+            def resolve(**kw):
+                class R:
+                    source = "stt"
+                    speaker = kw["stt_speaker"]
+                    confidence = 0.0
+                    reason = "fallback"
+                return R()
+
+        @staticmethod
+        def diarization_window(a, b):
+            return []
+
+        @staticmethod
+        def key_for_stt_fallback_speaker(speaker, duration_ms=0):
+            calls.append(speaker)
+            return "@diar:1"
+
+    rec: dict = {}
+    got = decide_speaker(_S(), sp_id="人物2", d={"kind": "ラベル継続"}, wav=None,
+                         start_ms=0, end_ms=1000, rec_extra=rec,
+                         vp_debug=False, stt_label="2")
+    assert calls == ["2"], "生ラベルではなく写像済みキーで席を引いている"
+    assert rec["stt_raw_speaker"] == "2"
+    assert got == "@diar:1"
