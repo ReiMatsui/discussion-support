@@ -1199,7 +1199,12 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
                     f.write(raw)
                 print(f"# 旧モデル({foreign})の声紋を {bak} に退避しました", flush=True)
             self._foreign_backup = None
-        named = {k: v.tolist() for k, v in self.profiles.items() if not is_minted_key(k)}
+        # 永続化するのは実名だけ。人物N（セッション限りの匿名戸籍）に加えて
+        # AI声紋（__AI__/__PARTNER__）も除く——エージェントが毎セッション
+        # 書き込む一時キーで、永続化すると次回起動時に「保存済みプロファイル」
+        # として UI に並んでしまう（レビュー 2026-07-30）。
+        named = {k: v.tolist() for k, v in self.profiles.items()
+                 if not is_minted_key(k) and not is_ai_key(k)}
         named["_model"] = self.model   # 声紋はモデル間で互換性がないため記録
         tmp = self.path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
