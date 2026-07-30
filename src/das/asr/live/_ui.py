@@ -99,15 +99,21 @@ class _UIRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         last_rev = -1
         last_partial = None
+        last_backlog_bucket = 0
         try:
             while not s.stop.is_set():
                 rev = s.rev
                 partial = s.partial_text  # 認識途中経過も変化を見る（課題①）
-                if rev != last_rev or partial != last_partial:
+                # 送信バックログは rev を上げずに変わるため、5秒刻みの段が
+                # 変わったら配信する（遅延警告の表示・解除・更新のため）。
+                backlog_bucket = s.send_backlog_ms // 5000
+                if (rev != last_rev or partial != last_partial
+                        or backlog_bucket != last_backlog_bucket):
                     payload = json.dumps(s.api_snapshot(), ensure_ascii=False)
                     self.wfile.write(f"data: {payload}\n\n".encode())
                     last_rev = rev
                     last_partial = partial
+                    last_backlog_bucket = backlog_bucket
                 else:
                     self.wfile.write(b": ping\n\n")  # ハートビート
                 self.wfile.flush()

@@ -179,6 +179,7 @@ INDEX_HTML = """<!doctype html>
   <div class="modes" id="modes"></div>
 
   <div class="vp-banner" id="vp-banner" hidden></div>
+  <div class="vp-banner" id="backlog-banner" hidden></div>
 
   <div class="setup-panel" id="setup-panel" hidden>
     <h2>開始前設定</h2>
@@ -444,6 +445,17 @@ function renderVpBanner(vp) {
   }
 }
 
+function renderBacklogBanner(ms) {
+  // 送信バックログ（文字起こしの遅れの下限）。5秒以上で警告、下回れば消す。
+  const el = $("backlog-banner");
+  if (!el) return;
+  if (!ms || ms < 5000) { el.hidden = true; return; }
+  el.hidden = false;
+  el.className = "vp-banner";
+  el.textContent = `⚠ 文字起こしが約${Math.round(ms / 1000)}秒遅れています`
+    + "（音声送信の詰まり。話者分離ワーカーやCPU負荷が原因の可能性）";
+}
+
 function renderEnroll(vp) {
   const panel = $("enroll-panel");
   if (!vp || !vp.enabled) { panel.hidden = true; return; }
@@ -665,6 +677,7 @@ function render(state) {
   renderModes(state.mode);
   $("setup-panel").hidden = !(state.setup && state.setup.waiting);
   renderVpBanner(state.vp);
+  renderBacklogBanner(state.backlog_ms);
   renderEnroll(state.vp);
   renderDiarization(state.diarization);
   renderIntervention(state.intervention);

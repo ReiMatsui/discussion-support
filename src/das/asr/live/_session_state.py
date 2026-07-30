@@ -253,6 +253,12 @@ class SessionState:
         self._PCM_KEEP_BYTES = SR * 2 * 120
         self.buf_lock = threading.Lock()
         self.pcm_file = None  # IO[bytes] | None
+        # 送信バックログ（取り込み済みでSTTへ未送信の音声量, ms）。送信スレッドが
+        # チャンクごとに更新し、UIの遅延警告と diag の send_backlog 記録に使う。
+        # 2026-07-30 の講義では終了時点で約170秒に達していたが、計測がなく
+        # 事後の wav 長との突き合わせでしか分からなかった。
+        self.send_backlog_ms = 0
+        self._backlog_diag_last = 0.0   # 最後に diag へ記録した時刻(monotonic)
         # AI再生区間の記録（P2-1）。マイク音声のmsタイムラインで「AIが鳴っていた
         # 区間」を残し、エコー判定を壁時計ではなく発話区間の重なりで行う。STT確定が
         # 遅れてエコー窓の外に出た回り込みも取りこぼさない。source ごとに開いた区間を
@@ -921,6 +927,7 @@ class SessionState:
             "intervention_events": list(self.intervention_events[-20:]),
             "agenda": self._current_agenda(),
             "started": self.started.strftime("%Y-%m-%d %H:%M"),
+            "backlog_ms": self.send_backlog_ms,
             "partial": {"speaker": self.partial_speaker, "text": self.partial_text},
             "speakers": speakers,
             "records": records,
@@ -1045,6 +1052,31 @@ class SessionState:
         """
         return (self.asr_pcm_total_bytes
                 + getattr(self.audio_q, "pending_bytes", 0)) // 32
+
+    def note_send_backlog(self) -> None:
+        """送信バックログ量を更新し、5秒以上なら30秒おきに diag へ残す.
+
+        送信スレッドがチャンクごとに呼ぶ（更新は整数演算のみで安価）。
+        バックログは「文字起こしが何秒遅れているか」の下限で、話者分離
+        ワーカーの詰まり（例: sortformer のブロッキング書き込み）や
+        CPU逼迫を、セッション中に発見できるようにする。
+        """
+        self.send_backlog_ms = getattr(self.audio_q, "pending_bytes", 0) // 32
+        if self.send_backlog_ms < 5000:
+            return
+        now = time.monotonic()
+        if now - self._backlog_diag_last < 30.0:
+            return
+        self._backlog_diag_last = now
+        try:
+            with open(self.diag_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps({
+                    "type": "send_backlog",
+                    "backlog_ms": self.send_backlog_ms,
+                    "asr_ms": self.current_asr_ms(),
+                }, ensure_ascii=False) + "\n")
+        except OSError:
+            pass
 
     def note_ai_speech_start(self, source: str) -> None:
         """AI（source: agent/partner）の再生開始を現在のマイクms位置で記録する."""

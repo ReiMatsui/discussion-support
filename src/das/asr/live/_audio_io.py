@@ -176,6 +176,7 @@ def _run_sender(state: SessionState, backend: STTBackend):
                     ws.send(backend.make_end_message(seq))
             break
         setup_capture_only = state.waiting_to_start and ws is None
+        state.note_send_backlog()
         with state.buf_lock:
             state.pcm_buf.extend(pcm)
             if not setup_capture_only:

@@ -317,3 +317,38 @@ def test_open_interval_now_uses_capture_position(tmp_path):
     state.note_ai_speech_start("agent")   # 開始 61000ms、開いたまま
 
     assert state.overlaps_ai_speech(61200, 61800, source="agent")
+
+
+def test_note_send_backlog_updates_and_logs_to_diag(tmp_path):
+    """送信バックログの更新と diag 記録（5秒以上で30秒おき）.
+
+    2026-07-30 の講義で送信遅延が約170秒まで蓄積したが、計測がなく
+    セッション中に気づけなかった。バックログを毎チャンク更新し、
+    5秒以上なら send_backlog として diag に残す（30秒に1回まで）。
+    """
+    state = _make_state(tmp_path)
+
+    import os
+
+    def _backlog_lines():
+        if not os.path.exists(state.diag_path):
+            return []
+        with open(state.diag_path, encoding="utf-8") as f:
+            return [json.loads(x) for x in f if "send_backlog" in x]
+
+    # 5秒未満: 更新はされるが diag には書かない
+    state.audio_q.put(b"\0" * (3000 * 32))
+    state.note_send_backlog()
+    assert state.send_backlog_ms == 3000
+    assert _backlog_lines() == []
+
+    # 5秒以上: diag に1行。直後の再呼び出しでは重複しない（30秒レート制限）
+    state.audio_q.put(b"\0" * (60000 * 32))
+    state.note_send_backlog()
+    state.note_send_backlog()
+    lines = _backlog_lines()
+    assert len(lines) == 1
+    assert lines[0]["backlog_ms"] == 63000
+
+    # バックログは api_snapshot で UI に出る
+    assert state.api_snapshot()["backlog_ms"] == 63000
