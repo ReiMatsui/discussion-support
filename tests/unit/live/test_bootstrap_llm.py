@@ -1,6 +1,10 @@
 """論点抽出・脱線判定のLLM呼び出しパラメータ構築（Fix 9）のテスト."""
 from __future__ import annotations
 
+import io
+import urllib.error
+import urllib.request
+
 from das.asr.live import _bootstrap as bootstrap
 from das.asr.live._bootstrap import _build_chat_params
 
@@ -105,3 +109,42 @@ def test_live_llm_helpers_use_structured_outputs(monkeypatch):
         "participation_result",
         "fact_correction_result",
     ]
+
+
+# -- 400 の原因を出す（2026-07-29） -----------------------------------
+
+
+def test_http_error_prints_the_response_body(monkeypatch, capsys):
+    """400 の本文を出す.
+
+    OpenAI は「未知のモデル名」「そのモデルでは使えないパラメータ」といった
+    理由を本文に書いてくる。捨てると `400 Bad Request` だけが延々と流れ、
+    LLM機能が全滅していても何が悪いのか特定できない（実会話で発生した）。
+    """
+    import urllib.error
+
+    def _boom(*a, **k):
+        raise urllib.error.HTTPError(
+            "http://x", 400, "Bad Request", {},
+            io.BytesIO(b'{"error":{"message":"unknown model gpt-5.4-mini"}}'))
+
+    monkeypatch.setattr(urllib.request, "urlopen", _boom)
+    got = bootstrap._post_chat_json({"model": "gpt-5.4-mini"}, "k",
+                                    timeout=1, label="topic")
+    out = capsys.readouterr().out
+    assert got is None
+    assert "unknown model gpt-5.4-mini" in out, "本文が出ていない"
+    assert "gpt-5.4-mini" in out                # どのモデルで起きたか
+    assert "400" in out
+
+
+def test_http_error_without_a_body_still_reports(monkeypatch, capsys):
+    """本文が読めないときも理由（reason）だけは出す."""
+    def _boom(*a, **k):
+        raise urllib.error.HTTPError("http://x", 429, "Too Many Requests",
+                                     {}, None)
+
+    monkeypatch.setattr(urllib.request, "urlopen", _boom)
+    assert bootstrap._post_chat_json({"model": "m"}, "k", timeout=1,
+                                     label="drift") is None
+    assert "429" in capsys.readouterr().out

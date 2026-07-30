@@ -7,6 +7,7 @@ CLI引数の定義は live.py 側 (click) に残し、ここではパース済�
 """
 from __future__ import annotations
 
+import contextlib
 import datetime
 import json
 import os
@@ -325,6 +326,7 @@ def _build_chat_params(model: str, prompt: str, *, max_out: int,
 
 def _post_chat_json(params: dict, api_key: str, *, timeout: int, label: str):
     """Chat Completions を叩き、本文をJSONとして返す。失敗時はNone（理由をログ）."""
+    import urllib.error
     import urllib.request
     body = json.dumps(params).encode()
     req = urllib.request.Request(OPENAI_API, data=body, method="POST")
@@ -343,6 +345,18 @@ def _post_chat_json(params: dict, api_key: str, *, timeout: int, label: str):
         if text.startswith("```"):
             text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
         return json.loads(text)
+    except urllib.error.HTTPError as e:
+        # **本文を必ず出す**。OpenAI は 400 の理由（未知のモデル名、その
+        # モデルでは使えないパラメータ等）を本文に書いてくるので、ここを
+        # 捨てると「400 Bad Request」だけが延々と流れて原因が分からない
+        # （2026-07-29 に実会話で発生し、LLM機能が全滅しているのに何が
+        # 悪いのか特定できなかった）。
+        detail = ""
+        with contextlib.suppress(Exception):
+            detail = e.read().decode("utf-8", "replace")[:600]
+        print(f"# [{label}] APIエラー {e.code}: {detail or e.reason}"
+              f"（model={params.get('model')}）", flush=True)
+        return None
     except Exception as e:
         print(f"# [{label}] API/解析エラー: {type(e).__name__}: {e}", flush=True)
         return None
