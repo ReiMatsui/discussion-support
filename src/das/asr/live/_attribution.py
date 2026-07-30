@@ -48,6 +48,8 @@ if TYPE_CHECKING:
 
 from ._constants import (
     CLUSTER_IMPURE_RECOVERY_ENDORSE_MIN_SIM,
+    IMPURE_LOWSIM_MAX_SIM,
+    IMPURE_LOWSIM_MIN_CHARS,
     PYANNOTE_CLUSTER_OVERLAP_MIN_RATIO,
     UNSURE_SPEAKER,
 )
@@ -84,6 +86,19 @@ def _voiceprint_claim(d, sp_id) -> tuple[str | None, float | None]:
             and not is_label_key(sp_id)):
         return str(sp_id), 1.0
     return None, None
+
+
+def impure_lowsim(kind, chars, sim) -> bool:
+    """未登録話者の門番の述語（handoff §47）。本番 flush と eval 再現が共用する.
+
+    「ラベル不純で、長い発話なのに、どの登録済みプロファイルとも十分似て
+    いない」発話は未登録の声である公算が高く、写像や席で既存の誰かへ寄せる
+    と必ず誤帰属になる（未登録の声には正解の出口が無い）。しきい値の校正は
+    `_constants.py` の IMPURE_LOWSIM_* を参照。
+    """
+    return (kind == "ラベル不純"
+            and int(chars or 0) >= IMPURE_LOWSIM_MIN_CHARS
+            and float(sim or 0.0) < IMPURE_LOWSIM_MAX_SIM)
 
 
 def voiceprint_endorses(d, sp_id) -> bool:

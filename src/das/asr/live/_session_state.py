@@ -741,6 +741,12 @@ class SessionState:
                 # 引き戻せない——予定表を複数回にした意味（§28.5）と、僅差なら
                 # 未確定へ戻す棄権則（§36.4）が2回目以降まったく効かない
                 # （レビュー 2026-07-30）。
+                # 未登録話者の門番（§47）で未確定にしたレコードは復活させない。
+                # 未登録の声には席の参照が無く、貼り直しは必ず既存の誰か
+                # （＝誤帰属）になる。測定（impure_lowsim_guard.py）も
+                # 「遡及の後に門番」の意味論で行った。
+                if src == "impure_lowsim_guard":
+                    continue
                 revisable = (src in ("seat_assign", "seat_assign_retro")
                              or str(r["speaker"]) == UNSURE_SPEAKER)
                 if not revisable:

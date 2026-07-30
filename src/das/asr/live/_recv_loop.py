@@ -16,6 +16,7 @@ import contextlib
 from ._attribution import (
     _VOICEPRINT_RELIABLE_KINDS,
     decide_speaker,
+    impure_lowsim,
     voiceprint_endorses,
 )
 from ._constants import (
@@ -583,6 +584,23 @@ class RecvLoop:
             final_sp_id = self._assign_seat(
                 final_sp_id, sp_id=sp_id, d=d, wav=wav,
                 rec_extra=rec_extra, diag_extra=diag_extra)
+
+        # --- 8b. 未登録話者の門番（ハイブリッド限定, handoff §47） ---
+        # ラベル不純で、長い発話なのに best sim が低い声は未登録の公算が高く、
+        # 写像・席のどちらで寄せても誤帰属にしかならない（未登録の声には正解の
+        # 出口が無い）。席の決め直しの**後**に掛けるのは、講義 2026-07-30 で
+        # 席の決め直し自体が誤った（近い席しか選べない）ため。speaker_source を
+        # 専用値にして、遡及訂正がこの未確定を席の参照で復活させないようにする。
+        if (s.cluster_namer is not None and final_sp_id != UNSURE_SPEAKER
+                and d is not None
+                and impure_lowsim(d.get("kind"), len(self.cur_text.strip()),
+                                  d.get("sim"))):
+            final_sp_id = UNSURE_SPEAKER
+            rec_extra["speaker_source"] = "impure_lowsim_guard"
+            rec_extra["speaker_confidence"] = 0.0
+            rec_extra["speaker_reason"] = "impure_label_long_low_sim"
+            diag_extra["src"] = "impure_lowsim_guard"
+            diag_extra["why"] = "impure_label_long_low_sim"
 
         # --- 9. 記録 ---
         if tracker is not None and (d is not None or stt_speaker_unknown):

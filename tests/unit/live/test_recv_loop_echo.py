@@ -352,3 +352,76 @@ def test_note_send_backlog_updates_and_logs_to_diag(tmp_path):
 
     # バックログは api_snapshot で UI に出る
     assert state.api_snapshot()["backlog_ms"] == 63000
+
+
+class _ImpureTracker:
+    """ラベル不純を返すフェイク声紋トラッカー（§47 門番テスト用）."""
+
+    def __init__(self, sim: float) -> None:
+        self.last = {"kind": "ラベル不純", "label": "2", "name": "人物2",
+                     "sim": sim}
+
+    def classify(self, wav, speaker, *, overlapped, count, chars, enroll=True):
+        return "人物2"
+
+
+def _flush_impure(tmp_path, *, sim: float, text: str) -> list:
+    tracker = _ImpureTracker(sim)
+    state = _make_state(tmp_path, tracker=tracker)
+    state.cluster_namer = object()   # ハイブリッド構成の印（門番の適用条件）
+    loop = _loop_with(state, text=text, ms=1000, end=11000)
+    loop.flush()  # type: ignore[no-untyped-call]
+    return state.records
+
+
+def test_impure_long_lowsim_goes_unsure(tmp_path):
+    """未登録話者の門番（§47）: ラベル不純×30字以上×sim<0.5 は未確定に倒す.
+
+    2026-07-30 の講義で、プロファイルも席も無い未登録の話者6発話（915字）が
+    Soniox ラベルの写像で参加者Bへ吸われた（#210 等: 60〜264字, sim 0.37〜
+    0.49）。長い発話なのにどの登録済みの声とも似ていないなら、既存の誰かへ
+    寄せず未確定にする。校正済み実会話9本では該当0件（impure_lowsim_guard.py）。
+    """
+    from das.asr.live._constants import UNSURE_SPEAKER
+    records = _flush_impure(
+        tmp_path, sim=0.45,
+        text="と、話が戻っちゃうんだけど、経歴、話して、でも、思っている数、じゃあ先生の話を聞かせてください")
+    assert len(records) == 1
+    assert records[0]["speaker"] == UNSURE_SPEAKER
+    assert records[0]["speaker_source"] == "impure_lowsim_guard"
+
+
+def test_impure_long_highsim_keeps_attribution(tmp_path):
+    """sim>=0.5 なら門番は発火しない（本物の話者の長発話は寄せたまま）."""
+    records = _flush_impure(
+        tmp_path, sim=0.55,
+        text="で、僕は、もう、その前からアニメオタクやったんですが、その頃はまだ言えなかったんです")
+    assert len(records) == 1
+    assert records[0].get("speaker_source") != "impure_lowsim_guard"
+
+
+def test_impure_short_lowsim_keeps_attribution(tmp_path):
+    """30字未満なら発火しない（短い発話は正解でも sim が低く出る）."""
+    records = _flush_impure(tmp_path, sim=0.2, text="京都の方です。")
+    assert len(records) == 1
+    assert records[0].get("speaker_source") != "impure_lowsim_guard"
+
+
+def test_retro_does_not_revive_impure_guarded_record(tmp_path):
+    """遡及訂正は門番の未確定を席の参照で復活させない（§47）.
+
+    未登録の声には席の参照が無く、貼り直しは必ず既存の誰か（＝誤帰属）に
+    なる。測定も「遡及の後に門番」の意味論で行った。
+    """
+    from das.asr.live._constants import UNSURE_SPEAKER
+    state = _make_state(tmp_path)
+    state.records.append({"ms": 1000, "end_ms": 2000, "text": "x",
+                          "speaker": UNSURE_SPEAKER,
+                          "speaker_source": "impure_lowsim_guard"})
+    state.records.append({"ms": 3000, "end_ms": 4000, "text": "y",
+                          "speaker": UNSURE_SPEAKER,
+                          "speaker_source": "seat_assign"})
+    applied = state.apply_retro_attribution({1000: "人物2", 3000: "人物2"})
+    assert state.records[0]["speaker"] == UNSURE_SPEAKER   # 門番は不可侵
+    assert state.records[1]["speaker"] == "人物2"           # 通常の遡及は従来どおり
+    assert 1000 not in applied
