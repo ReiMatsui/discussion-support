@@ -29,7 +29,6 @@
 | `roster_merge.py` | キー統合案（却下の証拠。§44.3） |
 | `method_overlap.py` | 本番と単純方式の発話ごとの突き合わせ。§41 |
 | `segment_split_ceiling.py` | 区切り直しの上限（却下の証拠。§37） |
-| `segment_boundary_ceiling.py` | またぎ率の測定（error_anatomy が使う） |
 | `retro_schedule.py` | 遡及訂正の予定表の校正。§28 |
 | `replay_seat_assign.py` | 本番の SeatAudio を記録で駆動する忠実性確認。§27 |
 
@@ -48,7 +47,7 @@
 `replay_attribution.py`（§14の測定経路） / `replay_live_attribution.py`
 （§23の忠実性確認。diagnose が使う） / `eval_speaker_gt.py` /
 `score_transcription.py` / `score_pyannote_ceiling.py` / `sortformer_compare.py`
-(+`sortformer_infer.py`) / `phase0_dual_ledger.py` / `fetch_callhome_jpn.py`
+(+`sortformer_infer.py`) / `phase0_dual_ledger.py` / `fetch_callhome_jpn.py` / `segment_boundary_ceiling.py`
 
 削除済み（履歴にのみ存在）: `seat_query_context` `seat_pick_variants`
 `seat_assign_extensions` `retro_reattribution`（§27〜§28で結論記録済み）
