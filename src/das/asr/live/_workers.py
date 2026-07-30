@@ -136,7 +136,12 @@ def _run_agenda_detector(state: SessionState, oai_key: str, oai_model: str):
             continue
         with state.topics_lock:
             if state.topics:
-                return  # 既に議題/論点あり → 役目終了
+                # 議題がある間は何もしない。ただしスレッドは終了しない——
+                # 終了すると「新しい会議」で topics がクリアされた後、2会議目
+                # 以降の議題自動検出が二度と動かない（T3 の epoch リセットが
+                # 意図している「リセットをまたいで動く」が実現しない。
+                # レビュー 2026-07-30）。
+                continue
         with state.state_lock:
             epoch = state.meeting_epoch
             talk_rs = intervention_records([
@@ -161,7 +166,7 @@ def _run_agenda_detector(state: SessionState, oai_key: str, oai_model: str):
         if agenda and state.meeting_epoch == epoch:
             state.seed_topic(agenda, speaker="議題(自動)")
             _print_line(f"# 議題を自動検出してシード: {agenda}")
-            return
+            continue  # topics ができたので、次周から上の continue 側で待機
 
 
 @_resilient
@@ -611,6 +616,7 @@ def _run_participation_checker(state: SessionState, oai_key: str, oai_model: str
         if agent.mode == "conversation":
             continue
         with state.state_lock:
+            epoch = state.meeting_epoch
             talk_rs = intervention_records([
                 r for r in state.records
                 if "speaker" in r and r.get("text")
@@ -655,6 +661,12 @@ def _run_participation_checker(state: SessionState, oai_key: str, oai_model: str
                 print(f"# [invite] skip: 信頼できる参加者名ではない target={target}",
                       flush=True)
                 continue
+            with state.state_lock:
+                if state.meeting_epoch != epoch:
+                    # LLM呼び出し中に「新しい会議」が起きた。旧会議の統計に
+                    # 基づく声かけを新会議のキューへ入れない（他ワーカーの
+                    # H2 ガードと同じ。ここだけ無かった。レビュー 2026-07-30）。
+                    continue
             _print_line(f"# 🙋 声かけ候補: {target}（{result.get('reason', '')}）")
             state.invite_requests.put(target)
             print("# [invite] → 声かけ要求をキューに投入", flush=True)
