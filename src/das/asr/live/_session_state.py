@@ -908,20 +908,25 @@ class SessionState:
         STT接続を作り直す際、新しいSTTのタイムスタンプ(ms=0起点)と
         PCMバッファの位置を揃えるため、バッファのオフセット類も0に戻す。
         """
-        self._reset_pcm_buffers()
+        with self.buf_lock:
+            # 送信スレッドの「wavへ書いてバッファへ足す」区間と同じロックで
+            # 排他する。ロック無しだと、カウンタのゼロ化と加算が交錯して
+            # 「ms == 送信済みバイト位置」の対応（§30）が新会議全体で崩れる。
+            self._reset_pcm_buffers()
+            try:
+                self.pcm_file = open(self.wav_path, "wb")  # noqa: SIM115
+                self.pcm_file.write(
+                    b"RIFF" + struct.pack("<I", 0) + b"WAVEfmt " +
+                    struct.pack("<IHHIIHH", 16, 1, 1, SR, SR * 2, 2, 16) +
+                    b"data" + struct.pack("<I", 0))
+                self.pcm_file.flush()
+            except OSError as e:
+                print(f"# 録音ファイルを開けません: {e}", flush=True)
+                self.pcm_file = None
         with self._ai_speech_lock:
             self._ai_speech_intervals.clear()
             self._ai_speech_open.clear()
             self.retired_echo_texts.clear()
-        try:
-            self.pcm_file = open(self.wav_path, "wb")  # noqa: SIM115
-            self.pcm_file.write(b"RIFF" + struct.pack("<I", 0) + b"WAVEfmt " +
-                                struct.pack("<IHHIIHH", 16, 1, 1, SR, SR * 2, 2, 16) +
-                                b"data" + struct.pack("<I", 0))
-            self.pcm_file.flush()
-        except OSError as e:
-            print(f"# 録音ファイルを開けません: {e}", flush=True)
-            self.pcm_file = None
 
     def finalize_wav(self) -> str | None:
         """録音wavのヘッダを確定して閉じる。保存したパスを返す（短すぎ/失敗ならNone）.
@@ -937,18 +942,21 @@ class SessionState:
         if dropped > SR * 2:  # 1秒以上こぼれたときだけ知らせる
             print(f"# 録音: STTへ送れず録音に含めなかった音声 "
                   f"{dropped / (SR * 2):.1f}秒", flush=True)
-        try:
-            self.pcm_file.flush()
-            data_size = self.asr_pcm_total_bytes
-            self.pcm_file.seek(4)
-            self.pcm_file.write(struct.pack("<I", 36 + data_size))
-            self.pcm_file.seek(40)
-            self.pcm_file.write(struct.pack("<I", data_size))
-            self.pcm_file.close()
-        except OSError:
+        with self.buf_lock:
+            # 送信スレッドの書き込みと排他する。ロック無しだと、ヘッダ確定の
+            # seek と送信チャンクの write が交錯して旧会議の wav が壊れる。
+            try:
+                self.pcm_file.flush()
+                data_size = self.asr_pcm_total_bytes
+                self.pcm_file.seek(4)
+                self.pcm_file.write(struct.pack("<I", 36 + data_size))
+                self.pcm_file.seek(40)
+                self.pcm_file.write(struct.pack("<I", data_size))
+                self.pcm_file.close()
+            except OSError:
+                self.pcm_file = None
+                return None
             self.pcm_file = None
-            return None
-        self.pcm_file = None
         if data_size > SR * 2 * 10:
             return self.wav_path
         with contextlib.suppress(OSError):

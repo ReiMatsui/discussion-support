@@ -155,3 +155,21 @@ def test_stt_connection_start_sets_timestamp_offset() -> None:
     assert state.stt_time_offset_ms == 12000
     assert state.stt_abs_ms(345) == 12345
     assert state.stt_abs_ms(None) is None
+
+
+def test_closed_wav_file_does_not_kill_the_sender_path(tmp_path):
+    """finalize と交錯して閉じたファイルへ書いても、送信スレッドは死なない.
+
+    閉じたファイルへの write は OSError ではなく ValueError を投げる。
+    捕捉が OSError だけだと送信スレッドが未捕捉例外で死に、以後の
+    文字起こしが無言で全停止する（レビュー 2026-07-30）。
+    """
+    f = open(tmp_path / "x.wav", "wb")  # noqa: SIM115
+    f.close()
+    # _run_sender の該当ブロックと同じ捕捉で書けること（例外が漏れない）
+    try:
+        f.write(b"\0\0")
+    except (OSError, ValueError):
+        pass
+    else:  # pragma: no cover
+        raise AssertionError("閉じたファイルへの write が例外を出していない")

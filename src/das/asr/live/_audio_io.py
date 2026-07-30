@@ -190,13 +190,19 @@ def _run_sender(state: SessionState, backend: STTBackend):
             except Exception:
                 pass
             else:
-                if state.pcm_file is not None:
-                    try:
-                        state.pcm_file.write(pcm)
-                        state.pcm_file.flush()
-                    except OSError:
-                        pass
+                # wav への書き込みは buf_lock の中で行う。「新しい会議」の
+                # finalize_wav / open_wav（同じロックを取る）と競合すると、
+                # 閉じたファイルへの write が ValueError で送信スレッドを
+                # 殺し、以後の文字起こしが無言で全停止する（レビュー
+                # 2026-07-30）。閉じたファイルは OSError ではなく ValueError
+                # を投げるので、捕捉の型も広げる。
                 with state.buf_lock:
+                    if state.pcm_file is not None:
+                        try:
+                            state.pcm_file.write(pcm)
+                            state.pcm_file.flush()
+                        except (OSError, ValueError):
+                            pass
                     state.asr_pcm_buf.extend(pcm)
                     state.asr_pcm_total_bytes += len(pcm)
                     if len(state.asr_pcm_buf) > state._PCM_KEEP_BYTES + SR * 2 * 10:
