@@ -936,6 +936,162 @@ def _receive_until_stopped(state, args, backend, connect_stt) -> None:
                 break
 
 
+def _setup_companions(state, args, tracker, oai_key: str) -> bool:
+    """同席するAI（Simulator/Partner）と議題・積極性を設定する.
+
+    run_session から順序を変えずに切り出したもの。戻り値は「明示的な議題を
+    シードしたか」（議題自動検出を起動するかの判断に使う）。
+    """
+    if args.simulate and args.debate:
+        raise SystemExit("--simulate と --debate は同時に使えません")
+
+    # --- DiscussionSimulator ---
+    if args.simulate:
+        if not oai_key:
+            raise SystemExit("--simulate には OPENAI_API_KEY が必要です")
+        if not args.agent:
+            print("# ヒント: --no-agent 指定中のためファシリテーターは介入しません", flush=True)
+        if args.agent and args.agent_voice in DiscussionSimulator.SPEAKERS.values():
+            print(f"# 警告: --agent-voice={args.agent_voice} はSimulator話者と重複しています。"
+                  f"声紋分離に影響する可能性があります。alloy を推奨します。", flush=True)
+        state.simulator = DiscussionSimulator(
+            api_key=oai_key, topic=args.simulate,
+            scenario=args.sim_scenario)
+
+    # --- ConversationPartner ---
+    if args.debate:
+        if not oai_key:
+            raise SystemExit("--debate には OPENAI_API_KEY が必要です")
+        if not args.agent:
+            print("# ヒント: --no-agent 指定中のためファシリテーターは介入しません", flush=True)
+        if args.agent and args.debate_voice == args.agent_voice:
+            print(f"# 警告: --debate-voice と --agent-voice が同じ ({args.debate_voice})。"
+                  f"声紋分離に影響します。", flush=True)
+        state.partner = ConversationPartner(
+            api_key=oai_key, voice=args.debate_voice, topic=args.debate)
+        if tracker is not None:
+            state.partner.set_tracker(tracker)
+
+    # --- 議題を脱線検出の基準論点としてシード（Fix 8 / 人間モードはS1で--topic対応） ---
+    # 明示的な議題があれば、論点抽出LLMの成否に依存せず最初から脱線検出を効かせる。
+    # 人間同士モード(--topic)・debate・simulate のいずれの議題でもシードできる。
+    # --- 積極性プロファイルを適用（S5） ---
+    if state.set_proactivity(args.proactivity).get("ok"):
+        print(f"# 介入の積極性: {args.proactivity}", flush=True)
+
+    # 会話モード(converse)で動的にパートナーを生成するための設定を保持（F3）
+    if state.agent is not None:
+        state._partner_cfg = {"api_key": oai_key,
+                              "voice": args.debate_voice,
+                              "topic": args.topic or args.debate}
+
+    explicit_agenda = False
+    if state.agent is not None:
+        _agenda = args.topic or args.debate or args.simulate
+        if _agenda:
+            state.seed_topic(_agenda)
+            explicit_agenda = True
+            print(f"# 脱線検出: 議題を基準論点としてシード → {_agenda}", flush=True)
+    return explicit_agenda
+
+
+def _announce_and_wait_start(state, args, backend, serve: bool, ui_port: int,
+                             html_path: str) -> bool:
+    """保存先・UIを告知し、開始前設定モードなら「会議を開始」まで待つ.
+
+    戻り値は「音声スレッド（マイク＋sender）を既に起動したか」。開始前設定
+    中もマイクを流し始めるのは、開始前に声紋の距離感（誰がどの席か）を
+    ブラウザで確認できるようにするため。呼び出し側は戻った後に
+    state.stop を確認すること（待機中に停止された場合がある）。
+    """
+    state.save()
+    if serve:
+        print(f"# ブラウザUI: http://127.0.0.1:{ui_port}/ "
+              f"（開始前設定・モード切替・ライブ更新・新しい会議・停止）", flush=True)
+    else:
+        print(f"# ブラウザ表示: open {html_path}", flush=True)
+    if not args.no_open:
+        import webbrowser
+        if serve:
+            webbrowser.open(f"http://127.0.0.1:{ui_port}/")
+        else:
+            webbrowser.open("file://" + os.path.abspath(html_path))
+    audio_started = False
+    if state.waiting_to_start and not args.wav and not args.simulate:
+        threading.Thread(target=_run_from_mic, args=(state, args.device),
+                         daemon=True).start()
+        threading.Thread(target=_run_sender, args=(state, backend),
+                         daemon=True).start()
+        audio_started = True
+    if state.waiting_to_start:
+        print("# 開始前設定: ブラウザで参加人数などを確認し、「会議を開始」を押してください", flush=True)
+        while not state.stop.is_set() and not state.start_requested.wait(timeout=0.2):
+            pass
+    return audio_started
+
+
+def _launch_runtime(state, args, backend, *, audio_started: bool,
+                    oai_key: str, oai_model: str, out_path: str,
+                    explicit_agenda: bool, on_agent_text) -> None:
+    """音声入力・LLMワーカー・エージェント・送信スレッドと停止/リセットフックを起動する.
+
+    run_session の try ブロック冒頭から順序を変えずに切り出したもの。
+    起動順（音声→stdin→LLMワーカー→agent/partner→sender→フック）は
+    従来のまま。
+    """
+    if state.simulator is not None:
+        if state.agent is not None:
+            state.simulator._agent_ref = state.agent
+        state.simulator.start(state.audio_q, state.stop, play_audio=True)
+        print(f"# Simulator: 議論を自動生成中（議題: {args.simulate}）", flush=True)
+    else:
+        if args.wav:
+            threading.Thread(target=_run_from_wav, args=(state, args),
+                             daemon=True).start()
+        elif not audio_started:
+            threading.Thread(target=_run_from_mic, args=(state, args.device),
+                             daemon=True).start()
+    threading.Thread(target=_run_stdin_commands, args=(state,),
+                     daemon=True).start()
+    _start_llm_workers(state, args, oai_key=oai_key,
+                       oai_model=oai_model, out_path=out_path,
+                       explicit_agenda=explicit_agenda)
+    if state.agent is not None:
+        _connect_agent(state, on_agent_text)
+    if state.partner is not None:
+        state.partner.on_ai_utterance = _on_partner_text_factory(state)
+        state.partner.connect()
+        print(f"# Partner: voice={state.partner.voice} topic={state.partner.topic}",
+              flush=True)
+
+    if not audio_started:
+        threading.Thread(target=_run_sender, args=(state, backend),
+                         daemon=True).start()
+
+    state.save()
+    print("# 開始。話してください（名前登録はブラウザUIから / UIの停止ボタン or Ctrl+Cで終了）",
+          flush=True)
+    print(f"# 保存先: {out_path}", flush=True)
+
+    # UIからの停止フック: stopを立て、STTのWebSocketを閉じて受信ループを抜ける（F1）
+    def _request_stop():
+        state.stop.set()
+        with contextlib.suppress(Exception):
+            if state.stt_ws is not None:
+                state.stt_ws.close()
+    state.request_stop = _request_stop
+
+    # UIからのフルリセット要求: STT接続を作り直す。実処理はメインスレッドが行う。
+    def _request_reset():
+        state.resetting = True
+        state.rev += 1  # UIに「リセット中」を即通知
+        state.reset_requested.set()
+        with contextlib.suppress(Exception):
+            if state.stt_ws is not None:
+                state.stt_ws.close()
+    state.request_reset = _request_reset
+
+
 def run_session(args: LiveArgs) -> None:
     """セッションを初期化し、STT受信ループを実行する.
 
@@ -1025,58 +1181,7 @@ def run_session(args: LiveArgs) -> None:
             state._serve = False
             state.waiting_to_start = False
 
-    if args.simulate and args.debate:
-        raise SystemExit("--simulate と --debate は同時に使えません")
-
-    # --- DiscussionSimulator ---
-    if args.simulate:
-        if not _oai_key:
-            raise SystemExit("--simulate には OPENAI_API_KEY が必要です")
-        if not args.agent:
-            print("# ヒント: --no-agent 指定中のためファシリテーターは介入しません", flush=True)
-        if args.agent and args.agent_voice in DiscussionSimulator.SPEAKERS.values():
-            print(f"# 警告: --agent-voice={args.agent_voice} はSimulator話者と重複しています。"
-                  f"声紋分離に影響する可能性があります。alloy を推奨します。", flush=True)
-        state.simulator = DiscussionSimulator(
-            api_key=_oai_key, topic=args.simulate,
-            scenario=args.sim_scenario)
-
-    # --- ConversationPartner ---
-    if args.debate:
-        if not _oai_key:
-            raise SystemExit("--debate には OPENAI_API_KEY が必要です")
-        if not args.agent:
-            print("# ヒント: --no-agent 指定中のためファシリテーターは介入しません", flush=True)
-        if args.agent and args.debate_voice == args.agent_voice:
-            print(f"# 警告: --debate-voice と --agent-voice が同じ ({args.debate_voice})。"
-                  f"声紋分離に影響します。", flush=True)
-        state.partner = ConversationPartner(
-            api_key=_oai_key, voice=args.debate_voice, topic=args.debate)
-        if tracker is not None:
-            state.partner.set_tracker(tracker)
-
-    # --- 議題を脱線検出の基準論点としてシード（Fix 8 / 人間モードはS1で--topic対応） ---
-    # 明示的な議題があれば、論点抽出LLMの成否に依存せず最初から脱線検出を効かせる。
-    # 人間同士モード(--topic)・debate・simulate のいずれの議題でもシードできる。
-    # --- 積極性プロファイルを適用（S5） ---
-    if state.set_proactivity(args.proactivity).get("ok"):
-        print(f"# 介入の積極性: {args.proactivity}", flush=True)
-
-    # 会話モード(converse)で動的にパートナーを生成するための設定を保持（F3）
-    if state.agent is not None:
-        state._partner_cfg = {"api_key": _oai_key,
-                              "voice": args.debate_voice,
-                              "topic": args.topic or args.debate}
-
-    _explicit_agenda = False
-    if state.agent is not None:
-        _agenda = args.topic or args.debate or args.simulate
-        if _agenda:
-            state.seed_topic(_agenda)
-            _explicit_agenda = True
-            print(f"# 脱線検出: 議題を基準論点としてシード → {_agenda}", flush=True)
-
-    import contextlib as _contextlib
+    _explicit_agenda = _setup_companions(state, args, tracker, _oai_key)
 
     def _connect_stt():
         _ws = connect(backend.ws_url(), additional_headers=backend.ws_headers())
@@ -1084,29 +1189,8 @@ def run_session(args: LiveArgs) -> None:
         state.mark_stt_connection_started()
         return _ws
 
-    state.save()
-    if _serve:
-        print(f"# ブラウザUI: http://127.0.0.1:{_ui_port}/ "
-              f"（開始前設定・モード切替・ライブ更新・新しい会議・停止）", flush=True)
-    else:
-        print(f"# ブラウザ表示: open {html_path}", flush=True)
-    if not args.no_open:
-        import webbrowser
-        if _serve:
-            webbrowser.open(f"http://127.0.0.1:{_ui_port}/")
-        else:
-            webbrowser.open("file://" + os.path.abspath(html_path))
-    audio_started = False
-    if state.waiting_to_start and not args.wav and not args.simulate:
-        threading.Thread(target=_run_from_mic, args=(state, args.device),
-                         daemon=True).start()
-        threading.Thread(target=_run_sender, args=(state, backend),
-                         daemon=True).start()
-        audio_started = True
-    if state.waiting_to_start:
-        print("# 開始前設定: ブラウザで参加人数などを確認し、「会議を開始」を押してください", flush=True)
-        while not state.stop.is_set() and not state.start_requested.wait(timeout=0.2):
-            pass
+    audio_started = _announce_and_wait_start(state, args, backend,
+                                             _serve, _ui_port, html_path)
     if state.stop.is_set():
         _cleanup(state, tracker, wav_path, out_path, html_path)
         return
@@ -1116,58 +1200,10 @@ def run_session(args: LiveArgs) -> None:
     if state.diarization_provider is not None:
         state.diarization_provider.start()
     try:
-        if state.simulator is not None:
-            if state.agent is not None:
-                state.simulator._agent_ref = state.agent
-            state.simulator.start(state.audio_q, state.stop, play_audio=True)
-            print(f"# Simulator: 議論を自動生成中（議題: {args.simulate}）", flush=True)
-        else:
-            if args.wav:
-                threading.Thread(target=_run_from_wav, args=(state, args),
-                                 daemon=True).start()
-            elif not audio_started:
-                threading.Thread(target=_run_from_mic, args=(state, args.device),
-                                 daemon=True).start()
-        threading.Thread(target=_run_stdin_commands, args=(state,),
-                         daemon=True).start()
-        _start_llm_workers(state, args, oai_key=_oai_key,
-                           oai_model=_oai_model, out_path=out_path,
-                           explicit_agenda=_explicit_agenda)
-        if state.agent is not None:
-            _connect_agent(state, _on_agent_text)
-        if state.partner is not None:
-            state.partner.on_ai_utterance = _on_partner_text_factory(state)
-            state.partner.connect()
-            print(f"# Partner: voice={state.partner.voice} topic={state.partner.topic}",
-                  flush=True)
-
-        if not audio_started:
-            threading.Thread(target=_run_sender, args=(state, backend),
-                             daemon=True).start()
-
-        state.save()
-        print("# 開始。話してください（名前登録はブラウザUIから / UIの停止ボタン or Ctrl+Cで終了）",
-              flush=True)
-        print(f"# 保存先: {out_path}", flush=True)
-
-        # UIからの停止フック: stopを立て、STTのWebSocketを閉じて受信ループを抜ける（F1）
-        def _request_stop():
-            state.stop.set()
-            with _contextlib.suppress(Exception):
-                if state.stt_ws is not None:
-                    state.stt_ws.close()
-        state.request_stop = _request_stop
-
-        # UIからのフルリセット要求: STT接続を作り直す。実処理はメインスレッドが行う。
-        def _request_reset():
-            state.resetting = True
-            state.rev += 1  # UIに「リセット中」を即通知
-            state.reset_requested.set()
-            with _contextlib.suppress(Exception):
-                if state.stt_ws is not None:
-                    state.stt_ws.close()
-        state.request_reset = _request_reset
-
+        _launch_runtime(state, args, backend, audio_started=audio_started,
+                        oai_key=_oai_key, oai_model=_oai_model,
+                        out_path=out_path, explicit_agenda=_explicit_agenda,
+                        on_agent_text=_on_agent_text)
         _receive_until_stopped(state, args, backend, _connect_stt)
     except KeyboardInterrupt:
         # Ctrl+C はトレースバックを出さず、UIの停止ボタンと同じ扱いで安全に終了する
@@ -1175,7 +1211,7 @@ def run_session(args: LiveArgs) -> None:
         print("\n# Ctrl+C を受信。議事録を保存して安全に終了します…", flush=True)
         state.stop.set()
     finally:
-        with _contextlib.suppress(Exception):
+        with contextlib.suppress(Exception):
             if state.stt_ws is not None:
                 state.stt_ws.close()
         if state.diarization_provider is not None:
