@@ -213,7 +213,8 @@ def _cached(cache, ms: int, name: str, seat, wav):
 
 def replay_seats(run: str, vp, *, wav_path: Path | None = None,
                  align: str = "time", query=None, cap: bool = True,
-                 seats: bool = True, emb_cache: dict | None = None) -> dict | None:
+                 seats: bool = True, emb_cache: dict | None = None,
+                 rekey=None) -> dict | None:
     """席の参照の推移と、貼り直せる発話の声紋を1回だけ計算する.
 
     席の参照は「高信頼で確定した発話」だけから作られ、その集合は予定表に
@@ -223,6 +224,11 @@ def replay_seats(run: str, vp, *, wav_path: Path | None = None,
     `cap` / `seats` は「参加人数を決めているか」の条件（`resolved_key` /
     `is_revisable` 参照）。人数の情報にどれだけ寄りかかっているかを測るための
     入口で、既定は本番と同じ「決めている」。
+
+    `rekey` は ``rekey(ms, キー) -> キー`` の形で、上流のキーを統合してから
+    規則を当てる（本番 `SessionState.rekey` に対応）。「どのキーが同じ人か」を
+    後から決める案を測るための入口。時刻を渡すのは、統合の判断が会話の進行に
+    つれて変わる（因果的である）ため。
 
     `query` は「席と比べる音声を何にするか」の差し込み口で、全発話について
     ``query(発話, 音声, 決め直す対象か) -> {名前: 音声}`` の形で呼ばれる。
@@ -243,6 +249,11 @@ def replay_seats(run: str, vp, *, wav_path: Path | None = None,
     for u, code in rows:
         a, b = int(u["ms"]), int(u.get("end") or u["ms"])
         wav = pcm[int(a / 1000 * SR):int(b / 1000 * SR)]
+        if rekey is not None:
+            u = dict(u)
+            for f in ("key", "final_key"):
+                if u.get(f) is not None:
+                    u[f] = rekey(a, str(u[f]))
         revisable = is_revisable(u, cap=cap, seats=seats)
         base = resolved_key(u, cap=cap)
         want = (query(u, wav, revisable) if query

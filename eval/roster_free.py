@@ -135,6 +135,14 @@ def _silhouette_k(emb: np.ndarray, max_k: int = MAX_K) -> int:
     return best_k
 
 
+def cluster(emb: np.ndarray, max_k: int = MAX_K) -> np.ndarray:
+    """話者数を選んでまとめ、点ごとの群番号を返す（人数は推定させる）."""
+    if len(emb) < 2:
+        return np.zeros(len(emb), dtype=int)
+    return fcluster(_linkage(emb), _silhouette_k(emb, max_k),
+                    criterion="maxclust")
+
+
 def _silhouette(d: np.ndarray, lab: np.ndarray) -> float:
     """シルエット係数（自分の群への近さ vs 最も近い他群への近さ）."""
     labs = np.unique(lab)
