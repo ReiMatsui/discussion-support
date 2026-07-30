@@ -48,6 +48,7 @@ import json
 import logging
 import queue
 import threading
+import urllib.error
 import urllib.request
 from typing import Any
 
@@ -157,8 +158,19 @@ class PyannoteStreamingDiarizationProvider:
         req = urllib.request.Request(self.create_url, data=b"{}", method="POST")
         req.add_header("Authorization", f"Bearer {self.api_key}")
         req.add_header("Content-Type", "application/json")
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            payload = json.loads(resp.read())
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                payload = json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            # 本文に理由が書かれている。捨てると「400 Bad Request」だけが出て
+            # 原因が分からない（LLM側で実際にそうなった。handoff §43）。
+            # 例外はそのまま上げる——起動を止める判断は呼び出し側が持つ。
+            detail = ""
+            with contextlib.suppress(Exception):
+                detail = e.read().decode("utf-8", "replace")[:600]
+            logger.error("pyannote Live-1: セッション作成が %s で失敗: %s",
+                         e.code, detail or e.reason)
+            raise
         url = payload["url"]
         self.stream_id = payload.get("id")
         self._ws = connect(url)
