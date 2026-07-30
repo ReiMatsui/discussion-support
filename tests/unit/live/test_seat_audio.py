@@ -285,3 +285,26 @@ def test_retro_without_a_length_behaves_as_before():
     retro = RetroAttributor(sa, schedule=(120.0,), interval=300.0)
     retro.remember(1000, sa.embed(_audio(0.0, 0.4)))   # 僅差だが長さは不明
     assert retro.revise()[1000] != UNSURE_SPEAKER
+
+
+def test_rename_during_embedding_does_not_resurrect_the_old_seat():
+    """埋め込み計算中に rename が走っても、消したキーの参照が復活しない.
+
+    observe はロックを外して埋め込みを計算する（tracker のロックと入れ子に
+    しないため）。その間に UI スレッドの rename(old→new) が old を全ストアから
+    消すと、計算後の書き戻しが old を復活させていた（レビュー 2026-07-30。
+    b5 で計算が1回500ms級になり、窓は現実的な幅がある）。
+    """
+    sa = _ready(min_ref_sec=1.0)
+
+    real_embed = sa._embed_audio
+
+    def _embed_and_rename(wav):
+        emb = real_embed(wav)
+        sa.rename("人物1", "人物2")      # 計算中に統合が完了した状況
+        return emb
+
+    sa._embed_audio = _embed_and_rename
+    sa.observe("人物1", _audio(1.0, 2.0))
+    assert "人物1" not in sa._embeddings, "消したはずの席が復活している"
+    assert "人物1" not in sa._seconds

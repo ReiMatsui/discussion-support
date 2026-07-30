@@ -145,6 +145,12 @@ class SeatAudio:
         # 埋め込みはロックの外で計算する（tracker 側のロックと入れ子にしない）。
         emb = self._embed_audio(concat)
         with self._lock:
+            if key not in self._buffers and key not in self._embeddings:
+                # 計算中に rename でこの席が統合・消去された。書き戻すと
+                # 「消えたはずの人格が復活する」（b5 で埋め込みが1回500ms級に
+                # なり、この窓は現実的な幅がある。レビュー 2026-07-30）。
+                # この1回ぶんの観測は捨てる——次の確定発話が参照を作り直す。
+                return
             if emb is not None:
                 self._embeddings[key] = emb
                 self._seconds[key] = total / SR
