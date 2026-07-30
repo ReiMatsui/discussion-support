@@ -394,61 +394,16 @@ class RealtimeAgent(_RealtimeBase):
             return "直近の参加者発話を踏まえた短い整理・確認"
         return ""
 
-    def trigger(self, *, topics: list[dict] | None = None,
-                drift_reason: str | None = None,
-                invite_target: str | None = None,
-                fact_correction: dict | None = None,
-                manual_request: dict | None = None,
-                summary_focus: str | None = None,
-                af_presentation: str | None = None,
-                hold_playback: bool = False,
-                retry_intervention: bool | None = None,
-                is_retry: bool = False,
-                recent_agent_texts: list[str] | None = None):
-        """蓄積した発話をRealtimeAPIに送信し応答を要求.
+    @staticmethod
+    def _compose_trigger_notes(conv: str, *, topics, drift_reason, invite_target,
+                               fact_correction, manual_request, summary_focus,
+                               af_presentation, recent_agent_texts) -> str:
+        """介入の種別ごとの指示文を、発話コンテキストへ前置/後置する（純関数）.
 
-        topics: 現在の論点一覧（_topic_workerが抽出したもの）。
-                渡された場合、コンテキストに含めて脱線検出の精度を上げる。
-        drift_reason: 並列ドリフトチェッカーが検出した脱線理由。
-                設定されている場合、_pendingが空でも送信し、
-                ファシリテーターに介入を強く促す。
-        invite_target: 発言の少ない参加者の名前（S4）。設定されていると、
-                _pendingが空でも送信し、その人に声をかける発話を促す。
-        fact_correction: 高確信の事実誤り補正。設定されていると、
-                _pendingが空でも送信し、短い補足だけを促す。
-        recent_agent_texts: 直近に自分（ファシリテーター）が実際に発話した
-                テキスト。渡された場合、コンテキストに含めて「同じ内容の
-                介入を繰り返さない」よう明示する（同一表示の再発防止の
-                最終層。一次防御は Controller の duplicate_content）。
-        retry_intervention: 割り込みで中断されたときに、発話内容を保存して
-                次の機会に再送してよいか。未指定なら、事実補正は再送せず、
-                それ以外の介入だけ再送候補にする。
-        保存された介入内容（割り込みで中断された発言）がある場合、
-        コンテキストに追加して再試行の機会を与える。
+        前置の順序（論点→脱線→声かけ→事実補正→手動→整理→AF）は生成文の
+        優先順位そのもの。変更時はゴールデン（test_trigger_context_golden）を
+        作り直すこと。
         """
-        if not self._connected or not self.enabled or not self.ws:
-            return
-        active_retryable = (
-            bool(retry_intervention)
-            if retry_intervention is not None
-            else fact_correction is None
-        )
-        # --- _responding を test-and-set でアトミックに確保（Bug 4） ---
-        # 複数スレッドからの同時triggerで二重にresponse.createが飛ぶのを防ぐ。
-        # ここで確保した後に送信できなかった場合（送るものがない/送信例外）は、
-        # 必ず False に戻して固着を避ける。
-        with self._state_lock:
-            if self._responding:
-                return  # 既に応答生成中、または別スレッドが確保済み
-            if (not self._pending and self._pending_intervention is None
-                    and not drift_reason and not invite_target and not fact_correction
-                    and not manual_request and not af_presentation):
-                return
-            self._responding = True  # 確保（この時点でレースは閉じる）
-            # スナップショットのみ取得。実際のクリアは送信成功後に行い、
-            # 送信例外で発話内容が失われないようにする（Bug 2）。
-            pending_snapshot = list(self._pending)
-            conv = self._format_utterance_context(pending_snapshot)
         # --- 論点一覧をコンテキストに追加 ---
         if topics:
             topic_lines = "\n".join(
@@ -527,6 +482,69 @@ class RealtimeAgent(_RealtimeBase):
                     "同じことしか言えない場合は、繰り返す代わりに、"
                     "いま新しく加えられる一言だけを短く述べてください。")
                 conv = f"{conv}\n\n{repeat_note}"
+        return conv
+
+    def trigger(self, *, topics: list[dict] | None = None,
+                drift_reason: str | None = None,
+                invite_target: str | None = None,
+                fact_correction: dict | None = None,
+                manual_request: dict | None = None,
+                summary_focus: str | None = None,
+                af_presentation: str | None = None,
+                hold_playback: bool = False,
+                retry_intervention: bool | None = None,
+                is_retry: bool = False,
+                recent_agent_texts: list[str] | None = None):
+        """蓄積した発話をRealtimeAPIに送信し応答を要求.
+
+        topics: 現在の論点一覧（_topic_workerが抽出したもの）。
+                渡された場合、コンテキストに含めて脱線検出の精度を上げる。
+        drift_reason: 並列ドリフトチェッカーが検出した脱線理由。
+                設定されている場合、_pendingが空でも送信し、
+                ファシリテーターに介入を強く促す。
+        invite_target: 発言の少ない参加者の名前（S4）。設定されていると、
+                _pendingが空でも送信し、その人に声をかける発話を促す。
+        fact_correction: 高確信の事実誤り補正。設定されていると、
+                _pendingが空でも送信し、短い補足だけを促す。
+        recent_agent_texts: 直近に自分（ファシリテーター）が実際に発話した
+                テキスト。渡された場合、コンテキストに含めて「同じ内容の
+                介入を繰り返さない」よう明示する（同一表示の再発防止の
+                最終層。一次防御は Controller の duplicate_content）。
+        retry_intervention: 割り込みで中断されたときに、発話内容を保存して
+                次の機会に再送してよいか。未指定なら、事実補正は再送せず、
+                それ以外の介入だけ再送候補にする。
+        保存された介入内容（割り込みで中断された発言）がある場合、
+        コンテキストに追加して再試行の機会を与える。
+        """
+        if not self._connected or not self.enabled or not self.ws:
+            return
+        active_retryable = (
+            bool(retry_intervention)
+            if retry_intervention is not None
+            else fact_correction is None
+        )
+        # --- _responding を test-and-set でアトミックに確保（Bug 4） ---
+        # 複数スレッドからの同時triggerで二重にresponse.createが飛ぶのを防ぐ。
+        # ここで確保した後に送信できなかった場合（送るものがない/送信例外）は、
+        # 必ず False に戻して固着を避ける。
+        with self._state_lock:
+            if self._responding:
+                return  # 既に応答生成中、または別スレッドが確保済み
+            if (not self._pending and self._pending_intervention is None
+                    and not drift_reason and not invite_target and not fact_correction
+                    and not manual_request and not af_presentation):
+                return
+            self._responding = True  # 確保（この時点でレースは閉じる）
+            # スナップショットのみ取得。実際のクリアは送信成功後に行い、
+            # 送信例外で発話内容が失われないようにする（Bug 2）。
+            pending_snapshot = list(self._pending)
+            conv = self._format_utterance_context(pending_snapshot)
+        conv = self._compose_trigger_notes(
+            conv, topics=topics, drift_reason=drift_reason,
+            invite_target=invite_target, fact_correction=fact_correction,
+            manual_request=manual_request, summary_focus=summary_focus,
+            af_presentation=af_presentation,
+            recent_agent_texts=recent_agent_texts)
         # --- 保存された介入内容をコンテキストに追加 ---
         # 注: 有効な介入は送信成功までクリアしない（Bug 2）。
         #     期限切れの介入のみ、送信成否に関わらずここで破棄する。
@@ -564,6 +582,19 @@ class RealtimeAgent(_RealtimeBase):
             manual_request=manual_request,
             pending_intervention=pi if include_pi else None,
         )
+        self._send_trigger(conv, hold_playback=hold_playback,
+                           pending_snapshot=pending_snapshot,
+                           active_retryable=active_retryable,
+                           retry_fallback=retry_fallback,
+                           pi=pi, include_pi=include_pi)
+
+    def _send_trigger(self, conv: str, *, hold_playback, pending_snapshot,
+                      active_retryable, retry_fallback, pi, include_pi) -> None:
+        """組み立てた文脈を送信し、成功時だけ状態を消費する.
+
+        失敗時は _responding の確保を解放し、pending も介入も一切クリアせず
+        保持して次回再試行する（Bug 2/4 の不変条件。呼び出し元 trigger 参照）。
+        """
         try:
             self.ws.send(json.dumps({
                 "type": "conversation.item.create",
