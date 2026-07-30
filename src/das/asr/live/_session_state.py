@@ -99,6 +99,15 @@ class SessionState:
         # 新会議に書き込んで「カーソルが発話数を超える永久待機」に陥るのを防ぐ。
         self.meeting_epoch = 0
 
+        self._init_attribution(tracker, diarization_provider, speaker_resolver,
+                               cluster_namer, seat_audio)
+        self._init_agents_and_queues()
+        self._init_audio_buffers()
+        self._init_worker_state()
+
+    def _init_attribution(self, tracker, diarization_provider, speaker_resolver,
+                          cluster_namer, seat_audio) -> None:
+        """話者帰属に関わる状態（声紋・外部分離・席・遡及訂正）."""
         # 声紋
         self.tracker: VoiceProfiles | None = tracker
         # 外部話者分離
@@ -134,6 +143,8 @@ class SessionState:
         self.constrain_drop_counts: dict[str, int] = {}
         self.constrain_warned = False
 
+    def _init_agents_and_queues(self) -> None:
+        """AIエージェント・論点・介入要求キューの状態."""
         # AI
         self.agent: RealtimeAgent | None = None
         self.partner: ConversationPartner | None = None
@@ -205,6 +216,8 @@ class SessionState:
         self.waiting_to_start = False             # 開始前設定画面で待機中
         self.start_requested = threading.Event()
 
+    def _init_audio_buffers(self) -> None:
+        """PCMバッファとAI再生区間の記録（エコー判定用）."""
         # PCMバッファ
         self._reset_pcm_buffers()
         self._PCM_KEEP_BYTES = SR * 2 * 120
@@ -225,6 +238,8 @@ class SessionState:
         self.retired_echo_texts: collections.deque[tuple[float, str]] = (
             collections.deque(maxlen=32))
 
+    def _init_worker_state(self) -> None:
+        """制御イベントとワーカーのカーソル類."""
         # 制御
         self.stop = threading.Event()
         self.audio_q: queue.Queue[bytes | None] = queue.Queue()
