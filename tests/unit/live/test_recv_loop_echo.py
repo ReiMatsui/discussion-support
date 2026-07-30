@@ -274,3 +274,46 @@ def test_non_overlapping_utterance_counts_despite_recorded_intervals(tmp_path):
     assert tracker.calls[0]["count"] is True
     assert tracker.calls[0]["enroll"] is True
     assert len(state.records) == 1
+
+
+def test_interval_uses_capture_position_under_send_backlog(tmp_path):
+    """送信が遅延していても、AI再生区間はエコーが実際に並ぶ位置に記録される.
+
+    2026-07-30 の講義(2時間3分)で、送信バックログ約60秒の状態でのAI介入の
+    エコーが「参加者B」の発話として議事録に混入した。原因は区間の記録が
+    送信済み位置(current_asr_ms)だったこと: エコーはマイク取り込み順で
+    ストリームに並ぶため、実位置より約60秒手前に区間が記録され、±300msの
+    重なり判定から外れて類似度の照合に進めなかった。区間は
+    取り込み位置(送信済み+送信待ち)で記録する。
+    """
+    tracker = _RecordingTracker()
+    state = _make_state(tmp_path, tracker=tracker)
+    state.agent = _EchoAgent(in_echo=False, ai_speaking=False, sim=0.9)  # type: ignore[assignment]
+
+    # 送信済み 1000ms・送信待ち 60000ms（=送信バックログ60秒）の状態でAIが8秒鳴る。
+    state.asr_pcm_total_bytes = 1000 * 32
+    state.audio_q.put(b"\0" * (60000 * 32))
+    state.note_ai_speech_start("agent")
+    state.audio_q.put(b"\0" * (8000 * 32))   # 再生中に取り込まれた8秒（エコー含む）
+    state.note_ai_speech_end("agent")
+
+    # エコーはずっと後に確定して届く。cur_ms は取り込み位置ベース（61000ms〜）。
+    loop = _loop_with(state, ms=61100, end=66000)
+    loop.flush()  # type: ignore[no-untyped-call]
+
+    assert tracker.calls == []   # 区間が実位置にあるので安全網が発火する
+    assert state.records == []
+
+
+def test_open_interval_now_uses_capture_position(tmp_path):
+    """再生中（開区間）の判定も取り込み位置で行う.
+
+    送信済み位置を「現在」に使うと、遅延中は now が開始位置より手前になり
+    開区間 [start, now] が空集合に化けて、再生中のエコーすら素通りする。
+    """
+    state = _make_state(tmp_path)
+    state.asr_pcm_total_bytes = 1000 * 32
+    state.audio_q.put(b"\0" * (60000 * 32))
+    state.note_ai_speech_start("agent")   # 開始 61000ms、開いたまま
+
+    assert state.overlaps_ai_speech(61200, 61800, source="agent")

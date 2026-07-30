@@ -47,6 +47,36 @@ from .agents._realtime import RealtimeAgent
 from .agents._simulator import DiscussionSimulator
 
 
+class _AudioByteQueue(queue.Queue):
+    """滞留バイト数を数える audio_q（送信待ち音声の量 = 送信遅延の実体）.
+
+    エコー判定のAI再生区間は「エコーが実際に並ぶストリーム位置」で記録する
+    必要がある。エコーはマイク取り込みの順で送信ストリームに並ぶため、
+    その位置は 送信済み(asr_pcm_total_bytes) + 送信待ち(このキューの滞留)。
+    送信済み位置だけで記録すると、送信が遅延したとき区間が実位置より
+    手前にずれ、重なり判定から外れてガードが素通りする（2026-07-30 講義
+    2時間3分: 送信遅延約60秒でAI発話が「参加者B」として議事録に混入）。
+
+    _put/_get は queue.Queue が mutex を握った状態で呼ぶ拡張点なので、
+    追加のロックなしでスレッド安全。None 終端はバイト数に数えない。
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.pending_bytes = 0
+
+    def _put(self, item) -> None:
+        if isinstance(item, (bytes, bytearray)):
+            self.pending_bytes += len(item)
+        super()._put(item)
+
+    def _get(self):
+        item = super()._get()
+        if isinstance(item, (bytes, bytearray)):
+            self.pending_bytes -= len(item)
+        return item
+
+
 class SessionState:
     """main()内の共有状態を集約するコンテナ.
 
@@ -242,7 +272,7 @@ class SessionState:
         """制御イベントとワーカーのカーソル類."""
         # 制御
         self.stop = threading.Event()
-        self.audio_q: queue.Queue[bytes | None] = queue.Queue()
+        self.audio_q: _AudioByteQueue = _AudioByteQueue()
 
         # エージェントワーカー状態
         self._last_utt_time = [time.monotonic()]
@@ -1004,10 +1034,22 @@ class SessionState:
         """
         return self.asr_pcm_total_bytes // 32
 
+    def current_capture_ms(self) -> int:
+        """マイクが取り込んだ音声の現在位置ms（cur_ms と同じストリーム座標系）.
+
+        送信済み(asr_pcm_total_bytes) + 送信待ち(audio_q滞留) で近似する。
+        いま鳴った音（AIエコー含む）は取り込み順でストリームに並ぶので、
+        送信がどれだけ遅延していても、この位置がその音の将来の cur_ms と
+        一致する。current_asr_ms（送信済み位置）は遅延中は実位置より手前に
+        ずれるため、AI再生区間の記録には使わない（2026-07-30 講義で混入）。
+        """
+        return (self.asr_pcm_total_bytes
+                + getattr(self.audio_q, "pending_bytes", 0)) // 32
+
     def note_ai_speech_start(self, source: str) -> None:
         """AI（source: agent/partner）の再生開始を現在のマイクms位置で記録する."""
         with self._ai_speech_lock:
-            self._ai_speech_open[source] = self.current_asr_ms()
+            self._ai_speech_open[source] = self.current_capture_ms()
 
     def note_ai_speech_end(self, source: str) -> None:
         """AI再生の終了で開いていた区間を閉じ、判定用の履歴に積む."""
@@ -1015,7 +1057,7 @@ class SessionState:
             start = self._ai_speech_open.pop(source, None)
             if start is None:
                 return
-            end = max(self.current_asr_ms(), start)
+            end = max(self.current_capture_ms(), start)
             self._ai_speech_intervals.append((start, end, source))
 
     def add_retired_echo_texts(self, texts) -> None:
@@ -1057,7 +1099,9 @@ class SessionState:
                 if a <= hi and lo <= b:
                     return True
             if self._ai_speech_open:
-                now = self.current_asr_ms()
+                # 開区間の「現在」も取り込み位置で見る。送信済み位置だと遅延中に
+                # now が開始位置より手前になり、開区間が空集合に化ける。
+                now = self.current_capture_ms()
                 for src, a in self._ai_speech_open.items():
                     if source is not None and src != source:
                         continue
