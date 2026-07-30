@@ -357,7 +357,7 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
 
     # 人物別しきい値のオフセット（_person_th: p35 - この値）。分位点 p35 は
     # sweep 実測で選定済みだが、このオフセット自体は旧仕様（中央値-0.12）からの
-    # 流用で未検証（attribution_selfreview_2026-07-21.md）。sweep 可能にするため
+    # 流用で未検証（docs/design/attribution_selfreview_2026-07-21.md）。sweep 可能にするため
     # 属性化（既定 0.12 ＝従来と同一挙動）。
     person_th_offset = 0.12
 
