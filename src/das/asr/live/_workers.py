@@ -316,6 +316,56 @@ def _play_ack_chime() -> None:
     threading.Thread(target=_play, daemon=True).start()
 
 
+def _triage_classify_one(state, talk_rs, idx, r, text, *, retry_counts,
+                         classify_fn, oai_key, oai_model) -> dict | None:
+    """発話1件の triage 注釈を作る。一時失敗で再試行すべきなら None を返す."""
+    if len(text) < _TRIAGE_MIN_CHARS:
+        # 相槌は triage_records が除外済み。残る機械的ゲートは
+        # 「極端に短い発話」のみ（LLM を呼ぶ価値がない, コスト0）。
+        return {"factual_claim": False, "facilitator_request": ""}
+    context = talk_rs[max(0, idx - _TRIAGE_CONTEXT_WINDOW):idx]
+    utts = [{"speaker": intervention_speaker_name(state, c),
+             "text": c["text"]} for c in context]
+    utts.append({"speaker": intervention_speaker_name(state, r),
+                 "text": text})
+    result = classify_fn(utts, oai_key, oai_model)
+    if result.get("retryable_error"):
+        tries = retry_counts.get(idx, 0) + 1
+        retry_counts[idx] = tries
+        if tries <= _TRIAGE_MAX_RETRIES:
+            print(f"# [triage] retry: LLM分類の一時失敗 "
+                  f"{tries}/{_TRIAGE_MAX_RETRIES}", flush=True)
+            return None   # 同一発話を次tickで再試行（カーソルは進めない）
+        print("# [triage] skip: LLM分類の失敗が続いたため対象発話を"
+              "スキップ", flush=True)
+        return {"factual_claim": False, "facilitator_request": ""}
+    return {
+        "factual_claim": _as_bool(result.get("factual_claim")),
+        "facilitator_request": str(
+            result.get("facilitator_request") or ""
+        ).strip()[:_MANUAL_CALL_MAX_CHARS],
+    }
+
+
+def _dispatch_facilitator_voice_call(state, text: str, request: str) -> None:
+    """検出した呼びかけを手動呼び出しキューへ積む（UIボタンと同じ経路）."""
+    state.manual_call_requests.put({
+        "request": request,
+        "source": "voice",
+        "created_at": time.monotonic(),
+        "created_wall_at": datetime.datetime.now()
+        .isoformat(timespec="seconds"),
+    })
+    print(f"# [voice] ファシリテーター呼びかけ検出: {request}",
+          flush=True)
+    _log_voice_call_diag(state, text=text, request=request)
+    _set_manual_status(state, "queued", source="voice",
+                       request=request)
+    # 「聞こえた」を即時に伝えるアック音（H）。UI由来のボタン呼び出しは
+    # UIに既にフィードバックがあるため鳴らさない（voice経路だけ）。
+    _play_ack_chime()
+
+
 @_resilient
 def _run_triage_worker(state: SessionState, oai_key: str,
                        oai_model: str) -> None:
@@ -414,41 +464,11 @@ def _run_triage_worker(state: SessionState, oai_key: str,
             idx = cursor
             r = talk_rs[idx]
             text = str(r.get("text") or "").strip()
-            # 相槌は triage_records が除外済み（未確定話者は呼びかけ検出のため
-            # 含まれる, 修正5）。ここで残る機械的ゲートは「極端に短い発話」のみ
-            # （LLM を呼ぶ価値がない, コスト0）。
-            if len(text) < _TRIAGE_MIN_CHARS:
-                annotation = {"factual_claim": False, "facilitator_request": ""}
-            else:
-                context = talk_rs[max(0, idx - _TRIAGE_CONTEXT_WINDOW):idx]
-                utts = [
-                    {"speaker": intervention_speaker_name(state, c),
-                     "text": c["text"]}
-                    for c in context
-                ]
-                utts.append({
-                    "speaker": intervention_speaker_name(state, r),
-                    "text": text,
-                })
-                result = _classify(utts, oai_key, oai_model)
-                if result.get("retryable_error"):
-                    tries = _retry_counts.get(idx, 0) + 1
-                    _retry_counts[idx] = tries
-                    if tries <= _TRIAGE_MAX_RETRIES:
-                        print(f"# [triage] retry: LLM分類の一時失敗 "
-                              f"{tries}/{_TRIAGE_MAX_RETRIES}", flush=True)
-                        break  # 同一発話を次tickで再試行（カーソルは進めない）
-                    print("# [triage] skip: LLM分類の失敗が続いたため対象発話を"
-                          "スキップ", flush=True)
-                    annotation = {"factual_claim": False,
-                                  "facilitator_request": ""}
-                else:
-                    annotation = {
-                        "factual_claim": _as_bool(result.get("factual_claim")),
-                        "facilitator_request": str(
-                            result.get("facilitator_request") or ""
-                        ).strip()[:_MANUAL_CALL_MAX_CHARS],
-                    }
+            annotation = _triage_classify_one(
+                state, talk_rs, idx, r, text, retry_counts=_retry_counts,
+                classify_fn=_classify, oai_key=oai_key, oai_model=oai_model)
+            if annotation is None:
+                break                     # 一時失敗 → 次tickで同じ発話を再試行
             _retry_counts.pop(idx, None)
             # 注釈書き込み・cursor 書き戻し（副作用）の直前で epoch 確認（H2）。
             with state.state_lock:
@@ -466,21 +486,7 @@ def _run_triage_worker(state: SessionState, oai_key: str,
                 with state.state_lock:
                     if state.meeting_epoch != epoch:
                         break
-                state.manual_call_requests.put({
-                    "request": request,
-                    "source": "voice",
-                    "created_at": time.monotonic(),
-                    "created_wall_at": datetime.datetime.now()
-                    .isoformat(timespec="seconds"),
-                })
-                print(f"# [voice] ファシリテーター呼びかけ検出: {request}",
-                      flush=True)
-                _log_voice_call_diag(state, text=text, request=request)
-                _set_manual_status(state, "queued", source="voice",
-                                   request=request)
-                # 「聞こえた」を即時に伝えるアック音（H）。UI由来のボタン呼び出しは
-                # UIに既にフィードバックがあるため鳴らさない（voice経路だけ）。
-                _play_ack_chime()
+                _dispatch_facilitator_voice_call(state, text, request)
 
 
 @_resilient
