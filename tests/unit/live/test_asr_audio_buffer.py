@@ -104,7 +104,6 @@ def test_open_wav_resets_asr_buffer_offsets() -> None:
     state.asr_pcm_buf_offset = 10
     state.asr_pcm_total_bytes = 3
     state.stt_time_offset_ms = 999
-    state._stt_connection_audio_base_bytes = 123
 
     state.open_wav()  # type: ignore[no-untyped-call]
 
@@ -112,7 +111,6 @@ def test_open_wav_resets_asr_buffer_offsets() -> None:
     assert state.asr_pcm_buf_offset == 0
     assert state.asr_pcm_total_bytes == 0
     assert state.stt_time_offset_ms == 0
-    assert state._stt_connection_audio_base_bytes == 0
 
 
 def test_recording_holds_only_sent_audio_so_wav_matches_utterance_ms(

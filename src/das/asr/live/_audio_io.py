@@ -183,7 +183,6 @@ def _run_sender(state: SessionState, backend: STTBackend):
             if len(state.pcm_buf) > state._PCM_KEEP_BYTES + SR * 2 * 10:
                 trim = len(state.pcm_buf) - state._PCM_KEEP_BYTES
                 del state.pcm_buf[:trim]
-                state.pcm_buf_offset += trim
         if ws is not None:
             try:
                 ws.send(pcm)

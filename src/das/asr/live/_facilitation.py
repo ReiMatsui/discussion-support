@@ -83,8 +83,6 @@ class InterventionCandidate:
     confidence: float = 0.0
     created_at: float = 0.0
     expires_at: float = 0.0          # 0.0 = 無期限
-    source_turn_ids: list[str] = field(default_factory=list)
-    retryable: bool = False
     interrupt_policy: InterruptPolicy = "wait_for_pause"
     payload: dict = field(default_factory=dict)
 

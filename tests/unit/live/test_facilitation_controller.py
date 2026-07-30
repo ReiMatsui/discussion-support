@@ -51,13 +51,13 @@ def _drift(now):
 def _manual(now, *, request="ここまで整理して", expires_at=0.0):
     return InterventionCandidate(
         id="manual", kind="manual", brief=request, created_at=now,
-        expires_at=expires_at, retryable=True,
+        expires_at=expires_at,
         payload={"request": request, "source": "ui"})
 
 
 def _summarize(now, *, focus="論点の整理"):
     return InterventionCandidate(id="summarize", kind="summarize", brief=focus,
-                                 created_at=now, retryable=True,
+                                 created_at=now,
                                  payload={"focus": focus})
 
 

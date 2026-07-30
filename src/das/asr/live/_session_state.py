@@ -696,10 +696,9 @@ class SessionState:
                     continue
                 r["speaker"] = new_key
                 r["speaker_source"] = "seat_assign_retro"
-                # 貼り直しは未確定へ**戻す**こともある（短くて僅差の発話。
-                # handoff §36）。ここを常に False にすると、引き戻した発話が
-                # 未確定の見た目にならない。
-                r["unsure"] = str(new_key) == UNSURE_SPEAKER
+                # 未確定かどうかの表示は api_snapshot が speaker キーから毎回
+                # 再計算する。ここで unsure フラグを書いても読み手がいない
+                # （レビュー 2026-07-30 で確認しデッド書き込みを削除）。
                 applied[ms] = str(new_key)
             if applied:
                 for r in self.records:
@@ -897,7 +896,6 @@ class SessionState:
         切り出しが静かにずれる——実際に録音と発話msがずれた事故があった（§30）。
         """
         self.pcm_buf = bytearray()
-        self.pcm_buf_offset = 0
         self.pcm_total_bytes = 0
         # 声紋判定用: STT WebSocket に実際に送信できたPCMだけを保持する。
         # 録音用バッファとは分けることで、接続リセット中に捨てた音声や送信失敗音声で
@@ -906,7 +904,6 @@ class SessionState:
         self.asr_pcm_buf_offset = 0
         self.asr_pcm_total_bytes = 0
         self.stt_time_offset_ms = 0
-        self._stt_connection_audio_base_bytes = 0
 
     def open_wav(self):
         """録音wavを開きヘッダを書く。PCMバッファ関連もリセットする.
@@ -973,7 +970,6 @@ class SessionState:
         """新しいSTT接続の時刻0と、送信済み音声の絶対位置を対応させる."""
         with self.buf_lock:
             base = self.asr_pcm_total_bytes
-            self._stt_connection_audio_base_bytes = base
             self.stt_time_offset_ms = int(base / (SR * 2) * 1000)
 
     def stt_abs_ms(self, ms: int | None) -> int | None:
@@ -1473,7 +1469,7 @@ class SessionState:
                 total_turns = sum(sp_turns.values()) or 1
                 ranked = sorted(sp_dur.keys(), key=lambda s: sp_dur[s], reverse=True)
 
-                def _bar_rows(data, total, unit=""):
+                def _bar_rows(data, total):
                     rows = []
                     for s in ranked:
                         v = data.get(s, 0)

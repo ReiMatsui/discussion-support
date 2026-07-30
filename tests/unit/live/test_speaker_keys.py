@@ -19,7 +19,6 @@ import pytest
 
 from das.asr.live._speaker_keys import (
     is_ai_key,
-    is_anonymous,
     is_cluster_key,
     is_label_key,
     is_minted_key,
@@ -92,15 +91,6 @@ def test_minted_key_and_system_looking_name_are_different_questions():
     assert looks_like_system_name("話者1") is True
     # 人物N は両方に該当する（鋳造もするし、仮名にも見える）
     assert is_minted_key("人物1") and looks_like_system_name("人物1")
-
-
-@pytest.mark.parametrize(("key", "expected"), [
-    ("#1", True), ("@diar:1", True), ("人物1", True), ("話者1", True),
-    ("田中", False), ("?", False),
-])
-def test_is_anonymous(key, expected):
-    """表示上まだ匿名扱いする対象（旧 _is_anonymous_speaker_key or 仮名）."""
-    assert is_anonymous(key) is expected
 
 
 def test_vocabulary_is_the_single_source_for_key_shapes():

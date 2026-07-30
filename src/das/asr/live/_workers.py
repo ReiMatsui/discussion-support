@@ -892,8 +892,6 @@ class _AfEarlyGenGate:
 
     def __init__(self) -> None:
         self._holding = False
-        self._held_kind: str | None = None
-        self._held_af: dict[str, Any] | None = None
         self._held_since: float | None = None
         self._last_release_ms: float | None = None
 
@@ -908,8 +906,6 @@ class _AfEarlyGenGate:
 
     def reset(self) -> None:
         self._holding = False
-        self._held_kind = None
-        self._held_af = None
         self._held_since = None
 
     def _fire(self, agent: Any, af: dict[str, Any], *, hold: bool, topics: Any) -> None:
@@ -955,13 +951,10 @@ class _AfEarlyGenGate:
         if status == "hold":  # 採択見込み・間待ち → 生成先行 (hold)
             self._fire(agent, af, hold=True, topics=topics)
             self._holding = True
-            self._held_kind = str(af.get("kind") or "af_l1")
-            self._held_af = af
             self._held_since = now
             return "trigger"
         if status == "deliver":  # 既に pause 成立 → 生成先行の余地なく即時配信
             self._fire(agent, af, hold=False, topics=topics)
-            self._held_kind = str(af.get("kind") or "af_l1")
             return "deliver"
         return "none"
 

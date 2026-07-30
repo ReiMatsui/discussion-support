@@ -413,7 +413,6 @@ def _build_candidates(
                 created_at=queued_at,
                 expires_at=fact_expires_at(queued_at),
                 interrupt_policy="wait_for_pause",
-                retryable=False,
                 payload={"correction": correction, "fact": f},
             ))
 
@@ -428,7 +427,6 @@ def _build_candidates(
             created_at=created,
             expires_at=created + _MANUAL_CALL_TTL,
             interrupt_policy="wait_for_pause",
-            retryable=True,
             payload={"request": request, "source": str(m.get("source") or "ui")},
         ))
 
@@ -441,7 +439,6 @@ def _build_candidates(
             created_at=drift_created,
             expires_at=drift_created + _DRIFT_PENDING_TTL,
             interrupt_policy="wait_for_pause",
-            retryable=True,
             payload={"drift_count": pending.drift_count},
         ))
 
@@ -453,7 +450,6 @@ def _build_candidates(
             brief=str(pi.get("delivered", "")),
             created_at=float(pi.get("created_at", now)),
             interrupt_policy="wait_for_pause",
-            retryable=True,
         ))
 
     # summarize 抑止規則 (設計 88f9a78): pending に af_l2 が保留されている間は
@@ -470,7 +466,6 @@ def _build_candidates(
             brief=focus or "議論の整理",
             created_at=created,
             interrupt_policy="wait_for_pause",
-            retryable=True,
             payload={"focus": focus},
         ))
 
@@ -488,7 +483,6 @@ def _build_candidates(
             created_at=af_created,
             expires_at=af_created + af_ttl,
             interrupt_policy="wait_for_pause",
-            retryable=True,
             payload={"af_text": str(a.get("af_text") or ""), "kind": af_kind},
         ))
 
