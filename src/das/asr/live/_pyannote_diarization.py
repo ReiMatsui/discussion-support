@@ -118,6 +118,11 @@ class PyannoteStreamingDiarizationProvider:
         self._reader: threading.Thread | None = None
         self._stop = threading.Event()
         self._active_starts: dict[str, int] = {}
+        # _active_starts は3スレッドが触る（readerが挿入/pop、送信スレッドが
+        # clear、recv側が active_events で走査）。無ロックだと走査中の挿入で
+        # RuntimeError（dictionary changed size during iteration）になり、
+        # 発話処理ごと落ちる（レビュー 2026-07-30）。
+        self._active_lock = threading.Lock()
         self._pcm_buf = bytearray()
         self._reconnects = 0
         self._session_base_ms = 0
@@ -131,7 +136,8 @@ class PyannoteStreamingDiarizationProvider:
 
     def start(self) -> None:
         self._stop.clear()
-        self._active_starts.clear()
+        with self._active_lock:
+            self._active_starts.clear()
         self._pcm_buf.clear()
         self._reconnects = 0
         # ラベルepoch・タイムライン基点は start() でリセットしない（2026-07-15
@@ -197,7 +203,8 @@ class PyannoteStreamingDiarizationProvider:
         self._session_base_ms += self._sent_audio_ms
         self._sent_audio_ms = 0
         self._label_epoch += 1
-        self._active_starts.clear()
+        with self._active_lock:
+            self._active_starts.clear()
         self._stop.clear()
         try:
             self._connect()
@@ -247,10 +254,10 @@ class PyannoteStreamingDiarizationProvider:
                 return events
 
     def active_events(self) -> list[DiarizationEvent]:
-        return [
-            DiarizationEvent(start_ms, None, speaker, self.name)
-            for speaker, start_ms in self._active_starts.items()
-        ]
+        with self._active_lock:
+            items = list(self._active_starts.items())
+        return [DiarizationEvent(start_ms, None, speaker, self.name)
+                for speaker, start_ms in items]
 
     def close(self) -> None:
         """end_of_stream を送り、サーバが確定イベントを出し切って自発的に
@@ -313,7 +320,8 @@ class PyannoteStreamingDiarizationProvider:
         speaker = raw_speaker if self._label_epoch == 0 else f"R{self._label_epoch}:{raw_speaker}"
         ms = int(float(timestamp) * 1000) + self._session_base_ms
         if typ == "diarization_speaker_start":
-            self._active_starts[speaker] = ms
+            with self._active_lock:
+                self._active_starts[speaker] = ms
             return None
         # diarization_speaker_end。仕様(streaming-real-time)上は
         # start/end が必ず対で来る想定だが、実測ではサーバ側の重複end送信・
@@ -325,14 +333,15 @@ class PyannoteStreamingDiarizationProvider:
         # 生ログ・統計に混入し、イベントペアリングの不整合を隠していた）。
         # 対応するstartが無いendは実区間を再構成できないため、ここで
         # ログを残した上で捨てる（Noneを返す）。
-        if speaker not in self._active_starts:
+        with self._active_lock:
+            start_ms = self._active_starts.pop(speaker, None)
+        if start_ms is None:
             logger.warning(
                 "pyannote Live-1: speaker=%s の speaker_end (ts=%.3fs) に対応する"
                 " speaker_start がありません。縮退セグメント化を避けるため破棄します。",
                 speaker, timestamp if isinstance(timestamp, int | float) else -1.0,
             )
             return None
-        start_ms = self._active_starts.pop(speaker)
         if ms <= start_ms:
             logger.warning(
                 "pyannote Live-1: speaker=%s の区間が非正 (start_ms=%d end_ms=%d)。"

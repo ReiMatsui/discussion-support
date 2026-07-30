@@ -242,3 +242,25 @@ def test_restart_advances_label_epoch_to_avoid_key_collision(monkeypatch) -> Non
     assert speaker_of(provider) == "R1:SPEAKER_00"
     # タイムラインは再接続時と同様に累計msを引き継いで単調を保つ
     assert provider._session_base_ms == 5000
+
+
+def test_active_starts_is_guarded_by_a_lock() -> None:
+    """開区間の辞書は3スレッドが触るため、走査はロック下のコピーで行う.
+
+    reader が挿入/pop、送信スレッドが clear、recv 側が active_events で走査
+    する。無ロックだと走査中の挿入で RuntimeError になり発話処理ごと落ちる
+    （レビュー 2026-07-30）。ここでは「走査がロック下のスナップショットで
+    行われる」ことを、走査中に挿入しても安全なことで確かめる。
+    """
+    provider = PyannoteStreamingDiarizationProvider("k")
+    for i in range(50):
+        provider._parse_message(json.dumps(
+            {"type": "diarization_speaker_start",
+             "data": {"timestamp": i * 0.1, "speaker": f"SPEAKER_{i:02d}"}}))
+    events = provider.active_events()
+    # スナップショットなので、走査結果へ後から挿入しても影響しない
+    provider._parse_message(json.dumps(
+        {"type": "diarization_speaker_start",
+         "data": {"timestamp": 99.0, "speaker": "SPEAKER_99"}}))
+    assert len(events) == 50
+    assert provider._active_lock is not None
