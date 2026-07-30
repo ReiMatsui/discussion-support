@@ -527,6 +527,19 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
         # ユーザーが明示的にONにしたもの＋セッション中に自動登録された人物Nのみが照合対象。
         self._active_keys: set[str] = set()
 
+    def _rename_in_label_hist(self, old: str, new: str) -> None:
+        """ラベル健全性の履歴の中の人物キーも付け替える.
+
+        付け替えないと、リネーム直後の照合成功が新キーで記録され、履歴に
+        新旧2つのキーが並ぶ。_label_pure が「直近windowに2人物」と誤判定して
+        ラベル不純に落ち、**正しい命名操作が帰属品質を一時的に劣化させる**
+        （レビュー 2026-07-30）。
+        """
+        for h in getattr(self, "label_hist", {}).values():
+            for i, k in enumerate(h):
+                if k == old:
+                    h[i] = new
+
     def reset_session(self) -> None:
         """会議リセット時に、セッション由来の割り当て・蓄積をクリアする（課題③）.
 
@@ -552,6 +565,12 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
             # ANON は「人物N」のみをカバーする（#ラベルは _active_keys に入らない）。
             self._active_keys = {k for k in self._active_keys
                                  if is_ai_key(k) or not is_minted_key(k)}
+            # プロファイルの実体も落とす。残すと n_anon=0 に戻した後、次の
+            # 会議でまだ鋳造されていない 人物N をユーザーが命名したとき、
+            # **前の会議の不在者の声紋**が「label in profiles」で拾われて
+            # 実名登録・永続化されてしまう（レビュー 2026-07-30）。
+            self.profiles = {k: v for k, v in self.profiles.items()
+                             if not is_minted_key(k)}
 
     def _active_human(self) -> dict:
         """照合対象の人間プロファイル（AI声紋 __..__ は除く）."""
@@ -1071,6 +1090,7 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
         self._own_updates.pop(old, None)
         if old != label:   # 「人物N=名前」のリネーム以外は、ラベル自体も対応づける
             self.sp_map[label] = name
+        self._rename_in_label_hist(old, name)
         self._persist()
         return old
 
@@ -1086,6 +1106,7 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
             for k, v in list(self.sp_map.items()):
                 if v == src:
                     self.sp_map[k] = dst
+            self._rename_in_label_hist(src, dst)
             self._active_keys.discard(src)
             self._persist()
             return True
@@ -1190,7 +1211,8 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
             return True
 
     def _persist(self):
-        if self._foreign_backup is not None:
+        # getattr なのは __new__ 構築のテスト用フェイク対策（label_hist と同じ）
+        if getattr(self, "_foreign_backup", None) is not None:
             # 別モデルの台帳を上書きする前に退避する（1回だけ）。
             raw, foreign = self._foreign_backup
             bak = f"{self.path}.{foreign}.bak"
