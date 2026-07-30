@@ -459,13 +459,23 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
         self._OWN_EMB_CAP = 16            # 人物ごとに保持する受理一致埋め込みの上限（P3）
         self.max_human_speakers: int | None = None
         self.profiles: dict[str, np.ndarray] = {}
+        # 別モデルで作られた voices.json を見つけたときの避難先。読み込まずに
+        # そのまま進むと、次の _persist() が空の台帳で**上書き**し、過去の
+        # 実名プロファイルが黙って全消去される（レビュー 2026-07-30 で発見）。
+        # 消す代わりに、最初の書き込みの前に <path>.<旧モデル>.bak へ退避する。
+        self._foreign_backup: tuple[str, str] | None = None
         if os.path.exists(path):
             with open(path, encoding="utf-8") as f:
-                data = json.load(f)
-            if data.pop("_model", "resemblyzer") == model:   # 別モデルの声紋は互換性なし
+                raw = f.read()
+            data = json.loads(raw)
+            foreign = data.pop("_model", "resemblyzer")
+            if foreign == model:   # 別モデルの声紋は互換性なし
                 self.profiles = {k: np.asarray(v, dtype=np.float64) for k, v in data.items()}
             else:
-                print(f"# 注意: {path} は別の声紋モデルで作成されたため読み込みません", flush=True)
+                self._foreign_backup = (raw, foreign)
+                print(f"# 注意: {path} は別の声紋モデル({foreign})で作成されたため"
+                      f"読み込みません（保存時に {path}.{foreign}.bak へ退避します）",
+                      flush=True)
         self.sp_map: dict[str, str] = {}                    # Sonioxラベル -> 表示キー
         # ラベル健全性の履歴: Sonioxラベル -> 直近の照合成功（一致/補正/登録/合流）
         # で確定した人物のリスト。高重なり会話ではSonioxが複数話者を同一ラベルに
@@ -1180,6 +1190,15 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
             return True
 
     def _persist(self):
+        if self._foreign_backup is not None:
+            # 別モデルの台帳を上書きする前に退避する（1回だけ）。
+            raw, foreign = self._foreign_backup
+            bak = f"{self.path}.{foreign}.bak"
+            if not os.path.exists(bak):
+                with open(bak, "w", encoding="utf-8") as f:
+                    f.write(raw)
+                print(f"# 旧モデル({foreign})の声紋を {bak} に退避しました", flush=True)
+            self._foreign_backup = None
         named = {k: v.tolist() for k, v in self.profiles.items() if not is_minted_key(k)}
         named["_model"] = self.model   # 声紋はモデル間で互換性がないため記録
         tmp = self.path + ".tmp"
