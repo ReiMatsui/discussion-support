@@ -74,9 +74,9 @@ class PyannoteStreamingDiarizationProvider:
     チャンクに内部変換して送る。
 
     自動再接続:
-      サーバ切断（close code 1011 等）は scripts/test_pyannote_live.py で
-      先行実装・検証済みだったロジック（新セッション作成＋タイムスタンプ
-      オフセット補正）を本体に移植したもの。``send_audio()`` 中に送信が
+      サーバ切断（close code 1011 等）への対応は、先行スクリプト（旧
+      scripts/test_pyannote_live.py、本体移植後に削除）で検証済みだった
+      ロジック（新セッション作成＋タイムスタンプオフセット補正）の移植。``send_audio()`` 中に送信が
       失敗した場合、``max_reconnects`` 回まで自動的に新しい Live-1 セッション
       を作り直し、そのセッション内タイムスタンプに「これまでに送信できた
       音声の累計ms」を加算して連続したタイムラインに補正する
