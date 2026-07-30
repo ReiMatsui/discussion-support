@@ -36,6 +36,7 @@ handoff から引くときは、それより後の節で訂正されていない
 | 席の割当てだけ ReDimNet b5（声紋層は b2 のまま） | 正解 91.1→91.5% | `seat_embedder`（§38） |
 | LLM: reasoning_effort が弾かれたら次を試す | 全滅バグの修正 | `_post_chat_json`（§43） |
 | AI再生区間を取り込み位置で記録（送信遅延に耐性） | 混入バグの修正 | `note_ai_speech_*`（§46） |
+| 未登録話者の門番（ラベル不純×30字＋×sim<0.5→未確定） | 講義の誤り5件回収・校正9本で発火0 | `impure_lowsim`（§47） |
 | 送信バックログの計測・diag記録・UI遅延警告 | 遅延の可視化 | `note_send_backlog`（§46） |
 
 定数の正本は `_constants.py`（各定数に校正表つき）。
