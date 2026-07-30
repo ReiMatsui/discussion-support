@@ -290,6 +290,16 @@ _FACT_STYLE_ADVICE_RE = re.compile(
 )
 
 
+# 推論の強さは弱いほうから試す。短いJSON抽出に推論は要らないので最小を望むが、
+# **どの値が使えるかはモデルの世代で変わる**。実際 gpt-5.4-mini は 'minimal' を
+# 拒否し（使えるのは none/low/medium/high/xhigh）、既定モデルが上がった瞬間に
+# LLM機能が全滅した（2026-07-29）。世代ごとの対応表を持つと、次にモデルが
+# 上がったとき同じことが起きる。だから**弾かれたら次を試して覚える**。
+_EFFORT_ORDER = ("minimal", "none", "low")
+# モデル名（小文字）-> そのモデルで通った値。セッション内だけ持つ。
+_EFFORT: dict[str, str] = {}
+
+
 def _build_chat_params(model: str, prompt: str, *, max_out: int,
                        temperature: float, schema_name: str | None = None,
                        schema: dict | None = None) -> dict:
@@ -313,7 +323,7 @@ def _build_chat_params(model: str, prompt: str, *, max_out: int,
             },
         }
     if name.startswith("gpt-5"):
-        params["reasoning_effort"] = "minimal"  # 短いJSON抽出に推論は不要
+        params["reasoning_effort"] = _EFFORT.get(name, _EFFORT_ORDER[0])
         params["max_completion_tokens"] = max_out
     elif name.startswith(("o1", "o3", "o4")):
         params["reasoning_effort"] = "low"       # o系は minimal 非対応
@@ -324,7 +334,26 @@ def _build_chat_params(model: str, prompt: str, *, max_out: int,
     return params
 
 
-def _post_chat_json(params: dict, api_key: str, *, timeout: int, label: str):
+def _next_effort(params: dict, detail: str) -> str | None:
+    """`reasoning_effort` が拒否されたら、次に試す値を返す（無ければ None）.
+
+    弾かれた値より弱い順の次を選び、モデル名に対して覚える。以後の呼び出しは
+    `_build_chat_params` がその値で組む（1セッション1回だけ余分に叩く）。
+    """
+    if "reasoning_effort" not in detail:
+        return None      # 別の理由の 400（モデル名違い等）はここで扱わない
+    cur = params.get("reasoning_effort")
+    if cur not in _EFFORT_ORDER:
+        return None
+    nxt = _EFFORT_ORDER[_EFFORT_ORDER.index(cur) + 1:]
+    if not nxt:
+        return None
+    _EFFORT[str(params.get("model", "")).lower()] = nxt[0]
+    return nxt[0]
+
+
+def _post_chat_json(params: dict, api_key: str, *, timeout: int, label: str,
+                    _retried: bool = False):
     """Chat Completions を叩き、本文をJSONとして返す。失敗時はNone（理由をログ）."""
     import urllib.error
     import urllib.request
@@ -354,6 +383,13 @@ def _post_chat_json(params: dict, api_key: str, *, timeout: int, label: str):
         detail = ""
         with contextlib.suppress(Exception):
             detail = e.read().decode("utf-8", "replace")[:600]
+        nxt = None if _retried else _next_effort(params, detail)
+        if nxt is not None:
+            print(f"# [{label}] reasoning_effort='{params['reasoning_effort']}' は"
+                  f"{params.get('model')} で使えないため '{nxt}' で再試行します",
+                  flush=True)
+            return _post_chat_json({**params, "reasoning_effort": nxt}, api_key,
+                                   timeout=timeout, label=label, _retried=True)
         print(f"# [{label}] APIエラー {e.code}: {detail or e.reason}"
               f"（model={params.get('model')}）", flush=True)
         return None
