@@ -88,6 +88,34 @@ from ._speaker_policy import (
 from ._ui import _print_line
 
 
+def _resilient(fn):
+    """LLMワーカーを、予期しない例外1回で恒久停止させないためのラッパ.
+
+    ワーカーのループ本体には LLM 呼び出し・state.save()（ディスクI/O）が
+    あり、一過性の OSError 1回でスレッドが死ぬと、その機能は残り時間ずっと
+    黙って止まる（§43 型の静かな全滅。レビュー 2026-07-30）。例外を握り
+    つぶすのではなく、理由を出してから5秒後に再入する。停止要求では再入
+    しない。ワーカーの進行状態（カーソル等）は state 側にあるため、再入で
+    失われない。
+    """
+    import functools
+    import traceback
+
+    @functools.wraps(fn)
+    def run(state, *args, **kwargs):
+        while not state.stop.is_set():
+            try:
+                fn(state, *args, **kwargs)
+                return
+            except Exception:
+                traceback.print_exc()
+                print(f"# [{fn.__name__}] 予期しないエラー。5秒後に再開します",
+                      flush=True)
+                state.stop.wait(5.0)
+    return run
+
+
+@_resilient
 def _run_agenda_detector(state: SessionState, oai_key: str, oai_model: str):
     """会議冒頭の発話から議題を1回推定してシードする（S3, --topic未指定時）.
 
@@ -136,6 +164,7 @@ def _run_agenda_detector(state: SessionState, oai_key: str, oai_model: str):
             return
 
 
+@_resilient
 def _run_topic_worker(state: SessionState, oai_key: str, oai_model: str):
     """論点抽出のバックグラウンドワーカー（モジュールレベル関数）."""
     from das.asr.live._bootstrap import extract_topics as _extract_topics
@@ -179,6 +208,7 @@ def _run_topic_worker(state: SessionState, oai_key: str, oai_model: str):
                     _print_line(f"# 💡論点: {t['topic']}（{t.get('speaker', '?')}）")
 
 
+@_resilient
 def _run_drift_checker(state: SessionState, oai_key: str, oai_model: str):
     """脱線検出のバックグラウンドワーカー（並列監視）.
 
@@ -281,6 +311,7 @@ def _play_ack_chime() -> None:
     threading.Thread(target=_play, daemon=True).start()
 
 
+@_resilient
 def _run_triage_worker(state: SessionState, oai_key: str,
                        oai_model: str) -> None:
     """確定発話ごとに1回だけ表層分類し、record に ``triage`` 注釈を付ける（H6/M2）.
@@ -447,6 +478,7 @@ def _run_triage_worker(state: SessionState, oai_key: str,
                 _play_ack_chime()
 
 
+@_resilient
 def _run_fact_checker(state: SessionState, oai_key: str, oai_model: str):
     """明確な事実誤りだけを短く補正する要求を積む.
 
@@ -556,6 +588,7 @@ def _run_fact_checker(state: SessionState, oai_key: str, oai_model: str):
                 print("# [fact] → 補正要求をキューに投入", flush=True)
 
 
+@_resilient
 def _run_participation_checker(state: SessionState, oai_key: str, oai_model: str):
     """発話量の偏りを監視し、発言の少ない人への声かけ要求を積む（S4）.
 
@@ -627,6 +660,7 @@ def _run_participation_checker(state: SessionState, oai_key: str, oai_model: str
             print("# [invite] → 声かけ要求をキューに投入", flush=True)
 
 
+@_resilient
 def _run_structuring_checker(state: SessionState, oai_key: str,
                              oai_model: str) -> None:
     """整理介入の価値判定チェッカー（C3, count の無条件介入を置換）.
