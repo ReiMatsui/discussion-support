@@ -32,7 +32,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import _gtlib  # noqa: E402
-import cluster_merge_feasibility as feas  # noqa: E402
+import _pipeline as pipe  # noqa: E402
 import decompose_attribution as dec  # noqa: E402
 
 from das.asr.live._constants import SR  # noqa: E402
@@ -52,7 +52,7 @@ def replay(run: str, vp) -> dict | None:
     if not rows or not any(u.get("final_key") is not None for u, _ in rows):
         return None
     rows.sort(key=lambda r: int(r[0]["ms"]))
-    pcm = feas.read_wav(wav_path)
+    pcm = pipe.read_wav(wav_path)
 
     seat = SeatAudio(vp)          # 既定値＝本番と同じ参照秒数・成熟下限
     picks: dict[int, str] = {}

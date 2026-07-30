@@ -14,7 +14,6 @@
 | `_textgt.py` | 正解の文章一致割当て（§34） |
 | `_utt_embeddings.py` | 発話ごとの声紋の計算と保存（`_emb/`、b5） |
 | `decompose_attribution.py` | diag の読み込み（load_run）・相槌判定 |
-| `cluster_merge_feasibility.py` | read_wav 等の古いユーティリティ（依存が残る） |
 
 ## 現役の測定スクリプト
 
@@ -44,10 +43,13 @@
 
 ## 旧世代（結論は handoff に記録済み。新規の測定には使わない）
 
-`replay_attribution.py`（§14の測定経路） / `replay_live_attribution.py`
-（§23の忠実性確認。diagnose が使う） / `eval_speaker_gt.py` /
-`score_transcription.py` / `score_pyannote_ceiling.py` / `sortformer_compare.py`
-(+`sortformer_infer.py`) / `phase0_dual_ledger.py` / `fetch_callhome_jpn.py` / `segment_boundary_ceiling.py`
+`replay_attribution.py`（声紋層の再設計の実測記録。src/tests の docstring から
+多数引用されるため残す） / `replay_live_attribution.py`（§23。diagnose が使う） /
+`eval_speaker_gt.py`（run_chiba が採点に使う） / `score_transcription.py`
 
-削除済み（履歴にのみ存在）: `seat_query_context` `seat_pick_variants`
-`seat_assign_extensions` `retro_reattribution`（§27〜§28で結論記録済み）
+削除済み（`git log --diff-filter=D -- eval/<名前>.py` で履歴から復元できる）:
+`seat_query_context` `seat_pick_variants` `seat_assign_extensions`
+`retro_reattribution`（§27〜§28） / `cluster_merge_feasibility`
+`phase0_dual_ledger`（二重帳簿 handoff に記録） / `score_pyannote_ceiling`
+`fetch_callhome_jpn`（§14期） / `segment_boundary_ceiling`（§37で置換） /
+`sortformer_compare` `sortformer_infer`（§29で却下）
