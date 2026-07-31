@@ -9,6 +9,13 @@ AMI cpWER 31.5%、オフライン・MDM条件）と**同一コーパス・同一
 正解: data/ami/manual/words/<meeting>.<A-D>.words.xml（AMI公式の単語時刻）。
 仮説: transcripts/<run>.turns.jsonl（--lang en で流したラン）。
 
+変種「＋検出区間」: diag の diar_seg（pyannote の全区間, §48.2）で、仮説音声に
+覆われていない時間を「発話あり」として穴埋めした DER も出す。文字は増えない
+（cpWER 不変）が、「誰が・いつ」の申告を完全にした条件で、区間のみを出力する
+比較先（LS-EEND 等）と同じ課題定義になる（§48.3。恣意性の議論は §48.2）。
+ラベルは pyannote クラスタ名なので、切断でクラスタが分断されたランでは
+効果が薄れる。
+
 使い方:
   uv run python eval/ami_metrics.py <run名> --meeting ES2004a
 """
@@ -105,6 +112,36 @@ def hypothesis(run: str, *, drop_unsure: bool = False):
             " ".join(x for _m, x in sorted(ordered)), end)
 
 
+def fill_with_detected(hyp_ann, run: str):
+    """仮説音声に覆われていない時間を diar_seg で穴埋めした仮説を返す.
+
+    区間が無ければ (None) を返す（diar_seg 未記録の古いラン）。
+    """
+    from pyannote.core import Timeline
+    diag = ROOT / "transcripts" / f"{run}.diag.jsonl"
+    segs = []
+    if diag.exists():
+        with open(diag, encoding="utf-8") as f:
+            for line in f:
+                if '"diar_seg"' not in line:
+                    continue
+                d = json.loads(line)
+                if d.get("end") is not None:
+                    segs.append(d)
+    if not segs:
+        return None
+    hyp_tl = hyp_ann.get_timeline().support()
+    union = hyp_ann.copy()
+    i = 0
+    for sgm in segs:
+        span = Timeline([Segment(sgm["ms"] / 1000, sgm["end"] / 1000)])
+        for gap in span.extrude(hyp_tl):
+            if gap.duration > 0.05:
+                union[gap, f"d{i}"] = f"diar:{sgm['spk']}"
+                i += 1
+    return union
+
+
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("run", help="採点するラン（transcripts/<run>.turns.jsonl）")
@@ -131,6 +168,17 @@ def main(argv: list[str] | None = None) -> None:
     print(f"  未確定を外した confusion: {d2['confusion']/(d2['total'] or 1):.1%}")
     dso = DiarizationErrorRate(collar=0.5, skip_overlap=True)(ref_ann, hyp_ann, uem=uem)
     print(f"DER (重なり除く): {abs(dso):.1%}")
+
+    filled = fill_with_detected(hyp_ann, args.run)
+    if filled is not None:
+        df = DiarizationErrorRate(collar=0.0)(ref_ann, filled, uem=uem, detailed=True)
+        tf = df["total"] or 1
+        print(f"DER (collar 0, ＋検出区間の変種): {df['diarization error rate']:.1%}"
+              f" (miss {df['missed detection']/tf:.1%} / FA {df['false alarm']/tf:.1%}"
+              f" / conf {df['confusion']/tf:.1%})"
+              f"  ※文字は増えない＝cpWERは下の値のまま")
+    else:
+        print("# diar_seg なし（旧ラン）: ＋検出区間の変種はスキップ")
 
     cp = cp_word_error_rate(ref_txt, hyp_txt)
     asr = cp_word_error_rate({"all": ref_ordered}, {"all": hyp_ordered})
