@@ -115,8 +115,19 @@ def hypothesis(run: str, *, drop_unsure: bool = False):
 def fill_with_detected(hyp_ann, run: str):
     """仮説音声に覆われていない時間を diar_seg で穴埋めした仮説を返す.
 
+    穴埋めのラベルは、そのクラスタと時間重なりが最大の**仮説話者**
+    （参加者X）に写像する——システムは実行中にクラスタ→参加者の対応
+    （diarization_speaker_keys / クラスタ名前付け）を持っており、ここでは
+    それをログから多数決で復元している。生のクラスタ名のまま出すと、
+    正解4人と対応済みの参加者ラベルに加えて別クラスタが立ち、正しく
+    検出できた時間まで confusion に数えられる（クリーンランで実測:
+    素 45.1% → 生ラベル穴埋め 47.9% と悪化。写像後の測定が本命）。
+    対応が取れないクラスタは自ラベルのまま（安全側＝confusion行き）。
+
     区間が無ければ (None) を返す（diar_seg 未記録の古いラン）。
     """
+    from collections import defaultdict
+
     from pyannote.core import Timeline
     diag = ROOT / "transcripts" / f"{run}.diag.jsonl"
     segs = []
@@ -130,14 +141,26 @@ def fill_with_detected(hyp_ann, run: str):
                     segs.append(d)
     if not segs:
         return None
+    # クラスタ→仮説話者の写像（時間重なりの多数決）
+    votes: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    for sgm in segs:
+        s0, s1 = sgm["ms"] / 1000, sgm["end"] / 1000
+        for useg, _tr, spk in hyp_ann.itertracks(yield_label=True):
+            ov = min(s1, useg.end) - max(s0, useg.start)
+            if ov > 0:
+                votes[sgm["spk"]][spk] += ov
+    cluster_to = {c: max(v, key=v.get) for c, v in votes.items() if v}
     hyp_tl = hyp_ann.get_timeline().support()
     union = hyp_ann.copy()
     i = 0
     for sgm in segs:
+        label = cluster_to.get(sgm["spk"], f"diar:{sgm['spk']}")
+        if label == UNSURE_DISPLAY:
+            label = f"diar:{sgm['spk']}"   # 未確定へ寄せても情報が無い
         span = Timeline([Segment(sgm["ms"] / 1000, sgm["end"] / 1000)])
         for gap in span.extrude(hyp_tl):
             if gap.duration > 0.05:
-                union[gap, f"d{i}"] = f"diar:{sgm['spk']}"
+                union[gap, f"d{i}"] = label
                 i += 1
     return union
 
