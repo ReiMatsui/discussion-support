@@ -171,3 +171,44 @@ def test_closed_wav_file_does_not_kill_the_sender_path(tmp_path):
         pass
     else:  # pragma: no cover
         raise AssertionError("閉じたファイルへの write が例外を出していない")
+
+
+def test_sender_announces_when_diarization_gives_up():
+    """分離が自動再接続を諦めたら一度だけ告知する（§48.5）.
+
+    send_audio の例外は送信スレッドで握り潰すため、告知しないと
+    「帰属がSTTラベル頼みに縮退した」ことに誰も気づけない。
+    """
+    import threading as _t
+
+    from das.asr.live._audio_io import _run_sender
+
+    class _DeadProvider:
+        alive = False
+
+        def send_audio(self, pcm):
+            raise RuntimeError("dead")
+
+        def drain_events(self):
+            return []
+
+    class _WS:
+        def send(self, x):
+            pass
+
+    class _Backend:
+        def make_end_message(self, seq):
+            return "{}"
+
+    state = _make_state()
+    state.stt_ws = _WS()
+    state.diarization_provider = _DeadProvider()
+    sys_lines = []
+    state.add_sys = lambda ms, text: sys_lines.append(text)
+    state.audio_q.put(b"\0" * 3200)
+    state.audio_q.put(b"\0" * 3200)
+    state.audio_q.put(None)
+    th = _t.Thread(target=_run_sender, args=(state, _Backend()))
+    th.start()
+    th.join(timeout=5)
+    assert sum(1 for x in sys_lines if "話者分離が停止" in x) == 1, "告知が無いか重複"

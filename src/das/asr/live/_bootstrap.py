@@ -859,6 +859,13 @@ def _receive_until_stopped(state, args, backend, connect_stt) -> None:
                 continue
             recv = RecvLoop(state, args, backend)
             print("# STTに再接続しました", flush=True)
+            # 議事録のタイムラインにも残す（§48.5）。切断はconfusionの増加や
+            # 発話の欠落と相関するため、事後の切り分けに接続履歴が要る
+            # （AMIの切断ランでは diar_seg の R前置から間接的に推定するしか
+            # なかった）。
+            state.add_sys(state.elapsed_ms(),
+                          f"音声認識に再接続しました（{reconnect_attempts}回目。"
+                          "切断中の発話は記録されていません）")
         else:
             reconnect_attempts = 0
             if status == "finished":

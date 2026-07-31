@@ -246,9 +246,16 @@ class _LoopState:
         self.resetting = False
         self.rev = 0
         self.reset_calls = 0
+        self.sys_lines = []
 
     def reset_for_new_meeting(self):
         self.reset_calls += 1
+
+    def elapsed_ms(self):
+        return 0
+
+    def add_sys(self, ms, text):
+        self.sys_lines.append(text)
 
 
 def test_receive_loop_returns_when_stt_finishes(monkeypatch) -> None:
@@ -269,6 +276,7 @@ def test_receive_loop_reconnects_after_a_disconnect(monkeypatch) -> None:
     assert calls == ["connect"]
     assert s.stt_ws == "ws"
     assert _Recv.made == 2
+    assert any("再接続" in x for x in s.sys_lines), "再接続が議事録に残らない（§48.5）"
 
 
 def test_receive_loop_rebuilds_the_session_on_reset(monkeypatch) -> None:

@@ -144,6 +144,7 @@ def _run_sender(state: SessionState, backend: STTBackend):
     で分かり、`finalize_wav` が知らせる。
     """
     seq = 0
+    _diar_dead_notified = False
     while True:
         pcm = state.audio_q.get()
         ws = state.stt_ws
@@ -190,5 +191,18 @@ def _run_sender(state: SessionState, backend: STTBackend):
                     with contextlib.suppress(Exception):
                         state.diarization_provider.send_audio(pcm)
                     state.drain_diarization_provider()
+                    # 分離が自動再接続を諦めた（無言死）ら一度だけ告知する
+                    # （§48.5）。send_audio の例外はここで握り潰すため、
+                    # 告知しないと「帰属がSTTラベル頼みに縮退した」ことに
+                    # 誰も気づけない。
+                    if (not _diar_dead_notified
+                            and getattr(state.diarization_provider, "alive", True)
+                            is False):
+                        _diar_dead_notified = True
+                        print("# 警告: 話者分離が切断され再接続も失敗しました。"
+                              "以後はSTT+声紋のみで続行します", flush=True)
+                        state.add_sys(state.elapsed_ms(),
+                                      "話者分離が停止しました（以後はSTT+声紋のみ。"
+                                      "精度が下がる可能性があります）")
                 seq += 1
 

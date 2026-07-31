@@ -255,6 +255,11 @@ class PyannoteStreamingDiarizationProvider:
             if self._reconnects and self._sent_audio_ms >= self._RECONNECT_FORGET_MS:
                 self._reconnects = 0
 
+    @property
+    def alive(self) -> bool:
+        """接続が生きているか（自動再接続を諦めた後は False, §48.5）."""
+        return self._ws is not None
+
     def drain_events(self) -> list[DiarizationEvent]:
         events: list[DiarizationEvent] = []
         while True:
