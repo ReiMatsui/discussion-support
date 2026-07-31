@@ -112,6 +112,9 @@ class PyannoteStreamingDiarizationProvider:
         self.max_speakers = max_speakers
         self.max_reconnects = max_reconnects
         self.auto_reconnect = auto_reconnect
+        # 再接続カウンタを忘れるまでの安定送信時間。_sent_audio_ms は再接続で
+        # 0 に戻るので「直近の再接続からの安定時間」をそのまま表す。
+        self._RECONNECT_FORGET_MS = 60_000
         self.stream_id: str | None = None
         self._ws: Any = None
         self._events: queue.Queue[DiarizationEvent] = queue.Queue()
@@ -244,6 +247,13 @@ class PyannoteStreamingDiarizationProvider:
                     raise
                 self._ws.send(payload)
             self._sent_audio_ms += _CHUNK_MS
+            # 1分間安定して送れたら再接続カウンタを忘れる（§48.5）。
+            # 上限3回は「連続失敗の暴走止め」であって生涯回数ではない。
+            # 忘れないと、数時間の会議で散発的な瞬断が3回起きただけで
+            # 分離が残り全部で無言のまま死ぬ（send_audio は例外を
+            # 呼び出し側で握り潰されるため気づけない）。
+            if self._reconnects and self._sent_audio_ms >= self._RECONNECT_FORGET_MS:
+                self._reconnects = 0
 
     def drain_events(self) -> list[DiarizationEvent]:
         events: list[DiarizationEvent] = []

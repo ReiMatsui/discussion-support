@@ -284,3 +284,22 @@ def test_reader_survives_a_malformed_frame() -> None:
     provider._ws = _WS()
     provider._read_loop()          # 不正フレームで例外が漏れないこと
     assert provider.active_events(), "不正フレームの後のイベントを取りこぼした"
+
+
+def test_reconnect_counter_forgets_after_stable_sending() -> None:
+    """1分間安定して送れたら再接続カウンタを0に戻す（§48.5）.
+
+    上限3回は連続失敗の暴走止めであって生涯回数ではない。忘れないと、
+    数時間の会議で散発的な瞬断が3回起きただけで分離が残り全部で
+    無言のまま死ぬ。
+    """
+    class WS:
+        def send(self, payload) -> None:
+            pass
+
+    provider = PyannoteStreamingDiarizationProvider("k")
+    provider._ws = WS()
+    provider._reconnects = 2
+    provider._sent_audio_ms = 59_900   # あと1チャンクで安定1分
+    provider.send_audio(struct.pack("<1600h", *([0] * 1600)))
+    assert provider._reconnects == 0
