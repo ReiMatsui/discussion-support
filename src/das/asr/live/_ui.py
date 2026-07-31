@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
 from http.server import BaseHTTPRequestHandler
 
-from ._constants import _ENROLL_MIN_VOICED_SEC, CLEAR_LINE, SR
+from ._constants import _ENROLL_MIN_VOICED_SEC, CLEAR_LINE, SEND_BACKLOG_WARN_MS, SR
 
 
 def _print_line(text: str):
@@ -106,7 +106,7 @@ class _UIRequestHandler(BaseHTTPRequestHandler):
                 partial = s.partial_text  # 認識途中経過も変化を見る（課題①）
                 # 送信バックログは rev を上げずに変わるため、5秒刻みの段が
                 # 変わったら配信する（遅延警告の表示・解除・更新のため）。
-                backlog_bucket = s.send_backlog_ms // 5000
+                backlog_bucket = s.send_backlog_ms // SEND_BACKLOG_WARN_MS
                 if (rev != last_rev or partial != last_partial
                         or backlog_bucket != last_backlog_bucket):
                     payload = json.dumps(s.api_snapshot(), ensure_ascii=False)

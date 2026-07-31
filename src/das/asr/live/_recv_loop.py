@@ -21,6 +21,7 @@ from ._attribution import (
 )
 from ._constants import (
     _BACKCHANNEL_RE,
+    ECHO_TEXT_SIM_THRESH,
     RESET,
     UNSURE_SPEAKER,
     fmt_ts,
@@ -232,14 +233,14 @@ class RecvLoop:
                 if not in_echo:
                     continue
             sim = src._best_similarity(self.cur_text)
-            if sim > 0.35:
+            if sim > ECHO_TEXT_SIM_THRESH:
                 return name, sim
         # パートナー切断直後もエコー参照を短時間保持する（P2-4）。partner が
         # None になってもテキスト安全網が効くよう、TTL 内の退役テキストとも照合。
         retired = s.recent_retired_echo_texts()
         if retired:
             sim = _best_text_similarity(self.cur_text.strip(), retired)
-            if sim > 0.35:
+            if sim > ECHO_TEXT_SIM_THRESH:
                 return "retired", sim
         return None
 

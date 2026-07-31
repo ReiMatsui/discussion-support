@@ -526,6 +526,31 @@ IMPURE_LOWSIM_MAX_SIM = 0.5
 # あてにならないため安全側で未確定にする。この比率以上を占める話者が2人以上いれば
 # 重複発話とみなす。
 PYANNOTE_CLUSTER_OVERLAP_MIN_RATIO = 0.2
+# テキスト安全網エコー除去の類似度しきい値（_recv_loop._text_echo_match）。
+# _best_text_similarity（部分包含=1.0 / SequenceMatcher / trigram jaccard /
+# coverage の最大値）に対して掛ける。0.35 は導入時からの運用値で、実測では
+# 本物のエコーは 0.958〜1.0 と大きく上に離れて出る（§46）。誤発火側の校正は
+# 未実施（下げる変更はデータを取ってから）。
+ECHO_TEXT_SIM_THRESH = 0.35
+# AI再生区間との重なり判定の許容マージン（_session_state.overlaps_ai_speech）。
+# 区間は取り込み位置で記録される（§46）ため大きな系統ずれは無く、チャンク
+# 粒度（100ms）と記録タイミングの揺れを吸収できれば足りる。
+AI_SPEECH_OVERLAP_MARGIN_MS = 300
+# 送信バックログ（文字起こしの遅れの下限）の警告しきい値。これ以上で
+# diag 記録（30秒おき）とブラウザUIの警告バナーを出す（§46）。正常時は
+# 数百ms以下なので、5秒は「何かが詰まっている」ことの明確な兆候。
+SEND_BACKLOG_WARN_MS = 5000
+
+# --- しきい値の地図（このファイル以外に住んでいるもの） -----------------
+# 声紋層のしきい値は VoiceProfiles のクラス属性が正本:
+#   DEFAULTS（モデル別の即時判定th/合流dedupe/一貫性consist、校正表つき）、
+#   AI_THRESH、person_th_offset、label_purity_window、min_sec、margin。
+#   classify の挙動と一体なので、クラスから切り離さない。
+# 発話と分離区間の重なり判定は SpeakerResolver.__init__ の既定値が正本:
+#   diarization_min_overlap=0.55 / min_overlap_ms=250 / boundary_tolerance_ms=250 /
+#   voiceprint_high_confidence=0.70（短い発話の救済分岐の 0.25・1.5x も同所）。
+# それ以外の帰属関連の数値をコードへ直接書かないこと——ここに定数と校正表を
+# 足すか、上の2箇所のどちらかに置く。
 # =====================================================================
 # タイミング定数（介入・割り込みロジック）
 # ---------------------------------------------------------------------

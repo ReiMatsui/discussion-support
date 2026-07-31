@@ -22,6 +22,7 @@ from ._constants import (
     _PROACTIVITY_DEFAULT,
     _PROACTIVITY_PROFILES,
     AGENT_VOICES,
+    AI_SPEECH_OVERLAP_MARGIN_MS,
     CLEAR_LINE,
     DIM,
     HTML_PALETTE,
@@ -29,6 +30,7 @@ from ._constants import (
     PALETTE,
     PYANNOTE_PARTICIPANT_HYSTERESIS_S,
     RESET,
+    SEND_BACKLOG_WARN_MS,
     SR,
     UNSURE_SPEAKER,
     fmt_ts,
@@ -1068,7 +1070,7 @@ class SessionState:
         CPU逼迫を、セッション中に発見できるようにする。
         """
         self.send_backlog_ms = getattr(self.audio_q, "pending_bytes", 0) // 32
-        if self.send_backlog_ms < 5000:
+        if self.send_backlog_ms < SEND_BACKLOG_WARN_MS:
             return
         now = time.monotonic()
         if now - self._backlog_diag_last < 30.0:
@@ -1121,7 +1123,7 @@ class SessionState:
 
     def overlaps_ai_speech(self, start_ms: int | None, end_ms: int | None,
                            *, source: str | None = None,
-                           margin_ms: int = 300) -> bool:
+                           margin_ms: int = AI_SPEECH_OVERLAP_MARGIN_MS) -> bool:
         """発話区間 [start_ms, end_ms] がAI再生区間と重なるか（±margin_ms）.
 
         閉じた区間に加え、まだ再生中の開いた区間（[start, 現在]）も対象にする。

@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+from ._constants import SEND_BACKLOG_WARN_MS
+
 INDEX_HTML = """<!doctype html>
 <html lang="ja">
 <head>
@@ -449,7 +451,7 @@ function renderBacklogBanner(ms) {
   // 送信バックログ（文字起こしの遅れの下限）。5秒以上で警告、下回れば消す。
   const el = $("backlog-banner");
   if (!el) return;
-  if (!ms || ms < 5000) { el.hidden = true; return; }
+  if (!ms || ms < __BACKLOG_WARN_MS__) { el.hidden = true; return; }
   el.hidden = false;
   el.className = "vp-banner";
   el.textContent = `⚠ 文字起こしが約${Math.round(ms / 1000)}秒遅れています`
@@ -772,3 +774,7 @@ connect();
 </body>
 </html>
 """
+
+# 遅延警告のしきい値はPython側の定数が正本（_constants.SEND_BACKLOG_WARN_MS）。
+# JSに数値を直書きすると2つの正本ができるため、配信時に埋め込む。
+INDEX_HTML = INDEX_HTML.replace("__BACKLOG_WARN_MS__", str(SEND_BACKLOG_WARN_MS))
