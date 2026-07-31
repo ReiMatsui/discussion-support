@@ -45,9 +45,12 @@ def test_no_vp_skips_the_voiceprint_model_entirely() -> None:
     assert _bootstrap._build_tracker(_Args(no_vp=True)) is None
 
 
-def test_tracker_falls_back_to_another_model_when_the_first_fails(
-        monkeypatch, capsys) -> None:
-    """既定のモデルが読めなければ次の候補へ落ちる（起動そのものは止めない）."""
+def test_tracker_loads_the_configured_model_once(monkeypatch, capsys) -> None:
+    """指定モデルだけを読み込む（旧代替モデルへのフォールバックは削除済み）.
+
+    別モデルのしきい値で黙って動くと帰属の性質が変わるため、読めない場合は
+    声紋なしへ落とす（次のテスト）。成功時は話者数上限が声紋層へ渡ること。
+    """
     tried: list[str] = []
 
     class _VP:
@@ -55,8 +58,6 @@ def test_tracker_falls_back_to_another_model_when_the_first_fails(
 
         def __init__(self, **kw):
             tried.append(kw["model"])
-            if kw["model"] == "redimnet":
-                raise RuntimeError("依存が無い")
 
         def set_max_human_speakers(self, n):
             self.max_speakers = n
@@ -64,15 +65,14 @@ def test_tracker_falls_back_to_another_model_when_the_first_fails(
     monkeypatch.setattr(_bootstrap, "VoiceProfiles", _VP)
     tracker = _bootstrap._build_tracker(_Args(no_vp=False))
 
-    assert tried == ["redimnet", "ecapa"], "代替モデルへ落ちていない"
+    assert tried == ["redimnet"], "指定モデル以外を読み込んでいる"
     assert tracker is not None
     assert tracker.max_speakers == 3, "話者数の上限が声紋層へ渡っていない"
-    assert "ecapa" in capsys.readouterr().out
 
 
-def test_tracker_is_none_and_says_how_to_fix_when_all_models_fail(
+def test_tracker_is_none_and_says_how_to_fix_when_the_model_fails(
         monkeypatch, capsys) -> None:
-    """全部読めなければ None。黙って落ちると原因が分からないので手順を出す."""
+    """読めなければ None（代替へは落とさない）。復旧手順を必ず出す."""
     class _VP:
         def __init__(self, **kw):
             raise RuntimeError("依存が無い")
@@ -311,7 +311,7 @@ def test_receive_loop_stops_when_asked(monkeypatch) -> None:
 def test_seat_embedder_is_skipped_for_non_redimnet() -> None:
     """声紋層が redimnet でなければ、席も同じモデルのまま（注入しない）."""
     class _T:
-        model = "resemblyzer"
+        model = "other-model"
     assert _seat_audio.seat_embedder(_T()) is None
 
 

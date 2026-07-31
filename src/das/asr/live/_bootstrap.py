@@ -646,29 +646,24 @@ def vp_mint_cluster_link_disabled_warning(
 # ---------------------------------------------------------------------------
 
 def _build_tracker(args) -> VoiceProfiles | None:
-    """声紋モデルを読み込む（読めない場合は順に代替モデルへ落とす）.
+    """声紋モデル（redimnet）を読み込む.
 
-    どのモデルも読めなければ None を返し、声紋照合なしで進む——起動そのものは
-    止めない（文字起こしは動くため）。ただし黙って落ちると「人物が確定しない
-    のはなぜか」が分からないので、警告と復旧手順を必ず出す。
+    読めなければ None を返し、声紋照合なしで進む——起動そのものは止めない
+    （文字起こしは動くため）。ただし黙って落ちると「人物が確定しないのは
+    なぜか」が分からないので、警告と復旧手順を必ず出す。旧代替モデル
+    （ecapa/resemblyzer）へのフォールバックは 2026-07-31 に削除——別モデルの
+    しきい値で動くと帰属の性質が黙って変わるため、落とすなら声紋なしに落とす。
     """
     if args.no_vp:
         return None
     tracker: VoiceProfiles | None = None
     print("# 声紋モデルを読み込み中…", flush=True)
-    for vp_model in dict.fromkeys([args.vp_model, "ecapa", "resemblyzer"]):
-        try:
-            tracker = VoiceProfiles(path=args.voices, thresh=args.vp_match,
-                                    auto=not args.vp_no_auto, model=vp_model)
-            if vp_model != args.vp_model:
-                print(f"# 注意: {args.vp_model} を読み込めなかったため {vp_model} で動作します"
-                      f"（依存: uv add speechbrain torchaudio / redimnetは初回ネット接続必要）",
-                      flush=True)
-            print(f"# 声紋モデル: {vp_model}", flush=True)
-            break
-        except Exception as e:
-            print(f"#   {vp_model}: 読み込み失敗 ({type(e).__name__})", flush=True)
-            continue
+    try:
+        tracker = VoiceProfiles(path=args.voices, thresh=args.vp_match,
+                                auto=not args.vp_no_auto, model=args.vp_model)
+        print(f"# 声紋モデル: {args.vp_model}", flush=True)
+    except Exception as e:
+        print(f"#   {args.vp_model}: 読み込み失敗 ({type(e).__name__})", flush=True)
     if tracker is None:
         print("# 警告: 声紋照合がOFFです！ 依存が未導入のため人物の確定・補正は行われません。", flush=True)
         print("#   有効化するには: uv add speechbrain torchaudio  →  再起動", flush=True)

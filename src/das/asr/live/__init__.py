@@ -69,7 +69,7 @@ def post_system(text: str) -> None:
 @click.option("--no-vp", is_flag=True, help="声紋照合を無効化")
 @click.option("--voices", default="voices.json", help="声紋プロファイルの保存先")
 @click.option("--vp-model", default="redimnet",
-              type=click.Choice(["redimnet", "ecapa", "resemblyzer"]),
+              type=click.Choice(["redimnet"]),
               help="声紋モデル（既定redimnet）")
 @click.option("--vp-match", type=float, default=None,
               help="即時判定のしきい値（省略時はモデル別の既定値）")

@@ -361,16 +361,15 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
     # 属性化（既定 0.12 ＝従来と同一挙動）。
     person_th_offset = 0.12
 
-    # モデル別の既定しきい値（実音声プールで校正済み。スコアのスケールが違う）
-    # resemblyzer: 軽量・依存少。同一/別人の分布に重なりあり（分離マージン-0.06）
-    # ecapa: ほぼ完全分離(+0.01)＋10倍速。混合音声を成分話者と強くマッチさせる癖
-    # redimnet: Interspeech 2024。本プールで最良の分離(+0.10)・27ms級・5M params
-    # (即時判定th, 合流dedupe, 一貫性consist)。dedupeは三発話プロファイル同士の比較なので
-    # 単発より高め（2026-06-11夜: 0.30→巻き取り復活/個人別→本人分裂のため固定の中庸値に）
-    DEFAULTS: ClassVar[dict] = {"resemblyzer": (0.75, 0.72, 0.62), "ecapa": (0.35, 0.40, 0.30),
-                                "redimnet": (0.42, 0.50, 0.34)}
-    # AI声紋判定用の閾値（人間より高め — TTS音声はスピーカー経由でも特徴が明瞭）
-    AI_THRESH: ClassVar[dict] = {"resemblyzer": 0.80, "ecapa": 0.42, "redimnet": 0.50}
+    # モデル別の既定しきい値（実音声プールで校正済み）。
+    # redimnet: Interspeech 2024。実音声プールで最良の分離(+0.10)・27ms級・
+    # 5M params。値は (即時判定th, 合流dedupe, 一貫性consist)。dedupeは
+    # 三発話プロファイル同士の比較なので単発より高め（2026-06-11夜:
+    # 0.30→巻き取り復活/個人別→本人分裂のため固定の中庸値に）。
+    # resemblyzer / ecapa の項は経路の削除（2026-07-31）とともに除去した。
+    # 校正値は git 履歴参照。
+    DEFAULTS: ClassVar[dict] = {"redimnet": (0.42, 0.50, 0.34)}
+    AI_THRESH: ClassVar[dict] = {"redimnet": 0.50}
 
     @staticmethod
     def _load_embedder(model: str, size: str = "b2"):
@@ -384,35 +383,24 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
         いる（`DEFAULTS` のしきい値）ので、ここを替えるのは**しきい値を使わ
         ない席の割当て**に別モデルを載せるときだけである（handoff §38）。
         """
-        if model == "ecapa":
-            import torch
-            from speechbrain.inference.speaker import EncoderClassifier
-            enc = EncoderClassifier.from_hparams(
-                source="speechbrain/spkrec-ecapa-voxceleb")
+        if model != "redimnet":
+            # resemblyzer / ecapa の経路は 2026-07-31 に削除した（redimnet が
+            # 全比較で最良・運用も一本。git 履歴から復元できる）。
+            raise ValueError(f"未対応の声紋モデル: {model}（redimnet のみ）")
+        import torch  # 初回はGitHubからコード＋重み(20MB)をダウンロード
+        enc = torch.hub.load("IDRnD/ReDimNet", "ReDimNet", model_name=size,
+                             train_type="ft_lm", dataset="vox2", trust_repo=True)
+        enc.eval()
 
-            def _embed_raw(wav):
-                with torch.no_grad():
-                    return enc.encode_batch(
-                        torch.from_numpy(wav).float().unsqueeze(0)).squeeze().numpy()
-            return _embed_raw
-        if model == "redimnet":
-            import torch  # 初回はGitHubからコード＋重み(20MB)をダウンロード
-            enc = torch.hub.load("IDRnD/ReDimNet", "ReDimNet", model_name=size,
-                                 train_type="ft_lm", dataset="vox2", trust_repo=True)
-            enc.eval()
-
-            def _embed_raw(wav):
-                with torch.no_grad():
-                    return enc(torch.from_numpy(wav).float().unsqueeze(0)).squeeze().numpy()
-            return _embed_raw
-        from resemblyzer import VoiceEncoder, preprocess_wav  # 初回ロード数秒
-        enc = VoiceEncoder("cpu", verbose=False)
-        return lambda wav: enc.embed_utterance(preprocess_wav(wav, source_sr=SR))
+        def _embed_raw(wav):
+            with torch.no_grad():
+                return enc(torch.from_numpy(wav).float().unsqueeze(0)).squeeze().numpy()
+        return _embed_raw
 
     def __init__(self, path: str = "voices.json", thresh: float | None = None,
                  min_sec: float = 1.0, margin: float = 0.05, auto: bool = True,
                  consist: float | None = None, dedupe: float | None = None,
-                 model: str = "resemblyzer", embedder=None):
+                 model: str = "redimnet", embedder=None):
         self.model = model
         # embedder を渡すとモデルを読まない。判定の筋道だけを試すとき
         # （テスト・オフライン検証）に、20MBのダウンロードと数秒の初期化を
@@ -468,6 +456,9 @@ class VoiceProfiles(_LabelTrustMixin, _ProfileQualityMixin):
             with open(path, encoding="utf-8") as f:
                 raw = f.read()
             data = json.loads(raw)
+            # _model が無い voices.json は resemblyzer 時代の遺物（当時は
+            # 記録していなかった）。モデル経路は削除済みだが、データの出自の
+            # 印としての文字列は互換のため残す。
             foreign = data.pop("_model", "resemblyzer")
             if foreign == model:   # 別モデルの声紋は互換性なし
                 self.profiles = {k: np.asarray(v, dtype=np.float64) for k, v in data.items()}

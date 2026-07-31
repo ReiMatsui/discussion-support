@@ -44,7 +44,7 @@ def _tracker(embs):
     vp.margin = 0.05
     vp.thresh = 0.5
     vp.consist = 0.62
-    vp.model = "resemblyzer"
+    vp.model = "redimnet"
     vp.auto = False   # 自動登録経路を切り、照合とラベル継続だけを見る
     vp.max_human_speakers = None
     it = iter(embs)

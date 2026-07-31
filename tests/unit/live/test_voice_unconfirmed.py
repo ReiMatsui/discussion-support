@@ -50,7 +50,7 @@ def _tracker(emb: np.ndarray) -> VoiceProfiles:
     vp.thresh = 0.5
     vp.consist = 0.6
     vp.dedupe = 0.7
-    vp.model = "resemblyzer"
+    vp.model = "redimnet"
     vp.auto = True
     vp._embed = lambda wav: emb  # type: ignore[method-assign]
     return vp
