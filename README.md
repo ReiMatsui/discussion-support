@@ -17,14 +17,18 @@ uv run pytest -q        # 単体テスト（実APIは呼ばない）
 ## 使い方
 
 ```bash
-# 推奨構成（Soniox + pyannote + 声紋）。参加人数は指定しなくてよい
-uv run python -m das.asr.live --diarization pyannote --vp-cluster-naming
+# 基本コマンド（既定で推奨構成: Soniox + pyannote + 声紋。人数指定は不要）
+uv run das listen-soniox
 
-# 統合AF構築＋ライブ介入まで含めたフル構成（--hybrid は上記構成の短縮形）
-uv run das listen-soniox --hybrid
+# 書き起こし＋話者特定だけ（統合AF構築なし）
+uv run python -m das.asr.live
 
 # 録音ファイルで再実験（マイク不要）
-uv run das listen-soniox --hybrid --wav transcripts/<日時>.wav
+uv run das listen-soniox --wav transcripts/<日時>.wav
+
+# pyannoteを使わないSoniox単独（PYANNOTEAI_API_KEY が無い環境でも起動は止まらず
+# 自動でこの構成に縮退する）
+uv run python -m das.asr.live --diarization none
 ```
 
 起動するとブラウザUI（`http://127.0.0.1:8231/`）が開き、ライブ議事録・

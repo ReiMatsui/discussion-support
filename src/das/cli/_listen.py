@@ -91,29 +91,10 @@ def listen_soniox(
         "--wav",
         help="実マイクの代わりに WAV ファイルで擬似ライブ入力する",
     ),
-    diarization: str | None = typer.Option(
-        None,
-        "--diarization",
-        help="外部話者分離の供給源 (none|pyannote)。"
-        "--hybrid と併用すると pyannote の代わりにこちらが後勝ちで使われる",
-    ),
-    vp_cluster_naming: bool = typer.Option(
-        False,
-        "--vp-cluster-naming",
-        help="diarization の生クラスタ単位で声紋照合して名前を確定する"
-        " (--diarization pyannote 専用)",
-    ),
     max_speakers: int | None = typer.Option(
         None,
         "--max-speakers",
         help="想定話者数のヒント (文字起こし側の --diarization-max-speakers に転送)",
-    ),
-    hybrid: bool = typer.Option(
-        False,
-        "--hybrid",
-        help="推奨構成のショートハンド (= --diarization pyannote --vp-cluster-naming)。"
-        "登録者ゼロでも話者ラベルの一貫性を保つ推奨構成"
-        " (docs/design/handoff_2026-07-14_unregistered_speakers.md)",
     ),
     soniox_args: str = typer.Option(
         "",
@@ -124,9 +105,12 @@ def listen_soniox(
 ) -> None:
     """Soniox+声紋プロファイルで「誰が何を」をライブ取得し、統合 AF 構築＋ライブ介入を行う。
 
+    既定で推奨構成（Soniox + pyannote + 声紋のハイブリッド話者帰属）で動く。
+
     使用例:
-      das listen-soniox --hybrid --max-speakers 3   (推奨: ハイブリッド話者帰属)
-      das listen-soniox --hybrid --wav meeting.wav  (録音ファイルで擬似ライブ)
+      das listen-soniox                      (マイクから開始)
+      das listen-soniox --wav meeting.wav   (録音ファイルで擬似ライブ)
+      das listen-soniox --soniox-args "--diarization none"  (Soniox単独に落とす)
 
     speaker-attribution 由来の話者特定つき文字起こし (das.asr.live) を
     別スレッドで走らせ、確定発話を Orchestrator.run_live に流す。
@@ -145,10 +129,7 @@ def listen_soniox(
             skip_docs=skip_docs,
             soniox_argv=_build_soniox_argv(
                 wav=wav,
-                diarization=diarization,
-                vp_cluster_naming=vp_cluster_naming,
                 max_speakers=max_speakers,
-                hybrid=hybrid,
                 # --docs を明示したときだけ文字起こし側の AF ランタイムにも渡す
                 # （AF 有効時のみ使われる。既定 data/docs を暗黙に二重取り込み
                 #  させないため、明示指定に限る）
@@ -189,32 +170,22 @@ def _is_duplicate_presentation(body: str, recent: dict[str, float],
 def _build_soniox_argv(
     *,
     wav: Path | None = None,
-    diarization: str | None = None,
-    vp_cluster_naming: bool = False,
     max_speakers: int | None = None,
     af_docs: Path | None = None,
-    hybrid: bool = False,
     soniox_args: str = "",
 ) -> list[str]:
     """第一級オプションを文字起こし側 (das.asr.live, click) の argv に合成する。
 
-    click は同一オプションが複数回渡されると最後の値を採用する (後勝ち。
-    is_flag は冪等)。互換用の ``--soniox-args`` を末尾に置くことで、
-    第一級オプションと重複した場合は ``--soniox-args`` 側が優先される。
+    推奨構成（pyannote＋クラスタ名前付け）は文字起こし側の**既定**なので
+    ここでは何も足さない。click は同一オプションが複数回渡されると最後の
+    値を採用する (後勝ち)。``--soniox-args`` を末尾に置くことで、第一級
+    オプションと重複した場合は ``--soniox-args`` 側が優先される。
     ``soniox_args`` は shlex で分割するため、クォートすれば空白を含む
     パス等も安全に渡せる。
     """
     argv: list[str] = []
-    if hybrid:
-        # 推奨構成 (ハイブリッド話者帰属) の糖衣。
-        # docs/design/handoff_2026-07-14_unregistered_speakers.md
-        argv += ["--diarization", "pyannote", "--vp-cluster-naming"]
     if wav is not None:
         argv += ["--wav", str(wav)]
-    if diarization is not None:
-        argv += ["--diarization", diarization]
-    if vp_cluster_naming and not hybrid:
-        argv.append("--vp-cluster-naming")
     if af_docs is not None:
         argv += ["--docs", str(af_docs)]
     if max_speakers is not None:

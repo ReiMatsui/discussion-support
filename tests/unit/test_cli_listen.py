@@ -1,5 +1,8 @@
-"""das listen-soniox の引数合成 (_build_soniox_argv) の単体テスト。"""
+"""das listen-soniox の argv 合成のテスト.
 
+推奨構成（pyannote＋クラスタ名前付け）は文字起こし側 (das.asr.live) の
+既定になったため、argv 合成は「既定から外れる指定」だけを運ぶ。
+"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -7,17 +10,9 @@ from pathlib import Path
 from das.cli._listen import _build_soniox_argv
 
 
-def test_default_is_empty() -> None:
-    """何も指定しなければ空 (既存挙動と同じ)。"""
+def test_default_argv_is_empty_because_recommended_config_is_the_default() -> None:
+    """無指定なら何も渡さない＝文字起こし側の既定（推奨構成）で動く."""
     assert _build_soniox_argv() == []
-
-
-def test_hybrid_expands_to_recommended_config() -> None:
-    assert _build_soniox_argv(hybrid=True) == [
-        "--diarization",
-        "pyannote",
-        "--vp-cluster-naming",
-    ]
 
 
 def test_max_speakers_maps_to_diarization_max_speakers() -> None:
@@ -27,12 +22,9 @@ def test_max_speakers_maps_to_diarization_max_speakers() -> None:
     ]
 
 
-def test_hybrid_with_max_speakers_and_wav() -> None:
-    argv = _build_soniox_argv(hybrid=True, max_speakers=3, wav=Path("x.wav"))
+def test_wav_and_max_speakers() -> None:
+    argv = _build_soniox_argv(max_speakers=3, wav=Path("x.wav"))
     assert argv == [
-        "--diarization",
-        "pyannote",
-        "--vp-cluster-naming",
         "--wav",
         "x.wav",
         "--diarization-max-speakers",
@@ -40,26 +32,15 @@ def test_hybrid_with_max_speakers_and_wav() -> None:
     ]
 
 
-def test_explicit_options_without_hybrid() -> None:
-    argv = _build_soniox_argv(diarization="none", vp_cluster_naming=True)
-    assert argv == ["--diarization", "none", "--vp-cluster-naming"]
-
-
-def test_vp_cluster_naming_not_duplicated_with_hybrid() -> None:
-    argv = _build_soniox_argv(hybrid=True, vp_cluster_naming=True)
-    assert argv.count("--vp-cluster-naming") == 1
-
-
 def test_soniox_args_appended_last_for_click_last_wins() -> None:
     """--soniox-args は末尾に付き、click の後勝ちで第一級オプションより優先。"""
     argv = _build_soniox_argv(
-        hybrid=True,
+        wav=Path("m.wav"),
         soniox_args="--diarization none --no-agent",
     )
     assert argv == [
-        "--diarization",
-        "pyannote",
-        "--vp-cluster-naming",
+        "--wav",
+        "m.wav",
         "--diarization",
         "none",
         "--no-agent",
@@ -67,10 +48,10 @@ def test_soniox_args_appended_last_for_click_last_wins() -> None:
 
 
 def test_wav_path_with_spaces() -> None:
-    argv = _build_soniox_argv(wav=Path("/tmp/my meeting/rec 1.wav"))
-    assert argv == ["--wav", "/tmp/my meeting/rec 1.wav"]
+    argv = _build_soniox_argv(wav=Path("dir with space/x.wav"))
+    assert argv == ["--wav", "dir with space/x.wav"]
 
 
-def test_soniox_args_shlex_handles_quoted_spaces() -> None:
-    argv = _build_soniox_argv(soniox_args="--wav '/tmp/my meeting/rec 1.wav'")
-    assert argv == ["--wav", "/tmp/my meeting/rec 1.wav"]
+def test_af_docs_forwarded() -> None:
+    argv = _build_soniox_argv(af_docs=Path("data/docs"))
+    assert argv == ["--docs", "data/docs"]

@@ -88,10 +88,11 @@ def test_no_diarization_provider_by_default() -> None:
     assert _bootstrap._build_diarizer(_Args(diarization="none")) is None
 
 
-def test_pyannote_needs_its_api_key(monkeypatch) -> None:
+def test_pyannote_without_key_degrades_with_a_warning(monkeypatch, capsys) -> None:
+    """既定（pyannote）でキーが無くても起動を止めず、縮退を明示する."""
     monkeypatch.delenv("PYANNOTEAI_API_KEY", raising=False)
-    with pytest.raises(SystemExit):
-        _bootstrap._build_diarizer(_Args(diarization="pyannote"))
+    assert _bootstrap._build_diarizer(_Args(diarization="pyannote")) is None
+    assert "PYANNOTEAI_API_KEY" in capsys.readouterr().out
 
 
 def test_pyannote_provider_gets_the_speaker_cap(monkeypatch) -> None:
@@ -114,14 +115,14 @@ def test_pyannote_provider_gets_the_speaker_cap(monkeypatch) -> None:
 
 def test_cluster_layer_is_off_without_the_flag() -> None:
     namer, seat = _bootstrap._build_cluster_layer(
-        _Args(diarization="pyannote", vp_cluster_naming=False), object())
+        _Args(diarization="pyannote", vp_cluster_naming=False), object(), object())
     assert (namer, seat) == (None, None)
 
 
 def test_cluster_layer_is_off_without_a_tracker(capsys) -> None:
     """声紋が無ければ照合しようがない。黙って無視せず理由を出す."""
     namer, seat = _bootstrap._build_cluster_layer(
-        _Args(diarization="pyannote", vp_cluster_naming=True), None)
+        _Args(diarization="pyannote", vp_cluster_naming=True), None, object())
     assert (namer, seat) == (None, None)
     assert "無効なため無視" in capsys.readouterr().out
 
@@ -139,7 +140,7 @@ def test_cluster_layer_builds_both_and_turns_on_hybrid(monkeypatch) -> None:
                         lambda t, **kw: ("seat", t))
     tracker = _Tracker()
     namer, seat = _bootstrap._build_cluster_layer(
-        _Args(diarization="pyannote", vp_cluster_naming=True), tracker)
+        _Args(diarization="pyannote", vp_cluster_naming=True), tracker, object())
     assert namer == ("namer", tracker)
     assert seat == ("seat", tracker)
     assert tracker.hybrid is True
@@ -364,3 +365,14 @@ def test_reset_survives_a_transient_stt_connect_failure(monkeypatch) -> None:
     assert len(attempts) == 3, "接続を再試行していない"
     assert s.stt_ws == "ws3"
     assert not s.reset_requested.is_set()
+
+
+def test_cluster_layer_is_off_when_the_diarizer_could_not_be_built() -> None:
+    """キー未設定の縮退時はクラスタ層を組まない.
+
+    組んでしまうと tracker.set_hybrid(True) で声紋層の性質が変わり、
+    真の Soniox 単独と挙動がずれる（既定化レビュー 2026-07-31）。
+    """
+    namer, seat = _bootstrap._build_cluster_layer(
+        _Args(diarization="pyannote", vp_cluster_naming=True), object(), None)
+    assert (namer, seat) == (None, None)

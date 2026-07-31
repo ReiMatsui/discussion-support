@@ -64,15 +64,13 @@ def post_system(text: str) -> None:
 @click.option("--no-vp", is_flag=True, help="声紋照合を無効化")
 @click.option("--voices", default="voices.json", help="声紋プロファイルの保存先")
 @click.option("--vp-debug", is_flag=True, help="声紋判定の内訳を表示")
-@click.option("--diarization", default="none",
+@click.option("--diarization", default="pyannote",
               type=click.Choice(["none", "pyannote"]),
-              help="外部話者分離の供給源")
+              help="外部話者分離の供給源（既定pyannote=推奨構成。noneでSoniox単独）")
 @click.option("--diarization-max-speakers", type=int, default=None,
               help="外部話者分離に渡す最大話者数ヒント")
-@click.option("--vp-cluster-naming", is_flag=True,
-              help="ハイブリッド構成: diarizationの生クラスタ単位で声紋照合し"
-                   "名前を確定する（--diarization pyannote専用。声紋照合が"
-                   "有効な時のみ機能。docs/design/pyannote_live1_trial_2026-07-09.md §9）")
+@click.option("--vp-cluster-naming/--no-vp-cluster-naming", default=True,
+              help="クラスタ単位の声紋名前付け（既定ON。--diarization pyannote 専用）")
 @click.option("--port", type=int, default=8231, help="UIサーバーのポート番号（0で無効）")
 @click.option("--agent/--no-agent", default=True,
               help="AIファシリテーターを有効化（OPENAI_API_KEY必要）")

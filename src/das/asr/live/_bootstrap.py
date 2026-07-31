@@ -79,13 +79,14 @@ class LiveArgs:
     voices: str = "voices.json"
     vp_model: str = "redimnet"   # 内部既定（CLIからは変えない）
     vp_debug: bool = False
-    diarization: str = "none"  # none / pyannote
+    diarization: str = "pyannote"  # 既定=推奨構成（none で Soniox 単独）
     diarization_max_speakers: int | None = None
     # ハイブリッド構成（docs/design/pyannote_live1_trial_2026-07-09.md §9）:
     # --diarization pyannote と併用時のみ有効。pyannoteの生クラスタ単位で
     # 声紋照合し、名前を確定する（3役分業: Soniox=文字起こし/pyannote=クラスタ
     # リング/声紋照合=クラスタ単位の名前付け）。tracker(声紋)が無効なら無視される。
-    vp_cluster_naming: bool = False
+    # 既定 True（推奨構成。実測 91.5%/85.5%、STATUS.md §1）。
+    vp_cluster_naming: bool = True
     setup: bool = True
     port: int = 8231
     agent: bool = True
@@ -582,8 +583,8 @@ def vp_cluster_naming_disabled_warning(
     構成のつもりのまま気づけない）。diarization の値に依らず警告する。
     """
     if vp_cluster_naming and diarization != "pyannote":
-        return ("# 注意: --vp-cluster-naming は --diarization pyannote "
-                f"専用のため無効です（--diarization {diarization} では無視されます）")
+        return (f"# 話者分離なし（--diarization {diarization}）: "
+                "クラスタ単位の名前付けは無効です（Soniox+声紋のみで動作）")
     return None
 
 
@@ -663,7 +664,13 @@ def _build_diarizer(args):
     if args.diarization == "pyannote":
         pyannote_key = os.environ.get("PYANNOTEAI_API_KEY")
         if not pyannote_key:
-            raise SystemExit("環境変数 PYANNOTEAI_API_KEY を設定してください")
+            # 既定が推奨構成（pyannote）なので、キーが無くても起動は止めない。
+            # ただし帰属の性質が変わる（ハイブリッド→Soniox+声紋のみ）ことは
+            # コンソールと議事録の冒頭（run_session 側の sys 行）で明示する。
+            print("# 警告: PYANNOTEAI_API_KEY が未設定のため話者分離なしで動作します"
+                  "（精度は下がります。キーを .env に設定すると推奨構成になります）",
+                  flush=True)
+            return None
         diarizer = PyannoteStreamingDiarizationProvider(
             pyannote_key,
             max_speakers=args.diarization_max_speakers,
@@ -673,22 +680,25 @@ def _build_diarizer(args):
     return diarizer
 
 
-def _build_cluster_layer(args, tracker):
+def _build_cluster_layer(args, tracker, diarizer):
     """ハイブリッド構成（クラスタ単位の声紋名前付け＋席の音声）を組む.
 
     戻り値: (cluster_namer, seat_audio)。条件を満たさなければ (None, None) で、
     Soniox単独・pyannote単独の挙動は変わらない。
+
+    `diarizer` を要求するのは、既定が pyannote になった今、キー未設定で
+    provider が作れなかったときにクラスタ層だけ組んでしまうと、声紋層が
+    hybrid モード（短発話の照合緩和）に黙って切り替わり、真の Soniox 単独と
+    挙動が変わるため（既定化レビュー 2026-07-31）。
     """
     cluster_namer = None
     seat_audio = None
     # --- ハイブリッド構成: 匿名クラスタ単位の声紋名前付け ---
     # (docs/design/pyannote_live1_trial_2026-07-09.md §9)。匿名クラスタ型の
-    # diarization（pyannote）かつ --vp-cluster-naming 指定時、
+    # diarization（pyannote が実際に建った）かつ --vp-cluster-naming 指定時、
     # かつ声紋照合(tracker)が有効な時だけ生成する。
     # tracker が無い（--no-vp や依存未導入）場合は照合しようがないため無視する。
-    cluster_namer = None
-    seat_audio = None
-    if args.diarization == "pyannote" and args.vp_cluster_naming:
+    if diarizer is not None and args.vp_cluster_naming:
         if tracker is not None:
             cluster_namer = ClusterVoiceNamer(tracker)
             # 席落ち発話の割当て（handoff §27）。クラスタ分裂で席を得られず
@@ -1045,7 +1055,7 @@ def run_session(args: LiveArgs) -> None:
     # --- SessionState ---
     wav_path = os.path.splitext(out_path)[0] + ".wav"
     diarizer = _build_diarizer(args)
-    cluster_namer, seat_audio = _build_cluster_layer(args, tracker)
+    cluster_namer, seat_audio = _build_cluster_layer(args, tracker, diarizer)
 
     state = SessionState(args=args, started=started, out_path=out_path,
                          html_path=html_path, diag_path=diag_path,
@@ -1057,6 +1067,11 @@ def run_session(args: LiveArgs) -> None:
                          seat_audio=seat_audio)
     state.stt_backend = backend
     state.waiting_to_start = bool(args.setup and _serve and not args.wav and not args.simulate)
+    if args.diarization == "pyannote" and diarizer is None:
+        # キー未設定の縮退（_build_diarizer が警告済み）。コンソールだけだと
+        # 会議後に気づけないので、議事録のタイムラインにも残す。
+        state.add_sys(0, "PYANNOTEAI_API_KEY が未設定のため、話者分離なし"
+                         "（Soniox+声紋のみ）で動作しています")
     write_session_config(state, args, tracker)
 
     # --- AIエージェント ---

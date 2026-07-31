@@ -14,6 +14,9 @@ def test_live_args_defaults_match_recommended_live_setup() -> None:
     assert args.agent is True
     assert args.setup is True
     assert args.proactivity == "standard"
+    # 推奨構成（pyannote＋クラスタ名前付け）が既定（2026-07-31）
+    assert args.diarization == "pyannote"
+    assert args.vp_cluster_naming is True
 
 
 def test_cli_help_documents_simplified_switches() -> None:
@@ -35,11 +38,10 @@ def test_vp_cluster_naming_warning_for_non_pyannote_diarization() -> None:
     from das.asr.live._bootstrap import vp_cluster_naming_disabled_warning as warn
 
     assert warn("pyannote", True) is None            # 有効な構成は警告なし
-    assert warn("none", False) is None               # 未指定なら警告なし
-    for diar in ("none",):
-        msg = warn(diar, True)
-        assert msg is not None
-        assert "--vp-cluster-naming" in msg and "pyannote" in msg and "無効" in msg
+    assert warn("none", False) is None               # 両方無効なら警告なし
+    msg = warn("none", True)
+    assert msg is not None
+    assert "話者分離なし" in msg and "無効" in msg   # 縮退の明示（既定Trueでも威圧的でない文言）
 
 
 def test_live_args_has_docs_field_so_af_can_ingest():

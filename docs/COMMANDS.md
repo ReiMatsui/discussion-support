@@ -24,6 +24,8 @@ cd ~/discussion-support
 uv run python -m das.asr.live
 ```
 
+既定で推奨構成（Soniox＋pyannote話者分離＋声紋）が使われる。PYANNOTEAI_API_KEY が
+未設定なら警告のうえ Soniox＋声紋のみで動く（`--diarization none` で明示も可）。
 ブラウザUI（`http://127.0.0.1:8231/`）が自動で開き、議事録がライブ更新される
 （Server-Sent Eventsで差分配信。旧来の2秒ごと全リロードは廃止）。
 終了はUIの「終了」ボタン、または `Ctrl-C`。

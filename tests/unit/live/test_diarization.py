@@ -92,7 +92,7 @@ def test_liveargs_and_cli_have_diarization_option() -> None:
     from das.asr.live._bootstrap import LiveArgs
 
     assert LiveArgs().model == "stt-rt-v5"
-    assert LiveArgs().diarization == "none"
+    assert LiveArgs().diarization == "pyannote"   # 推奨構成が既定
     assert LiveArgs(diarization="pyannote").diarization == "pyannote"
     assert LiveArgs(
         diarization="pyannote",
