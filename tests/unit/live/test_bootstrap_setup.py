@@ -26,7 +26,6 @@ class _Args:
     diarization = "none"
     diarization_max_speakers = 3
     vp_cluster_naming = False
-    vp_mint_cluster_link = False
     docs = None
     af = False
 

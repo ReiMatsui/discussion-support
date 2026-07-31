@@ -46,7 +46,6 @@ SR = 16000
 class _Args:
     lang = "ja"
     vp_debug = False
-    vp_mint_cluster_link = False
     diarization = "pyannote"
     vp_cluster_naming = True
     diarization_max_speakers = 3

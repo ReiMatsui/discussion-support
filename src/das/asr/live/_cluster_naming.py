@@ -41,8 +41,6 @@ import numpy as np
 
 from ._constants import (
     PYANNOTE_CLUSTER_CONFIRM_MIN_SIM,
-    PYANNOTE_CLUSTER_MINT_LINK_MARGIN,
-    PYANNOTE_CLUSTER_MINT_LINK_MIN_SIM,
     PYANNOTE_CLUSTER_NAMING_MAX_BUFFER_SEC,
     PYANNOTE_CLUSTER_NAMING_MIN_SEC,
     SR,
@@ -117,84 +115,6 @@ class ClusterVoiceNamer:
             self._buffers.clear()
             self._confirmed.clear()
             self.last_match = None
-
-    def link_minted_profile(
-        self,
-        prof: np.ndarray,
-        key_of,
-        *,
-        min_sim: float = PYANNOTE_CLUSTER_MINT_LINK_MIN_SIM,
-        margin: float = PYANNOTE_CLUSTER_MINT_LINK_MARGIN,
-    ) -> tuple[str, str, float] | None:
-        """鋳造したての人物プロファイルと同一人物の「席持ちクラスタ」を1つ返す.
-
-        二重帳簿（同じ人間がクラスタ名義 @diar:N と声紋名義 人物N の2つの席を
-        取る）の根治のため、声紋側が新しい戸籍を作る瞬間に呼ばれる
-        （handoff_2026-07-25_dual_ledger_rootcure.md 案B。既定は無効で、
-        呼び出し側 RecvLoop.flush が opt-in のときだけ使う）。
-
-        比較は**対称**: 片方向照合（match_profile: クラスタ声紋 vs 凍結
-        プロファイル）と違い、こちらは「鋳造したてのプロファイル」と
-        「クラスタの蓄積音声から作った声紋」を突き合わせる。両側とも蓄積から
-        作るため分離がよく、確定バー0.65 が見送っていた同一人物ペアも拾える
-        （実測: 2026-07-25_1723 で片方向0.63 → 対称0.71）。バーを下げるのでは
-        なく比較の仕方を変える、という位置づけ（0.65 は据え置き）。
-
-        引数:
-          prof: 鋳造直後の人物プロファイル（正規化済み）
-          key_of: 生クラスタID → 現在の表示キー（無ければ None）を返す呼び出し
-                  可能オブジェクト。席を持たないクラスタは統合先にできないため
-                  除外する（席の二重取りがまだ発生していない＝実害がない）
-        戻り値: (生クラスタID, 統合先の表示キー, 類似度) または None。
-
-        **この判定は鋳造の瞬間の1回きりに使うこと。** 蓄積が伸びるたびに
-        呼び直すと別人の類似が同一人物の帯まで上がって分離が消える
-        （_constants.PYANNOTE_CLUSTER_MINT_LINK_MIN_SIM の校正メモ参照）。
-        """
-        if prof is None:
-            return None
-        with self._lock:
-            # 埋め込み計算はロックの外で行う（tracker 側のロックを掴む経路と
-            # 入れ子にしない）。ここではバッファの浅いコピーだけ取る。
-            snapshot = [(raw, list(buf)) for raw, buf in self._buffers.items()]
-            confirmed = dict(self._confirmed)
-        min_samples = int(self.min_sec * SR)
-        scored: list[tuple[float, str]] = []
-        for raw, buf in snapshot:
-            if raw in confirmed or not buf:
-                continue   # 確定済みクラスタは既に戸籍を持つ（統合の対象外）
-            if key_of(raw) is None:
-                continue   # 席が無いクラスタには統合できない
-            total = sum(a.size for a in buf)
-            if total < min_samples:
-                continue   # 蓄積不足のクラスタは声紋が当てにならない
-            concat = np.concatenate(buf) if len(buf) > 1 else buf[0]
-            emb = self.tracker.embed_audio(concat)
-            if emb is None:
-                continue
-            scored.append((float(np.dot(prof, emb)), raw))
-        if not scored:
-            return None
-        scored.sort(reverse=True)
-        sim, raw = scored[0]
-        second = scored[1][0] if len(scored) > 1 else -1.0
-        if sim < min_sim or sim - second < margin:
-            return None
-        key = key_of(raw)
-        if key is None:
-            return None
-        return raw, key, sim
-
-    def adopt_confirmed(self, raw_cluster: str, name: str) -> None:
-        """クラスタを外部判断（鋳造時リンク）で確定済みにする.
-
-        link_minted_profile で統合が成立したとき、そのクラスタの以後の発話が
-        統合先へ帰属するよう確定を書き込み、蓄積バッファを解放する
-        （observe の確定短絡と同じ状態にする）。
-        """
-        with self._lock:
-            self._confirmed[raw_cluster] = name
-            self._buffers.pop(raw_cluster, None)
 
     def _trim_buffer(self, buf: list[np.ndarray]) -> int:
         """バッファを max_buffer_sec に収まるよう古い方から捨て、総サンプル数を返す."""

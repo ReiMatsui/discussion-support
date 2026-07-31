@@ -73,11 +73,6 @@ def post_system(text: str) -> None:
               help="ハイブリッド構成: diarizationの生クラスタ単位で声紋照合し"
                    "名前を確定する（--diarization pyannote専用。声紋照合が"
                    "有効な時のみ機能。docs/design/pyannote_live1_trial_2026-07-09.md §9）")
-@click.option("--vp-mint-cluster-link", is_flag=True,
-              help="二重帳簿の根治(opt-in): 声紋が新しい人物Nを鋳造する瞬間に、"
-                   "席を持つクラスタの蓄積声紋と対称比較し、同一人物なら新しい席を"
-                   "作らずそのクラスタへ統合する（--vp-cluster-naming 併用時のみ。"
-                   "docs/design/handoff_2026-07-25_dual_ledger_rootcure.md 案B）")
 @click.option("--port", type=int, default=8231, help="UIサーバーのポート番号（0で無効）")
 @click.option("--agent/--no-agent", default=True,
               help="AIファシリテーターを有効化（OPENAI_API_KEY必要）")

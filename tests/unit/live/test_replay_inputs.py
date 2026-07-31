@@ -36,7 +36,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "eval"))
 class _Args:
     lang = "ja"
     vp_debug = False
-    vp_mint_cluster_link = False
     diarization = "pyannote"
     diarization_max_speakers = 2
     vp_cluster_naming = True
@@ -173,7 +172,6 @@ def test_session_config_is_written_to_diag(tmp_path):
     assert cfg["diarization"] == "pyannote"
     assert cfg["diarization_max_speakers"] == 2
     assert cfg["vp_cluster_naming"] is True
-    assert cfg["vp_mint_cluster_link"] is False
     assert cfg["vp_model"] == "redimnet"
 
 
@@ -253,7 +251,7 @@ def test_replay_reproduces_the_recorded_decisions(tmp_path):
     texts = [(1000, "最初の発言です"), (4000, "次の発言です"), (7000, "三つ目の発言です")]
     config = {"type": "session_config", "diarization": "pyannote",
               "diarization_max_speakers": 2, "vp_cluster_naming": False,
-              "vp_mint_cluster_link": False, "vp_model": "redimnet",
+              "vp_model": "redimnet",
               "vp_auto": True, "vp_hybrid": True, "stt": "soniox"}
     _write_recording(tmp_path, "s", utts, texts, config=config)
 
@@ -282,7 +280,7 @@ def test_replay_can_change_configuration_to_compare_designs(tmp_path):
     texts = [(1000, "一人目の発言"), (6000, "二人目の発言")]
     config = {"type": "session_config", "diarization": "pyannote",
               "diarization_max_speakers": 2, "vp_cluster_naming": False,
-              "vp_mint_cluster_link": False, "vp_model": "redimnet",
+              "vp_model": "redimnet",
               "vp_auto": True, "vp_hybrid": True, "stt": "soniox"}
     _write_recording(tmp_path, "s", utts, texts, config=config)
     rec = rla.load_session("s", root=tmp_path)
