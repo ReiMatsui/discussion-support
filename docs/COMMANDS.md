@@ -43,9 +43,6 @@ uv run python -m das.asr.live
 ### 主要オプション
 
 ```bash
-# Speechmaticsを使う
-uv run python -m das.asr.live --stt speechmatics
-
 # ブラウザを開かない
 uv run python -m das.asr.live --no-open
 

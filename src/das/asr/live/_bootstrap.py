@@ -61,7 +61,6 @@ from das.asr.live.agents._realtime import RealtimeAgent
 from das.asr.live.agents._simulator import DiscussionSimulator
 from das.asr.live.stt import STTBackend
 from das.asr.live.stt._soniox import SonioxBackend
-from das.asr.live.stt._speechmatics import SpeechmaticsBackend
 
 # ---------------------------------------------------------------------------
 # CLI引数をまとめるデータクラス（argparse.Namespace の代替）
@@ -140,25 +139,14 @@ def load_env(path: str = ".env") -> None:
 
 def build_backend(args: LiveArgs) -> STTBackend:
     """CLIオプションに基づいてSTTバックエンドを構築する."""
-    if args.stt == "speechmatics":
-        sm_key = os.environ.get("SPEECHMATICS_API_KEY")
-        if not sm_key:
-            raise SystemExit(
-                "環境変数 SPEECHMATICS_API_KEY を設定してください"
-                "（https://portal.speechmatics.com/settings/api-keys）")
-        return SpeechmaticsBackend(
-            api_key=sm_key,
-            max_speakers=args.diarization_max_speakers,
-        )
-    else:
-        api_key = os.environ.get("SONIOX_API_KEY")
-        if not api_key:
-            raise SystemExit(
-                "環境変数 SONIOX_API_KEY を設定してください"
-                "（https://console.soniox.com）")
-        return SonioxBackend(
-            api_key=api_key,
-            enable_endpoint_detection=getattr(args, "soniox_endpoint", False))
+    api_key = os.environ.get("SONIOX_API_KEY")
+    if not api_key:
+        raise SystemExit(
+            "環境変数 SONIOX_API_KEY を設定してください"
+            "（https://console.soniox.com）")
+    return SonioxBackend(
+        api_key=api_key,
+        enable_endpoint_detection=getattr(args, "soniox_endpoint", False))
 
 
 def start_ui_server(state: SessionState, port: int):

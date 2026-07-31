@@ -22,7 +22,7 @@ class STTBackend(Protocol):
 
     @property
     def name(self) -> str:
-        """プロバイダ名（"soniox", "speechmatics" 等）."""
+        """プロバイダ名（"soniox" 等）."""
         ...
 
     def ws_url(self) -> str:

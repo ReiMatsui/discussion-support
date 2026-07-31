@@ -1,6 +1,6 @@
 """リアルタイム議事録ツール — エントリーポイント.
 
-STTバックエンド（Soniox/Speechmatics/…）経由で音声をストリーミングし、
+STTバックエンド（Soniox）経由で音声をストリーミングし、
 声紋話者分離・AI ファシリテーション・議事録保存を統合する。
 
 使い方:
@@ -23,7 +23,6 @@ das連携フック:
   stt/                STTバックエンド
     __init__.py       STTBackend Protocol
     _soniox.py        Soniox 実装
-    _speechmatics.py  Speechmatics 実装
   agents/             AIエージェント群
     _realtime.py      OpenAI Realtime API ファシリテーター
     _partner.py       Realtime API 議論パートナー
@@ -77,7 +76,7 @@ def post_system(text: str) -> None:
 @click.option("--vp-no-auto", is_flag=True, help="未知の声の自動登録を無効化")
 @click.option("--vp-debug", is_flag=True, help="声紋判定の内訳を表示")
 @click.option("--stt", default="soniox",
-              type=click.Choice(["soniox", "speechmatics"]),
+              type=click.Choice(["soniox"]),
               help="リアルタイムSTTの供給源")
 @click.option("--soniox-endpoint/--no-soniox-endpoint", default=True,
               help="Sonioxのエンドポイント検出を使う")

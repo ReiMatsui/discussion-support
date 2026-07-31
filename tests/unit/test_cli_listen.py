@@ -54,7 +54,7 @@ def test_soniox_args_appended_last_for_click_last_wins() -> None:
     """--soniox-args は末尾に付き、click の後勝ちで第一級オプションより優先。"""
     argv = _build_soniox_argv(
         hybrid=True,
-        soniox_args="--diarization none --stt speechmatics",
+        soniox_args="--diarization none --no-agent",
     )
     assert argv == [
         "--diarization",
@@ -62,8 +62,7 @@ def test_soniox_args_appended_last_for_click_last_wins() -> None:
         "--vp-cluster-naming",
         "--diarization",
         "none",
-        "--stt",
-        "speechmatics",
+        "--no-agent",
     ]
 
 
