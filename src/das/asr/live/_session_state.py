@@ -1216,6 +1216,18 @@ class SessionState:
                     q.get_nowait()
                 except queue.Empty:
                     break
+        # 音声キューも空にする（レビュー 2026-07-31）。STT切断中の分は送信
+        # スレッドが自然に捨てるが、新しい接続が張られた瞬間にキューへ残って
+        # いた分だけは前の会議の音声として新しい会議の冒頭へ混入し得る。
+        # None（終端）は捨てない——捨てると送信スレッドが終了条件を失う。
+        while True:
+            try:
+                item = self.audio_q.get_nowait()
+            except queue.Empty:
+                break
+            if item is None:
+                self.audio_q.put(None)
+                break
         if self.agent is not None:
             self.agent.reset_meeting()
         should_wait_for_setup = bool(

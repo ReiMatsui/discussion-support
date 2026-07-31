@@ -425,3 +425,24 @@ def test_retro_does_not_revive_impure_guarded_record(tmp_path):
     assert state.records[0]["speaker"] == UNSURE_SPEAKER   # 門番は不可侵
     assert state.records[1]["speaker"] == "人物2"           # 通常の遡及は従来どおり
     assert 1000 not in applied
+
+
+def test_reset_drains_stale_audio_but_keeps_the_end_sentinel(tmp_path):
+    """会議リセットで音声キューの残りを捨てる（前会議の音声混入防止）.
+
+    STT切断中の分は送信スレッドが自然に捨てるが、新接続の瞬間にキューへ
+    残っていた分は新しい会議の冒頭へ混入し得る（レビュー 2026-07-31）。
+    終端 None は捨てない——捨てると送信スレッドが終了条件を失う。
+    """
+    state = _make_state(tmp_path)
+    state.audio_q.put(b"\0" * 3200)
+    state.audio_q.put(b"\0" * 3200)
+    state.reset_for_new_meeting()
+    assert state.audio_q.qsize() == 0
+    assert state.audio_q.pending_bytes == 0
+
+    # 終端 None が入っている場合は残す
+    state.audio_q.put(b"\0" * 3200)
+    state.audio_q.put(None)
+    state.reset_for_new_meeting()
+    assert state.audio_q.get_nowait() is None
