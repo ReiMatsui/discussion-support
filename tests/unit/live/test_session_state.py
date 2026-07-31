@@ -635,7 +635,8 @@ def test_drain_logs_all_diarization_segments_to_diag(tmp_path):
                     DiarizationEvent(1500, 2500, "SPEAKER_01", "pyannote")]
     s.diarization_provider = _P()
     s.drain_diarization_provider()
-    rows = [_json.loads(x) for x in open(s.diag_path, encoding="utf-8")]
+    with open(s.diag_path, encoding="utf-8") as f:
+        rows = [_json.loads(x) for x in f]
     segs = [r for r in rows if r.get("type") == "diar_seg"]
     assert len(segs) == 2
     assert segs[0] == {"type": "diar_seg", "src": "pyannote",
