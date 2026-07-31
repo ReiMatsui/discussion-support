@@ -32,8 +32,6 @@ from __future__ import annotations
 
 import click
 
-from das.asr.live._constants import _AGENT_TRIGGER
-
 # ---------------------------------------------------------------------------
 # das連携フック（外部API）
 # ---------------------------------------------------------------------------
@@ -85,8 +83,6 @@ def post_system(text: str) -> None:
               help="AIファシリテーターを有効化（OPENAI_API_KEY必要）")
 @click.option("--agent-voice", default="shimmer",
               help="AIファシリテーターの声")
-@click.option("--agent-trigger", type=int, default=_AGENT_TRIGGER,
-              help=f"AIの応答を検討する発話間隔（既定{_AGENT_TRIGGER}）")
 @click.option("--simulate", metavar="TOPIC", default=None,
               help="AI議論シミュレーション（Chat+TTSで自動生成）")
 @click.option("--sim-scenario", default=None,
@@ -99,10 +95,6 @@ def post_system(text: str) -> None:
 @click.option("--topic", metavar="TOPIC", default=None,
               help="人間同士の議論の議題（AI有効時の脱線判定の基準。"
                    "未指定なら会議冒頭から自動推定）")
-@click.option("--proactivity", default="standard",
-              type=click.Choice(["controlled", "standard", "active"]),
-              help="ファシリテーターの介入の積極性（既定standard。"
-                   "controlled=明確な問題時のみ）")
 @click.option("--docs", default=None, metavar="DIR",
               help="--af 有効時に AF ランタイムが事前取り込みする文書ディレクトリ"
                    "（未指定なら取り込まない）")
