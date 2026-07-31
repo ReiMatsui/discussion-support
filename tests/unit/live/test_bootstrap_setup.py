@@ -376,3 +376,52 @@ def test_cluster_layer_is_off_when_the_diarizer_could_not_be_built() -> None:
     namer, seat = _bootstrap._build_cluster_layer(
         _Args(diarization="pyannote", vp_cluster_naming=True), object(), None)
     assert (namer, seat) == (None, None)
+
+
+class _ProviderSpy:
+    """close/start の呼び出しを数える話者分離プロバイダの代役."""
+
+    def __init__(self):
+        self.closes = 0
+        self.starts = 0
+
+    def close(self):
+        self.closes += 1
+
+    def start(self):
+        self.starts += 1
+
+
+def test_stt_reconnect_does_not_restart_the_diarizer(monkeypatch) -> None:
+    """STT切断では話者分離を作り直さない（§48.5）.
+
+    従来はSTT再接続のたびに close→start していたが、クラスタ空間がゼロから
+    再構築され話者の身元が分断される（AMI実測: 切断2回で confusion
+    9.8→30.1%）。送信は「STTへ送れたチャンクだけ」を分離へも送るため、
+    STT停止中は分離にも音が行かず、作り直さなくてもストリーム位置は揃う。
+    分離側自身の切断は provider 内蔵の自動再接続が自己修復する。
+    """
+    monkeypatch.setattr(_bootstrap, "RecvLoop", _Recv)
+    monkeypatch.setattr(_bootstrap.time, "sleep", lambda *_: None)
+    s = _LoopState(["disconnected", "finished"])
+    s.diarization_provider = _ProviderSpy()
+    _bootstrap._receive_until_stopped(s, _Args(), object(), lambda: "ws")
+    assert s.diarization_provider.closes == 0, "STT切断で分離を壊している"
+    assert s.diarization_provider.starts == 0
+
+
+def test_meeting_reset_still_restarts_the_diarizer(monkeypatch) -> None:
+    """「新しい会議」では従来どおり分離を作り直す（意図的なやり直し）."""
+    monkeypatch.setattr(_bootstrap, "RecvLoop", _Recv)
+    s = _LoopState(["ok", "finished"])
+    s.diarization_provider = _ProviderSpy()
+
+    def _run(ws):
+        if len(_Recv.script) == 2:
+            s.reset_requested.set()
+        return _Recv.script.pop(0) if _Recv.script else "finished"
+
+    monkeypatch.setattr(_Recv, "run", lambda self, ws: _run(ws))
+    _bootstrap._receive_until_stopped(s, _Args(), object(), lambda: "ws2")
+    assert s.diarization_provider.closes == 1
+    assert s.diarization_provider.starts == 1

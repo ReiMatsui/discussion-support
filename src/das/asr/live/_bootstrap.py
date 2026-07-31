@@ -843,10 +843,14 @@ def _receive_until_stopped(state, args, backend, connect_stt) -> None:
             with _contextlib.suppress(Exception):
                 if state.stt_ws is not None:
                     state.stt_ws.close()
-            if state.diarization_provider is not None:
-                with _contextlib.suppress(Exception):
-                    state.diarization_provider.close()
-                state.diarization_provider.start()
+            # 話者分離(pyannote)は**作り直さない**（§48.5）。従来はSTT切断の
+            # たびに close→start していたが、クラスタ空間がゼロから再構築され
+            # 話者の身元が分断される（AMI実測: 切断2回で confusion 9.8→30.1%）。
+            # 作り直しは不要である——送信は「STTへ送れたチャンクだけ」を
+            # 分離へも送る構造なので、STT停止中は分離にも音が行かず、両者の
+            # ストリーム位置は自然に揃ったまま。分離側自身の切断は provider
+            # 内蔵の自動再接続（epoch前置つき）が自己修復する。
+            # 「新しい会議」(reset) branch の作り直しは意図的なので残す。
             time.sleep(delay)
             try:
                 state.stt_ws = connect_stt()
