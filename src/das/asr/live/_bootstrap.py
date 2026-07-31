@@ -18,7 +18,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from das.asr.live._af_runtime import run_af_runtime
-from das.asr.live._assemblyai_diarization import AssemblyAIStreamingDiarizationProvider
 from das.asr.live._audio_io import (
     _run_from_mic,
     _run_from_wav,
@@ -720,16 +719,6 @@ def _build_diarizer(args):
             max_speakers=args.diarization_max_speakers,
         )
         print(f"# 話者分離: pyannoteAI streaming を使用"
-              f"{_speaker_cap_hint(args)}", flush=True)
-    elif args.diarization == "assemblyai":
-        assemblyai_key = os.environ.get("ASSEMBLYAI_API_KEY")
-        if not assemblyai_key:
-            raise SystemExit("環境変数 ASSEMBLYAI_API_KEY を設定してください")
-        diarizer = AssemblyAIStreamingDiarizationProvider(
-            assemblyai_key,
-            max_speakers=args.diarization_max_speakers,
-        )
-        print(f"# 話者分離: AssemblyAI streaming を使用"
               f"{_speaker_cap_hint(args)}", flush=True)
     return diarizer
 

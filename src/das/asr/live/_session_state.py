@@ -525,7 +525,7 @@ class SessionState:
         SPEAKER_00/01/02... に分裂することが実地の検証（Live-1試行,
         docs/design/pyannote_live1_trial_2026-07-09.md）で確認された。
         即座に @diar:N を発行すると偽参加者が量産されるため、pyannote
-        provider使用時のみ猶予を設ける。Soniox/AssemblyAI経路の挙動は
+        provider使用時のみ猶予を設ける。Soniox単独経路の挙動は
         変えない（従来どおり即時登録）。
         """
         provider = self.diarization_provider

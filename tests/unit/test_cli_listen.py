@@ -41,8 +41,8 @@ def test_hybrid_with_max_speakers_and_wav() -> None:
 
 
 def test_explicit_options_without_hybrid() -> None:
-    argv = _build_soniox_argv(diarization="assemblyai", vp_cluster_naming=True)
-    assert argv == ["--diarization", "assemblyai", "--vp-cluster-naming"]
+    argv = _build_soniox_argv(diarization="none", vp_cluster_naming=True)
+    assert argv == ["--diarization", "none", "--vp-cluster-naming"]
 
 
 def test_vp_cluster_naming_not_duplicated_with_hybrid() -> None:
@@ -54,14 +54,14 @@ def test_soniox_args_appended_last_for_click_last_wins() -> None:
     """--soniox-args は末尾に付き、click の後勝ちで第一級オプションより優先。"""
     argv = _build_soniox_argv(
         hybrid=True,
-        soniox_args="--diarization assemblyai --stt speechmatics",
+        soniox_args="--diarization none --stt speechmatics",
     )
     assert argv == [
         "--diarization",
         "pyannote",
         "--vp-cluster-naming",
         "--diarization",
-        "assemblyai",
+        "none",
         "--stt",
         "speechmatics",
     ]

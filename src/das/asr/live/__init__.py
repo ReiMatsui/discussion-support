@@ -82,10 +82,10 @@ def post_system(text: str) -> None:
 @click.option("--soniox-endpoint/--no-soniox-endpoint", default=True,
               help="Sonioxのエンドポイント検出を使う")
 @click.option("--diarization", default="none",
-              type=click.Choice(["none", "pyannote", "assemblyai"]),
+              type=click.Choice(["none", "pyannote"]),
               help="外部話者分離の供給源")
 @click.option("--diarization-max-speakers", type=int, default=None,
-              help="外部話者分離に渡す最大話者数ヒント（AssemblyAI等）")
+              help="外部話者分離に渡す最大話者数ヒント")
 @click.option("--vp-cluster-naming", is_flag=True,
               help="ハイブリッド構成: diarizationの生クラスタ単位で声紋照合し"
                    "名前を確定する（--diarization pyannote専用。声紋照合が"

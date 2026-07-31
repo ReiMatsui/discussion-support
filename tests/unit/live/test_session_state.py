@@ -156,7 +156,7 @@ class _FakePyannoteProvider:
 class _FakeOtherProvider:
     """pyannote以外のprovider（AssemblyAI等）を模したダミー."""
 
-    name = "assemblyai"
+    name = "otherprov"
 
 
 def test_key_for_diarization_speaker_hysteresis_below_threshold_stays_unsure():
@@ -184,7 +184,7 @@ def test_key_for_diarization_speaker_no_hysteresis_for_non_pyannote_provider():
     """pyannote以外のproviderでは従来どおり即時に@diar:Nを発行する（挙動を変えない）."""
     s = _make_state()
     s.diarization_provider = _FakeOtherProvider()
-    key = s.key_for_diarization_speaker("assemblyai", "A", duration_ms=10)
+    key = s.key_for_diarization_speaker("otherprov", "A", duration_ms=10)
     assert key.startswith("@diar:")
 
 

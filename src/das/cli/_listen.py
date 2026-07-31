@@ -98,7 +98,7 @@ def listen_soniox(
     diarization: str | None = typer.Option(
         None,
         "--diarization",
-        help="外部話者分離の供給源 (none|pyannote|assemblyai)。"
+        help="外部話者分離の供給源 (none|pyannote)。"
         "--hybrid と併用すると pyannote の代わりにこちらが後勝ちで使われる",
     ),
     vp_cluster_naming: bool = typer.Option(

@@ -38,7 +38,7 @@ def test_vp_cluster_naming_warning_for_non_pyannote_diarization() -> None:
 
     assert warn("pyannote", True) is None            # 有効な構成は警告なし
     assert warn("none", False) is None               # 未指定なら警告なし
-    for diar in ("none", "assemblyai"):
+    for diar in ("none",):
         msg = warn(diar, True)
         assert msg is not None
         assert "--vp-cluster-naming" in msg and "pyannote" in msg and "無効" in msg
