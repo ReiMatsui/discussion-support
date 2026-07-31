@@ -29,9 +29,6 @@ class _Args:
     diarization_max_speakers = 3
     vp_cluster_naming = False
     vp_mint_cluster_link = False
-    sortformer_python = "python"
-    sortformer_latency = "low"
-    sortformer_device = "cpu"
     docs = None
     af = False
 

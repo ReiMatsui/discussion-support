@@ -40,7 +40,6 @@ from das.asr.live._pyannote_diarization import PyannoteStreamingDiarizationProvi
 from das.asr.live._recv_loop import RecvLoop
 from das.asr.live._seat_audio import SeatAudio, seat_embedder
 from das.asr.live._session_state import SessionState
-from das.asr.live._sortformer_diarization import SortformerLocalDiarizationProvider
 from das.asr.live._ui import _UIHandler
 from das.asr.live._voice_profiles import VoiceProfiles
 from das.asr.live._workers import (
@@ -89,13 +88,8 @@ class LiveArgs:
     stt: str = "soniox"
     # Sonioxのエンドポイント検出（文の切れ目で区切る＝議事録が読みやすい）。既定ON。
     soniox_endpoint: bool = True
-    diarization: str = "none"  # none / pyannote / assemblyai / sortformer
+    diarization: str = "none"  # none / pyannote
     diarization_max_speakers: int | None = None
-    # --diarization sortformer 用: NeMo 専用 venv の python（未指定なら
-    # 環境変数 SORTFORMER_PYTHON → 既定パスの順で解決）と、レイテンシ設定。
-    sortformer_python: str | None = None
-    sortformer_latency: str = "low"
-    sortformer_device: str = "cpu"
     # ハイブリッド構成（docs/design/pyannote_live1_trial_2026-07-09.md §9）:
     # --diarization pyannote と併用時のみ有効。pyannoteの生クラスタ単位で
     # 声紋照合し、名前を確定する（3役分業: Soniox=文字起こし/pyannote=クラスタ
@@ -605,15 +599,15 @@ def vp_cluster_naming_disabled_warning(
         diarization: str, vp_cluster_naming: bool) -> str | None:
     """--vp-cluster-naming が効かない構成なら警告文を返す（有効構成なら None）.
 
-    クラスタ単位の声紋名前付けは匿名クラスタ型の diarization（pyannote /
-    sortformer）が前提のため、それ以外では機能しない。従来は assemblyai
+    クラスタ単位の声紋名前付けは匿名クラスタ型の diarization（pyannote）が
+    前提のため、それ以外では機能しない。従来は他provider
     併用時のみ警告し、--diarization none（既定）では黙って無効化されていた
     （2026-07-15 レビュー F6。例: --hybrid --soniox-args "--diarization none"
     では、後勝ちで diarization だけが none に上書きされ、ユーザーはハイブリッド
     構成のつもりのまま気づけない）。diarization の値に依らず警告する。
     """
-    if vp_cluster_naming and diarization not in ("pyannote", "sortformer"):
-        return ("# 注意: --vp-cluster-naming は --diarization pyannote/sortformer "
+    if vp_cluster_naming and diarization != "pyannote":
+        return ("# 注意: --vp-cluster-naming は --diarization pyannote "
                 f"専用のため無効です（--diarization {diarization} では無視されます）")
     return None
 
@@ -737,19 +731,6 @@ def _build_diarizer(args):
         )
         print(f"# 話者分離: AssemblyAI streaming を使用"
               f"{_speaker_cap_hint(args)}", flush=True)
-    elif args.diarization == "sortformer":
-        # ローカル Streaming Sortformer（opt-in 検証用, 2026-07-22）。
-        # NeMo 専用 venv のサブプロセスで動くため API キーは不要。
-        diarizer = SortformerLocalDiarizationProvider(
-            python_path=args.sortformer_python,
-            latency=args.sortformer_latency,
-            device=args.sortformer_device,
-            max_speakers=args.diarization_max_speakers,
-        )
-        print(f"# 話者分離: ローカル Streaming Sortformer を使用"
-              f"（latency={args.sortformer_latency} device={args.sortformer_device}。"
-              f"注: 話者は最大4人・マイク残響環境では現行pyannote構成より弱い実測。"
-              f"docs/design/sortformer_feasibility_2026-07-22.md）", flush=True)
     return diarizer
 
 
@@ -763,12 +744,12 @@ def _build_cluster_layer(args, tracker):
     seat_audio = None
     # --- ハイブリッド構成: 匿名クラスタ単位の声紋名前付け ---
     # (docs/design/pyannote_live1_trial_2026-07-09.md §9)。匿名クラスタ型の
-    # diarization（pyannote / sortformer）かつ --vp-cluster-naming 指定時、
+    # diarization（pyannote）かつ --vp-cluster-naming 指定時、
     # かつ声紋照合(tracker)が有効な時だけ生成する。
     # tracker が無い（--no-vp や依存未導入）場合は照合しようがないため無視する。
     cluster_namer = None
     seat_audio = None
-    if args.diarization in ("pyannote", "sortformer") and args.vp_cluster_naming:
+    if args.diarization == "pyannote" and args.vp_cluster_naming:
         if tracker is not None:
             cluster_namer = ClusterVoiceNamer(tracker)
             # 席落ち発話の割当て（handoff §27）。クラスタ分裂で席を得られず
