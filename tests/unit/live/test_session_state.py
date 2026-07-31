@@ -615,3 +615,28 @@ def test_renamed_person_keeps_their_seat(tmp_path):
 
     assert s.constrain_human_speaker_key("田中") == "田中"
     assert s.constrain_human_speaker_key("人物2") == "?"   # 上限1なので他は入れない
+
+
+def test_drain_logs_all_diarization_segments_to_diag(tmp_path):
+    """分離の全区間を diag に diar_seg として残す（§48.2）.
+
+    従来は発話と重なった窓しか記録されず、「STTが文字にできなかった発話を
+    分離側は検出していたか」（重なりの取り逃しの天井）を後から測れなかった。
+    """
+    import json as _json
+
+    from das.asr.live._diarization import DiarizationEvent
+    s = _make_state()
+    s.diag_path = str(tmp_path / "d.diag.jsonl")
+
+    class _P:
+        def drain_events(self):
+            return [DiarizationEvent(1000, 2000, "SPEAKER_00", "pyannote"),
+                    DiarizationEvent(1500, 2500, "SPEAKER_01", "pyannote")]
+    s.diarization_provider = _P()
+    s.drain_diarization_provider()
+    rows = [_json.loads(x) for x in open(s.diag_path, encoding="utf-8")]
+    segs = [r for r in rows if r.get("type") == "diar_seg"]
+    assert len(segs) == 2
+    assert segs[0] == {"type": "diar_seg", "src": "pyannote",
+                       "spk": "SPEAKER_00", "ms": 1000, "end": 2000}

@@ -602,6 +602,19 @@ class SessionState:
         events = provider.drain_events()
         if not events:
             return
+        # 全区間を diag に残す（§48.2）。従来は発話と重なった窓しか記録されず、
+        # 「STTが文字にできなかった発話（重なりの取り逃し）を分離側は検出して
+        # いたか」を後から測れなかった。missの天井測定と、将来の
+        # 「（聞き取れない発話）」表示の材料になる。
+        try:
+            with open(self.diag_path, "a", encoding="utf-8") as f:
+                for e in events:
+                    f.write(json.dumps(
+                        {"type": "diar_seg", "src": e.source, "spk": e.speaker,
+                         "ms": e.start_ms, "end": e.end_ms},
+                        ensure_ascii=False) + "\n")
+        except OSError:
+            pass
         with self.diarization_lock:
             self.diarization_events.extend(events)
             newest = max((e.end_ms or e.start_ms for e in self.diarization_events),
