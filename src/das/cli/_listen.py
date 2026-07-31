@@ -85,10 +85,6 @@ def listen_soniox(
     docs: Path | None = typer.Option(
         None, "--docs", help="議論前に取り込む文書ディレクトリ (省略時は data/docs)"
     ),
-    run_id: str | None = typer.Option(None, "--run-id", help="出力先サブディレクトリ名"),
-    threshold: float | None = typer.Option(None, "--threshold", help="リンク採用の信頼度閾値"),
-    top_k: int = typer.Option(5, "--top-k", help="リンク候補の embedding top-k (混合)"),
-    top_k_per_source: int = typer.Option(0, "--top-k-per-source", help="source 別 top-k (0=混合)"),
     skip_docs: bool = typer.Option(False, "--skip-docs", help="ドキュメントの事前 AF 化をスキップ"),
     wav: Path | None = typer.Option(
         None,
@@ -125,16 +121,6 @@ def listen_soniox(
         help="文字起こし側へ渡す追加引数 (空白区切り。例: '--stt speechmatics')。"
         "上記の第一級オプションと重複した場合はこちらが優先される",
     ),
-    min_utt_chars: int = typer.Option(
-        7,
-        "--min-utt-chars",
-        help="この文字数未満の発話(相槌等)は AF 構築に流さない (議事録側には残る)",
-    ),
-    facilitate_interval: float = typer.Option(
-        3.0,
-        "--facilitate-interval",
-        help="介入判定の周期(秒)。0 で介入無効",
-    ),
 ) -> None:
     """Soniox+声紋プロファイルで「誰が何を」をライブ取得し、統合 AF 構築＋ライブ介入を行う。
 
@@ -152,10 +138,10 @@ def listen_soniox(
     asyncio.run(
         _run_listen_soniox_async(
             docs=docs,
-            run_id=run_id,
-            threshold=threshold,
-            top_k=top_k,
-            top_k_per_source=top_k_per_source if top_k_per_source > 0 else None,
+            run_id=None,
+            threshold=None,          # リンク閾値は既定値（調整オプションは削除済み）
+            top_k=5,
+            top_k_per_source=None,
             skip_docs=skip_docs,
             soniox_argv=_build_soniox_argv(
                 wav=wav,
@@ -169,8 +155,8 @@ def listen_soniox(
                 af_docs=docs if not skip_docs else None,
                 soniox_args=soniox_args,
             ),
-            min_utt_chars=min_utt_chars,
-            facilitate_interval=facilitate_interval,
+            min_utt_chars=7,          # 相槌をAFへ流さない既定
+            facilitate_interval=3.0,  # 介入判定の周期（秒）
         )
     )
 
