@@ -24,14 +24,10 @@ def test_liveargs_has_proactivity():
     assert LiveArgs(proactivity="standard").proactivity == "standard"
 
 
-def test_cli_has_proactivity_option():
-    from das.asr.live import main
-    for p in main.params:
-        if p.name == "proactivity":
-            assert set(p.type.choices) == {"controlled", "standard", "active"}
-            break
-    else:
-        raise AssertionError("proactivity option not found")
+def test_proactivity_default_survives_cli_option_removal():
+    """積極性の既定は standard（CLIオプションは削除済み・変更はUIから）."""
+    from das.asr.live._bootstrap import LiveArgs
+    assert LiveArgs().proactivity == "standard"
 
 
 def test_proactivity_profiles():
