@@ -12,7 +12,7 @@ cd ~/discussion-support
 |---|---|
 | `OPENAI_API_KEY` | AIファシリテーター・TTS音声生成 |
 | `SONIOX_API_KEY` | Soniox リアルタイムSTT |
-| `SPEECHMATICS_API_KEY` | Speechmatics STT（オプション） |
+| `PYANNOTEAI_API_KEY` | pyannote 話者分離（--hybrid 使用時） |
 
 ---
 
@@ -78,9 +78,6 @@ uv run python -m das.asr.live
 
 # 議題を指定（脱線判定の基準。UIから後で変更も可）
 uv run python -m das.asr.live --topic 'AIツール導入の是非'
-
-# 介入の積極性（controlled=既定・控えめ / standard=標準 / active=積極的）
-uv run python -m das.asr.live --proactivity standard
 
 # AIと音声で議論する相手を付ける（AIと会話モードで起動）
 uv run python -m das.asr.live --debate 'AIツール導入の是非'
@@ -193,11 +190,11 @@ uv run das listen-soniox
 # ドキュメント事前読み込みをスキップ（素早く開始）
 uv run das listen-soniox --skip-docs
 
-# 書き起こし側にオプションを渡す
-uv run das listen-soniox --skip-docs --soniox-args "--stt soniox"
+# 書き起こし側にオプションを渡す（例: AIファシリテーターなし）
+uv run das listen-soniox --skip-docs --soniox-args "--no-agent"
 
-# ファイル観戦 + ファシリテータ
-uv run das listen-soniox --skip-docs --soniox-args "--wav data/overlap_test/C_heavy.wav --play"
+# ファイル再生 + ファシリテータ
+uv run das listen-soniox --skip-docs --wav data/overlap_test/C_heavy.wav
 ```
 
 ---
@@ -207,10 +204,10 @@ uv run das listen-soniox --skip-docs --soniox-args "--wav data/overlap_test/C_he
 ### 直接注入（観戦モード）— パイプラインの実力測定
 
 ```bash
-uv run python -m das.asr.live --wav data/overlap_test/C_heavy.wav --play
+uv run python -m das.asr.live --wav data/overlap_test/C_heavy.wav
 ```
 
-wav内の音声を直接STTに送信。スピーカーからも再生されるので聞きながら確認できる。マイクは使わない。
+wav内の音声を直接STTに送信する。マイクは使わない。
 
 ### マイク経由 — 実環境テスト
 
@@ -225,14 +222,6 @@ afplay data/overlap_test/C_heavy.wav
 ```
 
 スピーカー→部屋→マイクの実経路を通した認識精度を測定。
-
-### 参加モード（--join）— TTS討論に乱入
-
-```bash
-uv run python -m das.asr.live --wav data/overlap_test/C_heavy.wav --join
-```
-
-wavをスピーカー再生しつつ、自分のマイクも同時に拾う。**イヤホン推奨**（ハウリング防止）。
 
 ---
 

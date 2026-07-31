@@ -13,10 +13,10 @@ OpenAI TTS APIで各話者の発言を生成し、適切な間（ま）を入れ
   uv run python scripts/generate_conversation_wav.py --all
 
   # 生成したWAVでファシリテーターをテスト（trigger=5で短いシナリオでも発火しやすく）
-  uv run python -m das.asr.live --wav test_wavs/stalled.wav --agent --play --agent-trigger 5
+  uv run python -m das.asr.live --wav test_wavs/stalled.wav
 
   # 自分も参加（マイクON）
-  uv run python -m das.asr.live --wav test_wavs/stalled.wav --agent --join --agent-trigger 5
+  uv run python -m das.asr.live --wav test_wavs/stalled.wav
 """
 
 from __future__ import annotations
@@ -273,11 +273,11 @@ def main():
             paths.append(path)
         print(f"\n🎉 全{len(paths)}シナリオ生成完了")
         print("\nテスト実行例:")
-        print(f"  uv run python -m das.asr.live --wav {paths[0]} --agent --play")
+        print(f"  uv run python -m das.asr.live --wav {paths[0]}")
     elif args.scenario:
         path = generate_scenario_wav(args.scenario, args.output_dir, args.pause)
         print("\nテスト実行:")
-        print(f"  uv run python -m das.asr.live --wav {path} --agent --play")
+        print(f"  uv run python -m das.asr.live --wav {path}")
     else:
         ap.print_help()
 

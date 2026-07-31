@@ -1,148 +1,56 @@
 # discussion-support
 
-マルチエージェントによる議論グラフ統合型 議論支援システム (das = Discussion Argumentation Support).
+対面議論のリアルタイム議事録＋話者特定＋AIファシリテーション (das = Discussion
+Argumentation Support)。Soniox のリアルタイム文字起こしに、pyannote の話者分離と
+ReDimNet の声紋照合を重ねて「誰が何を言ったか」を特定し、AIファシリテーターが
+脱線戻し・声かけ・事実確認で議論を支援する。
 
-議論ログ側 (立場を持つ claim / premise) と外部知識側 (中立な事実 = evidence) を
-支持・攻撃エッジで連結した「統合議論グラフ」を、複数の専門エージェント
-(論証抽出 / ドキュメント知識 / Web 検索 / 連結 / ファシリテーション) が
-分業して構築・運用する研究プロトタイプ。
-
-ノード型は議論側の `claim` / `premise` と知識側の `evidence` の 2 系統。外部の文書・Web
-は「主張」に分解せず中立な事実として扱い、その事実が各主張を支持するか攻撃するかは
-**対象主張ごとのエッジ** で表現する (同じ事実が主張 A を支持し主張 B を攻撃しうる)。
-
-- **論証抽出 (Extraction)**: 発話を claim / premise に分解 (議論側、立場あり)
-- **ドキュメント知識 (Document)**: 事前文書を中立な事実 (evidence) に分解
-- **Web 検索 (WebSearch)**: リアルタイム検索結果を事実 (evidence) ノード化
-- **連結 (Linking)**: 事実 → 主張の関係を対象主張ごとに支持/攻撃/中立で判定しエッジ化
-- **ファシリテーション (Facilitation)**: グラフ全体を読み「いつ・誰に・何を」提示するか中央調停
-
-## クイックスタート
+## セットアップ
 
 ```bash
-# 依存関係をインストール
 uv sync --all-extras
-
-# 環境変数を設定
-cp .env.example .env
-$EDITOR .env  # OPENAI_API_KEY を設定
-
-# 単体テストが通ることを確認 (実 API は呼ばない)
-uv run pytest -q
-
-# サンプル議論ログから AF を構築 (実 API を呼ぶ)
-uv run das run-session tests/fixtures/cafeteria_transcript.jsonl
-
-# Streamlit ビューアで結果をブラウズ
-uv run das ui
+cp .env.example .env    # SONIOX_API_KEY / OPENAI_API_KEY /
+                        # PYANNOTEAI_API_KEY（--hybrid 用）を設定
+uv run pytest -q        # 単体テスト（実APIは呼ばない）
 ```
 
-## 対面議論のライブ入力 (Soniox + 声紋プロファイル)
-
-「誰が何を言ったか」の文字起こし＋話者特定＋統合AF構築＋ライブ介入 (`das/asr/live`)。
-
-**基本のコマンドはこれ:**
+## 使い方
 
 ```bash
-uv sync --extra soniox
-echo "SONIOX_API_KEY=..." >> .env
+# 推奨構成（Soniox + pyannote + 声紋）。参加人数は指定しなくてよい
+uv run python -m das.asr.live --diarization pyannote --vp-cluster-naming
 
-uv run das listen-soniox --max-speakers 3   # ← 参加人数を指定して録音開始
+# 統合AF構築＋ライブ介入まで含めたフル構成（--hybrid は上記構成の短縮形）
+uv run das listen-soniox --hybrid
+
+# 録音ファイルで再実験（マイク不要）
+uv run das listen-soniox --hybrid --wav transcripts/<日時>.wav
 ```
 
-話者特定は声紋ベース。登録者ゼロでも自動で人物を学習し、同じ人を同じラベルに集める。
-実行中はブラウザUIで名前登録・モード切替・停止。議事録
-(MD/turns.jsonl/diag.jsonl) は transcripts/ に自動保存。
+起動するとブラウザUI（`http://127.0.0.1:8231/`）が開き、ライブ議事録・
+モード切替（議事録のみ／AIと会話／人間に介入）・話者の名前登録・議題編集・
+「新しい会議」・停止が行える。議事録（md / turns.jsonl / diag.jsonl / wav）は
+`transcripts/` に自動保存される。
 
-よく使うオプション:
+参加人数は設定しなくても動く（設定すると未確定が減る）。話者はプロファイル
+ゼロから自動学習され、名前はUIから後付けできる。詳しい操作とオプションは
+`docs/COMMANDS.md` を参照。
 
-```bash
-uv run das listen-soniox --max-speakers 3 --wav <録音.wav>   # 過去の録音で再実験（マイク不要）
-uv run das listen-soniox --max-speakers 3 --hybrid           # 実験的: pyannote話者分離を併用
-                                                             # （要 PYANNOTEAI_API_KEY。採否は検証中、
-                                                             #   docs/design/handoff_2026-07-14_*.md 参照）
-# バッチでも可: uv run das run-session transcripts/<日時>.turns.jsonl
-# 介入レビュー: uv run python -m das.asr.live.replay transcripts/<日時>.turns.jsonl --no-api --serve
-```
+## 精度と検証
 
-話者特定の精度評価ツール（正解アノテーション・採点・オフライン再生）は `eval/` にある。
-
-### AIファシリテーター付きライブUI (`python -m das.asr.live`)
-
-ブラウザUI（`http://127.0.0.1:8231/`）で開始前の参加人数設定・ライブ議事録・3モード切替（議事録のみ／
-AIと会話／人間に介入）・議題編集・話者リネーム・発言量・「新しい会議」リセット・
-停止が行える。脱線を本題に戻し、発言の少ない人に声をかける。
-
-```bash
-uv run python -m das.asr.live
-# 議題を指定する場合: --topic 'AIツール導入の是非'
-# 一人で動作確認: --simulate '議題' --sim-scenario derailed|imbalanced
-```
-
-詳しくは `docs/COMMANDS.md` を参照。
-
-## CLI
-
-```bash
-uv run das version                    # バージョン
-uv run das ingest-docs data/docs/     # 文書を evidence ノード化して保存
-uv run das run-session <file>.jsonl   # 議論ログを流して統合 AF を構築
-uv run das listen                     # マイクからのリアルタイム議論を AF 化 (asr extras)
-uv run das visualize <snapshot.json>  # snapshot を pyvis HTML に
-uv run das ui                         # Streamlit ビューア
-```
-
-## リアルタイム音声入力 (`das listen`)
-
-WhisperLiveKit を使ってマイク音声を逐次文字起こしし、そのまま統合 AF を組み
-立てる。Apple Silicon 向けに mlx-whisper バックエンドを既定にしている。
-
-```bash
-# extras を入れる (PyTorch / mlx-whisper / sounddevice が入る、~3GB)
-uv sync --extra asr
-
-# 録音開始 (既定: large-v3 / 日本語)。Ctrl-C で停止し snapshot を保存。
-uv run das listen
-
-# モデル・言語の上書き
-uv run das listen --model large-v3-turbo --language ja
-```
-
-設定は `.env` でも上書きできる:
-
-```env
-DAS_ASR_BACKEND=mlx-whisper      # CUDA なら faster-whisper
-DAS_ASR_MODEL=large-v3
-DAS_ASR_LANGUAGE=ja
-```
-
-注意: 話者ダイアライゼーション (複数人の自動区別) は初期実装では無効。すべての
-発話が `speaker_1` で記録される。多人数議論サポートは追加予定。
-
-## テスト
-
-単体テスト (実 API を呼ばない、AsyncMock でフェイク):
-
-```bash
-uv run pytest -q
-```
-
-E2E スモーク (実 OpenAI API を呼ぶため、明示的な opt-in が必要):
-
-```bash
-OPENAI_API_KEY=sk-... OPENAI_INTEGRATION=1 \
-    uv run pytest tests/integration -m integration -s
-```
+話者帰属の成績・採用済みの仕組み・却下済みの案は `docs/design/STATUS.md` が
+正本（校正セットで文字正解 91.5%、人数未指定でも 85.5%）。経緯は
+`docs/design/handoff_2026-07-14_unregistered_speakers.md`、研究記録は
+`docs/research/` にある。採点・オフライン再生・正解アノテーションのツールは
+`eval/`（案内は `eval/README.md`）。
 
 ## 開発
 
 ```bash
-uv run ruff check .
-uv run ruff format .
-uv run mypy src/das
-uv run pytest --cov=das
+uv run ruff check .     # lint（既存エラーを増やさない）
+uv run pytest -q        # 全テスト
 ```
 
-## ディレクトリ
-
-実装計画は `docs/implementation_plan.md` を参照。
+- 実験・挙動変更は測定とセットで（1変更=1コミット、回帰テストを付ける）
+- 再現と採点は `eval/_pipeline.py` だけを使う
+- しきい値は `src/das/asr/live/_constants.py` が正本（校正表つき）
