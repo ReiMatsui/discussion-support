@@ -92,7 +92,6 @@ def test_liveargs_and_cli_have_diarization_option() -> None:
     from das.asr.live._bootstrap import LiveArgs
 
     assert LiveArgs().model == "stt-rt-v5"
-    assert LiveArgs().soniox_endpoint is True
     assert LiveArgs().diarization == "none"
     assert LiveArgs(diarization="pyannote").diarization == "pyannote"
     assert LiveArgs(
@@ -106,7 +105,6 @@ def test_liveargs_and_cli_have_diarization_option() -> None:
             break
     else:
         raise AssertionError("diarization option not found")
-    assert any(param.name == "soniox_endpoint" for param in main.params)
 
 
 def test_recv_loop_uses_diarization_when_voiceprint_is_unavailable() -> None:

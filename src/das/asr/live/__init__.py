@@ -58,9 +58,6 @@ def post_system(text: str) -> None:
 @click.option("--model", default="stt-rt-v5", help="STTモデル名")
 @click.option("--wav", default=None, type=click.Path(exists=False),
               help="指定で実マイクの代わりにファイル擬似ライブ")
-@click.option("--play", is_flag=True, help="--wav使用時、スピーカーからも再生する")
-@click.option("--join", is_flag=True,
-              help="--wav使用時、再生しつつ自分のマイクも混ぜて参加する（イヤホン推奨）")
 @click.option("--device", default=None, help="マイクデバイス名")
 @click.option("--out", default=None, help="保存先mdファイル（省略時 transcripts/日時.md）")
 @click.option("--no-open", is_flag=True, help="ブラウザを自動で開かない")
@@ -68,18 +65,7 @@ def post_system(text: str) -> None:
               help="起動時にブラウザで開始前設定を行う")
 @click.option("--no-vp", is_flag=True, help="声紋照合を無効化")
 @click.option("--voices", default="voices.json", help="声紋プロファイルの保存先")
-@click.option("--vp-model", default="redimnet",
-              type=click.Choice(["redimnet"]),
-              help="声紋モデル（既定redimnet）")
-@click.option("--vp-match", type=float, default=None,
-              help="即時判定のしきい値（省略時はモデル別の既定値）")
-@click.option("--vp-no-auto", is_flag=True, help="未知の声の自動登録を無効化")
 @click.option("--vp-debug", is_flag=True, help="声紋判定の内訳を表示")
-@click.option("--stt", default="soniox",
-              type=click.Choice(["soniox"]),
-              help="リアルタイムSTTの供給源")
-@click.option("--soniox-endpoint/--no-soniox-endpoint", default=True,
-              help="Sonioxのエンドポイント検出を使う")
 @click.option("--diarization", default="none",
               type=click.Choice(["none", "pyannote"]),
               help="外部話者分離の供給源")

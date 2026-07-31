@@ -72,20 +72,13 @@ class LiveArgs:
     lang: str = "ja"
     model: str = "stt-rt-v5"
     wav: str | None = None
-    play: bool = False
-    join: bool = False
     device: str | None = None
     out: str | None = None
     no_open: bool = False
     no_vp: bool = False
     voices: str = "voices.json"
-    vp_model: str = "redimnet"
-    vp_match: float | None = None
-    vp_no_auto: bool = False
+    vp_model: str = "redimnet"   # 内部既定（CLIからは変えない）
     vp_debug: bool = False
-    stt: str = "soniox"
-    # Sonioxのエンドポイント検出（文の切れ目で区切る＝議事録が読みやすい）。既定ON。
-    soniox_endpoint: bool = True
     diarization: str = "none"  # none / pyannote
     diarization_max_speakers: int | None = None
     # ハイブリッド構成（docs/design/pyannote_live1_trial_2026-07-09.md §9）:
@@ -144,9 +137,8 @@ def build_backend(args: LiveArgs) -> STTBackend:
         raise SystemExit(
             "環境変数 SONIOX_API_KEY を設定してください"
             "（https://console.soniox.com）")
-    return SonioxBackend(
-        api_key=api_key,
-        enable_endpoint_detection=getattr(args, "soniox_endpoint", False))
+    # エンドポイント検出（文の切れ目で区切る＝議事録が読みやすい）は常時ON。
+    return SonioxBackend(api_key=api_key, enable_endpoint_detection=True)
 
 
 def start_ui_server(state: SessionState, port: int):
@@ -617,7 +609,7 @@ def write_session_config(state, args: LiveArgs, tracker) -> None:
         "vp_model": None if tracker is None else tracker.model,
         "vp_auto": None if tracker is None else bool(tracker.auto),
         "vp_hybrid": None if tracker is None else bool(tracker.hybrid),
-        "stt": args.stt,
+        "stt": "soniox",
     }
     try:
         with open(state.diag_path, "a", encoding="utf-8") as f:
@@ -659,8 +651,7 @@ def _build_tracker(args) -> VoiceProfiles | None:
     tracker: VoiceProfiles | None = None
     print("# 声紋モデルを読み込み中…", flush=True)
     try:
-        tracker = VoiceProfiles(path=args.voices, thresh=args.vp_match,
-                                auto=not args.vp_no_auto, model=args.vp_model)
+        tracker = VoiceProfiles(path=args.voices, model=args.vp_model)
         print(f"# 声紋モデル: {args.vp_model}", flush=True)
     except Exception as e:
         print(f"#   {args.vp_model}: 読み込み失敗 ({type(e).__name__})", flush=True)

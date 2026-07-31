@@ -105,15 +105,6 @@ def _run_from_wav(state: SessionState, args):
     agent = state.agent
     y = _load_wav_mono_16k(args.wav)
     step = int(SR * 0.12)
-    out = mic = None
-    if args.play or args.join:
-        import sounddevice as sd
-        out = sd.OutputStream(samplerate=SR, channels=1, dtype="float32")
-        out.start()
-    if args.join:
-        import sounddevice as sd
-        mic = sd.InputStream(samplerate=SR, channels=1, dtype="float32", blocksize=step)
-        mic.start()
     i = 0
     _wav_paused = False
     while not state.stop.is_set():
@@ -131,24 +122,10 @@ def _run_from_wav(state: SessionState, args):
         if len(chunk) < step:
             chunk = np.pad(chunk, (0, step - len(chunk)))
         i += step
-        if i - step >= len(y) and mic is None:
+        if i - step >= len(y):
             break
-        if mic is not None:
-            mdata, _ = mic.read(step)
-            mix = np.clip(chunk + mdata[:, 0], -1, 1)
-        else:
-            mix = chunk
-        state.audio_q.put((mix * 32767).astype("<i2").tobytes())
-        if out is not None:
-            out.write(chunk.reshape(-1, 1))
-            if mic is None:
-                continue
-        if mic is None and out is None:
-            time.sleep(0.12)
-    for s in (out, mic):
-        if s is not None:
-            s.stop()
-            s.close()
+        state.audio_q.put((chunk * 32767).astype("<i2").tobytes())
+        time.sleep(0.12)
     state.audio_q.put(None)
 
 

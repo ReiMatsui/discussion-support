@@ -10,12 +10,10 @@ from das.asr.live._bootstrap import LiveArgs
 def test_live_args_defaults_match_recommended_live_setup() -> None:
     args = LiveArgs()
 
-    assert args.stt == "soniox"
     assert args.model == "stt-rt-v5"
     assert args.agent is True
     assert args.setup is True
     assert args.proactivity == "standard"
-    assert args.soniox_endpoint is True
 
 
 def test_cli_help_documents_simplified_switches() -> None:

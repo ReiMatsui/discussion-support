@@ -23,8 +23,6 @@ class _Args:
     no_vp = True
     vp_model = "redimnet"
     voices = "voices.json"
-    vp_match = 0.5
-    vp_no_auto = False
     diarization = "none"
     diarization_max_speakers = 3
     vp_cluster_naming = False
