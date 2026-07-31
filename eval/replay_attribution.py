@@ -370,7 +370,7 @@ def build_argparser() -> argparse.ArgumentParser:
                    help="ライブランの diag.jsonl（実セグメンテーション＋実Sonioxラベル）"
                         "で再生する。--gt に timeline形式GT、--wav に音源wavが必須")
     p.add_argument("--model", default="redimnet",
-                   choices=["redimnet", "ecapa", "resemblyzer"], help="声紋モデル")
+                   choices=["redimnet"], help="声紋モデル（旧モデルの経路は2026-07-31に削除）")
     p.add_argument("--max-speakers", type=int, default=3,
                    help="max_human_speakers（実運用と同じ既定3）")
     p.add_argument("--hybrid", action=argparse.BooleanOptionalAction, default=True,
