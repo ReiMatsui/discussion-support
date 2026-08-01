@@ -30,6 +30,9 @@ from ._constants import (
     PALETTE,
     PYANNOTE_PARTICIPANT_HYSTERESIS_S,
     RESET,
+    SEAT_RECLAIM_GHOST_IDLE_MS,
+    SEAT_RECLAIM_GHOST_MAX_CHARS,
+    SEAT_RECLAIM_MIN_DROPS,
     SEND_BACKLOG_WARN_MS,
     SR,
     UNSURE_SPEAKER,
@@ -40,6 +43,7 @@ from ._participation import participation_stats
 from ._seat_audio import RetroAttributor, SeatAudio
 from ._speaker_keys import (
     NON_PARTICIPANT_KEYS,
+    is_person_key,
     is_provisional_key,
     looks_like_system_name,
 )
@@ -465,6 +469,13 @@ class SessionState:
         # 喋っていないのに素通りし、上限3の会話で8人が表示された（実会話で確認）。
         # 「今回のセッションで既に席に着いているか」で判定するのが正しい。
         if len(slots) >= max_speakers:
+            # 満席でも、声紋が実在人物と同定したキーが落ち続けているなら、
+            # 「発話がごく少なく長く黙っている席」（開始前の雑音声が先取りした
+            # 席）を回収して明け渡す（§49）。回収できなければ従来どおり落とす。
+            if self._try_reclaim_seat_for(key):
+                self._note_seat_admitted(key, self._known_human_slots(),
+                                         max_speakers)
+                return key
             self._note_constrain_drop(key, max_speakers)
             return UNSURE_SPEAKER
         self._note_seat_admitted(key, slots, max_speakers)
@@ -488,6 +499,92 @@ class SessionState:
                 "max_speakers": max_speakers,
                 "labels": dict(self.anonymous_labels),
             }, ensure_ascii=False, default=str) + "\n")
+
+    def _try_reclaim_seat_for(self, key: str) -> bool:
+        """満席のとき、幽霊席を回収して key に明け渡せたら True（§49）.
+
+        **解く問題**（rehacq検証 2026-08-01）: 開始前の雑音声（音声調整の声）が
+        最初の席を取ると、本編の実在話者が満席で座れない。声紋層は「人物3」と
+        正しく同定し続けていた（43発話・類似度最大0.82）のに、席が無いために
+        全発話が行き場を失った。席は一度埋まると回収されない設計だったため、
+        序盤の一瞬の雑音が最後まで祟る。
+
+        回収の条件（全部そろったときだけ。校正は _constants.py の
+        SEAT_RECLAIM_* 参照）:
+
+          - key は人物キー（人物N/実名）＝声紋が実在の人物という証拠を出している
+          - その key が SEAT_RECLAIM_MIN_DROPS 回、上限で落ち続けている
+            （一度きりの誤鋳造で席を動かさない）
+          - 匿名ラベルの席に、合計発話 GHOST_MAX_CHARS 字以下かつ
+            GHOST_IDLE_MS 無発話の「幽霊」がいる（実名を付けた席は対象外——
+            ユーザーが実在を確認した席を機械判断で奪わない）
+
+        回収 = 幽霊の過去発話を未確定へ戻し（雑音声の可能性が高い。誤回収でも
+        損害は未確定 GHOST_MAX_CHARS 字ぶんで有界）、台帳・席の参照・クラスタ
+        確定から幽霊を外す。安全弁（unseated_person_guard）で未確定になっていた
+        本人の過去発話は、席の参照が育ち次第、遡及訂正が本人にだけ貼り直す。
+        """
+        if not is_person_key(key):
+            return False
+        if self.constrain_drop_counts.get(key, 0) + 1 < SEAT_RECLAIM_MIN_DROPS:
+            return False
+        with self.state_lock:
+            # 席持ちキーごとの合計文字数と最終発話時刻（sys行は speaker を
+            # 持たないので自然に除外される）
+            stats: dict[str, tuple[int, int]] = {}
+            now_ms = 0
+            for r in self.records:
+                if "speaker" not in r:
+                    continue
+                k = str(r["speaker"])
+                ms = int(r.get("ms") or 0)
+                now_ms = max(now_ms, ms)
+                chars, last = stats.get(k, (0, 0))
+                stats[k] = (chars + len(str(r.get("text") or "")),
+                            max(last, ms))
+            ghosts = []
+            for k in list(self.anonymous_labels):
+                if k == key:
+                    continue
+                chars, last = stats.get(k, (0, 0))
+                if (chars <= SEAT_RECLAIM_GHOST_MAX_CHARS
+                        and now_ms - last >= SEAT_RECLAIM_GHOST_IDLE_MS):
+                    ghosts.append((chars, last, k))
+            if not ghosts:
+                return False
+            ghosts.sort()   # 最少発話・最古の順に最有力
+            g_chars, _g_last, ghost = ghosts[0]
+            g_label = self.anonymous_labels.get(ghost, "?")
+            flipped = 0
+            for r in self.records:
+                if r.get("speaker") == ghost:
+                    r["speaker"] = UNSURE_SPEAKER
+                    r["speaker_source"] = "seat_reclaimed"
+                    flipped += 1
+            self.anonymous_labels.pop(ghost, None)
+            if self.seat_audio is not None:
+                self.seat_audio.drop(ghost)
+            if self.cluster_namer is not None:
+                self.cluster_namer.drop_confirmed(ghost)
+            # 外部クラスタ台帳が幽霊を指したままだと、そのクラスタの次の
+            # 発話で幽霊が席なしキーとして戻ってくる。対応を外し、以後は
+            # 新規クラスタとして扱わせる
+            for cluster, k in list(self.diarization_speaker_keys.items()):
+                if k == ghost:
+                    del self.diarization_speaker_keys[cluster]
+        with contextlib.suppress(OSError), \
+                open(self.diag_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "type": "seat_reclaimed", "ghost": ghost, "ghost_label": g_label,
+                "ghost_chars": g_chars, "flipped": flipped, "new": key,
+                "drops": self.constrain_drop_counts.get(key, 0) + 1,
+            }, ensure_ascii=False) + "\n")
+        self.add_sys(self.elapsed_ms(),
+                     f"発話がほとんど無い{g_label}の席を回収し、繰り返し検出"
+                     f"されている新しい話者に割り当てました（{g_label}の"
+                     f"{flipped}件は未確定に戻しました）")
+        self.rev += 1
+        return True
 
     def _note_constrain_drop(self, key: str, max_speakers: int) -> None:
         """上限で未確定化した事実を可視化する（帰属の挙動は一切変えない）.

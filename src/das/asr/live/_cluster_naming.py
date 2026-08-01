@@ -109,6 +109,19 @@ class ClusterVoiceNamer:
                 if name == old:
                     self._confirmed[cluster] = new
 
+    def drop_confirmed(self, name: str) -> None:
+        """確定名 name を指すクラスタの確定を取り消す（席の回収 §49 用）.
+
+        取り消さないと、そのクラスタの次の発話が `observe()` の確定短絡で
+        回収済みの幽霊キーとして帰属され続ける（rename_confirmed の C3 と
+        同型の復活事故）。クラスタ自体の蓄積は残す——同じ声がまた十分話せば、
+        改めて（正しい相手に）確定できる。
+        """
+        with self._lock:
+            for cluster, n in list(self._confirmed.items()):
+                if n == name:
+                    del self._confirmed[cluster]
+
     def reset(self) -> None:
         """会議リセット時に蓄積・確定状態をクリアする."""
         with self._lock:

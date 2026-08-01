@@ -248,6 +248,19 @@ class SeatAudio:
                 st.pop(old, None)               # 旧キーは必ず消す
             self._frozen.discard(old)
 
+    def drop(self, key: str) -> None:
+        """席の回収（§49）で席を失ったキーの参照を捨てる.
+
+        残すと `nearest_from` の候補に立ち続け、遡及訂正が回収済みの幽霊席へ
+        貼り直してしまう（回収の意味が消える）。凍結の印も消す——同じキーが
+        後で正当に席を得たら、参照は白紙から育て直す。
+        """
+        with self._lock:
+            self._buffers.pop(key, None)
+            self._embeddings.pop(key, None)
+            self._seconds.pop(key, None)
+            self._frozen.discard(key)
+
     def reset(self) -> None:
         """会議リセット時に参照をすべて捨てる."""
         with self._lock:
