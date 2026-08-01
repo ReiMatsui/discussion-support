@@ -74,6 +74,9 @@ def post_system(text: str) -> None:
 @click.option("--port", type=int, default=8231, help="UIサーバーのポート番号（0で無効）")
 @click.option("--agent/--no-agent", default=True,
               help="AIファシリテーターを有効化（OPENAI_API_KEY必要）")
+@click.option("--no-llm", is_flag=True,
+              help="LLMを使う補助（論点抽出・脱線検出・AI介入等）をすべて無効化し"
+                   "トークン消費をゼロにする（文字起こし・話者帰属のみ）")
 @click.option("--agent-voice", default="shimmer",
               help="AIファシリテーターの声")
 @click.option("--simulate", metavar="TOPIC", default=None,

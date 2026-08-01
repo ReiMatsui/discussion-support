@@ -92,6 +92,10 @@ class LiveArgs:
     agent: bool = True
     agent_voice: str = "shimmer"
     agent_trigger: int = 10
+    # LLMを使う補助（論点抽出・脱線検出・AI介入など）をすべて止める。
+    # 検証の再生ランでトークンを消費しないための第一級スイッチ（§49.9）。
+    # 話者帰属には一切関わらないので、成績の比較可能性は保たれる。
+    no_llm: bool = False
     simulate: str | None = None
     sim_scenario: str | None = None
     debate: str | None = None
@@ -724,7 +728,15 @@ def _start_llm_workers(state, args, *, oai_key: str, oai_model: str,
     どれも会議の進行を助けるための背景処理で、話者の帰属には関わらない。
     エージェントが居ないときは論点抽出だけを動かす——他は介入するための
     判断材料であり、介入先が無ければ API を叩くだけ無駄になる。
+
+    ``--no-llm`` はここを丸ごと止める。検証の再生ラン（YouTube素材等）で
+    LLMのトークンを消費しないため（§49.9）。キーの有無より先に見るのは、
+    キーが設定されていても「使わない」という明示の意思を優先するため。
     """
+    if getattr(args, "no_llm", False):
+        print("# LLM補助: すべて無効（--no-llm。論点抽出・介入は動きません）",
+              flush=True)
+        return
     if oai_key:
         threading.Thread(target=_run_topic_worker,
                         args=(state, oai_key, oai_model), daemon=True).start()
@@ -1086,8 +1098,9 @@ def run_session(args: LiveArgs) -> None:
     write_session_config(state, args, tracker)
 
     # --- AIエージェント ---
+    # --no-llm はエージェントも含めて止める（LLM補助の一括スイッチ。§49.9）
     _agent_oai_key = os.environ.get("OPENAI_API_KEY", "")
-    if args.agent:
+    if args.agent and not getattr(args, "no_llm", False):
         if not _agent_oai_key:
             print("# AI Agent: OPENAI_API_KEY が未設定です。--agent は無効になります。", flush=True)
         else:

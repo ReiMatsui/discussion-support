@@ -96,6 +96,12 @@ def listen_soniox(
         "--max-speakers",
         help="想定話者数のヒント (文字起こし側の --diarization-max-speakers に転送)",
     ),
+    no_intervention: bool = typer.Option(
+        False,
+        "--no-intervention",
+        help="AI介入・論点抽出などLLMを使う機能をすべて無効化する"
+        "（文字起こし+話者帰属のみ。トークン消費ゼロ。検証の再生ラン向け）",
+    ),
     soniox_args: str = typer.Option(
         "",
         "--soniox-args",
@@ -110,6 +116,7 @@ def listen_soniox(
     使用例:
       das listen-soniox                      (マイクから開始)
       das listen-soniox --wav meeting.wav   (録音ファイルで擬似ライブ)
+      das listen-soniox --wav meeting.wav --no-intervention  (LLMなし・帰属検証向け)
       das listen-soniox --soniox-args "--diarization none"  (Soniox単独に落とす)
 
     speaker-attribution 由来の話者特定つき文字起こし (das.asr.live) を
@@ -119,6 +126,25 @@ def listen_soniox(
     要: SONIOX_API_KEY (.env) / `uv sync --extra soniox`。
     話者の実名登録は文字起こし側の標準入力で「1=名前」。
     """
+    if no_intervention:
+        # 介入層（Orchestrator / FacilitationAgent / AF）を一切組み立てず、
+        # 文字起こし+話者帰属の層だけを直接動かす。下層にも --no-agent と
+        # --no-llm を渡し、LLMを使う常駐ワーカーを全て止める（トークン消費
+        # ゼロ）。フラグを argv 先頭に置くのは、--soniox-args による明示の
+        # 上書き（click は後勝ち）を殺さないため。UI は下層のものを使う。
+        try:
+            from das.asr import live as _live_mod
+        except ImportError as exc:
+            typer.echo(f"[listen-soniox] 依存が未インストールです: {exc}")
+            raise typer.Exit(1) from exc
+        typer.echo("[listen-soniox] 介入なしモード: 文字起こし+話者帰属のみ"
+                   "（LLM不使用・トークン消費ゼロ）")
+        argv = [*_NO_INTERVENTION_FLAGS, *_build_soniox_argv(
+            wav=wav, max_speakers=max_speakers, af_docs=None,
+            soniox_args=soniox_args)]
+        _live_mod.main(argv, standalone_mode=False)
+        return
+
     asyncio.run(
         _run_listen_soniox_async(
             docs=docs,
@@ -141,6 +167,11 @@ def listen_soniox(
         )
     )
 
+
+# --no-intervention が下層へ渡すフラグ（順序: 先頭に置き、--soniox-args の
+# 明示上書きを許す）。--no-agent=Realtimeエージェント停止、--no-llm=論点抽出
+# 等の常駐LLMワーカー停止。
+_NO_INTERVENTION_FLAGS = ("--no-agent", "--no-llm")
 
 # ライブ介入(グラフレーン)の同一内容再提示の抑止窓（秒）。
 # _facilitation.py の _INTERVENTION_CONTENT_DEDUP_SEC（Realtime レーン）と

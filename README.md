@@ -26,6 +26,9 @@ uv run python -m das.asr.live
 # 録音ファイルで再実験（マイク不要）
 uv run das listen-soniox --wav transcripts/<日時>.wav
 
+# 検証向け: AI介入・論点抽出などLLMを一切使わない（トークン消費ゼロ）
+uv run das listen-soniox --wav <ファイル>.wav --no-intervention
+
 # pyannoteを使わないSoniox単独（PYANNOTEAI_API_KEY が無い環境でも起動は止まらず
 # 自動でこの構成に縮退する）
 uv run python -m das.asr.live --diarization none
