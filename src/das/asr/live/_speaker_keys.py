@@ -80,6 +80,22 @@ def is_provisional_key(key: object) -> bool:
     return is_label_key(key) or is_cluster_key(key)
 
 
+def is_person_key(key: object) -> bool:
+    """声紋層が「実在の人物」として同定したキー（``人物N`` か 実名）か.
+
+    暫定キー（``#ラベル`` / ``@diar:N``）・AIキー・非参加者キーの**どれでもない**
+    キーがこれに当たる。席上限で落ちた発話を席の実音声で寄せ直してよいか
+    （seat_audio §27）の判定に使う——寄せ直しの前提「落ちたキーは席持ちの
+    分裂」は暫定キーにしか成り立たず、人物キーが落ちている場合は声紋層が
+    「席に居ない実在の人物」という証拠を出している（rehacq検証 2026-08-01:
+    冒頭の雑音声が席を先取りすると、3人目の実在話者 2,587字が丸ごと
+    既存席へ押し込まれた。handoff §49）。
+    """
+    k = str(key)
+    return (k not in NON_PARTICIPANT_KEYS and not is_provisional_key(k)
+            and not is_ai_key(k))
+
+
 def looks_like_system_name(name: object | None) -> bool:
     """**ユーザーが付けた名前**がシステムの仮名に見えるか（``人物3`` ``話者2`` 等）.
 

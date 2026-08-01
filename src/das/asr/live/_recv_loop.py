@@ -27,7 +27,7 @@ from ._constants import (
     fmt_ts,
 )
 from ._seat_audio import declines_short
-from ._speaker_keys import is_ai_key
+from ._speaker_keys import is_ai_key, is_person_key
 from ._ui import _print_line
 from ._voice_profiles import _best_text_similarity
 
@@ -334,6 +334,12 @@ class RecvLoop:
         操作は高確信を要求」と衝突しない。handoff §27）。
         """
         s = self.state
+        # ここで判定する（後の「蓄積中」門番も final を UNSURE にするので、
+        # 門番の後に見ると「人数上限で落ちた」と「蓄積中で切った」を混同する。
+        # 安全弁(§49)は前者だけが対象——後者は §27.11 の設計どおり席の音声が
+        # 拾い直す）。
+        _dropped_by_constrain = (final_sp_id == UNSURE_SPEAKER
+                                 and sp_id != UNSURE_SPEAKER)
         # 「蓄積中」の門番（handoff §27.11）。声紋が育っていない発話の帰属は
         # 裏付け（1位候補が帰属先と一致）が無いと当てにならず、実測で
         # 裏付けあり 12正解/1誤り に対し裏付けなし 2正解/29誤り だった。
@@ -364,6 +370,28 @@ class RecvLoop:
             reason = "label_only_kind_resolved_by_seat_audio"
         elif final_sp_id == UNSURE_SPEAKER and sp_id != UNSURE_SPEAKER:
             # 上流は決めていたのに席上限で落ちた分（§27.8 の本体）。
+            if _dropped_by_constrain and is_person_key(sp_id):
+                # 安全弁（handoff §49）: 寄せ直しの前提「落ちたキーは席持ちの
+                # 分裂クラスタ」は @diar:N/#N にしか成り立たない。人物キーが
+                # 落ちているのは、声紋層が「席に居ない実在の人物」という証拠を
+                # 出している状態で、既存席へ寄せると必ず誤帰属になる
+                # （rehacq検証 2026-08-01: 冒頭の雑音声が席を先取りし、3人目の
+                # 実在話者 43発話・2,587字が丸ごと参加者Bへ。千葉13本では
+                # 人物キーの席上限落ちは0件＝この分岐は発火しない）。
+                # 声紋は控えておく——後で本人が席を得たら（席の回収・上限の
+                # 引き上げ）遡及訂正が本人にだけ貼り直せる（vp_person 参照）。
+                emb = s.seat_audio.embed(wav)
+                if s.retro is not None and emb is not None:
+                    dur = (None if self.cur_ms is None or self.cur_end is None
+                           else max(0, int(self.cur_end) - int(self.cur_ms)))
+                    s.retro.remember(self.cur_ms, emb, dur)
+                rec_extra["speaker_source"] = "unseated_person_guard"
+                rec_extra["speaker_confidence"] = 0.0
+                rec_extra["speaker_reason"] = "seat_full_true_person_not_absorbed"
+                rec_extra["vp_person"] = str(sp_id)
+                diag_extra["src"] = "unseated_person_guard"
+                diag_extra["why"] = "seat_full_true_person_not_absorbed"
+                return UNSURE_SPEAKER
             reason = "seat_full_nearest_seat_audio"
         else:
             # 参照は「声紋層が高信頼だった発話」だけで作る。全発話で作ると

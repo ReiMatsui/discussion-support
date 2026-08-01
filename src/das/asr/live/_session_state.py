@@ -756,6 +756,13 @@ class SessionState:
                 # 「遡及の後に門番」の意味論で行った。
                 if src == "impure_lowsim_guard":
                     continue
+                # 席上限の安全弁（§49）で未確定にしたレコードは、声紋が同定した
+                # **本人**へ貼り直す場合だけ許す。本人以外への貼り直しを許すと、
+                # 安全弁が止めた「既存席への押し込み」が遡及訂正の経路で復活する
+                # （本人の席は、席の回収か上限の引き上げで後から生まれうる）。
+                if (src == "unseated_person_guard"
+                        and str(new_key) != str(r.get("vp_person"))):
+                    continue
                 revisable = (src in ("seat_assign", "seat_assign_retro")
                              or str(r["speaker"]) == UNSURE_SPEAKER)
                 if not revisable:
