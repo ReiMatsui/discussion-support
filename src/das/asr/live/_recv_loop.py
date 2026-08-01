@@ -22,10 +22,12 @@ from ._attribution import (
 from ._constants import (
     _BACKCHANNEL_RE,
     ECHO_TEXT_SIM_THRESH,
+    PYANNOTE_CLUSTER_CONFIRM_MIN_SIM,
     RESET,
     UNSURE_SPEAKER,
     fmt_ts,
 )
+from ._nanori import detect_nanori
 from ._seat_audio import declines_short
 from ._speaker_keys import is_ai_key, is_person_key
 from ._ui import _print_line
@@ -76,6 +78,8 @@ class RecvLoop:
         self.cur_end: int | None = None
         self.cur_last_token_time: float = time.monotonic()
         self.recent_segs: list[tuple] = []
+        # 名乗り（§49.11）の告知を名前ごとに1回に抑える
+        self._nanori_announced: set[str] = set()
 
     def _note_echo_drop(self, src: str, *, sim: float | None = None,
                         key: str | None = None) -> None:
@@ -322,6 +326,50 @@ class RecvLoop:
             UNSURE_SPEAKER if is_backchannel else sp_id)
         return sp_id, final_sp_id, diag_extra
 
+    def _apply_nanori(self, name: str, *, sp_id, d, wav,
+                      rec_extra: dict, diag_extra: dict) -> str | None:
+        """名乗り（§49.11）を帰属へ反映する。戻り値=採用キー（見送りは None）.
+
+        3分岐:
+
+          1. 既に同名の有効プロファイルがある → その人として扱う
+             （再名乗りは無害。誤マージからの復帰にもなる）
+          2. 声紋が**確定級**（クラスタ確定と同じ校正線 0.65）で既存の別人と
+             言っている → 声紋を信じて見送る。司会が他人を「◯◯です」と
+             紹介する形（さん抜き）への防波堤——本人の声は司会のプロファイル
+             に強く一致するので、ここで止まる
+          3. 新しい名前 → この発話の音声で名前付き登録し、席を立てる。
+             チャネル劣化による声紋のぎりぎり誤一致（会見で 0.43-0.50, §49.10）
+             より、名乗りという明示の証拠を優先する
+        """
+        s = self.state
+        tracker = s.tracker
+        if name in set(tracker.active_profile_names()):
+            action = "existing"
+        elif (d is not None and d.get("sim") is not None
+                and d.get("sim") >= PYANNOTE_CLUSTER_CONFIRM_MIN_SIM
+                and d.get("kind") in ("声紋一致", "補正", "合流")
+                and str(sp_id) != name):
+            diag_extra["nanori_skipped"] = (
+                f"strong_voiceprint:{sp_id}:{d.get('sim'):.3f}")
+            return None
+        else:
+            if wav is None or not tracker.enroll_from_audio(name, wav):
+                diag_extra["nanori_skipped"] = "enroll_failed"
+                return None
+            action = "minted"
+        rec_extra["speaker_source"] = "nanori"
+        rec_extra["speaker_confidence"] = 1.0
+        rec_extra["speaker_reason"] = f"self_introduction_{action}"
+        diag_extra["src"] = "nanori"
+        diag_extra["nanori"] = name
+        if name not in self._nanori_announced:
+            self._nanori_announced.add(name)
+            s.add_sys(self.cur_ms, f"名乗りを検出: この声を「{name}」として"
+                                   "追跡します（間違いは右側の登録欄から修正できます）")
+            _print_line(f"# 名乗り検出: 「{name}」として追跡します")
+        return name
+
     def _assign_seat(self, final_sp_id: str, *, sp_id, d, wav,
                      rec_extra: dict, diag_extra: dict) -> str:
         """席上限で落ちた発話・ラベル頼りの発話を、席の実音声で決め直す.
@@ -556,8 +604,26 @@ class RecvLoop:
             sp_id, d=d, wav=wav, label=label, is_backchannel=_is_backchannel,
             rec_extra=rec_extra, classify_flags=_classify_flags)
 
+        # --- 7b. 名乗りの検出（ハイブリッド限定, handoff §49.11） ---
+        # 「TBSの寺島です」のような明示の自己紹介は、チャネル劣化した声紋の
+        # ぎりぎり一致より強い証拠として扱う。適用した発話は席の決め直し(8)
+        # にも門番(8b)にも回さない——名乗りより強い根拠を両者は持たない。
+        _nanori_applied = False
+        if (s.cluster_namer is not None and tracker is not None
+                and not _is_backchannel):
+            _stated = detect_nanori(self.cur_text.strip())
+            if _stated is not None:
+                _resolved = self._apply_nanori(
+                    _stated, sp_id=sp_id, d=d, wav=wav,
+                    rec_extra=rec_extra, diag_extra=diag_extra)
+                if _resolved is not None:
+                    sp_id = _resolved
+                    final_sp_id = s.constrain_human_speaker_key(_resolved)
+                    _nanori_applied = True
+
         # --- 8. 席の実音声による決め直し（ハイブリッド限定） ---
-        if s.seat_audio is not None and not _is_backchannel:
+        if (s.seat_audio is not None and not _is_backchannel
+                and not _nanori_applied):
             final_sp_id = self._assign_seat(
                 final_sp_id, sp_id=sp_id, d=d, wav=wav,
                 rec_extra=rec_extra, diag_extra=diag_extra)
@@ -569,6 +635,7 @@ class RecvLoop:
         # 席の決め直し自体が誤った（近い席しか選べない）ため。speaker_source を
         # 専用値にして、遡及訂正がこの未確定を席の参照で復活させないようにする。
         if (s.cluster_namer is not None and final_sp_id != UNSURE_SPEAKER
+                and not _nanori_applied
                 and d is not None
                 and impure_lowsim(d.get("kind"), len(self.cur_text.strip()),
                                   d.get("sim"))):
