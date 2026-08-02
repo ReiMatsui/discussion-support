@@ -72,9 +72,14 @@ def main(argv=None):
                    help="候補をこの件数までに制限（素振り用）")
     p.add_argument("--batch", type=int, default=25)
     args = p.parse_args(argv)
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(ROOT / ".env")   # 他スクリプトと同じ流儀（make_debate_wav 等）
+    except ImportError:
+        pass
     api_key = os.environ.get("OPENAI_API_KEY", "")
     if not api_key:
-        raise SystemExit("OPENAI_API_KEY が未設定です")
+        raise SystemExit("OPENAI_API_KEY が未設定です（.env にも見つかりません）")
 
     # 候補の収集
     cands = []   # (run, turn_id, text, regex_name)
