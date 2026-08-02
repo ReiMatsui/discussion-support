@@ -11,6 +11,7 @@ import contextlib
 import datetime
 import json
 import os
+import queue as _queue
 import re
 import threading
 import time
@@ -33,8 +34,14 @@ from das.asr.live._constants import (
     _TOPIC_PROMPT,
     _TRIAGE_PROMPT,
     OPENAI_API,
+    PYANNOTE_CLUSTER_CONFIRM_MIN_SIM,
 )
 from das.asr.live._diarization import SpeakerResolver
+from das.asr.live._nanori import (
+    LLM_JUDGE_HEAD,
+    NANORI_JUDGE_INSTRUCTIONS,
+    plausible_name,
+)
 from das.asr.live._pyannote_diarization import PyannoteStreamingDiarizationProvider
 from das.asr.live._recv_loop import RecvLoop
 from das.asr.live._seat_audio import SeatAudio, seat_embedder
@@ -721,6 +728,88 @@ def _build_cluster_layer(args, tracker, diarizer):
     return cluster_namer, seat_audio
 
 
+def _run_nanori_worker(state, oai_key: str, oai_model: str) -> None:
+    """名乗り候補をLLMで判定する常駐ワーカー（§49.14）.
+
+    flush(7b) が積んだ候補（正規表現で確定できなかった名乗りらしい発話）を
+    1件ずつ判定し、名乗りなら遡って席を立てる。判定は非同期なので
+    文字起こしの遅延に影響しない。
+    """
+    q = state.nanori_llm_queue
+    announced: set[str] = set()
+
+    def _post(content: str):
+        return _post_chat_json({
+            "model": oai_model,
+            "messages": [
+                {"role": "system",
+                 "content": NANORI_JUDGE_INSTRUCTIONS
+                 + '\nJSONだけを返す: {"nanori": true/false, "name": "氏名またはnull"}'},
+                {"role": "user", "content": content}],
+            "max_completion_tokens": 600,
+        }, oai_key, timeout=20, label="nanori")
+
+    while not state.stop.is_set():
+        try:
+            item = q.get(timeout=1.0)
+        except _queue.Empty:
+            continue
+        with contextlib.suppress(Exception):
+            _process_nanori_candidate(state, item, post=_post,
+                                      announced=announced)
+
+
+def _process_nanori_candidate(state, item: dict, *, post, announced: set) -> bool:
+    """名乗り候補1件を判定し、名乗りなら適用する（戻り値=適用したか）.
+
+    適用規則は同期の名乗り（§49.11 `_apply_nanori`）と同じ3分岐＋門:
+    同名再利用 / 確定級声紋の拒否権（同じ校正線 0.65）/ 新規登録。
+    氏名の門（空・8文字・代名詞）は `plausible_name`（評価と同じ正本）。
+    確定済みの発話を後から書き換えるため、席上限（constrain）を通った
+    場合だけ適用する。テストは post をフェイクにして直接呼ぶ。
+    """
+    got = post(str(item.get("text") or "")[:LLM_JUDGE_HEAD])
+    if not isinstance(got, dict) or not got.get("nanori"):
+        return False
+    name = str(got.get("name") or "").strip()
+    if not plausible_name(name):
+        return False
+    tracker = state.tracker
+    if tracker is None:
+        return False
+    if (item.get("sim") is not None
+            and item["sim"] >= PYANNOTE_CLUSTER_CONFIRM_MIN_SIM
+            and item.get("kind") in ("声紋一致", "補正", "合流")
+            and str(item.get("sp_id")) != name):
+        return False   # 確定級の声紋一致は名乗りに勝つ（司会の他人紹介の防波堤）
+    if name not in set(tracker.active_profile_names()):
+        wav = item.get("wav")
+        if wav is None or not tracker.enroll_from_audio(name, wav):
+            return False
+    if state.constrain_human_speaker_key(name) != name:
+        return False   # 満席で席が立たないなら過去の発話を書き換えない
+    with state.state_lock:
+        for r in state.records:
+            if r.get("ms") == item.get("ms") and "speaker" in r:
+                if str(r["speaker"]) != name:
+                    r["speaker"] = name
+                    r["speaker_source"] = "nanori_llm"
+                break
+    with contextlib.suppress(OSError), \
+            open(state.diag_path, "a", encoding="utf-8") as f:
+        f.write(json.dumps({"type": "nanori_llm", "ms": item.get("ms"),
+                            "name": name}, ensure_ascii=False) + "\n")
+    if name not in announced:
+        announced.add(name)
+        state.add_sys(state.elapsed_ms(),
+                      f"名乗りを検出: この声を「{name}」として追跡します"
+                      "（間違いは右側の登録欄から修正できます）")
+        state.rev += 1
+    with contextlib.suppress(Exception):
+        state.save()
+    return True
+
+
 def _start_llm_workers(state, args, *, oai_key: str, oai_model: str,
                        out_path: str, explicit_agenda: bool) -> None:
     """LLM を使う常駐ワーカーを起動する（APIキーが無ければ何も起こさない）.
@@ -738,6 +827,17 @@ def _start_llm_workers(state, args, *, oai_key: str, oai_model: str,
               flush=True)
         return
     if oai_key:
+        # --- 名乗りのLLM判定（§49.14, ハイブリッド時のみ意味を持つ） ---
+        # 正規表現で確定できない名乗り候補（全発話の0.5%）だけを安いモデルで
+        # 判定し、確定したら遡って席を立てる。評価は eval/nanori_llm.py
+        # （83ラン超・394候補で精度100%・再現18/18）。
+        if getattr(state, "cluster_namer", None) is not None:
+            state.nanori_llm_queue = _queue.Queue(maxsize=16)
+            threading.Thread(target=_run_nanori_worker,
+                            args=(state, oai_key, oai_model),
+                            daemon=True).start()
+            print("# 名乗り判定: 有効（正規表現で確定できない候補だけLLMで判定）",
+                  flush=True)
         threading.Thread(target=_run_topic_worker,
                         args=(state, oai_key, oai_model), daemon=True).start()
         print("# 論点抽出: 有効（5発話ごとにLLMで分析）", flush=True)

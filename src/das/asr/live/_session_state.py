@@ -174,6 +174,9 @@ class SessionState:
             RetroAttributor(seat_audio) if seat_audio is not None else None)
         self.anonymous_labels: dict[str, str] = {}
         self._DIARIZATION_KEEP_MS = 10 * 60 * 1000
+        # 名乗りLLM判定の候補キュー（§49.14。_start_llm_workers が
+        # ハイブリッド+キーありのときだけ Queue を張る。None なら不使用）
+        self.nanori_llm_queue = None
         # 上限(constrain)で未確定化した回数（可視化用, 2026-07-25 実セッションで
         # 「上限1のまま2人会話→2人目が全滅」が無警告で起きた対策）。帰属は変えない。
         self.constrain_drop_counts: dict[str, int] = {}

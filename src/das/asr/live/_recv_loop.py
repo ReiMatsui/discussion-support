@@ -27,7 +27,7 @@ from ._constants import (
     UNSURE_SPEAKER,
     fmt_ts,
 )
-from ._nanori import detect_nanori
+from ._nanori import detect_nanori, is_llm_candidate
 from ._seat_audio import declines_short
 from ._speaker_keys import is_ai_key, is_person_key
 from ._ui import _print_line
@@ -620,6 +620,17 @@ class RecvLoop:
                     sp_id = _resolved
                     final_sp_id = s.constrain_human_speaker_key(_resolved)
                     _nanori_applied = True
+            elif (s.nanori_llm_queue is not None and wav is not None
+                    and is_llm_candidate(self.cur_text.strip())):
+                # 正規表現で確定できない名乗り候補（0.5%）は非同期のLLM判定へ
+                # （§49.14）。声紋の判定材料も渡す——確定級一致の拒否権を
+                # 適用側（_process_nanori_candidate）が同じ規則で使うため。
+                with contextlib.suppress(Exception):
+                    s.nanori_llm_queue.put_nowait({
+                        "ms": self.cur_ms, "text": self.cur_text.strip(),
+                        "wav": wav, "sp_id": str(sp_id),
+                        "kind": (d or {}).get("kind"),
+                        "sim": (d or {}).get("sim")})
 
         # --- 8. 席の実音声による決め直し（ハイブリッド限定） ---
         if (s.seat_audio is not None and not _is_backchannel
