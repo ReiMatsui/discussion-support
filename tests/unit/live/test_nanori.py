@@ -40,6 +40,16 @@ def test_detects_kaiken_introductions():
         "東京テレビの山田誠太郎です。よろしくお願いいたします。") == "山田誠太郎"
 
 
+def test_detects_prefix_style_company_introductions():
+    """前置型の会社表記（コテンラジオ #4/#6 の実発話, §49.13）.
+
+    接尾語型（東京新聞の…）と違い「株式会社+社名+の+名前」の並び。
+    法人格の前置語に限って許す（拡張後83ランで誤発火0を再測定済み）。
+    """
+    assert detect_nanori("はい、株式会社古典の深井龍之介です。") == "深井龍之介"
+    assert detect_nanori("はい、えー、同じく株式会社古典の楊栄志です。") == "楊栄志"
+
+
 def test_does_not_fire_on_casual_speech():
     """雑談・討論の「〜の◯◯です」型（素朴な正規表現で70件誤発火した実例）."""
     for tx in (
