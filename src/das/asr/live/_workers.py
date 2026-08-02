@@ -74,6 +74,8 @@ from ._intervention import (
     _suppressed_for,
 )
 from ._participation import (
+    apply_diarization_time,
+    diarization_time_stats,
     participation_share_key,
     participation_share_label,
     participation_stats,
@@ -634,6 +636,19 @@ def _run_participation_checker(state: SessionState, oai_key: str, oai_model: str
             continue
         reliable_rs = reliable_human_records(talk_rs)
         stats = participation_stats(reliable_rs, exclude_speakers=_skip)
+        # 分離(diarization)の実測時間があれば時間軸をそれに置き換える
+        # （§49.17 案D）。未確定に落ちた発話の時間も本人のクラスタに乗る
+        # ため、「実はよく喋っている人」を静かと誤認しない。records側の
+        # 全話者を分離が捕捉しているときだけ適用（物差しの混在を避ける。
+        # Soniox単独=分離なしでは何も変わらない）。
+        with state.diarization_lock:
+            _ev = list(state.diarization_events)
+        if _ev:
+            with state.state_lock:
+                _keymap = dict(state.diarization_speaker_keys)
+            _diar = diarization_time_stats(
+                _ev, lambda e, _m=_keymap: _m.get(f"{e.source}:{e.speaker}"))
+            stats = apply_diarization_time(stats, _diar)
         if len(stats) < 2:
             continue  # 信頼できる参加者が2人未満なら声かけの意味がない
         # 事前ゲート: 公平シェアの_INVITE_QUIET_RATIO未満の人がいる時だけLLMを呼ぶ

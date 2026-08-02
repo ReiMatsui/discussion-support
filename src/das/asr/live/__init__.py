@@ -36,7 +36,7 @@ import click
 # das連携フック（外部API）
 # ---------------------------------------------------------------------------
 
-ON_UTTERANCE = None   # callable(speaker:str, text:str) | None
+ON_UTTERANCE = None   # callable(speaker, text, meta=None) | None（metaは§49.17参照）
 _SYS_HOOK_REF: list = [None]  # [callable | None] — _bootstrap から書き込まれる
 
 

@@ -530,7 +530,16 @@ class RecvLoop:
             c = s.color_of(sp_id)
         if ON_UTTERANCE is not None:
             with contextlib.suppress(Exception):
-                ON_UTTERANCE(s.disp_name(sp_id), self.cur_text.strip())
+                # 介入層が「この帰属をどれだけ信じてよいか」を判断できるよう、
+                # 未確定フラグ・確信度・決定経路を渡す（§49.17 案B）。
+                # 旧2引数のコールバックには従来どおりの形で呼ぶ。
+                meta = {"unsure": sp_id == UNSURE_SPEAKER,
+                        "confidence": rec_extra.get("speaker_confidence"),
+                        "source": rec_extra.get("speaker_source")}
+                try:
+                    ON_UTTERANCE(s.disp_name(sp_id), self.cur_text.strip(), meta)
+                except TypeError:
+                    ON_UTTERANCE(s.disp_name(sp_id), self.cur_text.strip())
         _print_line(f"{c}[{fmt_ts(self.cur_ms)}] {s.disp_name(sp_id)}{RESET}: "
                     f"{self.cur_text.strip()}")
 

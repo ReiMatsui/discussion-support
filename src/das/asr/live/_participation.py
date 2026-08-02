@@ -99,3 +99,71 @@ def quietest_participation_share(stats: dict[str, dict]) -> float:
 def participation_share_label(key: str) -> str:
     """参加シェア指標のプロンプト表示名を返す."""
     return _PARTICIPATION_SHARE_LABELS.get(key, "発話時間")
+
+
+def diarization_time_stats(events, resolve_key, *,
+                           window_ms: int = _DEFAULT_WINDOW_MS,
+                           now_ms: int | None = None) -> dict[str, float]:
+    """分離(diarization)の閉区間から、話者キー別の発話時間を集計する（§49.17 案D）.
+
+    帰属（名前）が未確定でも「誰がどれだけ喋ったか」は分離層が知っている。
+    名前ベースの集計は未確定ぶんが消えるため、実際にはよく喋っている人を
+    「静か」と誤認して的外れの声かけをしうる（§49.15のレビューで特定）。
+
+    Args:
+        events: DiarizationEvent の列（end_ms が無い開区間は除外）。
+        resolve_key: event -> 表示キー。未対応クラスタは None を返せば除外。
+        window_ms/now_ms: participation_stats と同じ直近窓。
+
+    Returns: {表示キー: 発話ミリ秒}（窓内に何も無ければ空）。
+    """
+    rows = []
+    for e in events:
+        end = getattr(e, "end_ms", None)
+        if end is None:
+            continue
+        key = resolve_key(e)
+        if not key:
+            continue
+        rows.append((str(key), int(e.start_ms), int(end)))
+    if not rows:
+        return {}
+    latest = now_ms if now_ms is not None else max(r[2] for r in rows)
+    lo = latest - window_ms
+    out: dict[str, float] = {}
+    for key, s0, s1 in rows:
+        s0 = max(s0, lo)
+        if s1 > s0:
+            out[key] = out.get(key, 0.0) + float(s1 - s0)
+    return out
+
+
+def apply_diarization_time(stats: dict[str, dict],
+                           diar_ms: dict[str, float]) -> dict[str, dict]:
+    """participation_stats の時間軸を分離計測へ置き換える（純関数・非破壊）.
+
+    2つの効果:
+      - 既存話者の talk_ms/time_share を分離計測に置き換える（未確定に
+        落ちた発話の時間も本人のクラスタに乗っているため過小評価が消える）
+      - records に1件も現れない（全部未確定になった）話者も、分離が検出して
+        いれば参加者として現れる（turns=0, chars=0。§49.15の「3人目が不可視」
+        の対策の本体）
+
+    測定基盤の混在を避けるため、**records 側の全話者が diar_ms に載っている
+    ときだけ**適用する（載っていない話者がいると、その人だけ別の物差しで
+    比較することになる）。適用しない場合は stats をそのまま返す＝挙動不変。
+    """
+    if not diar_ms:
+        return stats
+    if any(sp not in diar_ms for sp in stats):
+        return stats
+    out = {sp: dict(d) for sp, d in stats.items()}
+    for key, ms in diar_ms.items():
+        d = out.setdefault(key, {"talk_ms": 0.0, "turns": 0, "chars": 0,
+                                 "last_end_ms": None, "time_share": 0.0,
+                                 "turn_share": 0.0, "char_share": 0.0})
+        d["talk_ms"] = float(ms)
+    total = sum(d["talk_ms"] for d in out.values())
+    for d in out.values():
+        d["time_share"] = (d["talk_ms"] / total) if total > 0 else 0.0
+    return out

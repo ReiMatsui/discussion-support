@@ -180,6 +180,19 @@ _NO_INTERVENTION_FLAGS = ("--no-agent", "--no-llm")
 _PRESENT_DEDUP_SEC = 600.0
 
 
+def _addressee_head(addressed_to: str | None) -> str:
+    """宛先付き介入の見出しを決める。帰属が確かでない宛先は名指ししない.
+
+    介入時点の帰属は85-86%で、弱さは「未確定」への正直な棄権に集約されて
+    いる（§49.15）。未確定の発話者へ「未確定さん宛」と返すのは誰宛か
+    分からない介入になるので、全体宛に落とす（§49.17 案B。しきい値は
+    使わない——未確定かどうかだけを見る）。
+    """
+    if not addressed_to or addressed_to == "未確定":
+        return "💡介入(全体)"
+    return f"💡介入({addressed_to}さん宛)"
+
+
 def _is_duplicate_presentation(body: str, recent: dict[str, float],
                                *, now: float,
                                window: float = _PRESENT_DEDUP_SEC) -> bool:
@@ -279,8 +292,8 @@ async def _run_listen_soniox_async(
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue = asyncio.Queue()
 
-    def _on_utt(speaker: str, text: str) -> None:
-        loop.call_soon_threadsafe(queue.put_nowait, (speaker, text))
+    def _on_utt(speaker: str, text: str, meta: dict | None = None) -> None:
+        loop.call_soon_threadsafe(queue.put_nowait, (speaker, text, meta))
 
     _live_mod.ON_UTTERANCE = _on_utt
     argv = ["--no-open", *soniox_argv]
@@ -305,7 +318,7 @@ async def _run_listen_soniox_async(
             item = await queue.get()
             if item is None:
                 break
-            speaker, text = item
+            speaker, text, _meta = item
             turn += 1
             utt = Utterance(turn_id=turn, speaker=speaker, text=text)
             if len(text.strip()) < min_utt_chars:   # 相槌等はAFに流さない(コスト/ノイズ削減)
@@ -336,7 +349,7 @@ async def _run_listen_soniox_async(
                 tag = "支持" if it.relation == "support" else "反論"
                 parts.append(f"[{tag}] {it.source_text}")
             body = " / ".join(parts) or decision.brief or decision.reason
-            head = f"💡介入({to}さん宛)"
+            head = _addressee_head(to)
         if _is_duplicate_presentation(body, _recent_bodies,
                                       now=time.monotonic()):
             return
