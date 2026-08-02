@@ -43,6 +43,7 @@ _PROMPT = """会議・番組の書き起こしの発話を番号付きで与え�
 - 他人の紹介(「続いては田中さんです」)、引用、呼びかけ、単なる「〜です」文は名乗りではない
 - 他人を紹介してから自分も名乗る発話(「…の田中さんと、私、鈴木で…」)は、**自分の名前だけ**を抜き出す
 - 音声認識の聞き取りが崩れていて氏名として不自然な場合は nanori=false にする
+- 「私は賛成です」のような代名詞+意見は名乗りではない。代名詞(私/自分/僕等)を name にしない
 - 名乗りなら、名乗った氏名(姓または姓名。所属・肩書きは含めない)を抜き出す
 JSONの配列だけを返す: [{"i": 番号, "nanori": true/false, "name": "氏名またはnull"}]"""
 
@@ -50,11 +51,16 @@ JSONの配列だけを返す: [{"i": 番号, "nanori": true/false, "name": "氏�
 # 挨拶が名前扱いされるのを防ぐ(1回目の評価で「しんのじはうまへん」9文字が
 # 名前として抽出された実測から)。
 NAME_MAX_CHARS = 8
+# 代名詞は氏名ではない(言語的事実。2周目でシミュレーション討論の
+# 「私は賛成です」を名乗り判定し名前「私」を抽出した実測から)
+PRONOUNS = frozenset({"私", "わたし", "わたくし", "自分", "僕", "ぼく",
+                      "俺", "おれ", "当方", "こちら", "うち"})
 
 
 def plausible_name(name) -> bool:
-    """LLMが返した氏名が登録に値するか（長さと空の門だけ。中身は問わない）."""
-    return bool(name) and len(str(name).strip()) <= NAME_MAX_CHARS
+    """LLMが返した氏名が登録に値するか（空・長さ・代名詞の門。中身は問わない）."""
+    n = str(name or "").strip()
+    return bool(n) and len(n) <= NAME_MAX_CHARS and n not in PRONOUNS
 
 
 def _chat(model: str, api_key: str, content: str, *, timeout: int = 60):
@@ -121,7 +127,7 @@ def main(argv=None):
     total_tokens = [0, 0]
     for i in range(0, len(cands), args.batch):
         chunk = cands[i:i + args.batch]
-        content = "\n".join(f"{j}. {c[2][:120]}" for j, c in enumerate(chunk))
+        content = "\n".join(f"{j}. {c[2][:160]}" for j, c in enumerate(chunk))
         try:
             arr, usage = _chat(args.model, api_key, content)
         except Exception as e:
