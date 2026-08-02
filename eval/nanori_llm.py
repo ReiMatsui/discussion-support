@@ -41,8 +41,20 @@ _CAND = re.compile(
 _PROMPT = """会議・番組の書き起こしの発話を番号付きで与えます。
 各発話について、話者が**自分自身を名乗っている**(自己紹介している)かを判定してください。
 - 他人の紹介(「続いては田中さんです」)、引用、呼びかけ、単なる「〜です」文は名乗りではない
+- 他人を紹介してから自分も名乗る発話(「…の田中さんと、私、鈴木で…」)は、**自分の名前だけ**を抜き出す
+- 音声認識の聞き取りが崩れていて氏名として不自然な場合は nanori=false にする
 - 名乗りなら、名乗った氏名(姓または姓名。所属・肩書きは含めない)を抜き出す
 JSONの配列だけを返す: [{"i": 番号, "nanori": true/false, "name": "氏名またはnull"}]"""
+
+# 氏名らしさの門: 日本語の姓名で8文字を超えることはまず無い。STTが崩れた
+# 挨拶が名前扱いされるのを防ぐ(1回目の評価で「しんのじはうまへん」9文字が
+# 名前として抽出された実測から)。
+NAME_MAX_CHARS = 8
+
+
+def plausible_name(name) -> bool:
+    """LLMが返した氏名が登録に値するか（長さと空の門だけ。中身は問わない）."""
+    return bool(name) and len(str(name).strip()) <= NAME_MAX_CHARS
 
 
 def _chat(model: str, api_key: str, content: str, *, timeout: int = 60):
@@ -109,7 +121,7 @@ def main(argv=None):
     total_tokens = [0, 0]
     for i in range(0, len(cands), args.batch):
         chunk = cands[i:i + args.batch]
-        content = "\n".join(f"{j}. {c[2][:60]}" for j, c in enumerate(chunk))
+        content = "\n".join(f"{j}. {c[2][:120]}" for j, c in enumerate(chunk))
         try:
             arr, usage = _chat(args.model, api_key, content)
         except Exception as e:
@@ -127,7 +139,7 @@ def main(argv=None):
     miss, extra, agree = [], [], 0
     for idx, (run, tid, tx, rx_name) in enumerate(cands):
         r = results.get(idx, {})
-        llm_pos = bool(r.get("nanori"))
+        llm_pos = bool(r.get("nanori")) and plausible_name(r.get("name"))
         if rx_name and llm_pos:
             agree += 1
         elif rx_name and not llm_pos:
