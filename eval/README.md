@@ -19,6 +19,8 @@
 
 | ファイル | 何を測るか |
 |---|---|
+| `risk_coverage.py` | 棄権の閾値を振った risk–coverage（本手法 vs Soniox 素通し）。介入時点の断面 |
+| `ami_batch.py` | AMI テストセット16会議の一括再生と標準指標の集計（`ami_metrics.py` を呼ぶ） |
 | `error_anatomy.py` | 誤りの内訳（長さ・経路・またぎ/重なり別）。§35/§37 |
 | `gt_alignment_compare.py` | 正解の当て方（時間/文章）の比較。§34 の再現 |
 | `short_utterance_pick.py` | 短い発話の棄権則の校正。§36 |
