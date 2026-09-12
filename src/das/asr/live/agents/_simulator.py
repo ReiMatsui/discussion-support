@@ -201,10 +201,16 @@ class DiscussionSimulator:
         print("# Simulator: 終了", flush=True)
 
     def _wait_for_facilitator(self):
-        """ファシリテーターが話している/応答生成中の間は待機（被り防止）."""
+        """ファシリテーターが話している/応答生成中の間は待機（被り防止）.
+
+        待つ間も無音をパイプラインに流し続ける。止めると STT と話者分離に音声が
+        届かず、pyannote Live-1 は 5 秒無音声で接続を切る（2026-09-12 の実走で、
+        介入の発話中に分離が切れて以後の再接続も失敗した）。実際の会議では
+        マイクが常に音を運ぶので、シミュレーションもそれに合わせる。
+        """
         while not self._stop.is_set() and self._agent_ref is not None and (
                 self._agent_ref.ai_speaking or self._agent_ref._responding):
-            time.sleep(0.1)
+            self._send_silence(0.12)
 
     def _parse_turn(self, text: str) -> tuple[str | None, str | None]:
         """「話者名: 発言」をパースする.

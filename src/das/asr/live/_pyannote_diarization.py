@@ -48,6 +48,7 @@ import json
 import logging
 import queue
 import threading
+import time
 import urllib.error
 import urllib.request
 from typing import Any
@@ -115,6 +116,7 @@ class PyannoteStreamingDiarizationProvider:
         # 再接続カウンタを忘れるまでの安定送信時間。_sent_audio_ms は再接続で
         # 0 に戻るので「直近の再接続からの安定時間」をそのまま表す。
         self._RECONNECT_FORGET_MS = 60_000
+        self._MAX_AHEAD_MS = 3_500   # サーバの上限 5,000ms に対する余裕
         self.stream_id: str | None = None
         self._ws: Any = None
         self._events: queue.Queue[DiarizationEvent] = queue.Queue()
@@ -132,6 +134,8 @@ class PyannoteStreamingDiarizationProvider:
         self._label_epoch = 0
         self._sent_audio_ms = 0
         self._started_once = False
+        self._connected_at = 0.0     # 現セッションの接続時刻（実時間より先行しない送り方の基準）
+        self._dropped_ms = 0         # 先行しすぎて送らなかった音声（タイムラインは進める）
 
     @property
     def name(self) -> str:
@@ -183,6 +187,8 @@ class PyannoteStreamingDiarizationProvider:
         url = payload["url"]
         self.stream_id = payload.get("id")
         self._ws = connect(url)
+        self._connected_at = time.monotonic()
+        self._dropped_ms = 0
         self._reader = threading.Thread(target=self._read_loop, daemon=True)
         self._reader.start()
 
@@ -238,6 +244,20 @@ class PyannoteStreamingDiarizationProvider:
             del self._pcm_buf[:_CHUNK_BYTES_PCM16]
             payload = pcm16_to_pyannote_f32(chunk)
             if not payload:
+                continue
+            # Live-1 は「実時間より 5 秒以上先行した音声」を policy violation で切る。
+            # 再接続の間に溜まった音声を一気に流すと必ずこれに当たり、再接続→
+            # 溜まる→切断の悪循環で3回の上限を使い切って分離が死ぬ（2026-09-12 の
+            # 実走と AMI 一括実行で再現）。先行しすぎる分は送らずに捨て、
+            # その長さをタイムラインのオフセットに足して以後の区間の時刻を
+            # 会議の時間に合わせ続ける。
+            elapsed_ms = (time.monotonic() - self._connected_at) * 1000.0
+            if self._sent_audio_ms + self._dropped_ms - elapsed_ms > self._MAX_AHEAD_MS:
+                self._dropped_ms += _CHUNK_MS
+                self._session_base_ms += _CHUNK_MS
+                if self._dropped_ms == _CHUNK_MS:
+                    logger.warning("pyannote Live-1: 実時間より先行した音声を捨てて追従します"
+                                   "（再接続直後の溜まり分）。")
                 continue
             try:
                 self._ws.send(payload)
