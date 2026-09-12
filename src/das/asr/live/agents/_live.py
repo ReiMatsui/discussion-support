@@ -92,6 +92,7 @@ class LiveAgent(RealtimeAgent):
         self._watchdog: threading.Thread | None = None
         self._last_input_at = 0.0
         self._clock: threading.Thread | None = None
+        self._silent_run_ms = 0          # 発話中に続いた無音の長さ（ストリーム時間）
 
     # ------------------------------------------------------------ 接続
 
@@ -234,6 +235,7 @@ class LiveAgent(RealtimeAgent):
         self._speech_started = False
         self._interrupted = False
         self._audio_bytes_this_turn = 0
+        self._silent_run_ms = 0
 
     # ------------------------------------------------------------ 受信
 
@@ -278,6 +280,7 @@ class LiveAgent(RealtimeAgent):
         x = np.frombuffer(pcm, dtype="<i2").astype(np.float32)
         rms = float(np.sqrt(np.mean(x * x))) if len(x) else 0.0
         voiced = rms >= self._SILENCE_RMS
+        chunk_ms = len(pcm) * 1000 // (_OUT_RATE * 2)
         in_speech = self.ai_speaking or self._audio_bytes_this_turn > 0
         if not voiced and not in_speech:
             return                      # 話していない間の無音は捨てる
@@ -286,9 +289,19 @@ class LiveAgent(RealtimeAgent):
                 # こちらが求めていない発話（呼びかけへの返答など）。受け皿を作って通す
                 self._begin_turn()
                 self._responding = True
-            self._last_audio_at = time.monotonic()
+            self._silent_run_ms = 0
+        else:
+            self._silent_run_ms += chunk_ms
+        self._last_audio_at = time.monotonic()
         self._audio_bytes_this_turn += len(pcm)
         self._on_audio_delta({"delta": chunk})
+        # 終端は「ストリーム上の時間」で測る。届く間隔（壁時計）はネットワークや
+        # CPU の都合で 1 秒以上空くことがあり、それを終端と見ると1つの発話が
+        # 「テスト／段階での／フィードバック／…」のように細切れになる
+        # （2026-09-12 のシミュレーション実走で発生）。無音の delta が連続して
+        # _SPEECH_END_GAP_SEC 分たまったときだけ閉じる。
+        if self._silent_run_ms >= _SPEECH_END_GAP_SEC * 1000:
+            self._finish_turn()
 
     def _on_live_transcript(self, ev: dict) -> None:
         if not self._interrupted:
@@ -335,8 +348,10 @@ class LiveAgent(RealtimeAgent):
                 # モデルは1発話分をまとめて先に送ってくることがあり、再生中に
                 # 文字の delta が遅れて届く。届いていない段階で閉じると文字が
                 # 空のまま確定してしまう（2026-09-12 の疎通で発生）。
+                # 通常の終端は _on_live_audio がストリーム時間で決める。ここは
+                # ストリーム自体が止まった（delta が3秒来ない）ときの保険。
                 if (self.ai_speaking or self._responding) and self._last_audio_at \
-                        and time.monotonic() - self._last_audio_at > _SPEECH_END_GAP_SEC \
+                        and time.monotonic() - self._last_audio_at > 3.0 \
                         and self._audio_bytes_this_turn > 0 \
                         and self._audio_q.empty():
                     self._finish_turn()
@@ -347,6 +362,7 @@ class LiveAgent(RealtimeAgent):
         """delta が途切れた → 1発話の終わり。文字を確定し、終端マーカーを流す."""
         self._last_audio_at = 0.0
         self._audio_bytes_this_turn = 0
+        self._silent_run_ms = 0
         transcript = self._ai_text_buf.strip()
         self._ai_text_buf = ""
         if transcript:
