@@ -79,6 +79,9 @@ def post_system(text: str) -> None:
                    "トークン消費をゼロにする（文字起こし・話者帰属のみ）")
 @click.option("--agent-voice", default="shimmer",
               help="AIファシリテーターの声")
+@click.option("--agent-engine", default="realtime",
+              type=click.Choice(["realtime", "live"]),
+              help="介入を話すモデル: realtime=gpt-realtime（既定）/ live=GPT-Live-1（全二重・試験）")
 @click.option("--simulate", metavar="TOPIC", default=None,
               help="AI議論シミュレーション（Chat+TTSで自動生成）")
 @click.option("--sim-scenario", default=None,

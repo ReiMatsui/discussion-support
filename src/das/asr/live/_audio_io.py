@@ -38,6 +38,10 @@ def _run_from_mic(state: SessionState, device):
                 and not partner.in_echo_window
                 and not (agent is not None and agent.in_echo_window)):
             partner.feed_audio(pcm)
+        # GPT-Live 版のエージェントは室内の音声も聞く（送るかどうかは agent 側の listen 設定）
+        feed = getattr(agent, "feed_audio", None)
+        if feed is not None and agent._connected:
+            feed(pcm)
     with sd.InputStream(samplerate=SR, channels=1, dtype="float32",
                         device=device, callback=cb, blocksize=int(SR * 0.1)):
         while not state.stop.is_set():
@@ -124,7 +128,11 @@ def _run_from_wav(state: SessionState, args):
         i += step
         if i - step >= len(y):
             break
-        state.audio_q.put((chunk * 32767).astype("<i2").tobytes())
+        pcm = (chunk * 32767).astype("<i2").tobytes()
+        state.audio_q.put(pcm)
+        feed = getattr(agent, "feed_audio", None)
+        if feed is not None and agent._connected:
+            feed(pcm)
         time.sleep(0.12)
     state.audio_q.put(None)
 
