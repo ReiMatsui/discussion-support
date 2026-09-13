@@ -150,13 +150,24 @@ class LiveAgent(_VoiceAgentBase):
         self._silent_run_ms = 0                  # 発話中に続いた無音（ストリーム時間）
         self._last_input_at = 0.0
         self._seen_types: set[str] = set()
-        self._reconnect_lock = threading.Lock()
+        # 開き直し（mode/voice 変更）の制御。セッションごとに世代番号を振り、
+        # 古いセッションの受信スレッドが新しいセッションの状態を触らないようにする。
+        self._reconnect_lock = threading.RLock()
+        self._session_gen = 0
+        self._aux_started = False                # 時計・監視スレッドは1回だけ起動
+        self._reopening = False
+        self.last_reopen_ms: float | None = None  # 直近の開き直しに要した時間（記録用）
 
     # ------------------------------------------------------------ 状態
 
     @property
     def enabled(self) -> bool:
         return self.mode != "off"
+
+    @property
+    def ready(self) -> bool:
+        """指示を送れる状態か（接続済みで session.started を受け取り、開き直し中でない）."""
+        return self._connected and self._started.is_set() and not self._reopening
 
     @property
     def _prompt(self) -> str:
@@ -189,21 +200,33 @@ class LiveAgent(_VoiceAgentBase):
     # ------------------------------------------------------------ 接続
 
     def connect(self):
+        """セッションを開く。開き直し中（別スレッドがロック中）なら何もしない."""
+        if not self._reconnect_lock.acquire(blocking=False):
+            return
+        try:
+            self._connect_locked()
+        finally:
+            self._reconnect_lock.release()
+
+    def _connect_locked(self):
+        if self._connected or not self.enabled:
+            return
         try:
             from websockets.sync.client import connect
         except ImportError:
             self._conn_error = "websockets未インストール"
             print(f"# {self._LABEL}: websockets がインストールされていません", flush=True)
             return
-        if not self.enabled:
-            return
         try:
-            self.ws = connect(LIVE_URL, additional_headers={
+            ws = connect(LIVE_URL, additional_headers={
                 "Authorization": f"Bearer {self.api_key}"})
         except Exception as e:
             self._conn_error = str(e)[:80]
             print(f"# {self._LABEL}: 接続失敗 ({e})", flush=True)
             return
+        self._session_gen += 1
+        gen = self._session_gen
+        self.ws = ws
         self._connected = True
         self._conn_error = ""
         self._started.clear()
@@ -217,16 +240,38 @@ class LiveAgent(_VoiceAgentBase):
                 "delegation": {"type": "client"},
             },
         })
-        threading.Thread(target=self._recv_loop, daemon=True).start()
+        threading.Thread(target=self._recv_loop, args=(ws, gen), daemon=True).start()
         self._start_playback_thread()
-        self._start_watchdog()
-        self._start_clock()
+        if not self._aux_started:
+            self._aux_started = True
+            self._start_watchdog()
+            self._start_clock()
         if not self._started.wait(timeout=10):
             self._conn_error = "session.started が届かない"
             print(f"# {self._LABEL}: セッション開始の確認が10秒以内に届きません", flush=True)
         else:
             print(f"# {self._LABEL}: 接続完了（model={self.model}, voice={self.voice}, "
                   f"mode={self.mode}）", flush=True)
+
+    def _recv_loop(self, ws, gen: int):  # type: ignore[override]
+        """1セッション分の受信ループ。世代が進んだら（開き直し）静かに終わる."""
+        while not self._stop.is_set():
+            try:
+                raw = ws.recv()
+                ev = json.loads(raw)
+            except Exception as e:
+                if gen == self._session_gen and not self._stop.is_set():
+                    self._conn_error = f"切断: {e}"[:80]
+                    print(f"# {self._LABEL}: WebSocket切断 ({e})", flush=True)
+                break
+            if gen != self._session_gen:
+                # 閉じたセッションの残りイベント。使用量の記録だけ拾って状態は触らない
+                if ev.get("type") == "session.closed":
+                    self._on_closed(ev, stale=True)
+                continue
+            self._handle(ev)
+        if gen == self._session_gen:
+            self._connected = False
 
     def _send(self, ev: dict) -> bool:
         ws = self.ws
@@ -242,13 +287,15 @@ class LiveAgent(_VoiceAgentBase):
             return False
 
     def _close_session(self) -> None:
-        """今のセッションを閉じる（再接続と終了で共用）."""
+        """今のセッションを閉じる（開き直しと終了で共用）."""
         ws, self.ws = self.ws, None
+        self._session_gen += 1        # 以降、旧セッションの受信スレッドは状態を触らない
         self._connected = False
+        self._started.clear()
         if ws is not None:
             with contextlib.suppress(Exception):
                 ws.send(json.dumps({"type": "session.close", "event_id": "das_close"}))
-                time.sleep(0.3)
+                time.sleep(0.3)   # session.closed（使用量つき）を受け取る猶予
             with contextlib.suppress(Exception):
                 ws.close()
         self.stop_playback()
@@ -267,12 +314,19 @@ class LiveAgent(_VoiceAgentBase):
             self.trigger_n = trigger_n
         if not reopen:
             return
+        # 開き直しの間（実測 1〜3 秒）は ready=False になり、ワーカーは介入を出さない。
+        t0 = time.monotonic()
         with self._reconnect_lock:
-            self._close_session()
-            if self.enabled:
-                self._stop.clear()
-                self.connect()
-        print(f"# {self._LABEL}: 設定を反映（mode={self.mode} voice={self.voice}）", flush=True)
+            self._reopening = True
+            try:
+                self._close_session()
+                if self.enabled:
+                    self._connect_locked()
+            finally:
+                self._reopening = False
+        self.last_reopen_ms = (time.monotonic() - t0) * 1000
+        print(f"# {self._LABEL}: 設定を反映（mode={self.mode} voice={self.voice} "
+              f"開き直し {self.last_reopen_ms:.0f}ms）", flush=True)
 
     def close(self):
         self._close_session()
@@ -299,9 +353,9 @@ class LiveAgent(_VoiceAgentBase):
         silence = base64.b64encode(b"\x00" * (_OUT_RATE // 10 * 2)).decode("ascii")
 
         def _run():
-            while not self._stop.is_set() and self._connected:
+            while not self._stop.is_set():
                 time.sleep(0.1)
-                if time.monotonic() - self._last_input_at >= 0.1:
+                if self._connected and time.monotonic() - self._last_input_at >= 0.1:
                     self._last_input_at = time.monotonic()
                     self._send({"type": "session.input_audio.append", "audio": silence})
         threading.Thread(target=_run, daemon=True).start()
@@ -322,7 +376,7 @@ class LiveAgent(_VoiceAgentBase):
 
         文脈（直近の発話）を thinking、介入の指示を instructions として送る。
         """
-        if not self._connected or not self.enabled or self.ws is None:
+        if not self.ready or not self.enabled or self.ws is None:
             return
         if self.mode == "conversation":
             return   # 会話相手は室内の音声に自分で応じる。指示は出さない
@@ -437,10 +491,11 @@ class LiveAgent(_VoiceAgentBase):
             self._send({"type": "session.thinking.append", "delegation_id": did,
                         "content": "追加の処理は不要です。進行役として今の会話に短く応じてください。"})
 
-    def _on_closed(self, ev: dict) -> None:
+    def _on_closed(self, ev: dict, *, stale: bool = False) -> None:
         print(f"# {self._LABEL}: セッション終了（{ev.get('reason')}） usage={ev.get('usage')}",
               flush=True)
-        self._connected = False
+        if not stale:
+            self._connected = False
 
     def _on_error(self, ev: dict) -> None:
         msg = (ev.get("error") or {}).get("message") or ev.get("message") or "unknown"

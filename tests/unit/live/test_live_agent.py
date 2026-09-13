@@ -51,6 +51,7 @@ def agent(monkeypatch):
     a = LiveAgent(api_key="k")
     a.ws = FakeWS()
     a._connected = True
+    a._started.set()
     a.said: list[str] = []
     a.on_ai_utterance = a.said.append
     return a
@@ -152,15 +153,56 @@ def test_stop_playback_clears_queue_and_flags(agent):
 
 def test_apply_config_reopens_session_only_when_prompt_or_voice_changes(agent, monkeypatch):
     calls: list[str] = []
-    monkeypatch.setattr(LiveAgent, "connect", lambda self: calls.append("connect"))
+    monkeypatch.setattr(LiveAgent, "_connect_locked", lambda self: calls.append("connect"))
     old_ws = agent.ws
     agent.apply_config(trigger_n=5)
     assert calls == [] and agent.ws is old_ws    # trigger_n だけなら開き直さない
     agent.apply_config(mode="conversation")
     assert calls == ["connect"]
     assert old_ws.closed and old_ws.sent[-1]["type"] == "session.close"
+    assert agent.last_reopen_ms is not None and agent.last_reopen_ms >= 0
     agent.apply_config(mode="off")
     assert calls == ["connect"]                  # off は閉じるだけ
+
+
+def test_reopen_generation_ignores_stale_session_events(agent, monkeypatch):
+    """開き直しの後、古いセッションの受信スレッドが新しい接続状態を壊さない."""
+    monkeypatch.setattr(LiveAgent, "_connect_locked", lambda self: None)
+    old_gen = agent._session_gen
+    agent.apply_config(voice="cedar")            # 世代が進む
+    assert agent._session_gen > old_gen
+    # 新しいセッションが立ったとみなす
+    agent.ws = FakeWS()
+    agent._connected = True
+    agent._started.set()
+    # 旧セッションの session.closed が遅れて届いても切断扱いにしない
+    agent._on_closed({"type": "session.closed", "reason": "client", "usage": {}}, stale=True)
+    assert agent._connected and agent.ready
+
+
+def test_trigger_waits_until_session_started(agent):
+    agent._started.clear()                       # 接続はしたが session.started 前
+    agent.feed("A", "x")
+    agent.trigger(invite_target="B")
+    assert agent.ws.sent == []
+    assert agent.pending_count() == 1
+    agent._started.set()
+    agent.trigger(invite_target="B")
+    assert agent.ws.types() == ["session.thinking.append", "session.instructions.append"]
+
+
+def test_recv_loop_from_old_generation_does_not_clear_connected(agent):
+    """旧世代の受信ループが例外で終わっても、新世代の _connected は残る."""
+    class DeadWS:
+        def recv(self):
+            raise RuntimeError("closed")
+    stale_gen = agent._session_gen
+    agent._session_gen += 1                      # 開き直し済み
+    agent._connected = True
+    agent._recv_loop(DeadWS(), stale_gen)
+    assert agent._connected is True
+    agent._recv_loop(DeadWS(), agent._session_gen)   # 現世代の切断は反映される
+    assert agent._connected is False
 
 
 def test_conversation_mode_does_not_send_directives(agent):
@@ -191,6 +233,7 @@ def test_partner_uses_its_own_voice_key_and_topic_prompt(monkeypatch):
     assert "AIツール導入の是非" in p._prompt
     p.ws = FakeWS()
     p._connected = True
+    p._started.set()
     p.feed("人間", "どう思う？")
     p.trigger(invite_target="B")                 # 指示は受けない
     assert p.ws.sent == []

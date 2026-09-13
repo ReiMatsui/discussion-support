@@ -446,7 +446,9 @@ class _UIRequestHandler(BaseHTTPRequestHandler):
                     f" trigger={s.agent.trigger_n}（UIから）")
         s.save()
         self._json(200, {"ok": True, "mode": s.agent.mode,
-                         "voice": s.agent.voice, "trigger_n": s.agent.trigger_n})
+                         "voice": s.agent.voice, "trigger_n": s.agent.trigger_n,
+                         # mode/voice が変わるとセッションを開き直す。その所要時間（ms）
+                         "reopen_ms": getattr(s.agent, "last_reopen_ms", None)})
 
     def _json(self, code: int, data: dict) -> None:
         self.send_response(code)

@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import collections
 import contextlib
-import json
 import queue
 import threading
 import time
@@ -157,20 +156,6 @@ class _VoiceAgentBase:
     def _handle(self, ev: dict):  # pragma: no cover - サブクラスで実装
         """受信イベントを処理する。サブクラスで必ず実装する。"""
         raise NotImplementedError
-
-    def _recv_loop(self):
-        """WebSocketからイベントを受信し _handle に渡すループ（共通）."""
-        while not self._stop.is_set():
-            try:
-                raw = self.ws.recv()
-                ev = json.loads(raw)
-            except Exception as e:
-                if not self._stop.is_set():
-                    self._conn_error = f"切断: {e}"[:80]
-                    print(f"# {self._LABEL}: WebSocket切断 ({e})", flush=True)
-                break
-            self._handle(ev)
-        self._connected = False
 
     # --- 終了処理 ---
 

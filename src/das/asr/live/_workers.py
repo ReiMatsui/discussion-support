@@ -1234,10 +1234,12 @@ class _AgentWorker:
     def _agent_ready(self) -> bool:
         """使える状態か。切れていれば再接続を試み、False を返して次tickへ."""
         agent = self.agent
-        if agent is not None and agent._connected and agent.enabled:
+        if agent is not None and agent.enabled and getattr(agent, "ready", agent._connected):
             return True
         if agent is None or not agent.enabled:
             self.pending.clear_all()
+        if agent is not None and agent.enabled and getattr(agent, "_reopening", False):
+            return False   # 開き直し中（mode/voice 変更）。候補は保持し、介入は出さない
         if agent is not None and agent.enabled and not agent._connected:
             now = time.monotonic()
             if now - self.last_agent_reconnect_at >= 5.0:
