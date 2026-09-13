@@ -21,7 +21,6 @@ from ._constants import (
     _MANUAL_CALL_MAX_CHARS,
     _PROACTIVITY_DEFAULT,
     _PROACTIVITY_PROFILES,
-    AGENT_VOICES,
     AI_SPEECH_OVERLAP_MARGIN_MS,
     CLEAR_LINE,
     DIM,
@@ -48,8 +47,8 @@ from ._speaker_keys import (
     looks_like_system_name,
 )
 from ._voice_profiles import VoiceProfiles
+from .agents._live import LIVE_VOICES, LiveAgent
 from .agents._partner import ConversationPartner
-from .agents._realtime import RealtimeAgent
 from .agents._simulator import DiscussionSimulator
 
 
@@ -185,7 +184,7 @@ class SessionState:
     def _init_agents_and_queues(self) -> None:
         """AIエージェント・論点・介入要求キューの状態."""
         # AI
-        self.agent: RealtimeAgent | None = None
+        self.agent: LiveAgent | None = None
         self.partner: ConversationPartner | None = None
         self.simulator: DiscussionSimulator | None = None
         # 会話モード(converse)でパートナーを動的生成するための設定（F3）。
@@ -1781,7 +1780,7 @@ class SessionState:
             mode_btns.append(f'<button class="{cls}" data-mode="{m}" '
                              f'onclick="setAgentMode(this)">{lbl}</button>')
         voice_opts = []
-        for v in AGENT_VOICES:
+        for v in LIVE_VOICES:
             sel = 'selected' if v == self.agent.voice else ''
             voice_opts.append(f'<option value="{v}" {sel}>{v}</option>')
         trigger_val = self.agent.trigger_n

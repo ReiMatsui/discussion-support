@@ -63,8 +63,8 @@ from das.asr.live._workers import (
     _run_topic_worker,
     _run_triage_worker,
 )
+from das.asr.live.agents._live import LIVE_DEFAULT_VOICE, LiveAgent
 from das.asr.live.agents._partner import ConversationPartner
-from das.asr.live.agents._realtime import RealtimeAgent
 from das.asr.live.agents._simulator import DiscussionSimulator
 from das.asr.live.stt import STTBackend
 from das.asr.live.stt._soniox import SonioxBackend
@@ -97,9 +97,7 @@ class LiveArgs:
     setup: bool = True
     port: int = 8231
     agent: bool = True
-    agent_voice: str = "shimmer"
-    agent_engine: str = "realtime"   # realtime | live（GPT-Live-1, 2026-09 試験）
-    live_listen: str = "idle"        # idle | always | never（GPT-Live に室内音声を送る範囲）
+    agent_voice: str = LIVE_DEFAULT_VOICE
     agent_trigger: int = 10
     # LLMを使う補助（論点抽出・脱線検出・AI介入など）をすべて止める。
     # 検証の再生ランでトークンを消費しないための第一級スイッチ（§49.9）。
@@ -1206,14 +1204,8 @@ def run_session(args: LiveArgs) -> None:
         if not _agent_oai_key:
             print("# AI Agent: OPENAI_API_KEY が未設定です。--agent は無効になります。", flush=True)
         else:
-            if getattr(args, "agent_engine", "realtime") == "live":
-                from das.asr.live.agents._live import LIVE_DEFAULT_VOICE, LiveAgent
-                _voice = args.agent_voice if args.agent_voice != "shimmer" else LIVE_DEFAULT_VOICE
-                state.agent = LiveAgent(api_key=_agent_oai_key, voice=_voice,
-                                        mode="facilitator", trigger_n=args.agent_trigger)
-            else:
-                state.agent = RealtimeAgent(api_key=_agent_oai_key, voice=args.agent_voice,
-                                            mode="facilitator", trigger_n=args.agent_trigger)
+            state.agent = LiveAgent(api_key=_agent_oai_key, voice=args.agent_voice,
+                                    mode="facilitator", trigger_n=args.agent_trigger)
             if tracker is not None:
                 state.agent.set_tracker(tracker)
 

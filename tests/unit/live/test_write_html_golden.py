@@ -35,7 +35,7 @@ class _Agent:
     mode = "facilitator"
     _connected = True
     _conn_error = None
-    voice = "shimmer"
+    voice = "marin"
     trigger_n = 10
 
 

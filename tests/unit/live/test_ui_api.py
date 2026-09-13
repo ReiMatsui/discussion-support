@@ -26,7 +26,7 @@ def _make_state():
 class _FakeAgent:
     def __init__(self, mode="facilitator"):
         self.mode = mode
-        self.voice = "shimmer"
+        self.voice = "marin"
         self.model = "gpt-realtime-2"
         self.trigger_n = 10
         self._connected = False
