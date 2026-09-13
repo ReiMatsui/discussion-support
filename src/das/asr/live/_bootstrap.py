@@ -99,6 +99,7 @@ class LiveArgs:
     agent: bool = True
     agent_voice: str = "shimmer"
     agent_engine: str = "realtime"   # realtime | live（GPT-Live-1, 2026-09 試験）
+    live_listen: str = "idle"        # idle | always | never（GPT-Live に室内音声を送る範囲）
     agent_trigger: int = 10
     # LLMを使う補助（論点抽出・脱線検出・AI介入など）をすべて止める。
     # 検証の再生ランでトークンを消費しないための第一級スイッチ（§49.9）。
@@ -1209,7 +1210,8 @@ def run_session(args: LiveArgs) -> None:
                 from das.asr.live.agents._live import LIVE_DEFAULT_VOICE, LiveAgent
                 _voice = args.agent_voice if args.agent_voice != "shimmer" else LIVE_DEFAULT_VOICE
                 state.agent = LiveAgent(api_key=_agent_oai_key, voice=_voice,
-                                        mode="facilitator", trigger_n=args.agent_trigger)
+                                        mode="facilitator", trigger_n=args.agent_trigger,
+                                        listen=getattr(args, "live_listen", "idle"))
             else:
                 state.agent = RealtimeAgent(api_key=_agent_oai_key, voice=args.agent_voice,
                                             mode="facilitator", trigger_n=args.agent_trigger)

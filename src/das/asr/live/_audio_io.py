@@ -203,7 +203,12 @@ def _run_sender(state: SessionState, backend: STTBackend):
                     # （§48.5）。send_audio の例外はここで握り潰すため、
                     # 告知しないと「帰属がSTTラベル頼みに縮退した」ことに
                     # 誰も気づけない。
+                    # start() は UI のスレッドで走り、セッション作成（HTTP）と接続に
+                    # 1秒ほどかかる。その間に送信スレッドが先に回ると _ws が None で
+                    # 「死んだ」と誤報する（2026-09-13 の実走で開始直後に警告が出たが
+                    # 分離の区間は最後まで届いていた）。一度でも接続できた後だけ見る。
                     if (not _diar_dead_notified
+                            and getattr(state.diarization_provider, "_connected_at", 1.0) > 0
                             and getattr(state.diarization_provider, "alive", True)
                             is False):
                         _diar_dead_notified = True

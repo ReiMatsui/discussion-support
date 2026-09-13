@@ -42,7 +42,7 @@ LIVE_URL = "wss://api.openai.com/v1/live/sessions"
 LIVE_MODEL = "gpt-live-1"
 LIVE_DEFAULT_VOICE = "marin"
 _APPEND_MAX_CHARS = 600          # 500 トークンの目安（日本語）
-_SPEECH_END_GAP_SEC = 0.7        # これ以上 delta が途切れたら発話終了とみなす
+_SPEECH_END_GAP_SEC = 1.2        # ストリーム上でこれ以上無音が続いたら発話終了（「承知。…えっと」の間で切れない長さ）
 _OUT_RATE = 24000
 
 _PROMPT_LIVE = """\
@@ -93,6 +93,12 @@ class LiveAgent(RealtimeAgent):
         self._last_input_at = 0.0
         self._clock: threading.Thread | None = None
         self._silent_run_ms = 0          # 発話中に続いた無音の長さ（ストリーム時間）
+        if listen == "always":
+            # 全二重に任せる運用: 割り込みの検出と止め方はモデル側。こちらの
+            # 「中断された介入を後で再送する」仕組みは、モデルが自分で続きを
+            # 話すのと二重になる（2026-09-13 の一人試行で「承知。う」→ 続き →
+            # 再送、と3回に割れた）ので切る。
+            self._INTERVENTION_MAX_RETRIES = 0
 
     # ------------------------------------------------------------ 接続
 
@@ -390,6 +396,12 @@ class LiveAgent(RealtimeAgent):
         室内の声で止まる。
         """
         was_active = self.ai_speaking or self._responding
+        if self.listen == "always":
+            # モデルが室内の声を聞いているので、止まるかどうかはモデルに任せる。
+            # こちらで再生を切ると、モデル側の続きと食い違って文字が混ざる。
+            if was_active:
+                print(f"# {self._LABEL}: 参加者の発話を検出（全二重に任せる）", flush=True)
+            return
         # 親の処理のうち WebSocket へ送る部分（response.cancel 等）は ws を
         # 一時的に外して抑止する
         ws, self.ws = self.ws, None

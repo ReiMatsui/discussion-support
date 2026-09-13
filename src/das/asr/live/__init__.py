@@ -82,6 +82,10 @@ def post_system(text: str) -> None:
 @click.option("--agent-engine", default="realtime",
               type=click.Choice(["realtime", "live"]),
               help="介入を話すモデル: realtime=gpt-realtime（既定）/ live=GPT-Live-1（全二重・試験）")
+@click.option("--live-listen", default="idle",
+              type=click.Choice(["idle", "always", "never"]),
+              help="GPT-Live に室内の音声を聞かせる範囲: idle=AIが話している間は送らない（既定）/ "
+                   "always=常に送る（全二重の割り込みに任せる）/ never=文字だけ")
 @click.option("--simulate", metavar="TOPIC", default=None,
               help="AI議論シミュレーション（Chat+TTSで自動生成）")
 @click.option("--sim-scenario", default=None,
