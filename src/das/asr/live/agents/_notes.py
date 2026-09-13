@@ -2,11 +2,20 @@
 
 話す層（GPT-Live）に依存しない部分をここに置く。前置の順序
 （論点→脱線→声かけ→事実補正→手動→整理→AF）は生成文の優先順位そのもの。
-変更時はゴールデン（test_trigger_context_golden）を作り直すこと。
+文面は test_notes.py で固定している。変更時はそちらも直すこと。
 """
 from __future__ import annotations
 
 CONTEXT_HEADER = "[参加者発話]"
+_AGENDA_SPEAKERS = ("議題", "議題(自動)")
+
+
+def agenda_of(topics) -> str:
+    """論点一覧から会議の議題（seed_topic で先頭に入る）を取り出す。無ければ空."""
+    for t in topics or ():
+        if t.get("speaker") in _AGENDA_SPEAKERS and t.get("topic"):
+            return str(t["topic"]).strip()
+    return ""
 
 
 def format_utterance_context(pending: list[dict]) -> str:
@@ -31,14 +40,22 @@ def compose_trigger_notes(conv: str, *, topics=None, drift_reason=None,
             f"  {i+1}. {t['topic']}（{t.get('speaker', '?')}）"
             for i, t in enumerate(topics[-8:])  # 最新8件まで
         )
+        if drift_reason:
+            # 脱線と判定済みのときに「新しい論点を尊重」と言うと、脱線先の話を
+            # 進行してしまう（2026-09-13 のシミュレーションで実際にそうなった）
+            guidance = "ただし今回は脱線と判定されているので、議題へ戻すことを優先してください。"
+        else:
+            guidance = "最初の論点に固定せず、自然に移った新しい論点は尊重してください。"
         topic_note = (f"[現在の論点]\n{topic_lines}\n\n"
-                      f"これは会話の流れを理解するための参考です。"
-                      f"最初の論点に固定せず、自然に移った新しい論点は尊重してください。")
+                      f"これは会話の流れを理解するための参考です。{guidance}")
         conv = f"{topic_note}\n\n{conv}" if conv else topic_note
     if drift_reason:
+        agenda = agenda_of(topics)
+        where = f"会議の議題は「{agenda}」です。" if agenda else "会議の議題から離れています。"
         drift_note = (f"[脱線検出] {drift_reason}\n"
-                      f"必要な場合だけ、会話を前に進める短い一言を述べてください。"
-                      f"単に最初の話題へ戻すのではなく、今の流れを踏まえてください。")
+                      f"{where}今の話の流れに一言だけ触れてから、議題に戻す短い一言を"
+                      f"述べてください。脱線先の話を進める側には回らず、戻す側に立って"
+                      f"ください。")
         conv = f"{drift_note}\n\n{conv}" if conv else drift_note
     if invite_target:
         invite_note = (f"[声かけ] {invite_target}さんがしばらく発言していません。"
