@@ -240,3 +240,33 @@ def test_partner_uses_its_own_voice_key_and_topic_prompt(monkeypatch):
     p.inject_context("ファシリテーター", "本題に戻しましょう")
     assert p.ws.sent[-1]["type"] == "session.thinking.append"
     assert "本題に戻しましょう" in p.ws.sent[-1]["content"]
+
+
+# --- 発話の観測値（§3.5）: 介入ログに写す last_turn_stats ------------------------
+
+
+def test_turn_stats_for_requested_speech(agent):
+    agent.feed("A", "x")
+    agent.trigger(invite_target="B")
+    agent._speak_trigger_at = time.monotonic() - 0.8
+    for _ in range(6):
+        agent._handle({"type": "session.output_audio.delta", "delta": _voiced()})
+    agent._handle({"type": "session.output_transcript.delta", "delta": "Bさんはどうですか"})
+    for _ in range(int(_live._SPEECH_END_GAP_SEC * 10)):
+        agent._handle({"type": "session.output_audio.delta", "delta": _silent()})
+    st = agent.last_turn_stats
+    assert st["requested"] is True
+    assert st["speak_start_latency_ms"] >= 700
+    assert st["voiced_sec"] == 0.6 and st["chars"] == 9
+    assert st["end_reason"] == "silence" and st["unrequested_turns"] == 0
+
+
+def test_turn_stats_count_unrequested_speech(agent):
+    for _ in range(3):
+        agent._handle({"type": "session.output_audio.delta", "delta": _voiced()})
+    agent._handle({"type": "session.output_transcript.delta", "delta": "はい"})
+    agent._finish_turn(end_reason="stall")
+    st = agent.last_turn_stats
+    assert st["requested"] is False and st["speak_start_latency_ms"] is None
+    assert st["end_reason"] == "stall" and st["unrequested_turns"] == 1
+    assert agent.said == ["はい"]

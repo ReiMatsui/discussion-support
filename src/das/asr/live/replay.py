@@ -7,6 +7,7 @@ repeatable before adding heavier audio/TTS replay.
 from __future__ import annotations
 
 import datetime
+import itertools
 import json
 import os
 import webbrowser
@@ -153,6 +154,17 @@ const ignoredLabel = (s) => ({
   meta_topic: "話題化のため無視",
   no_request: "依頼表現なしのため無視",
 }[s] || s);
+const liveInfo = (l) => {
+  if (!l) return "";
+  const parts = [];
+  if (!l.requested) parts.push("指示なしの発話");
+  if (l.speak_start_latency_ms != null) parts.push(`指示→声 ${(l.speak_start_latency_ms / 1000).toFixed(1)}秒`);
+  if (l.voiced_sec != null) parts.push(`声 ${l.voiced_sec}秒`);
+  if (l.overlap_at_ms != null) parts.push(`${l.overlap_speaker || "参加者"}と重なり→${l.silenced_after_sec}秒で黙る`);
+  if (l.resumed) parts.push("自力で再開");
+  if (l.end_reason === "stall") parts.push("終端: ストリーム停止");
+  return `<div class="manual-info">${esc(parts.join(" / "))}</div>`;
+};
 const manualInfo = (m) => {
   if (!m) return "";
   const parts = [m.source === "voice" ? "音声" : "UI"];
@@ -191,11 +203,18 @@ fetch("/api/replay").then((r) => r.json()).then((data) => {
           esc(reviewSummary.manual_call_total)}（発話済み${
           esc(reviewSummary.manual_call_delivered ?? 0)} / 不発${
           esc(reviewSummary.manual_call_expired ?? 0)}）</span>` : ""}
+        ${reviewSummary.live_turns ? `<span class="chip">Live: 指示→声 中央値${
+          esc(((reviewSummary.live_speak_latency_ms_median ?? 0) / 1000).toFixed(1))}秒 / 指示なし${
+          esc(reviewSummary.live_unrequested ?? 0)} / 重なり${
+          esc(reviewSummary.live_overlaps ?? 0)}（黙るまで中央値${
+          esc(reviewSummary.live_silenced_after_sec_median ?? "-")}秒、再開${
+          esc(reviewSummary.live_resumed ?? 0)}）</span>` : ""}
       </div>` + review.map((r) => `<div class="review-item">
         <div><span class="kind">${esc(reasonLabel(r.reason || "delivery"))}</span>
           <span class="status">${esc(statusLabel(r.status))}</span></div>
         ${r.detail ? `<div class="detail">${esc(r.detail)}</div>` : ""}
         ${manualInfo(r.manual)}
+        ${liveInfo(r.live)}
         ${r.delivery_text ? `<div class="delivery">${esc(r.delivery_text)}</div>` : ""}
         ${r.quality_flags?.length ? `<div class="chips">${
           r.quality_flags.map((f) => `<span class="chip">${esc(flagLabel(f))}</span>`).join("")
@@ -531,6 +550,83 @@ def intervention_review_run_summary(
     return summary
 
 
+_RESUME_WINDOW_SEC = 15.0   # 重なりで黙った後、この秒数内の指示なし発話を「自力で再開」とみなす
+
+
+def _median(xs: list[float]) -> float | None:
+    if not xs:
+        return None
+    ys = sorted(xs)
+    n = len(ys)
+    mid = ys[n // 2] if n % 2 else (ys[n // 2 - 1] + ys[n // 2]) / 2
+    return round(mid, 3)
+
+
+def annotate_live_speech(items: list[dict[str, Any]], turns: list[dict[str, Any]]) -> dict[str, Any]:
+    """GPT-Live の発話観測（§3.5）を review item に貼り、集計を返す（純関数）.
+
+    delivery.timing にある値（LiveAgent.last_turn_stats 由来）:
+      requested / speak_start_latency_ms / voiced_sec / chars / end_reason /
+      capture_start_ms / capture_end_ms（マイク座標系での再生区間）
+    ここで出すもの:
+      item["live"] = {requested, speak_start_latency_ms, voiced_sec, end_reason,
+                      overlap_at_ms, overlap_speaker, silenced_after_sec, resumed}
+      - 重なり: 再生区間の中で始まった参加者発話の最初のもの
+      - 黙るまで: その発話の開始から、モデルの最後の声まで
+      - 再開: 重なりで黙った発話の直後（15秒内）に「指示なし」の発話があったか
+    """
+    humans = sorted(
+        (t for t in turns
+         if str(t.get("speaker") or "") not in AGENT_SPEAKERS
+         and isinstance(t.get("ms"), int | float)),
+        key=lambda t: float(t["ms"]))
+    dated = []
+    for item in items:
+        delivery = item.get("delivery")
+        timing = delivery.get("timing") if isinstance(delivery, dict) else None
+        if not isinstance(timing, dict) or "requested" not in timing:
+            continue
+        live: dict[str, Any] = {
+            "requested": bool(timing.get("requested")),
+            "speak_start_latency_ms": timing.get("speak_start_latency_ms"),
+            "voiced_sec": timing.get("voiced_sec"),
+            "end_reason": timing.get("end_reason"),
+            "overlap_at_ms": None, "overlap_speaker": None,
+            "silenced_after_sec": None, "resumed": False,
+        }
+        start, end = timing.get("capture_start_ms"), timing.get("capture_end_ms")
+        if isinstance(start, int | float) and isinstance(end, int | float):
+            hit = next((t for t in humans if start <= float(t["ms"]) < end), None)
+            if hit is not None:
+                live["overlap_at_ms"] = int(hit["ms"])
+                live["overlap_speaker"] = hit.get("speaker")
+                live["silenced_after_sec"] = round(max(0.0, (end - float(hit["ms"])) / 1000), 2)
+        item["live"] = live
+        dated.append((str(delivery.get("created_at") or ""), item))
+    dated.sort(key=lambda x: x[0])
+    for (t0, a), (t1, b) in itertools.pairwise(dated):
+        if a["live"]["overlap_at_ms"] is not None and not b["live"]["requested"]:
+            gap = _event_time_delta_sec(t0, t1)
+            if gap is not None and gap <= _RESUME_WINDOW_SEC:
+                a["live"]["resumed"] = True
+    lives = [it["live"] for _, it in dated]
+    latencies = [float(x["speak_start_latency_ms"]) for x in lives
+                 if isinstance(x.get("speak_start_latency_ms"), int | float)]
+    voiced = [float(x["voiced_sec"]) for x in lives if isinstance(x.get("voiced_sec"), int | float)]
+    silenced = [float(x["silenced_after_sec"]) for x in lives
+                if isinstance(x.get("silenced_after_sec"), int | float)]
+    return {
+        "live_turns": len(lives),
+        "live_unrequested": sum(1 for x in lives if not x["requested"]),
+        "live_overlaps": sum(1 for x in lives if x["overlap_at_ms"] is not None),
+        "live_resumed": sum(1 for x in lives if x["resumed"]),
+        "live_speak_latency_ms_median": _median(latencies),
+        "live_speak_latency_ms_max": round(max(latencies), 1) if latencies else None,
+        "live_voiced_sec_median": _median(voiced),
+        "live_silenced_after_sec_median": _median(silenced),
+    }
+
+
 def _event(turn: dict, kind: str, detail: str, **extra) -> dict:
     return {
         "turn_id": turn.get("turn_id"),
@@ -710,6 +806,8 @@ def replay_snapshot(source: str | Path, turns: list[dict], events: list[dict],
         1 for d in voice_diags if d["detected"])
     review_summary["voice_call_ignored"] = sum(
         1 for d in voice_diags if not d["detected"])
+    # GPT-Live の発話観測（§3.5）。値が無いログ（旧形式）では 0 件になるだけ。
+    review_summary.update(annotate_live_speech(review_items, turns))
     return {
         "source": str(source),
         "topic": opts.topic,

@@ -1203,6 +1203,11 @@ class SessionState:
         with self._ai_speech_lock:
             self._ai_speech_open[source] = self.current_capture_ms()
 
+    def ai_speech_open_start_ms(self, source: str) -> int | None:
+        """いま開いているAI再生区間の開始位置（マイクms）。開いていなければ None."""
+        with self._ai_speech_lock:
+            return self._ai_speech_open.get(source)
+
     def note_ai_speech_end(self, source: str) -> None:
         """AI再生の終了で開いていた区間を閉じ、判定用の履歴に積む."""
         with self._ai_speech_lock:

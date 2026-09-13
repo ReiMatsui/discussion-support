@@ -996,6 +996,33 @@ def _run_af_checker(state: SessionState, *, interval: float = 3.0) -> None:
         _af_checker_tick(state, facil, presented, af_gate)
 
 
+def _delivery_timing(state: SessionState) -> dict | None:
+    """発話1件の観測値（§3.5）を介入ログ用にまとめる.
+
+    LiveAgent.last_turn_stats（指示→最初の声の遅延、声の長さ、指示の有無、終端の
+    理由）に、マイク座標系での再生区間 [capture_start_ms, capture_end_ms] を添える。
+    replay はこの区間と参加者発話の ms を突き合わせて「人の発話が重なった時刻」と
+    「モデルが黙るまでの時間」を出す。属性が無い agent（テストの偽物）でも安全。
+    """
+    agent = state.agent
+    stats = getattr(agent, "last_turn_stats", None)
+    if not isinstance(stats, dict):
+        latency = getattr(agent, "_last_speak_latency_ms", None)
+        return {"speak_start_latency_ms": latency} if latency is not None else None
+    timing = dict(stats)
+    opener = getattr(state, "ai_speech_open_start_ms", None)
+    capture_now = getattr(state, "current_capture_ms", None)
+    if callable(opener) and callable(capture_now):
+        with contextlib.suppress(Exception):
+            start_ms = opener("agent")
+            since = stats.get("since_last_voice_sec")
+            end_ms = int(capture_now()) - int((since or 0.0) * 1000)
+            if start_ms is not None:
+                timing["capture_start_ms"] = int(start_ms)
+                timing["capture_end_ms"] = max(int(start_ms), end_ms)
+    return timing
+
+
 def _on_agent_text_factory(state: SessionState):
     """ファシリテーター発言コールバックを生成."""
     def _on_agent_text(text: str):
@@ -1009,12 +1036,7 @@ def _on_agent_text_factory(state: SessionState):
         if ON_UTTERANCE is not None:
             with contextlib.suppress(Exception):
                 ON_UTTERANCE("ファシリテーター", text)
-        # 観測: trigger → 発話開始の遅延（§3.5 予算検証用）。属性が無い agent でも安全。
-        timing = None
-        speak_latency = getattr(state.agent, "_last_speak_latency_ms", None)
-        if speak_latency is not None:
-            timing = {"speak_start_latency_ms": speak_latency}
-        state.add_facilitator_delivery_event(text, timing=timing)
+        state.add_facilitator_delivery_event(text, timing=_delivery_timing(state))
         _print_line(f"\x1b[96m[ファシリテーター]\x1b[0m: {text}")
         state.save()
     return _on_agent_text

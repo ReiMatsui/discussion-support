@@ -654,3 +654,60 @@ def test_cli_help_has_serve_option():
     assert "--interventions" in result.output
     assert "--review-out" in result.output
     assert "--review-summary-out" in result.output
+
+
+# --- GPT-Live の発話観測（§3.5）: 介入ログと議事録の突き合わせ ------------------
+
+
+def _live_delivery(created_at: str, *, requested=True, start=None, end=None,
+                   latency=1200.0, voiced=3.0):
+    timing = {"requested": requested, "speak_start_latency_ms": latency if requested else None,
+              "voiced_sec": voiced, "chars": 20, "end_reason": "silence",
+              "since_last_voice_sec": 1.2}
+    if start is not None:
+        timing["capture_start_ms"] = start
+        timing["capture_end_ms"] = end
+    return {"type": "delivery", "created_at": created_at, "text": "一言",
+            "timing": timing}
+
+
+def test_annotate_live_speech_overlap_silence_and_resume():
+    from das.asr.live.replay import annotate_live_speech
+    items = [
+        {"delivery": _live_delivery("2026-09-13T10:00:00", start=10_000, end=13_000)},
+        {"delivery": _live_delivery("2026-09-13T10:00:05", requested=False)},
+        {"delivery": _live_delivery("2026-09-13T10:01:00", start=60_000, end=64_000,
+                                    latency=800.0, voiced=4.0)},
+        {"delivery": {"type": "delivery", "created_at": "2026-09-13T10:02:00",
+                      "text": "旧形式", "timing": {"speak_start_latency_ms": 900.0}}},
+    ]
+    turns = [
+        {"speaker": "Aさん", "text": "ちょっと待って", "ms": 12_000},   # 1件目に重なる
+        {"speaker": "ファシリテーター", "text": "一言", "ms": 12_500},   # AI は数えない
+        {"speaker": "Bさん", "text": "次の話", "ms": 70_000},            # 3件目の外
+    ]
+    summary = annotate_live_speech(items, turns)
+    a, b, c, old = items
+    assert a["live"]["overlap_at_ms"] == 12_000 and a["live"]["overlap_speaker"] == "Aさん"
+    assert a["live"]["silenced_after_sec"] == 1.0
+    assert a["live"]["resumed"] is True            # 5秒後に指示なしで話した
+    assert b["live"]["requested"] is False and b["live"]["overlap_at_ms"] is None
+    assert c["live"]["overlap_at_ms"] is None and c["live"]["resumed"] is False
+    assert "live" not in old                       # 旧形式は触らない
+    assert summary["live_turns"] == 3
+    assert summary["live_unrequested"] == 1
+    assert summary["live_overlaps"] == 1 and summary["live_resumed"] == 1
+    assert summary["live_speak_latency_ms_median"] == 1000.0   # (1200+800)/2
+    assert summary["live_speak_latency_ms_max"] == 1200.0
+    assert summary["live_voiced_sec_median"] == 3.0
+    assert summary["live_silenced_after_sec_median"] == 1.0
+
+
+def test_annotate_live_speech_is_empty_for_old_logs():
+    from das.asr.live.replay import annotate_live_speech
+    items = [{"delivery": {"type": "delivery", "created_at": "2026-09-13T10:02:00",
+                           "text": "x", "timing": {"speak_start_latency_ms": 900.0}}},
+             {"delivery": None}]
+    summary = annotate_live_speech(items, [])
+    assert summary["live_turns"] == 0 and summary["live_speak_latency_ms_median"] is None
+    assert all("live" not in it for it in items)

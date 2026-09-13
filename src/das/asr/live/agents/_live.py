@@ -157,6 +157,13 @@ class LiveAgent(_VoiceAgentBase):
         self._aux_started = False                # 時計・監視スレッドは1回だけ起動
         self._reopening = False
         self.last_reopen_ms: float | None = None  # 直近の開き直しに要した時間（記録用）
+        # 直近の発話の観測値（§3.5）。_finish_turn で確定し、議事録側が介入ログに写す
+        self.last_turn_stats: dict | None = None
+        self._turn_requested = False             # こちらの指示で始まった発話か
+        self._turn_first_voice_at = 0.0          # 最初の声（壁時計）
+        self._turn_last_voice_at = 0.0           # 最後の声（壁時計）
+        self._voiced_ms_this_turn = 0            # 声の区間の合計（ストリーム時間）
+        self.unrequested_turns = 0               # 指示なしで話した回数（会議通算）
 
     # ------------------------------------------------------------ 状態
 
@@ -401,7 +408,7 @@ class LiveAgent(_VoiceAgentBase):
         for chunk in _chunks(context, _APPEND_MAX_CHARS):
             ok = ok and self._send({"type": "session.thinking.append",
                                     "delegation_id": None, "content": chunk})
-        self._begin_turn()
+        self._begin_turn(requested=True)
         self._last_speak_latency_ms = None
         self._speak_trigger_at = time.monotonic()
         for chunk in _chunks("[指示]\n" + directive, _APPEND_MAX_CHARS):
@@ -435,13 +442,19 @@ class LiveAgent(_VoiceAgentBase):
         self._session_id = (ev.get("session") or {}).get("id")
         self._started.set()
 
-    def _begin_turn(self) -> None:
+    def _begin_turn(self, *, requested: bool) -> None:
         self._played_bytes = 0
         self._play_epoch += 1
         self._speech_started = False
         self._audio_bytes_this_turn = 0
         self._silent_run_ms = 0
         self._ai_text_buf = ""
+        self._turn_requested = requested
+        self._turn_first_voice_at = 0.0
+        self._turn_last_voice_at = 0.0
+        self._voiced_ms_this_turn = 0
+        if not requested:
+            self.unrequested_turns += 1
 
     def _on_audio(self, ev: dict) -> None:
         chunk = ev.get("delta", "") or ev.get("audio", "")
@@ -458,16 +471,19 @@ class LiveAgent(_VoiceAgentBase):
         if voiced:
             if not self._responding and not self.ai_speaking:
                 # こちらが求めていない発話（呼びかけへの応答）。受け皿を作って通す
-                self._begin_turn()
+                self._begin_turn(requested=False)
                 with self._state_lock:
                     self._responding = True
             self._silent_run_ms = 0
+            self._voiced_ms_this_turn += chunk_ms
+            self._turn_last_voice_at = time.monotonic()
         else:
             self._silent_run_ms += chunk_ms
         self._last_audio_at = time.monotonic()
         self._audio_bytes_this_turn += len(pcm)
         if not self._speech_started:
             self._speech_started = True
+            self._turn_first_voice_at = time.monotonic()
             if self._speak_trigger_at:
                 self._last_speak_latency_ms = round(
                     (time.monotonic() - self._speak_trigger_at) * 1000, 1)
@@ -523,16 +539,33 @@ class LiveAgent(_VoiceAgentBase):
                 if (self.ai_speaking or self._responding) and self._last_audio_at \
                         and time.monotonic() - self._last_audio_at > _STREAM_STALL_SEC \
                         and self._audio_bytes_this_turn > 0 and self._audio_q.empty():
-                    self._finish_turn()
+                    self._finish_turn(end_reason="stall")
         threading.Thread(target=_run, daemon=True).start()
 
-    def _finish_turn(self) -> None:
-        """1発話の終わり。文字を確定して議事録へ渡し、再生の終端マーカーを流す."""
+    def _finish_turn(self, *, end_reason: str = "silence") -> None:
+        """1発話の終わり。文字を確定して議事録へ渡し、再生の終端マーカーを流す.
+
+        end_reason: silence（1.2秒の無音）/ stall（ストリーム停止の保険）。
+        """
         self._last_audio_at = 0.0
         self._audio_bytes_this_turn = 0
         self._silent_run_ms = 0
         transcript = self._ai_text_buf.strip()
         self._ai_text_buf = ""
+        now = time.monotonic()
+        self.last_turn_stats = {
+            "requested": self._turn_requested,
+            "speak_start_latency_ms": self._last_speak_latency_ms if self._turn_requested else None,
+            "voiced_sec": round(self._voiced_ms_this_turn / 1000, 2),
+            "span_sec": (round(self._turn_last_voice_at - self._turn_first_voice_at, 2)
+                         if self._turn_first_voice_at else 0.0),
+            "chars": len(transcript),
+            "end_reason": end_reason,
+            # 最後の声から確定までの経過（壁時計）。議事録側が捕捉msに換算するのに使う
+            "since_last_voice_sec": (round(now - self._turn_last_voice_at, 2)
+                                     if self._turn_last_voice_at else None),
+            "unrequested_turns": self.unrequested_turns,
+        }
         if transcript:
             self._recent_ai_texts.append(transcript)
             if self.on_ai_utterance:
