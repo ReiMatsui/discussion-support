@@ -1208,6 +1208,14 @@ class SessionState:
         with self._ai_speech_lock:
             return self._ai_speech_open.get(source)
 
+    def last_ai_speech_start_ms(self, source: str) -> int | None:
+        """閉じた区間のうち最後の source の開始位置（マイクms）。無ければ None."""
+        with self._ai_speech_lock:
+            for a, _b, src in reversed(self._ai_speech_intervals):
+                if src == source:
+                    return a
+            return None
+
     def note_ai_speech_end(self, source: str) -> None:
         """AI再生の終了で開いていた区間を閉じ、判定用の履歴に積む."""
         with self._ai_speech_lock:

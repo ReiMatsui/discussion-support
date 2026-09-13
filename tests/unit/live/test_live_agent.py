@@ -69,7 +69,7 @@ def test_trigger_sends_context_as_thinking_and_directive_as_instructions(agent):
     assert "Cさんに" in instr["content"]
     assert "[参加者発話]" not in instr["content"]
     assert agent._responding is True
-    assert agent.pending_count() == 0          # 送った分は消費される
+    assert agent.pending_count == 0          # 送った分は消費される
 
 
 def test_trigger_is_skipped_while_speaking_or_without_intent(agent):
@@ -79,7 +79,7 @@ def test_trigger_is_skipped_while_speaking_or_without_intent(agent):
     agent.ai_speaking = True
     agent.trigger(invite_target="B")
     assert agent.ws.sent == []                   # 話している間は送らない
-    assert agent.pending_count() == 1            # 発話は保持される
+    assert agent.pending_count == 1            # 発話は保持される
 
 
 def test_long_context_is_chunked_under_the_token_limit(agent):
@@ -185,7 +185,7 @@ def test_trigger_waits_until_session_started(agent):
     agent.feed("A", "x")
     agent.trigger(invite_target="B")
     assert agent.ws.sent == []
-    assert agent.pending_count() == 1
+    assert agent.pending_count == 1
     agent._started.set()
     agent.trigger(invite_target="B")
     assert agent.ws.types() == ["session.thinking.append", "session.instructions.append"]
@@ -270,3 +270,75 @@ def test_turn_stats_count_unrequested_speech(agent):
     assert st["requested"] is False and st["speak_start_latency_ms"] is None
     assert st["end_reason"] == "stall" and st["unrequested_turns"] == 1
     assert agent.said == ["はい"]
+
+
+# --- レビュー（2026-09-13）で見つかった欠陥の再発防止 ------------------------------
+
+
+def test_pending_count_is_a_value_not_a_method(agent):
+    """Controller は pending_count を数値として比較する（メソッドだと毎 tick 落ちる）."""
+    assert isinstance(LiveAgent.pending_count, property)
+    agent.feed("A", "x")
+    assert agent.pending_count > 0
+
+
+def test_trailing_silence_after_turn_end_does_not_start_a_ghost_turn(agent):
+    """終端後、再生スレッドが終端マーカーを取り出す前に届く無音で発話を再開しない."""
+    agent._responding = True
+    for _ in range(3):
+        agent._handle({"type": "session.output_audio.delta", "delta": _voiced()})
+    agent._handle({"type": "session.output_transcript.delta", "delta": "一言"})
+    for _ in range(int(_live._SPEECH_END_GAP_SEC * 10)):
+        agent._handle({"type": "session.output_audio.delta", "delta": _silent()})
+    assert agent.said == ["一言"]
+    assert agent.ai_speaking is True                 # 再生スレッドがまだ終端を取り出していない
+    finished = agent.last_turn_stats
+    for _ in range(60):                               # 6秒の無音が流れ続ける
+        agent._handle({"type": "session.output_audio.delta", "delta": _silent()})
+    assert agent.said == ["一言"]
+    assert agent.last_turn_stats is finished          # 0字の幽霊ターンで上書きされない
+    assert agent._responding is False
+
+
+def test_stop_playback_discards_the_rest_of_the_model_turn(agent):
+    """こちらの都合で止めた後、モデルが流し続ける残りは再生も記録もしない."""
+    agent._responding = True
+    agent._handle({"type": "session.output_audio.delta", "delta": _voiced()})
+    agent.stop_playback()
+    assert agent.ws.sent[-1]["type"] == "session.instructions.append"
+    assert "やめて" in agent.ws.sent[-1]["content"]
+    for _ in range(5):                                # 残りの声
+        agent._handle({"type": "session.output_audio.delta", "delta": _voiced()})
+    agent._handle({"type": "session.output_transcript.delta", "delta": "…の続き"})
+    assert agent.ai_speaking is False and agent._responding is False
+    assert all(c is None for _, c in list(agent._audio_q.queue))   # 終端マーカーだけ
+    assert agent.unrequested_turns == 0
+    for _ in range(int(_live._SPEECH_END_GAP_SEC * 10)):
+        agent._handle({"type": "session.output_audio.delta", "delta": _silent()})
+    assert agent._discarding is False                 # 1.2秒の無音で通常に戻る
+    agent._handle({"type": "session.output_audio.delta", "delta": _voiced()})
+    assert agent.ai_speaking is True and agent.unrequested_turns == 1
+
+
+def test_trigger_reports_whether_it_could_send(agent):
+    agent.feed("A", "x")
+    agent.ai_speaking = True
+    assert agent.trigger(invite_target="B") is False
+    agent.ai_speaking = False
+    assert agent.trigger(invite_target="B") is True
+
+
+def test_voice_change_forgets_the_ai_voiceprint(agent, monkeypatch):
+    monkeypatch.setattr(LiveAgent, "_connect_locked", lambda self: None)
+
+    class Tracker:
+        def __init__(self):
+            import threading
+            self.profiles = {LiveAgent.AI_VOICE_KEY: object()}
+            self._active_keys = {LiveAgent.AI_VOICE_KEY}
+            self._lock = threading.Lock()
+    agent._voice_tracker = Tracker()
+    agent._ai_voice_enrolled = True
+    agent.apply_config(voice="cedar")
+    assert agent._ai_voice_enrolled is False
+    assert LiveAgent.AI_VOICE_KEY not in agent._voice_tracker.profiles

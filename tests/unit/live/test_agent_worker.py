@@ -763,6 +763,36 @@ def test_invite_fires_at_pause_with_target():
     assert agent.trigger_calls[0]["invite_target"] == "参加者B"
 
 
+def test_candidate_is_kept_when_agent_could_not_send():
+    """trigger が False（開き直し中・話し中・送信失敗）なら候補を消費せず記帳もしない.
+
+    GPT-Live では指示→声の間が長く、その間に来た採択が空振りになりやすい。
+    空振りを「発話済み」と記録すると cooldown が進み、本当の介入が遅れる。
+    """
+    class BusyThenFreeAgent(FakeAgent):
+        def __init__(self):
+            super().__init__()
+            self.refuse = 2
+
+        def trigger(self, **kw):
+            if self.refuse > 0:
+                self.refuse -= 1
+                return False
+            super().trigger(**kw)
+            return True
+
+    agent = BusyThenFreeAgent()
+    state = FakeState(agent, None)
+    state.invite_requests.put("参加者B")
+    state._last_utt_time[0] = time.monotonic() - 100
+
+    _run_worker_briefly(state, until=lambda: bool(agent.trigger_calls))
+
+    assert len(agent.trigger_calls) == 1               # 断られた2回は消費されず再試行された
+    assert agent.trigger_calls[0]["invite_target"] == "参加者B"
+    assert [e["reason"] for e in state.intervention_events] == ["invite"]
+
+
 def test_invite_waits_for_pause():
     """沈黙の間が無い（直前に発話があった）うちは声かけしない（割り込まない）（S4）."""
     agent = FakeAgent()
@@ -848,7 +878,7 @@ def test_event_worker_utterance_appends_and_informs_partner():
     state.partner = p
     texts: list = []
     state.fac_events.put(("utterance", "本題に戻しましょう"))
-    _run_event_worker_briefly(state, texts.append, until=lambda: bool(texts))
+    _run_event_worker_briefly(state, lambda t, timing=None: texts.append(t), until=lambda: bool(texts))
     assert texts == ["本題に戻しましょう"]
     assert p.interrupts == 0
     assert p.injected and p.injected[0][1] == "本題に戻しましょう"
@@ -862,7 +892,7 @@ def test_event_worker_noop_utterance_does_not_react_partner():
     state.partner = p
     texts: list = []
     state.fac_events.put(("utterance", "（介入不要）"))
-    _run_event_worker_briefly(state, texts.append, until=lambda: bool(texts))
+    _run_event_worker_briefly(state, lambda t, timing=None: texts.append(t), until=lambda: bool(texts))
     assert texts == ["（介入不要）"]
     assert p.interrupts == 0
     assert p.injected == []
@@ -875,7 +905,7 @@ def test_event_worker_speech_start_does_not_interrupt_partner():
     p._responding = True
     state.partner = p
     state.fac_events.put(("speech_start", None))
-    _run_event_worker_briefly(state, lambda t: None, until=lambda: False)
+    _run_event_worker_briefly(state, lambda t, timing=None: None, until=lambda: False)
     assert p.interrupts == 0
 
 

@@ -909,11 +909,13 @@ class _AfDeliveryGate:
         """1 ループ分の処理。行った操作名 (deliver/none) を返す。"""
         if agent_busy or silence < self.MIN_SILENCE or not af or status != "deliver":
             return "none"
-        agent.trigger(
+        sent = agent.trigger(
             topics=topics,
             af_presentation=str(af.get("af_text") or ""),
             invite_target=af.get("target_speaker"),
         )
+        if sent is False:                # 送れなかった（開き直し中・話し中）。候補は残す
+            return "none"
         return "deliver"
 
 
@@ -1015,6 +1017,10 @@ def _delivery_timing(state: SessionState) -> dict | None:
     if callable(opener) and callable(capture_now):
         with contextlib.suppress(Exception):
             start_ms = opener("agent")
+            if start_ms is None:
+                # 終端マーカーが先に再生されて区間が閉じた後（stall 終端で起きやすい）。
+                # 閉じた区間の最後の agent 分を使う
+                start_ms = getattr(state, "last_ai_speech_start_ms", lambda _s: None)("agent")
             since = stats.get("since_last_voice_sec")
             end_ms = int(capture_now()) - int((since or 0.0) * 1000)
             if start_ms is not None:
@@ -1025,7 +1031,7 @@ def _delivery_timing(state: SessionState) -> dict | None:
 
 def _on_agent_text_factory(state: SessionState):
     """ファシリテーター発言コールバックを生成."""
-    def _on_agent_text(text: str):
+    def _on_agent_text(text: str, timing: dict | None = None):
         from das.asr.live import ON_UTTERANCE
 
         text = text.strip()
@@ -1036,7 +1042,7 @@ def _on_agent_text_factory(state: SessionState):
         if ON_UTTERANCE is not None:
             with contextlib.suppress(Exception):
                 ON_UTTERANCE("ファシリテーター", text)
-        state.add_facilitator_delivery_event(text, timing=_delivery_timing(state))
+        state.add_facilitator_delivery_event(text, timing=timing)
         _print_line(f"\x1b[96m[ファシリテーター]\x1b[0m: {text}")
         state.save()
     return _on_agent_text
@@ -1052,12 +1058,14 @@ def _run_facilitator_event_worker(state: SessionState, on_text):
     """
     while not state.stop.is_set():
         try:
-            kind, text = state.fac_events.get(timeout=0.5)
+            item = state.fac_events.get(timeout=0.5)
         except queue.Empty:
             continue
+        kind, text = item[0], item[1]
+        timing = item[2] if len(item) > 2 else None
         try:
             if kind == "utterance" and text is not None:
-                on_text(text)
+                on_text(text, timing)
                 if "介入不要" not in text:
                     p = state.partner
                     if p is not None and p._connected:
@@ -1079,7 +1087,10 @@ def _connect_agent(state: SessionState, on_text):
     if agent is None:
         return
     # 受信スレッドはイベントを積むだけ。副作用は専用ワーカーで処理（受信ブロック回避）。
-    agent.on_ai_utterance = lambda text: state.fac_events.put(("utterance", text))
+    # 観測値（§3.5）は受信スレッドの時点で写す。後から読むと次の発話に上書きされ、
+    # 再生区間も終端マーカーで閉じられてしまう
+    agent.on_ai_utterance = lambda text: state.fac_events.put(
+        ("utterance", text, _delivery_timing(state)))
 
     def _agent_speech_start() -> None:
         # AI再生区間を開き（P2-1）、従来のイベント通知も行う。
@@ -1497,9 +1508,10 @@ class _AgentWorker:
                 queued_at=float(decision.fact.get("_queued_at", now)),
                 queued_wall_at=str(decision.fact.get("_queued_wall_at") or ""),
                 policy="fact_freshness_pause")
+            if agent.trigger(topics=topics, fact_correction=decision.fact) is False:
+                return False             # 送れなかった。候補は残して次の tick で再判断
             print(f"# [trigger] fact: {correction}", flush=True)
             _log_intervention_event(s, "fact", correction, timing=timing)
-            agent.trigger(topics=topics, fact_correction=decision.fact)
             self.pending.facts.popleft()
             self.note_intervention(time.monotonic(), "fact", correction)
             return True
@@ -1515,6 +1527,8 @@ class _AgentWorker:
                 queued_at=queued_at,
                 queued_wall_at=str(queued_payload.get("created_wall_at") or ""),
                 policy="manual_call_pause")
+            if agent.trigger(topics=topics, manual_request=manual) is False:
+                return False
             print(f"# [trigger] manual_call: {detail}", flush=True)
             _log_intervention_event(
                 s, "manual_call", detail,
@@ -1523,7 +1537,6 @@ class _AgentWorker:
                         "outcome": "selected"})
             _set_manual_status(s, "dispatched", detail=detail,
                                wait_sec=now - queued_at)
-            agent.trigger(topics=topics, manual_request=manual)
             self.pending.clear_manual()
             self.note_intervention(time.monotonic(), "manual", detail)
             return True
@@ -1534,10 +1547,11 @@ class _AgentWorker:
                 queued_at=self.pending.last_drift_request_at or None,
                 queued_wall_at=self.pending.last_drift_request_wall_at,
                 policy="drift_confirmation_pause")
+            if agent.trigger(topics=topics, drift_reason=decision.drift_reason,
+                             recent_agent_texts=_recent_agent_texts(s)) is False:
+                return False
             print(f"# [trigger] drift: 脱線介入「{decision.drift_reason}」", flush=True)
             _log_intervention_event(s, "drift", decision.drift_reason, timing=timing)
-            agent.trigger(topics=topics, drift_reason=decision.drift_reason,
-                          recent_agent_texts=_recent_agent_texts(s))
             self.pending.clear_drift()
             self.note_intervention(time.monotonic(), "drift", decision.drift_reason)
             return True
@@ -1654,8 +1668,6 @@ class _AgentWorker:
                 pause_required=pause, policy=spec.policy)
             shown = (decision.detail[:spec.print_limit] if spec.print_limit
                      else decision.detail)
-            print(f"# [trigger] {kind}: {shown}", flush=True)
-        _log_intervention_event(self.state, kind, decision.detail, timing=timing)
         available = {
             "topics": topics,
             "summary_focus": decision.summary_focus,
@@ -1663,7 +1675,13 @@ class _AgentWorker:
             "af_presentation": decision.af_text,
             "recent_agent_texts": _recent_agent_texts(self.state),
         }
-        self.agent.trigger(**{k: available[k] for k in spec.trigger})
+        # 送れなかった（開き直し中・話し中・送信失敗）なら候補を消費せず、記帳もしない。
+        # 次の tick で Controller が改めて判断する
+        if self.agent.trigger(**{k: available[k] for k in spec.trigger}) is False:
+            return
+        if spec.policy is not None:
+            print(f"# [trigger] {kind}: {shown}", flush=True)
+        _log_intervention_event(self.state, kind, decision.detail, timing=timing)
         if "af_presentation" in spec.trigger and decision.af_text:
             # 受容計測 (フェーズ5): 配信した af 介入を AF ランタイムに記録する。
             rt = getattr(self.state, "af_runtime", None)
