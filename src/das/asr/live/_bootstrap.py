@@ -25,6 +25,7 @@ from das.asr.live._audio_io import (
     _run_sender,
 )
 from das.asr.live._cluster_naming import ClusterVoiceNamer
+from das.asr.live._console_log import ConsoleLog
 from das.asr.live._constants import (
     _AGENDA_PROMPT,
     _DRIFT_PROMPT,
@@ -1172,102 +1173,105 @@ def run_session(args: LiveArgs) -> None:
     diag_path = os.path.splitext(out_path)[0] + ".diag.jsonl"
     turns_path = os.path.splitext(out_path)[0] + ".turns.jsonl"
 
-    # --- 声紋モデル読み込み ---
-    tracker = _build_tracker(args)
+    log_path = os.path.splitext(out_path)[0] + ".log"
+    with ConsoleLog(log_path):
+        print(f"# ターミナルの出力はここにも残ります: {log_path}", flush=True)
+        # --- 声紋モデル読み込み ---
+        tracker = _build_tracker(args)
 
-    # --- SessionState ---
-    wav_path = os.path.splitext(out_path)[0] + ".wav"
-    diarizer = _build_diarizer(args)
-    cluster_namer, seat_audio = _build_cluster_layer(args, tracker, diarizer)
+        # --- SessionState ---
+        wav_path = os.path.splitext(out_path)[0] + ".wav"
+        diarizer = _build_diarizer(args)
+        cluster_namer, seat_audio = _build_cluster_layer(args, tracker, diarizer)
 
-    state = SessionState(args=args, started=started, out_path=out_path,
-                         html_path=html_path, diag_path=diag_path,
-                         turns_path=turns_path, wav_path=wav_path,
-                         tracker=tracker, serve=_serve,
-                         diarization_provider=diarizer,
-                         speaker_resolver=SpeakerResolver(),
-                         cluster_namer=cluster_namer,
-                         seat_audio=seat_audio)
-    state.stt_backend = backend
-    state.waiting_to_start = bool(args.setup and _serve and not args.wav and not args.simulate)
-    if args.diarization == "pyannote" and diarizer is None:
-        # キー未設定の縮退（_build_diarizer が警告済み）。コンソールだけだと
-        # 会議後に気づけないので、議事録のタイムラインにも残す。
-        state.add_sys(0, "PYANNOTEAI_API_KEY が未設定のため、話者分離なし"
-                         "（Soniox+声紋のみ）で動作しています")
-    write_session_config(state, args, tracker)
+        state = SessionState(args=args, started=started, out_path=out_path,
+                             html_path=html_path, diag_path=diag_path,
+                             turns_path=turns_path, wav_path=wav_path,
+                             tracker=tracker, serve=_serve,
+                             diarization_provider=diarizer,
+                             speaker_resolver=SpeakerResolver(),
+                             cluster_namer=cluster_namer,
+                             seat_audio=seat_audio)
+        state.stt_backend = backend
+        state.waiting_to_start = bool(args.setup and _serve and not args.wav and not args.simulate)
+        if args.diarization == "pyannote" and diarizer is None:
+            # キー未設定の縮退（_build_diarizer が警告済み）。コンソールだけだと
+            # 会議後に気づけないので、議事録のタイムラインにも残す。
+            state.add_sys(0, "PYANNOTEAI_API_KEY が未設定のため、話者分離なし"
+                             "（Soniox+声紋のみ）で動作しています")
+        write_session_config(state, args, tracker)
 
-    # --- AIエージェント ---
-    # --no-llm はエージェントも含めて止める（LLM補助の一括スイッチ。§49.9）
-    _agent_oai_key = os.environ.get("OPENAI_API_KEY", "")
-    if args.agent and not getattr(args, "no_llm", False):
-        if not _agent_oai_key:
-            print("# AI Agent: OPENAI_API_KEY が未設定です。--agent は無効になります。", flush=True)
-        else:
-            state.agent = LiveAgent(api_key=_agent_oai_key, voice=args.agent_voice,
-                                    mode="facilitator", trigger_n=args.agent_trigger)
-            if tracker is not None:
-                state.agent.set_tracker(tracker)
+        # --- AIエージェント ---
+        # --no-llm はエージェントも含めて止める（LLM補助の一括スイッチ。§49.9）
+        _agent_oai_key = os.environ.get("OPENAI_API_KEY", "")
+        if args.agent and not getattr(args, "no_llm", False):
+            if not _agent_oai_key:
+                print("# AI Agent: OPENAI_API_KEY が未設定です。--agent は無効になります。", flush=True)
+            else:
+                state.agent = LiveAgent(api_key=_agent_oai_key, voice=args.agent_voice,
+                                        mode="facilitator", trigger_n=args.agent_trigger)
+                if tracker is not None:
+                    state.agent.set_tracker(tracker)
 
-    # --- WAVストリーミング書き出し ---
-    state.open_wav()
+        # --- WAVストリーミング書き出し ---
+        state.open_wav()
 
-    def _sys_hook(text: str) -> None:
-        # 経過時刻付きで記録する（監査D: [--:--] はいつ起きたか追えない）。
-        state.add_sys(state.elapsed_ms(), text)
-        state.save()
-    _SYS_HOOK_REF[0] = _sys_hook
+        def _sys_hook(text: str) -> None:
+            # 経過時刻付きで記録する（監査D: [--:--] はいつ起きたか追えない）。
+            state.add_sys(state.elapsed_ms(), text)
+            state.save()
+        _SYS_HOOK_REF[0] = _sys_hook
 
-    # --- 論点抽出 ---
-    _oai_key = os.environ.get("OPENAI_API_KEY", "")
-    _oai_model = os.environ.get("OPENAI_MODEL_FAST", "gpt-5.4-mini")
+        # --- 論点抽出 ---
+        _oai_key = os.environ.get("OPENAI_API_KEY", "")
+        _oai_model = os.environ.get("OPENAI_MODEL_FAST", "gpt-5.4-mini")
 
-    # --- AIエージェント: コールバック ---
-    _on_agent_text = _on_agent_text_factory(state)
+        # --- AIエージェント: コールバック ---
+        _on_agent_text = _on_agent_text_factory(state)
 
-    # --- UIサーバー ---
-    _httpd = None
-    _ui_port = args.port
-    if _serve:
-        _httpd, _ui_port = start_ui_server(state, args.port)
-        if _httpd is None:
-            _serve = False
-            state._serve = False
-            state.waiting_to_start = False
+        # --- UIサーバー ---
+        _httpd = None
+        _ui_port = args.port
+        if _serve:
+            _httpd, _ui_port = start_ui_server(state, args.port)
+            if _httpd is None:
+                _serve = False
+                state._serve = False
+                state.waiting_to_start = False
 
-    _explicit_agenda = _setup_companions(state, args, tracker, _oai_key)
+        _explicit_agenda = _setup_companions(state, args, tracker, _oai_key)
 
-    def _connect_stt():
-        _ws = connect(backend.ws_url(), additional_headers=backend.ws_headers())
-        _ws.send(json.dumps(backend.start_message(args.model, args.lang)))
-        state.mark_stt_connection_started()
-        return _ws
+        def _connect_stt():
+            _ws = connect(backend.ws_url(), additional_headers=backend.ws_headers())
+            _ws.send(json.dumps(backend.start_message(args.model, args.lang)))
+            state.mark_stt_connection_started()
+            return _ws
 
-    audio_started = _announce_and_wait_start(state, args, backend,
-                                             _serve, _ui_port, html_path)
-    if state.stop.is_set():
-        _cleanup(state, tracker, wav_path, out_path, html_path)
-        return
+        audio_started = _announce_and_wait_start(state, args, backend,
+                                                 _serve, _ui_port, html_path)
+        if state.stop.is_set():
+            _cleanup(state, tracker, wav_path, out_path, html_path)
+            return
 
-    print(f"# {backend.name} に接続中…", flush=True)
-    state.stt_ws = _connect_stt()
-    if state.diarization_provider is not None:
-        state.diarization_provider.start()
-    try:
-        _launch_runtime(state, args, backend, audio_started=audio_started,
-                        oai_key=_oai_key, oai_model=_oai_model,
-                        out_path=out_path, explicit_agenda=_explicit_agenda,
-                        on_agent_text=_on_agent_text)
-        _receive_until_stopped(state, args, backend, _connect_stt)
-    except KeyboardInterrupt:
-        # Ctrl+C はトレースバックを出さず、UIの停止ボタンと同じ扱いで安全に終了する
-        # （ブラウザタブを閉じてしまった場合も、タブを開き直すか Ctrl+C で停止できる）。
-        print("\n# Ctrl+C を受信。議事録を保存して安全に終了します…", flush=True)
-        state.stop.set()
-    finally:
-        with contextlib.suppress(Exception):
-            if state.stt_ws is not None:
-                state.stt_ws.close()
+        print(f"# {backend.name} に接続中…", flush=True)
+        state.stt_ws = _connect_stt()
         if state.diarization_provider is not None:
-            state.diarization_provider.close()
-        _cleanup(state, tracker, wav_path, out_path, html_path)
+            state.diarization_provider.start()
+        try:
+            _launch_runtime(state, args, backend, audio_started=audio_started,
+                            oai_key=_oai_key, oai_model=_oai_model,
+                            out_path=out_path, explicit_agenda=_explicit_agenda,
+                            on_agent_text=_on_agent_text)
+            _receive_until_stopped(state, args, backend, _connect_stt)
+        except KeyboardInterrupt:
+            # Ctrl+C はトレースバックを出さず、UIの停止ボタンと同じ扱いで安全に終了する
+            # （ブラウザタブを閉じてしまった場合も、タブを開き直すか Ctrl+C で停止できる）。
+            print("\n# Ctrl+C を受信。議事録を保存して安全に終了します…", flush=True)
+            state.stop.set()
+        finally:
+            with contextlib.suppress(Exception):
+                if state.stt_ws is not None:
+                    state.stt_ws.close()
+            if state.diarization_provider is not None:
+                state.diarization_provider.close()
+            _cleanup(state, tracker, wav_path, out_path, html_path)

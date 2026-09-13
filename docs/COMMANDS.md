@@ -94,6 +94,9 @@ uv run python -m das.asr.live --agent-voice cedar
 uv run python -m das.asr.live --no-agent
 ```
 
+ターミナルに出る進行ログは `transcripts/<日時>.log` にも自動で残る（議事録と同じ名前）。
+不具合の報告はこのファイルを渡せばよい。途中経過の文字起こし（画面で書き直される行）は含まない。
+
 モードは**ブラウザUI上で実行中に切替**できる（AIパートナーの接続/切断も含む）。
 議題もUIから設定・変更でき、次回以降の脱線判定に即反映される。
 
