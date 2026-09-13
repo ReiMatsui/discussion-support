@@ -11,7 +11,7 @@ from typing import ClassVar
 import numpy as np
 
 from .._constants import SR
-from ._realtime import RealtimeAgent
+from ._live import LiveAgent
 
 
 class DiscussionSimulator:
@@ -58,7 +58,7 @@ class DiscussionSimulator:
         self._thread: threading.Thread | None = None
         self._history: list[dict] = []
         self._play_out = None  # スピーカー再生用OutputStream
-        self._agent_ref: RealtimeAgent | None = None  # ファシリテーター待機用
+        self._agent_ref: LiveAgent | None = None  # ファシリテーター待機用
 
     def start(self, audio_q: queue.Queue, stop: threading.Event,
               play_audio: bool = False):

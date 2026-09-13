@@ -32,17 +32,16 @@ from ._constants import (
     _INTERVENTION_PAUSE_DRIFT,
     _INTERVENTION_PAUSE_FACT,
     _INTERVENTION_PAUSE_MANUAL,
-    _INTERVENTION_PAUSE_RETRY,
     _INVITE_SILENCE,
     _MANUAL_CALL_COOLDOWN,
 )
 
-# 採否で扱う候補種別。現行 checker が生成する fact/drift/retry/summarize/silence/
+# 採否で扱う候補種別。現行 checker が生成する fact/drift/summarize/silence/
 # invite/conversation を受け付ける。summarize は「価値判定つき整理介入」(C3) で、
 # count（無条件の N発話介入）を置き換えた。
 # 注: stall（介入不要後のデッドエア一押し）は Phase3 で廃止した。
 Kind = Literal[
-    "fact", "manual", "drift", "retry", "summarize", "silence",
+    "fact", "manual", "drift", "summarize", "silence",
     "invite", "conversation",
     # AF ベース介入 (H1 フェーズ4)。既定 OFF で、AF ランタイム有効時のみ生成される。
     "af_l1", "af_l2",
@@ -161,7 +160,7 @@ class FacilitationDecision:
 
 
 # 種別ごとの採否ポリシー（§3.3）。完全な単一 min_interval にはしない。
-#   priority    : 小さいほど優先（fact>drift>retry / count>silence>invite に整合）
+#   priority    : 小さいほど優先（fact>manual>drift / summarize>silence>invite に整合）
 #   pause       : 発話の切れ目として必要な沈黙秒（floor 判定, §4）
 #   cooldown    : 直前の同種介入からの最小間隔（しつこさ防止）
 #   deadline_ms : この時間内に発話開始できなければ stale 破棄（§3.5）
@@ -179,7 +178,7 @@ class _KindPolicy:
     # 同一内容の再発火抑止窓（秒, 0=しない）。時間クールダウンは間隔しか見ない
     # ため、brief が内容そのものである種別（drift/summarize）だけこの窓で
     # 「同じことをもう一度言う」介入を抑止する。fact は上流（checker 側 90s
-    # dedup）が担い、silence/invite/retry の brief は内容ではないため対象外。
+    # dedup）が担い、silence/invite の brief は内容ではないため対象外。
     content_dedup_sec: float = 0.0
 
 
@@ -190,7 +189,6 @@ _KIND_POLICY: dict[str, _KindPolicy] = {
     "manual":   _KindPolicy(1, _INTERVENTION_PAUSE_MANUAL, _MANUAL_CALL_COOLDOWN, 3000, "wait_for_pause"),
     "drift":    _KindPolicy(2, _INTERVENTION_PAUSE_DRIFT, _INTERVENTION_COOLDOWN, 2000, "wait_for_pause", "global",
                             content_dedup_sec=_INTERVENTION_CONTENT_DEDUP_SEC),
-    "retry":    _KindPolicy(3, _INTERVENTION_PAUSE_RETRY, 0.0, 2000, "wait_for_pause"),
     # summarize: 価値判定つき整理介入（C3, count を置換）。上流でLLMが「今、整理が
     # 価値を足す」と判定済み。同種連発を防ぐ kind cooldown 30s に加え、他介入直後も
     # 抑えるため global scope にして「仕切りすぎ」の構造要因を断つ。
@@ -199,7 +197,7 @@ _KIND_POLICY: dict[str, _KindPolicy] = {
     "silence":  _KindPolicy(5, 0.0, 0.0, 2000, "low"),
     "invite":   _KindPolicy(6, _INVITE_SILENCE, _INTERVENTION_COOLDOWN, 2000, "wait_for_pause", "global"),
     "conversation": _KindPolicy(7, _AGENT_CONV_SILENCE, 0.0, 2000, "low"),
-    # AF ベース介入 (H1 フェーズ4)。af_l1 は個別通知 (retry の後・summarize 帯)、
+    # AF ベース介入 (H1 フェーズ4)。af_l1 は個別通知 (summarize 帯)、
     # af_l2 は俯瞰。俯瞰は頻発させないため global scope + 長め cooldown。
     "af_l1":    _KindPolicy(4, 1.5, 20.0, 2000, "wait_for_pause"),
     "af_l2":    _KindPolicy(6, 2.0, 60.0, 2000, "wait_for_pause", "global"),

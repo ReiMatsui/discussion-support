@@ -1005,7 +1005,7 @@ def _setup_companions(state, args, tracker, oai_key: str) -> bool:
             api_key=oai_key, topic=args.simulate,
             scenario=args.sim_scenario)
 
-    # --- ConversationPartner ---
+    # --- LivePartner（AIと会話の相手役） ---
     if args.debate:
         if not oai_key:
             raise SystemExit("--debate には OPENAI_API_KEY が必要です")

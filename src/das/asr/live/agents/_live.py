@@ -35,7 +35,7 @@ import numpy as np
 from .._constants import _AGENT_TRIGGER, _ECHO_COOLDOWN
 from .._voice_profiles import VoiceProfiles
 from . import _notes
-from ._base import _RealtimeBase
+from ._base import _VoiceAgentBase
 
 LIVE_URL = "wss://api.openai.com/v1/live/sessions"
 LIVE_MODEL = "gpt-live-1"
@@ -90,7 +90,7 @@ def _chunks(text: str, n: int) -> list[str]:
     return [text[i:i + n] for i in range(0, len(text), n)] if text else []
 
 
-class LiveAgent(_RealtimeBase):
+class LiveAgent(_VoiceAgentBase):
     """GPT-Live-1 で会議に参加する進行役（`mode="conversation"` なら会話相手）."""
 
     MODES = ("off", "facilitator", "conversation")
@@ -151,8 +151,6 @@ class LiveAgent(_RealtimeBase):
         self._last_input_at = 0.0
         self._seen_types: set[str] = set()
         self._reconnect_lock = threading.Lock()
-        # Realtime 版の「中断された介入」。Live では常に None（WP8 で参照ごと消す）
-        self._pending_intervention: dict | None = None
 
     # ------------------------------------------------------------ 状態
 
@@ -319,12 +317,10 @@ class LiveAgent(_RealtimeBase):
 
     def trigger(self, *, topics=None, drift_reason=None, invite_target=None,
                 fact_correction=None, manual_request=None, summary_focus=None,
-                af_presentation=None, recent_agent_texts=None, **_ignored):
+                af_presentation=None, recent_agent_texts=None):
         """採択済みの介入を GPT-Live に話させる.
 
         文脈（直近の発話）を thinking、介入の指示を instructions として送る。
-        `**_ignored` は Realtime 版にあった hold_playback / retry_intervention /
-        is_retry を受け流すためのもの（WP2 で呼び出し側から消す）。
         """
         if not self._connected or not self.enabled or self.ws is None:
             return

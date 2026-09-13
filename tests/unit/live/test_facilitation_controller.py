@@ -268,12 +268,10 @@ def test_expired_manual_is_suppressed():
 # ---------------------------------------------------------------------------
 
 class _FakeAgent:
-    def __init__(self, *, mode="facilitator", pending_count=0, trigger_n=10,
-                 pending_intervention=None):
+    def __init__(self, *, mode="facilitator", pending_count=0, trigger_n=10):
         self.mode = mode
         self.pending_count = pending_count
         self.trigger_n = trigger_n
-        self._pending_intervention = pending_intervention
 
 
 def test_build_candidates_does_not_mutate_pending():
@@ -334,16 +332,6 @@ def test_build_candidates_never_includes_stall():
     agent = _FakeAgent(pending_count=1)
     cands = _build_candidates(pend, agent, now=now)
     assert all(c.kind != "stall" for c in cands)
-
-
-def test_build_candidates_retry_from_pending_intervention():
-    now = time.monotonic()
-    pend = _PendingInterventions()
-    agent = _FakeAgent(pending_intervention={"delivered": "中断された指摘",
-                                              "created_at": now})
-    cands = _build_candidates(pend, agent, now=now)
-    retry = [c for c in cands if c.kind == "retry"]
-    assert retry and retry[0].brief == "中断された指摘"
 
 
 def test_build_candidates_manual_from_pending_call():
@@ -631,14 +619,16 @@ def test_normal_adapter_invite_held_during_global_cooldown():
 def test_barge_adapter_discards_drift_during_global_cooldown():
     """cooldown中のdriftは旧挙動どおり消費し、後で古い脱線介入を出さない."""
     now = time.monotonic()
-    pend = _PendingInterventions(drift_reason="脱線", drift_count=3)
-    agent = _FakeAgent(pending_intervention={"delivered": "中断介入", "created_at": now})
+    pend = _PendingInterventions(drift_reason="脱線", drift_count=3,
+                                 last_drift_request_at=now)   # 鮮度切れではなく cooldown で落とす
+    agent = _FakeAgent()
 
-    decision, _ctrl, _cands, _latency = _barge(
+    decision, ctrl, _cands, _latency = _barge(
         agent, pend, _FakeProactivityState(), now=now,
         last_intervention_at=now, cooldown=25.0)
 
-    assert decision.reason == "retry"
+    assert decision.reason == "hold"
+    assert ctrl is not None and ctrl.suppressed[0]["code"] == "cooldown_global"
     assert pend.drift_reason is None
 
 
@@ -671,7 +661,7 @@ def test_content_dedup_policy_scope():
     """内容dedupは brief=内容そのもの の drift/summarize だけに掛かる."""
     assert policy_for("drift").content_dedup_sec > 0
     assert policy_for("summarize").content_dedup_sec > 0
-    for kind in ("fact", "manual", "retry", "silence", "invite",
+    for kind in ("fact", "manual", "silence", "invite",
                  "conversation", "af_l1", "af_l2"):
         assert policy_for(kind).content_dedup_sec == 0.0, kind
 

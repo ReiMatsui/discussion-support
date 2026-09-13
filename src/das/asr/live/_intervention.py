@@ -442,16 +442,6 @@ def _build_candidates(
             payload={"drift_count": pending.drift_count},
         ))
 
-    pi = getattr(agent, "_pending_intervention", None)
-    if pi:
-        cands.append(InterventionCandidate(
-            id="retry",
-            kind="retry",
-            brief=str(pi.get("delivered", "")),
-            created_at=float(pi.get("created_at", now)),
-            interrupt_policy="wait_for_pause",
-        ))
-
     # summarize 抑止規則 (設計 88f9a78): pending に af_l2 が保留されている間は
     # summarize 候補を生成しない (af_l2 が整理介入を代表する)。priority は変えない。
     # af 候補は --af 有効時しか存在しないため、ルールベースモードの挙動は不変。
@@ -696,7 +686,7 @@ class _InterventionReviewRecorder:
 # 物理レーン分割（§4）。barge-in は echo/partner ガード前に評価し、
 # 通常トリガーはフロア返却後に評価する。Controller はそれぞれのレーンの
 # 候補集合から「採否」だけを決める（固定優先順位の置換, Phase2）。
-_BARGEIN_KINDS = ("fact", "manual", "drift", "retry")
+_BARGEIN_KINDS = ("fact", "manual", "drift")
 # af_l1/af_l2 は wait_for_pause なので通常レーン。AF 無効時は候補自体が出ない。
 # Phase3: stall は廃止（Speaker から「介入不要」判断を外したため）。
 _NORMAL_KINDS = ("summarize", "silence", "invite", "conversation", "af_l1", "af_l2")
@@ -738,7 +728,7 @@ def _controller_barge_in_decision(
 ) -> tuple[_BargeInDecision, FacilitationDecision | None, list[InterventionCandidate], float]:
     """barge-in レーンの採否を Controller に委ねる（固定優先順位の置換）.
 
-    既存checkerが作った候補(fact/drift/retry)を入力にし、Controller が
+    既存checkerが作った候補(fact/manual/drift)を入力にし、Controller が
     「今どれを採るか／黙るか」を決める。戻り値は既存 dispatch がそのまま使える
     ``_BargeInDecision`` へ逆変換したもの。物理タイミング（pause/partner/echo）は
     Controller の eligibility が判定する（§4）。
@@ -817,7 +807,10 @@ def _controller_barge_in_decision(
     if chosen.kind == "drift":
         return (_BargeInDecision("drift", drift_reason=chosen.brief),
                 decision, cands, latency_ms)
-    return _BargeInDecision("retry"), decision, cands, latency_ms
+    # _BARGEIN_KINDS 以外は候補に入らない。ここに来たら候補集合の不整合なので見送る。
+    print(f"# [diag] controller: バージイン候補に無い種別 kind={chosen.kind}（見送り）",
+          flush=True)
+    return _BargeInDecision("hold"), decision, cands, latency_ms
 
 
 def _controller_normal_decision(

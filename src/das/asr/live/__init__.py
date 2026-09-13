@@ -24,8 +24,8 @@ das連携フック:
     __init__.py       STTBackend Protocol
     _soniox.py        Soniox 実装
   agents/             AIエージェント群
-    _realtime.py      OpenAI Realtime API ファシリテーター
-    _partner.py       Realtime API 議論パートナー
+    _live.py          GPT-Live ファシリテーター / 議論パートナー
+    _notes.py         介入の指示文の組み立て（純関数）
     _simulator.py     Chat+TTS シミュレーション
 """
 from __future__ import annotations
@@ -86,7 +86,7 @@ def post_system(text: str) -> None:
                                  "consensus_needed", "healthy", "imbalanced"]),
               help="シミュレーションの議論パターン")
 @click.option("--debate", metavar="TOPIC", default=None,
-              help="AI会話相手と議論（Realtime APIで音声対話）")
+              help="AI会話相手と議論（GPT-Live で音声対話）")
 @click.option("--debate-voice", default="cedar", help="会話相手の声（GPT-Live: marin / cedar）")
 @click.option("--topic", metavar="TOPIC", default=None,
               help="人間同士の議論の議題（AI有効時の脱線判定の基準。"

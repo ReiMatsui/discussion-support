@@ -27,7 +27,7 @@ class _FakeAgent:
     def __init__(self, mode="facilitator"):
         self.mode = mode
         self.voice = "marin"
-        self.model = "gpt-realtime-2"
+        self.model = "gpt-live-1"
         self.trigger_n = 10
         self._connected = False
         self._conn_error = None
@@ -148,7 +148,7 @@ def test_api_snapshot_exposes_intervention_settings():
         "enabled": True,
         "proactivity": "controlled",
         "trigger_n": 10,
-        "model": "gpt-realtime-2",
+        "model": "gpt-live-1",
         "agent_active": True,
         "manual_call": None,
     }

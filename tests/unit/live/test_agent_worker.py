@@ -1,6 +1,6 @@
 """_run_agent_worker の介入リトライ集約（Bug 3）の回帰テスト.
 
-実 RealtimeAgent/Partner/SessionState を使わず、最小限のフェイクで
+実 LiveAgent/LivePartner/SessionState を使わず、最小限のフェイクで
 ワーカーループの分岐挙動だけを検証する。
 """
 from __future__ import annotations
@@ -28,7 +28,6 @@ class FakeAgent:
         self.mode = mode
         self.ai_speaking = False
         self._responding = False
-        self._pending_intervention: dict | None = None
         self.trigger_n = 10
         self.in_echo_window = False
         self._pending: list = []
@@ -46,21 +45,16 @@ class FakeAgent:
 
     def trigger(self, *, topics=None, drift_reason=None, invite_target=None,
                 fact_correction=None, manual_request=None,
-                summary_focus=None, retry_intervention=None,
-                is_retry=False, recent_agent_texts=None,
-                af_presentation=None, hold_playback=False) -> None:
+                summary_focus=None, recent_agent_texts=None,
+                af_presentation=None) -> None:
         self.trigger_calls.append({"topics": topics, "drift_reason": drift_reason,
                                    "invite_target": invite_target,
                                    "fact_correction": fact_correction,
                                    "manual_request": manual_request,
                                    "summary_focus": summary_focus,
-                                   "retry_intervention": retry_intervention,
-                                   "is_retry": is_retry,
                                    "recent_agent_texts": recent_agent_texts,
-                                   "af_presentation": af_presentation,
-                                   "hold_playback": hold_playback})
-        # 実エージェントの挙動を模倣: トリガーで介入と保留発話を消費
-        self._pending_intervention = None
+                                   "af_presentation": af_presentation})
+        # 実エージェントの挙動を模倣: トリガーで保留発話を消費
         self._pending.clear()
 
     def interrupt(self) -> None:
@@ -182,65 +176,8 @@ def _run_worker_briefly(state, *, until, timeout=3.0) -> None:
     t.join(timeout=2.0)
 
 
-def test_retry_waits_while_partner_speaking():
-    """中断された介入の再送も、パートナー発話中は待つ."""
-    agent = FakeAgent()
-    partner = FakePartner()
-    partner.ai_speaking = True
-    agent._pending_intervention = {
-        "delivered": "中断された指摘", "created_at": time.monotonic(), "attempts": 1,
-    }
-    state = FakeState(agent, partner)
-
-    _run_worker_briefly(state, until=lambda: False, timeout=1.0)
-
-    assert agent.trigger_calls == []
-
-
-def test_retry_fires_after_pause():
-    """中断された介入は、発話の切れ目ができたら再送できる."""
-    agent = FakeAgent()
-    agent._pending_intervention = {
-        "delivered": "中断された指摘", "created_at": time.monotonic(), "attempts": 1,
-    }
-    state = FakeState(agent, None)
-    state._last_utt_time[0] = time.monotonic() - 10
-
-    _run_worker_briefly(state, until=lambda: bool(agent.trigger_calls))
-
-    assert agent.trigger_calls
-
-
-def test_retry_waits_for_longer_pause_than_fact():
-    """再送はしつこく見えやすいので、短い間では待つ."""
-    agent = FakeAgent()
-    agent._pending_intervention = {
-        "delivered": "中断された指摘", "created_at": time.monotonic(), "attempts": 1,
-    }
-    state = FakeState(agent, None)
-    state._last_utt_time[0] = time.monotonic() - 1.0
-
-    _run_worker_briefly(state, until=lambda: False, timeout=1.0)
-
-    assert agent.trigger_calls == []
-
-
-def test_retry_waits_while_agent_busy():
-    """agentが応答生成中(_responding)はリトライしない."""
-    agent = FakeAgent()
-    agent._responding = True
-    agent._pending_intervention = {
-        "delivered": "x", "created_at": time.monotonic(), "attempts": 1,
-    }
-    state = FakeState(agent, None)
-
-    _run_worker_briefly(state, until=lambda: False, timeout=1.0)
-
-    assert agent.trigger_calls == []
-
-
-def test_no_retry_when_no_pending_intervention():
-    """保留介入がなければ（沈黙も短ければ）トリガーしない."""
+def test_no_trigger_without_pending_requests():
+    """介入の候補が何もなければ（沈黙も短ければ）トリガーしない."""
     agent = FakeAgent()
     state = FakeState(agent, None)
 
@@ -594,7 +531,6 @@ def test_fact_request_triggers_before_drift():
     assert agent.trigger_calls
     assert agent.trigger_calls[0]["fact_correction"]["correction"].startswith("指標Xは")
     assert agent.trigger_calls[0]["drift_reason"] is None
-    assert agent.trigger_calls[0]["retry_intervention"] is False
     assert state.intervention_events[0]["reason"] == "fact"
     assert state.intervention_events[0]["metadata"]["timing"]["kind"] == "fact"
     assert state.intervention_events[0]["metadata"]["timing"]["policy"] == "fact_freshness_pause"
@@ -1293,11 +1229,11 @@ def test_every_normal_spec_matches_the_agent_trigger_signature():
     import inspect
 
     from das.asr.live._intervention import _NORMAL_SPECS
-    from das.asr.live.agents._realtime import RealtimeAgent
-    accepted = set(inspect.signature(RealtimeAgent.trigger).parameters) - {"self"}
+    from das.asr.live.agents._live import LiveAgent
+    accepted = set(inspect.signature(LiveAgent.trigger).parameters) - {"self"}
     for kind, spec in _NORMAL_SPECS.items():
         unknown = set(spec.trigger) - accepted
-        assert not unknown, f"{kind} の trigger 引数が RealtimeAgent に無い: {unknown}"
+        assert not unknown, f"{kind} の trigger 引数が LiveAgent に無い: {unknown}"
 
 
 def test_normal_specs_cover_every_firing_reason():

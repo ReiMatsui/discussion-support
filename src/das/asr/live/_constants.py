@@ -1,7 +1,6 @@
 """リアルタイム議事録モジュール定数."""
 from __future__ import annotations
 
-import os
 import re
 
 SR = 16000
@@ -358,44 +357,6 @@ intervene=false の目安（迷ったら false を選ぶ）:
 JSON1つのみ出力。形式:
 {{"intervene": true/false, "focus": "介入するなら焦点を短く。しないなら空文字"}}"""
 
-_PROMPT_FACILITATOR = """\
-あなたは会議のファシリテーターAIです。
-参加者の議論を聞いて、必要な時だけ介入してください。
-
-介入すべき場面:
-- 議論が行き詰まった時（新しい視点を提案）
-- 重要な論点が見落とされている時
-- 議論が脱線した時（元のテーマに戻す提案）
-- 合意形成が必要な時（要約して確認）
-- 高確信の事実誤りがあり、短く補足しないと議論がずれる時
-
-あなたが呼ばれるのは、介入すべきだと既に判断された場面だけです。
-「話すかどうか」は考えず、与えられた文脈に対して簡潔に一言だけ述べてください。
-人間の議論を尊重し、価値を足す最小限の発言に留めてください。
-足すべき価値が薄いと感じたら、無理に整理せず一言の相槌程度に留めて構いません。
-発言は日本語で、30秒以内に収まる長さにしてください。
-最初の論点に固着しないでください。会話の論点が自然に移った場合は、
-新しい流れを尊重し、元の話題へ戻す必要はありません。
-参加者がファシリテーターやAIに話しかけている場合は、脱線扱いで戻すのではなく、
-必要ならその問いに短く答えてください。
-
-前置きや「（介入）」のような記号は付けず、本題の発言だけを短く話してください。"""
-
-_PROMPT_CONVERSATION = """\
-あなたは会議に参加しているAIアシスタントです。
-参加者と自然に会話してください。質問されたら必ず答えてください。
-簡潔に、日本語で返答してください（15秒以内に収まる長さ）。
-会議の文脈を踏まえた上で、役に立つ回答を心がけてください。"""
-
-# 2026-07: gpt-realtime-2.1 に更新 (割り込み挙動・無音/ノイズ処理の改善)。
-# 問題があれば環境変数 OPENAI_REALTIME_MODEL=gpt-realtime-2 で即ロールバック可。
-REALTIME_MODEL = os.environ.get("OPENAI_REALTIME_MODEL", "gpt-realtime-2.1")
-
-
-def realtime_url(model: str | None = None) -> str:
-    return f"wss://api.openai.com/v1/realtime?model={model or REALTIME_MODEL}"
-
-
 AGENT_SPEAKER = "ファシリテーター"   # recordsに使うスピーカーキー
 UNSURE_SPEAKER = "?"   # 短い発話で話者を確定できないときのキー（表示は「未確定」）
 # pyannote Live-1 のようにセッション序盤でラベルが揺れる（一人の発話が複数の
@@ -559,7 +520,6 @@ SEND_BACKLOG_WARN_MS = 5000
 _AGENT_TRIGGER = 10           # N発話ごとに応答検討(facilitator)
 _AGENT_DEBATE_SILENCE = 15.0  # N秒沈黙で応答検討(debate — Partner会話が主なので長め)
 _AGENT_CONV_SILENCE = 1.5     # N秒沈黙で応答(conversation — 発話断片をまとめる)
-_INTERRUPT_MIN_CHARS = 8      # ファシリテーター割り込みの最小文字数
 
 # --- 並列ドリフト（脱線）検出 ---
 _DRIFT_CHECK_INTERVAL = 3     # ドリフトチェックの発話間隔（短い発話に過敏にならない）
@@ -612,7 +572,6 @@ _FACTCHECK_PENDING_TTL = 30.0 # キュー内の補正が古くなったら会話
 # --- 介入タイミング ---
 _INTERVENTION_PAUSE_FACT = 0.9   # 事実補正: 鮮度優先。ただし発話には被せない
 _INTERVENTION_PAUSE_DRIFT = 1.8  # 脱線: 会話の自律的な復帰を少し待つ
-_INTERVENTION_PAUSE_RETRY = 2.4  # 再送: しつこさを避け、十分な間がある時だけ
 _INTERVENTION_PAUSE_COUNT = 1.5  # 発話数整理: 参加者の連続発話を遮らない
 _INTERVENTION_PAUSE_MANUAL = 1.0  # 手動呼び出し: 発話には被せないが drift/invite より早く反応
 
@@ -663,21 +622,6 @@ _BACKCHANNEL_RE = re.compile(
     r'[\s、。,.!?！？うんはいええそっかなるほど確かに]*$',
     re.IGNORECASE,
 )
-AGENT_VOICES = ["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse", "marin", "cedar"]
-
-_PROMPT_DEBATE_PARTNER = """\
-あなたは会議の参加者です。もう一人の参加者（人間）と議題について議論してください。
-
-ルール:
-- 自然な日本語で話してください
-- 自分の意見を持ち、根拠を示してください
-- 相手の意見に同意する場合も反論する場合も、理由を述べてください
-- 1回の発言は15秒以内に収まる長さにしてください
-- ファシリテーターが介入したら、その指摘を受け止めて議論に反映してください
-- 相手が雑談や別の話題を振ってきたら、自然に付き合ってください。\
-議題に無理に戻す必要はありません。人間同士の会話のように柔軟に対応してください"""
-
-
 def fmt_ts(ms: int | None) -> str:
     if ms is None:
         return "--:--"

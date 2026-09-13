@@ -2,7 +2,7 @@
 
 ログ接頭辞の規約（Phase 3 R4）:
   # [state]   ... エージェントの状態遷移（RESPONDING/SPEAKING/INTERRUPTED/IDLE等）
-  # [trigger] ... ファシリテーターのトリガー理由（drift/retry/summarize/silence/invite/skip）
+  # [trigger] ... ファシリテーターのトリガー理由（drift/summarize/silence/invite/skip）
   # [drift]   ... 並列ドリフト（脱線）検出の動作
   # [diag]    ... 定期的な状態ダンプ・スキップ理由などの診断
 """
@@ -1452,8 +1452,6 @@ class _AgentWorker:
                 or "直近の議論整理")
         elif decision.reason == "drift" and decision.drift_reason is not None:
             legacy = _legacy_decision_brief("drift", decision.drift_reason)
-        elif decision.reason == "retry":
-            legacy = _legacy_decision_brief("retry", "中断された介入を再送")
         else:
             legacy = _legacy_decision_brief(decision.reason)
         if ctrl is not None:
@@ -1477,8 +1475,7 @@ class _AgentWorker:
                 policy="fact_freshness_pause")
             print(f"# [trigger] fact: {correction}", flush=True)
             _log_intervention_event(s, "fact", correction, timing=timing)
-            agent.trigger(topics=topics, fact_correction=decision.fact,
-                          retry_intervention=False)
+            agent.trigger(topics=topics, fact_correction=decision.fact)
             self.pending.facts.popleft()
             self.note_intervention(time.monotonic(), "fact", correction)
             return True
@@ -1519,18 +1516,6 @@ class _AgentWorker:
                           recent_agent_texts=_recent_agent_texts(s))
             self.pending.clear_drift()
             self.note_intervention(time.monotonic(), "drift", decision.drift_reason)
-            return True
-        if decision.reason == "retry":
-            pending_intervention = agent._pending_intervention or {}
-            timing = _intervention_timing_metadata(
-                kind="retry", now=now, silence_elapsed=silence_elapsed,
-                pause_required=policy_for("retry").pause,
-                queued_at=float(pending_intervention.get("created_at", now)),
-                policy="retry_extra_pause")
-            print("# [trigger] retry: 中断された介入を再送（ガードバイパス）", flush=True)
-            _log_intervention_event(s, "retry", "中断された介入を再送", timing=timing)
-            agent.trigger(topics=topics, is_retry=True)
-            self.note_intervention(time.monotonic(), "retry", "中断された介入を再送")
             return True
         return False
 

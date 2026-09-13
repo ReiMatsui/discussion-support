@@ -228,7 +228,7 @@ def test_build_candidates_includes_af():
     pending = _PendingInterventions()
     pending.af = {"kind": "af_l1", "brief": "提示", "af_text": "[反論] X",
                   "target_speaker": "A", "created_at": now}
-    agent = SimpleNamespace(mode="facilitator", pending_count=0, _pending_intervention=None)
+    agent = SimpleNamespace(mode="facilitator", pending_count=0)
     cands = _build_candidates(pending, agent, now=now)
     af = [c for c in cands if c.kind == "af_l1"]
     assert len(af) == 1
@@ -240,14 +240,14 @@ def test_no_af_candidate_when_pending_empty():
     """pending.af が無ければ af 候補は出ない (AF 無効時の不変性)。"""
     now = time.monotonic()
     pending = _PendingInterventions()
-    agent = SimpleNamespace(mode="facilitator", pending_count=0, _pending_intervention=None)
+    agent = SimpleNamespace(mode="facilitator", pending_count=0)
     cands = _build_candidates(pending, agent, now=now)
     assert not any(c.kind in ("af_l1", "af_l2") for c in cands)
 
 
 def _silence_candidate(silence_summarize, partner_present):
     now = time.monotonic()
-    agent = SimpleNamespace(mode="facilitator", pending_count=3, _pending_intervention=None)
+    agent = SimpleNamespace(mode="facilitator", pending_count=3)
     cands = _build_candidates(_PendingInterventions(), agent, now=now,
                               silence_summarize=silence_summarize,
                               partner_present=partner_present)
@@ -273,7 +273,7 @@ def test_silence_threshold_respects_profile_with_partner():
 def test_pending_af_l2_suppresses_summarize():
     """保留中 af_l2 がある間は summarize 候補を生成しない (設計88f9a78)。"""
     now = time.monotonic()
-    agent = SimpleNamespace(mode="facilitator", pending_count=0, _pending_intervention=None)
+    agent = SimpleNamespace(mode="facilitator", pending_count=0)
     # summarize と af_l2 が両方保留
     pending = _PendingInterventions()
     pending.summarize = {"focus": "整理", "created_at": now}
@@ -296,7 +296,7 @@ def test_controller_normal_decision_maps_af():
     pending = _PendingInterventions()
     pending.af = {"kind": "af_l1", "brief": "提示", "af_text": "[反論] X",
                   "target_speaker": "A", "created_at": now}
-    agent = SimpleNamespace(mode="facilitator", pending_count=0, _pending_intervention=None)
+    agent = SimpleNamespace(mode="facilitator", pending_count=0)
     controller = FacilitationController()
     decision, _ctrl, _cands, _lat = _controller_normal_decision(
         controller, pending=pending, agent=agent, now=now,
@@ -323,7 +323,7 @@ def test_controller_normal_decision_survives_invalid_candidate_id():
                 valid_for_epoch=inp.snapshot_epoch, deadline_ms=0,
                 suppressed=(), reason="bogus")
 
-    agent = SimpleNamespace(mode="facilitator", pending_count=0, _pending_intervention=None)
+    agent = SimpleNamespace(mode="facilitator", pending_count=0)
     decision, _ctrl, _cands, _lat = _controller_normal_decision(
         _BogusController(), pending=pending, agent=agent, now=now,
         silence_elapsed=3.0, silence_summarize=None, partner_present=False,

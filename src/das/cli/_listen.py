@@ -169,12 +169,12 @@ def listen_soniox(
 
 
 # --no-intervention が下層へ渡すフラグ（順序: 先頭に置き、--soniox-args の
-# 明示上書きを許す）。--no-agent=Realtimeエージェント停止、--no-llm=論点抽出
+# 明示上書きを許す）。--no-agent=AIエージェント停止、--no-llm=論点抽出
 # 等の常駐LLMワーカー停止。
 _NO_INTERVENTION_FLAGS = ("--no-agent", "--no-llm")
 
 # ライブ介入(グラフレーン)の同一内容再提示の抑止窓（秒）。
-# _facilitation.py の _INTERVENTION_CONTENT_DEDUP_SEC（Realtime レーン）と
+# _facilitation.py の _INTERVENTION_CONTENT_DEDUP_SEC（介入レーン）と
 # 同じ思想・同じ 10 分。会話が同じ状態に留まる間の再提示を止め、
 # 窓を過ぎたら（本当に再度価値があれば）再提示を許す。
 _PRESENT_DEDUP_SEC = 600.0

@@ -61,10 +61,13 @@ uv run python -m das.asr.live --no-vp
 
 ---
 
-## 2. AIファシリテーター（Realtime API v2）
+## 2. AIファシリテーター（GPT-Live）
 
 AIファシリテーターは既定で有効。脱線したら本題に戻し、発言の少ない人に
 声をかける。起動後はブラウザUIで3モードを切り替えられる。
+話す層は GPT-Live（`gpt-live-1`、全二重）で、部屋の音声を常時聞いている。
+参加者が話し始めると AI は自分で話をやめ、呼びかけられれば短く答える
+（詳細: `docs/research/gpt_live_api_2026-09.md`、設計: `docs/design/live_native_plan_2026-09.md`）。
 
 ### 3つのモード
 
@@ -84,8 +87,8 @@ uv run python -m das.asr.live --topic 'AIツール導入の是非'
 # AIと音声で議論する相手を付ける（AIと会話モードで起動）
 uv run python -m das.asr.live --debate 'AIツール導入の是非'
 
-# 声を変える（alloy/ash/ballad/coral/echo/sage/shimmer/verse/marin/cedar）
-uv run python -m das.asr.live --agent-voice sage
+# 声を変える（marin / cedar。既定: ファシリテーター marin、会話相手 cedar）
+uv run python -m das.asr.live --agent-voice cedar
 
 # AIファシリテーターを使わない
 uv run python -m das.asr.live --no-agent

@@ -1,6 +1,6 @@
-"""RealtimeAgent / ConversationPartner の共通基底クラス（Phase 3 R3）.
+"""LiveAgent / LivePartner の共通基底クラス（Phase 3 R3 で導入、WP8 で GPT-Live 専用に）.
 
-両エージェントで重複していた再生キュー・声紋・受信ループ等の実装を集約する。
+再生キュー・声紋（エコー除去）・受信ループ等、話す層に依存しない実装を集約する。
 サブクラスは固有の _handle / セッション設定 / 送信系メソッドのみ持つ。
 """
 from __future__ import annotations
@@ -21,8 +21,8 @@ if TYPE_CHECKING:
     from .._voice_profiles import VoiceProfiles
 
 
-class _RealtimeBase:
-    """Realtime API ベースの音声エージェントの共通実装.
+class _VoiceAgentBase:
+    """WebSocket 型の音声エージェント（GPT-Live）の共通実装.
 
     サブクラスが __init__ で以下の属性を用意することを前提とする:
       _audio_q / _play_epoch / ai_speaking / _last_speech_end /
@@ -155,7 +155,7 @@ class _RealtimeBase:
     # --- WebSocket受信 ---
 
     def _handle(self, ev: dict):  # pragma: no cover - サブクラスで実装
-        """Realtimeイベントを処理する。サブクラスで必ず実装する。"""
+        """受信イベントを処理する。サブクラスで必ず実装する。"""
         raise NotImplementedError
 
     def _recv_loop(self):
