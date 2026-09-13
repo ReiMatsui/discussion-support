@@ -46,8 +46,13 @@ _APPEND_MAX_CHARS = 600          # 500 トークンの目安（日本語）
 _SPEECH_END_GAP_SEC = 1.2        # ストリーム上でこれ以上無音が続いたら発話終了
 _STREAM_STALL_SEC = 3.0          # delta 自体が止まったときの保険
 _NO_SPEECH_GIVEUP_SEC = 15.0     # 指示を送っても話し始めないときに諦めるまで
-_SILENCE_RMS = 200.0
-_CLOCK_IDLE_SEC = 0.3          # マイク入力がこの秒数途切れたら無音で時間を進める（100ms ブロックと競合しない）             # int16 の RMS。これ未満は無音（約 -44 dBFS）
+_SILENCE_RMS = 200.0             # int16 の RMS。これ未満は無音（約 -44 dBFS）
+_CLOCK_IDLE_SEC = 0.3            # マイク入力がこの秒数途切れたら無音で時間を進める
+_INPUT_BACKLOG_MAX = 30          # 送信待ちの室内音声（100ms 単位）。超えた古い分は捨てる（3秒）
+_TRANSCRIPT_QUIET_SEC = 0.3      # 文字が止まってからでないと発話を確定しない（文字は音声に遅れる）
+_RESUME_GRACE_SEC = 4.0          # 直前の発話の終端からこの秒数内の再開は同じ発話の続きとみなす
+_PENDING_KEEP = 40               # 溜めておく発話の上限。指示が長く出ないと際限なく増える
+_CONTEXT_MAX_UTTS = 15           # 指示に添える発話の上限（モデルは室内の音声も聞いている）
 
 PROMPT_FACILITATOR = """\
 あなたは対面会議の進行役AIです。日本語で話します。
@@ -56,6 +61,7 @@ PROMPT_FACILITATOR = """\
 1. [指示] で始まる指示が届いたとき。その指示に沿って、1〜2文で短く話します。
 2. 参加者があなた（進行役・AI・ファシリテーター）に直接呼びかけたとき。
    「はい」など一言か、聞かれたことに1文で短く答えます。
+   議題の中に「AI」という言葉が出てくるだけでは呼びかけではありません。
 それ以外では、参加者が何を話していても口を挟みません。
 参加者が話し始めたら、自分の発言の途中でもすぐにやめて聞きます。
 前置きや記号は付けず、本題だけを落ち着いた口調で話します。"""
@@ -168,6 +174,13 @@ class LiveAgent(_VoiceAgentBase):
         # こちらの都合で止めた後、モデルがまだ流している残りを捨てる（無音1.2秒で解除）
         self._discarding = False
         self._discard_silent_ms = 0
+        self._last_transcript_at = 0.0           # 文字が最後に届いた時刻（壁時計）
+        self._last_turn_end_at = 0.0             # 直前の発話を確定した時刻
+        self._last_turn_requested = False
+        self.last_unrequested_speech_at = 0.0    # 指示なしで話し始めた直近の時刻（呼びかけ応答の検出用）
+        self._finish_lock = threading.Lock()     # _finish_turn の二重実行を防ぐ
+        self._in_q: queue.Queue[bytes] = queue.Queue()   # 室内音声の送信待ち
+        self._playback_restart_at = 0.0
 
     # ------------------------------------------------------------ 状態
 
@@ -284,7 +297,12 @@ class LiveAgent(_VoiceAgentBase):
                 if ev.get("type") == "session.closed":
                     self._on_closed(ev, stale=True)
                 continue
-            self._handle(ev)
+            try:
+                self._handle(ev)
+            except Exception as e:
+                # 1イベントの処理失敗で受信スレッドを死なせない。死ぬと _connected が
+                # True のまま永久に沈黙する（レビュー 2026-09-13）
+                print(f"# {self._LABEL}: イベント処理エラー ({ev.get('type')}: {e})", flush=True)
         if gen == self._session_gen:
             self._connected = False
 
@@ -345,15 +363,15 @@ class LiveAgent(_VoiceAgentBase):
               f"開き直し {self.last_reopen_ms:.0f}ms）", flush=True)
 
     def _forget_ai_voice(self) -> None:
-        """登録済みの AI 声紋を捨て、次の発話から登録し直す（声の変更時）."""
+        """AI 声紋を次の発話から登録し直す（声の変更時）.
+
+        古い声紋は新しい声紋で上書きされるまで残す。消してしまうと、直前に
+        再生済みで Soniox の確定待ちになっている旧声のエコーが人の声として
+        通ってしまう（レビュー 2026-09-13）。
+        """
         self._ai_voice_enrolled = False
         self._ai_voice_buf = []
         self._ai_voice_sec = 0.0
-        tracker = self._voice_tracker
-        if tracker is not None and self.AI_VOICE_KEY in tracker.profiles:
-            with tracker._lock:
-                tracker.profiles.pop(self.AI_VOICE_KEY, None)
-                tracker._active_keys.discard(self.AI_VOICE_KEY)
 
     def close(self):
         self._close_session()
@@ -362,17 +380,37 @@ class LiveAgent(_VoiceAgentBase):
     # ------------------------------------------------------------ 音声入力
 
     def feed_audio(self, pcm_16k: bytes) -> None:
-        """室内の音声（16kHz PCM16）を常に送る。全二重の割り込み検出はこれが前提."""
-        if not self._connected:
+        """室内の音声（16kHz PCM16）を送信待ちに積む。全二重の割り込み検出はこれが前提.
+
+        マイクのコールバックから呼ばれるので、ここでは WebSocket に触らない
+        （送信が詰まるとコールバックが遅れ、マイク入力そのものが欠ける）。
+        送るのは送信スレッド（_start_clock）。
+        """
+        if not self._connected or not pcm_16k:
             return
-        out = _resample_16_to_24(pcm_16k)
-        if out:
-            self._last_input_at = time.monotonic()
-            self._send({"type": "session.input_audio.append",
-                        "audio": base64.b64encode(out).decode("ascii")})
+        self._in_q.put(pcm_16k)
+        while self._in_q.qsize() > _INPUT_BACKLOG_MAX:
+            with contextlib.suppress(queue.Empty):
+                self._in_q.get_nowait()   # 溜まりすぎた古い音声は捨てる（実時間に追従）
+
+    def _flush_input(self, max_items: int = 100) -> int:
+        """送信待ちの室内音声を送る。送った個数を返す（送信スレッドとテストから）."""
+        n = 0
+        while n < max_items:
+            try:
+                pcm = self._in_q.get_nowait()
+            except queue.Empty:
+                break
+            out = _resample_16_to_24(pcm)
+            if out and self._connected:
+                self._last_input_at = time.monotonic()
+                self._send({"type": "session.input_audio.append",
+                            "audio": base64.b64encode(out).decode("ascii")})
+            n += 1
+        return n
 
     def _start_clock(self) -> None:
-        """実音声が来ない間、100ms ごとに無音を送ってセッションの時間を進める.
+        """室内音声の送信スレッド。実音声が来ない間は無音を送って時間を進める.
 
         GPT-Live の時間は入力音声の長さで進むので、音声が途切れると指示や文脈の
         注入が「予定」のまま実行されない。マイクが止まったときの保険。
@@ -381,7 +419,8 @@ class LiveAgent(_VoiceAgentBase):
 
         def _run():
             while not self._stop.is_set():
-                time.sleep(0.1)
+                if not self._flush_input():
+                    time.sleep(0.02)
                 if self._connected and time.monotonic() - self._last_input_at >= _CLOCK_IDLE_SEC:
                     self._last_input_at = time.monotonic()
                     self._send({"type": "session.input_audio.append", "audio": silence})
@@ -395,10 +434,13 @@ class LiveAgent(_VoiceAgentBase):
             return
         with self._state_lock:
             self._pending.append({"speaker": speaker, "text": text, "_count": trigger_count})
+            if len(self._pending) > _PENDING_KEEP:
+                del self._pending[:len(self._pending) - _PENDING_KEEP]
 
     def trigger(self, *, topics=None, drift_reason=None, invite_target=None,
                 fact_correction=None, manual_request=None, summary_focus=None,
-                af_presentation=None, recent_agent_texts=None) -> bool:
+                af_presentation=None, recent_agent_texts=None,
+                silence_sec=None) -> bool:
         """採択済みの介入を GPT-Live に話させる.
 
         文脈（直近の発話）を thinking、介入の指示を instructions として送る。
@@ -413,17 +455,20 @@ class LiveAgent(_VoiceAgentBase):
             if self._responding or self.ai_speaking:
                 return False
             has_intent = any((drift_reason, invite_target, fact_correction,
-                              manual_request, summary_focus, af_presentation))
+                              manual_request, summary_focus, af_presentation,
+                              silence_sec))
             if not self._pending and not has_intent:
                 return False
             self._responding = True
             snapshot = list(self._pending)
+            self._discarding = False      # 止めた直後でも新しい指示の声は通す
+        context_utts = snapshot[-_CONTEXT_MAX_UTTS:]
         conv = _notes.compose_trigger_notes(
-            _notes.format_utterance_context(snapshot), topics=topics,
+            _notes.format_utterance_context(context_utts), topics=topics,
             drift_reason=drift_reason, invite_target=invite_target,
             fact_correction=fact_correction, manual_request=manual_request,
             summary_focus=summary_focus, af_presentation=af_presentation,
-            recent_agent_texts=recent_agent_texts)
+            recent_agent_texts=recent_agent_texts, silence_sec=silence_sec)
         directive, context = _notes.split_directive_and_context(conv)
         directive = directive or "直近の議論を踏まえ、必要なら短く一言だけ述べてください。"
         ok = True
@@ -482,6 +527,7 @@ class LiveAgent(_VoiceAgentBase):
         self._voiced_ms_this_turn = 0
         if not requested:
             self.unrequested_turns += 1
+            self.last_unrequested_speech_at = time.monotonic()
 
     def _on_audio(self, ev: dict) -> None:
         chunk = ev.get("delta", "") or ev.get("audio", "")
@@ -509,9 +555,14 @@ class LiveAgent(_VoiceAgentBase):
             return                      # 話していない間の無音は捨てる
         if voiced:
             if not self._responding:
-                # こちらが求めていない発話（呼びかけへの応答）。受け皿を作って通す。
-                # 前の発話の終端がまだ再生中でも新しい発話として区切る
-                self._begin_turn(requested=False)
+                # こちらが求めていない発話。前の発話の終端がまだ再生中でも新しい
+                # 発話として区切る。ただし直前の発話の終端からすぐの再開（文の間の
+                # 長い間、人の声で止まった後の「続けます」）は同じ介入の続きとして
+                # 数える。呼びかけへの応答は unrequested として数える
+                now = time.monotonic()
+                continuation = (self._last_turn_requested
+                                and now - self._last_turn_end_at < _RESUME_GRACE_SEC)
+                self._begin_turn(requested=continuation)
                 with self._state_lock:
                     self._responding = True
             self._silent_run_ms = 0
@@ -534,18 +585,22 @@ class LiveAgent(_VoiceAgentBase):
                     self.on_speech_start()
         self._q_put(pcm)
         self.ai_speaking = True
-        if self._silent_run_ms >= _SPEECH_END_GAP_SEC * 1000:
+        if self._silent_run_ms >= _SPEECH_END_GAP_SEC * 1000 \
+                and time.monotonic() - self._last_transcript_at >= _TRANSCRIPT_QUIET_SEC:
+            # 文字は音声に遅れて届く。無音が続いていても文字が動いている間は待つ
             self._finish_turn()
 
     def _on_transcript(self, ev: dict) -> None:
         self._ai_text_buf += ev.get("delta", "")
         self._last_audio_at = time.monotonic()
+        self._last_transcript_at = self._last_audio_at
 
     def _on_delegation(self, ev: dict) -> None:
         did = (ev.get("delegation") or {}).get("id")
         if did:
             self._send({"type": "session.thinking.append", "delegation_id": did,
-                        "content": "追加の処理は不要です。進行役として今の会話に短く応じてください。"})
+                        "content": "追加の処理は不要です。呼びかけへの返事でなければ何も言わず、"
+                                   "呼びかけなら短く答えてください。"})
 
     def _on_closed(self, ev: dict, *, stale: bool = False) -> None:
         print(f"# {self._LABEL}: セッション終了（{ev.get('reason')}） usage={ev.get('usage')}",
@@ -565,34 +620,59 @@ class LiveAgent(_VoiceAgentBase):
         def _run():
             while not self._stop.is_set():
                 time.sleep(0.1)
-                if self._responding and not self.ai_speaking and self._speak_trigger_at \
-                        and time.monotonic() - self._speak_trigger_at > _NO_SPEECH_GIVEUP_SEC:
-                    self._speak_trigger_at = 0.0
-                    with self._state_lock:
-                        self._responding = False
-                    self._ai_text_buf = ""
-                    print(f"# {self._LABEL}: 指示から{_NO_SPEECH_GIVEUP_SEC:.0f}秒たっても"
-                          "話し始めないので待つのをやめます", flush=True)
-                    continue
-                # 通常の終端は _on_audio がストリーム時間で決める。ここは delta 自体が
-                # 止まったときの保険。
-                if (self.ai_speaking or self._responding) and self._last_audio_at \
-                        and time.monotonic() - self._last_audio_at > _STREAM_STALL_SEC \
-                        and self._audio_bytes_this_turn > 0 and self._audio_q.empty():
-                    self._finish_turn(end_reason="stall")
+                self._watchdog_tick()
         threading.Thread(target=_run, daemon=True).start()
+
+    def _watchdog_tick(self) -> None:
+        """監視の1周（諦め・停止したストリームの終端・再生スレッドの立て直し）."""
+        if self._responding and not self.ai_speaking and self._speak_trigger_at \
+                and time.monotonic() - self._speak_trigger_at > _NO_SPEECH_GIVEUP_SEC:
+            self._speak_trigger_at = 0.0
+            with self._state_lock:
+                self._responding = False
+            self._ai_text_buf = ""
+            # 指示はモデル側に残っている。取り消さないと、後で静かになった
+            # ときに古い内容を話し出す（次の指示と重なる）
+            self._discarding = True
+            self._discard_silent_ms = 0
+            self._send({"type": "session.instructions.append", "delegation_id": None,
+                        "content": "[指示]\n先ほどの指示は取り消します。"
+                                   "次の指示があるまで黙ってください。"})
+            print(f"# {self._LABEL}: 指示から{_NO_SPEECH_GIVEUP_SEC:.0f}秒たっても"
+                  "話し始めないので待つのをやめます（指示を取り消し）", flush=True)
+            return
+        # 再生スレッドが死ぬと AI は永久に黙り、ai_speaking も戻らない
+        pt = self._playback_thread
+        if self._connected and (pt is None or not pt.is_alive()) \
+                and time.monotonic() - self._playback_restart_at > 2.0:
+            self._playback_restart_at = time.monotonic()
+            print(f"# {self._LABEL}: 再生スレッドが止まっていたので立て直します", flush=True)
+            self.ai_speaking = False
+            self._start_playback_thread()
+        # 通常の終端は _on_audio がストリーム時間で決める。ここは delta 自体が
+        # 止まったときの保険。
+        if (self.ai_speaking or self._responding) and self._last_audio_at \
+                and time.monotonic() - self._last_audio_at > _STREAM_STALL_SEC \
+                and self._audio_bytes_this_turn > 0 and self._audio_q.empty():
+            self._finish_turn(end_reason="stall")
 
     def _finish_turn(self, *, end_reason: str = "silence") -> None:
         """1発話の終わり。文字を確定して議事録へ渡し、再生の終端マーカーを流す.
 
         end_reason: silence（1.2秒の無音）/ stall（ストリーム停止の保険）。
+        受信スレッドと監視スレッドの両方から呼ばれうるので、1発話につき1回に絞る。
         """
-        self._last_audio_at = 0.0
-        self._audio_bytes_this_turn = 0
-        self._silent_run_ms = 0
-        transcript = self._ai_text_buf.strip()
-        self._ai_text_buf = ""
+        with self._finish_lock:
+            if self._audio_bytes_this_turn == 0 and not self._ai_text_buf:
+                return                  # もう確定済み（二重呼び出し）
+            self._last_audio_at = 0.0
+            self._audio_bytes_this_turn = 0
+            self._silent_run_ms = 0
+            transcript = self._ai_text_buf.strip()
+            self._ai_text_buf = ""
         now = time.monotonic()
+        self._last_turn_end_at = now
+        self._last_turn_requested = self._turn_requested
         self.last_turn_stats = {
             "requested": self._turn_requested,
             "speak_start_latency_ms": self._last_speak_latency_ms if self._turn_requested else None,
@@ -629,6 +709,10 @@ class LiveAgent(_VoiceAgentBase):
                 self._audio_q.get_nowait()
             except queue.Empty:
                 break
+        if self._ai_text_buf.strip():
+            # 止めた発話は議事録に入れないが、再生済みの分は Soniox の確定待ちで
+            # まだ文字になって返ってくる。エコー照合の参照には残す
+            self._recent_ai_texts.append(self._ai_text_buf.strip())
         self._ai_text_buf = ""
         self._audio_bytes_this_turn = 0
         self._silent_run_ms = 0

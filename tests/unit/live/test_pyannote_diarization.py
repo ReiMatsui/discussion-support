@@ -303,3 +303,37 @@ def test_reconnect_counter_forgets_after_stable_sending() -> None:
     provider._sent_audio_ms = 59_900   # あと1チャンクで安定1分
     provider.send_audio(struct.pack("<1600h", *([0] * 1600)))
     assert provider._reconnects == 0
+
+
+def test_audio_before_connection_advances_the_timeline() -> None:
+    """接続前に送れなかった音声の分だけ時刻の基点を進める（STT との整合）.
+
+    既定の UI 起動では STT 接続の直後に分離の接続が始まり、その約1秒の音声は
+    STT には届くが分離には届かない。基点を進めないと以後の区間が STT より
+    早い側にずれ、重なり判定（0.55 以上）が落ちて前話者へ誤帰属する
+    （セルフレビュー 2026-09-13）。
+    """
+    provider = PyannoteStreamingDiarizationProvider("k")
+    assert provider._ws is None
+    provider.send_audio(b"\x00" * (3200 * 10))      # 1秒分（16kHz PCM16）
+    assert provider._session_base_ms == 1000
+    end = {"type": "diarization_speaker_end",
+           "data": {"timestamp": 2.0, "speaker": "SPEAKER_00"}}
+    start = {"type": "diarization_speaker_start",
+             "data": {"timestamp": 1.0, "speaker": "SPEAKER_00"}}
+    provider._parse_message(json.dumps(start))
+    ev = provider._parse_message(json.dumps(end))
+    assert (ev.start_ms, ev.end_ms) == (2000, 3000)   # 分離の 1.0s = 会議の 2.0s
+
+
+def test_reset_timeline_for_a_new_meeting(monkeypatch) -> None:
+    """「新しい会議」では STT の時刻が 0 に戻るので、分離の基点も 0 に戻す."""
+    provider = PyannoteStreamingDiarizationProvider("k", auto_reconnect=False)
+    monkeypatch.setattr(provider, "_connect", lambda: None)
+    provider.start()
+    provider._sent_audio_ms = 60_000
+    provider.close()
+    provider.reset_timeline()
+    provider.start()
+    assert provider._session_base_ms == 0
+    assert provider._label_epoch == 1               # ラベルの世代は進める

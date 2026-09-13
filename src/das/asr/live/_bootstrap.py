@@ -53,7 +53,6 @@ from das.asr.live._workers import (
     _cleanup,
     _connect_agent,
     _on_agent_text_factory,
-    _on_partner_text_factory,
     _run_af_checker,
     _run_agenda_detector,
     _run_drift_checker,
@@ -63,6 +62,7 @@ from das.asr.live._workers import (
     _run_structuring_checker,
     _run_topic_worker,
     _run_triage_worker,
+    wire_partner_callbacks,
 )
 from das.asr.live.agents._live import LIVE_DEFAULT_VOICE, LiveAgent
 from das.asr.live.agents._simulator import DiscussionSimulator
@@ -922,6 +922,9 @@ def _receive_until_stopped(state, args, backend, connect_stt) -> None:
             if state.diarization_provider is not None:
                 with _contextlib.suppress(Exception):
                     state.diarization_provider.close()
+                reset_tl = getattr(state.diarization_provider, "reset_timeline", None)
+                if callable(reset_tl):
+                    reset_tl()   # STT の時刻が 0 に戻るのに合わせる
                 state.diarization_provider.start()
             if state.waiting_to_start:
                 state.resetting = False
@@ -1108,7 +1111,7 @@ def _launch_runtime(state, args, backend, *, audio_started: bool,
     if state.agent is not None:
         _connect_agent(state, on_agent_text)
     if state.partner is not None:
-        state.partner.on_ai_utterance = _on_partner_text_factory(state)
+        wire_partner_callbacks(state, state.partner)
         state.partner.connect()
         print(f"# Partner: voice={state.partner.voice} topic={state.partner.topic}",
               flush=True)

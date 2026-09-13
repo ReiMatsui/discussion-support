@@ -446,3 +446,44 @@ def test_reset_drains_stale_audio_but_keeps_the_end_sentinel(tmp_path):
     state.audio_q.put(None)
     state.reset_for_new_meeting()
     assert state.audio_q.get_nowait() is None
+
+
+def test_partner_text_net_is_gated_by_its_playback_interval(tmp_path):
+    """相手役のテキスト類似も再生区間で門を掛ける。掛けないと、人が相手役の言葉を
+    引用して反論した発言が会議中いつでもエコーとして消える（セルフレビュー 2026-09-13）."""
+    tracker = _RecordingTracker()
+    state = _make_state(tmp_path, tracker=tracker)
+    state.agent = None
+    state.partner = _EchoAgent(in_echo=False, ai_speaking=False, sim=0.9)  # type: ignore[assignment]
+    # 相手役が鳴っていたのは 10〜12 秒。人の発言は 20〜22 秒で、相手役の言葉を引用
+    state.asr_pcm_total_bytes = 10_000 * 32
+    state.note_ai_speech_start("partner")
+    state.asr_pcm_total_bytes = 12_000 * 32
+    state.note_ai_speech_end("partner")
+    state.asr_pcm_total_bytes = 22_000 * 32
+    loop = _loop_with(state, text="さっき『効率化は魅力的』と言ったけど私は反対です",
+                      ms=20_000, end=22_000)
+
+    loop.flush()  # type: ignore[no-untyped-call]
+
+    assert len(tracker.calls) == 1               # 落とさず照合して記録する
+    assert state.records and state.records[-1]["text"].startswith("さっき")
+
+    # 相手役の再生区間と重なる発言は従来どおりエコーとして落とす
+    loop2 = _loop_with(state, text="効率化は魅力的ですね", ms=10_500, end=11_500)
+    loop2.flush()  # type: ignore[no-untyped-call]
+    assert len(tracker.calls) == 1
+
+
+def test_ctrl_c_in_recv_loop_requests_stop(tmp_path):
+    """受信中の Ctrl+C は停止要求として扱う。握りつぶすと呼び出し側が run() を
+    再入して何度押しても終われない（セルフレビュー 2026-09-13）."""
+    state = _make_state(tmp_path)
+    loop = RecvLoop(state, _Args(), _Backend())  # type: ignore[arg-type]
+
+    class WS:
+        def recv(self):
+            raise KeyboardInterrupt
+
+    assert loop.run(WS()) == "ok"  # type: ignore[no-untyped-call]
+    assert state.stop.is_set()

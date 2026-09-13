@@ -33,8 +33,14 @@ def format_utterance_context(pending: list[dict]) -> str:
 def compose_trigger_notes(conv: str, *, topics=None, drift_reason=None,
                           invite_target=None, fact_correction=None,
                           manual_request=None, summary_focus=None,
-                          af_presentation=None, recent_agent_texts=None) -> str:
-    """介入の種別ごとの指示文を、発話コンテキストへ前置/後置する."""
+                          af_presentation=None, recent_agent_texts=None,
+                          silence_sec=None) -> str:
+    """介入の種別ごとの指示文を、発話コンテキストへ前置する.
+
+    すべての指示（[…] の注記）は `[参加者発話]` より前に置く。GPT-Live では
+    それより前が instructions、以降が黙って読む文脈（thinking）になるため、
+    後ろに置いた注記は指示として効かない。
+    """
     if topics:
         topic_lines = "\n".join(
             f"  {i+1}. {t['topic']}（{t.get('speaker', '?')}）"
@@ -101,7 +107,15 @@ def compose_trigger_notes(conv: str, *, topics=None, drift_reason=None,
             "説教・長い説明はせず、提示された情報の要点だけを届けてください。"
         )
         conv = f"{af_note}\n\n{conv}" if conv else af_note
-    if recent_agent_texts and conv:
+    if silence_sec:
+        silence_note = (
+            "[沈黙]\n"
+            f"{float(silence_sec):.0f}秒ほど誰も話していません。"
+            "直近の流れを一言で短く整理して、次に話すことを一つだけ提案してください。"
+            "論点を読み上げたり、長く話したりしないでください。"
+        )
+        conv = f"{silence_note}\n\n{conv}" if conv else silence_note
+    if recent_agent_texts:
         said = "\n".join(f"  - {t}" for t in recent_agent_texts if t.strip())
         if said:
             repeat_note = (
@@ -109,7 +123,8 @@ def compose_trigger_notes(conv: str, *, topics=None, drift_reason=None,
                 "上と実質的に同じ内容の発言は繰り返さないでください。"
                 "同じことしか言えない場合は、繰り返す代わりに、"
                 "いま新しく加えられる一言だけを短く述べてください。")
-            conv = f"{conv}\n\n{repeat_note}"
+            # 指示なので文脈の後ろではなく前に置く（後ろだと thinking 側に落ちる）
+            conv = f"{repeat_note}\n\n{conv}" if conv else repeat_note
     return conv
 
 

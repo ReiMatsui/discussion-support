@@ -799,3 +799,26 @@ def test_review_dispatched_flag_distinguishes_record_from_evaluate():
         s_rec, candidates=[cand], decision=decision, silence_elapsed=5.0,
         epoch=1, legacy={"reason": "drift", "detail": "脱線"}, latency_ms=0.1)
     assert s_rec.reviews[0]["dispatched"] is True
+
+
+def test_review_recorder_does_not_alternate_between_lanes():
+    """barge-in レーン（drift）と通常レーン（silence）が交互に記録されても、
+    レーンごとに前回と同じ採否なら書かない（0.25 秒ごとに 2 行書いていた）."""
+    runner = _InterventionReviewRecorder()
+    state = _ReviewState()
+    now = time.monotonic()
+    drift = InterventionCandidate(id="drift", kind="drift", brief="雑談", created_at=now)
+    silence = InterventionCandidate(id="silence", kind="silence", brief="沈黙", created_at=now)
+    ctrl = FacilitationController()
+
+    def decide(cands):
+        return ctrl.arbitrate(FacilitationInput(
+            candidates=tuple(cands), recent_interventions=(), silence_elapsed=0.0,
+            snapshot_epoch=0, now=now, required_drift_confirmations=2))
+
+    for _ in range(5):
+        runner.record(state, candidates=[drift], decision=decide([drift]),
+                      silence_elapsed=0.0, epoch=0, legacy=None)
+        runner.record(state, candidates=[silence], decision=decide([silence]),
+                      silence_elapsed=0.0, epoch=0, legacy=None)
+    assert len(state.reviews) == 2

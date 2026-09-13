@@ -33,7 +33,9 @@ class _VoiceAgentBase:
 
     # サブクラスで上書きするクラス属性
     AI_VOICE_KEY: str = "__BASE__"   # VoiceProfiles内のAI声紋キー
-    _AI_ENROLL_SEC: float = 3.0      # 声紋登録に必要な最小秒数
+    _AI_ENROLL_SEC: float = 3.0      # 声紋登録に必要な最小秒数（有声部分のみ）
+    _AI_ENROLL_MAX_SEC: float = 30.0  # これ以上溜めても登録できないなら諦める
+    _AI_ENROLL_MIN_RMS: float = 200.0 / 32768.0   # float32 正規化後の無音判定（_live._SILENCE_RMS と同じ）
     _LABEL: str = "Agent"            # ログ用ラベル
     _conn_error: str = ""            # 接続エラーメッセージ（UI表示用、共通デフォルト）
 
@@ -134,8 +136,12 @@ class _VoiceAgentBase:
                     pcm = np.frombuffer(chunk, dtype="<i2").astype(np.float32) / 32768.0
                     stream.write(pcm.reshape(-1, 1))
                     self._played_bytes += len(chunk)
-                    # 声紋登録用: 16kHzにリサンプルして蓄積
-                    if not self._ai_voice_enrolled and self._voice_tracker is not None:
+                    # 声紋登録用: 16kHzにリサンプルして蓄積。無音のチャンク（文の間、
+                    # 終端前の 1.2 秒）は声紋を薄めるだけなので入れない。登録に失敗し
+                    # 続けるときは溜め続けない（メモリと毎回の連結を抑える）
+                    if (not self._ai_voice_enrolled and self._voice_tracker is not None
+                            and self._ai_voice_sec < self._AI_ENROLL_MAX_SEC
+                            and float(np.sqrt(np.mean(pcm * pcm))) >= self._AI_ENROLL_MIN_RMS):
                         ref16 = _resample_24_to_16(pcm)
                         if len(ref16) > 0:
                             self._ai_voice_buf.append(ref16.copy())

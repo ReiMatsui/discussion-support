@@ -46,14 +46,15 @@ class FakeAgent:
     def trigger(self, *, topics=None, drift_reason=None, invite_target=None,
                 fact_correction=None, manual_request=None,
                 summary_focus=None, recent_agent_texts=None,
-                af_presentation=None) -> None:
+                af_presentation=None, silence_sec=None) -> None:
         self.trigger_calls.append({"topics": topics, "drift_reason": drift_reason,
                                    "invite_target": invite_target,
                                    "fact_correction": fact_correction,
                                    "manual_request": manual_request,
                                    "summary_focus": summary_focus,
                                    "recent_agent_texts": recent_agent_texts,
-                                   "af_presentation": af_presentation})
+                                   "af_presentation": af_presentation,
+                                   "silence_sec": silence_sec})
         # 実エージェントの挙動を模倣: トリガーで保留発話を消費
         self._pending.clear()
 
@@ -354,6 +355,66 @@ def test_manual_call_held_while_partner_speaking_then_fires():
 
     assert agent.trigger_calls, "空いたら保持していた手動呼び出しで発火するべき"
     assert agent.trigger_calls[0]["manual_request"]["request"] == "整理して"
+
+
+def test_voice_call_already_answered_by_the_model_is_not_repeated():
+    """GPT-Live が呼びかけに直接答えていたら、STT→triage 経由の同じ依頼は話させない.
+
+    全二重の GPT-Live は「AIさん、整理して」に約1秒で自分で答える。数秒後に
+    triage から届く manual_call をそのまま発火すると同じ内容を二度話す
+    （セルフレビュー 2026-09-13）。
+    """
+    agent = FakeAgent()
+    state = FakeState(agent, None)
+    queued_at = time.monotonic()
+    agent.last_unrequested_speech_at = queued_at - 3.0   # 呼びかけの直後に自分で話した
+    state.manual_call_requests.put({"request": "ここまで整理して", "source": "voice",
+                                    "created_at": queued_at})
+    state._last_utt_time[0] = time.monotonic() - 100
+
+    _run_worker_briefly(state, until=lambda: bool(state.intervention_events), timeout=2.0)
+
+    assert agent.trigger_calls == []
+    ev = state.intervention_events[0]
+    assert ev["reason"] == "manual_call"
+    assert ev["metadata"]["timing"]["outcome"] == "answered_directly"
+    assert any(st["status"] == "delivered" for st in state.manual_statuses)
+
+
+def test_ui_call_is_not_suppressed_by_an_old_unrequested_turn():
+    """UI からの呼び出しは直接応答の判定を受けない。古い自発発話でも抑制しない."""
+    agent = FakeAgent()
+    state = FakeState(agent, None)
+    agent.last_unrequested_speech_at = time.monotonic() - 60
+    state.manual_call_requests.put({"request": "整理して", "source": "ui"})
+    state._last_utt_time[0] = time.monotonic() - 100
+
+    _run_worker_briefly(state, until=lambda: bool(agent.trigger_calls))
+
+    assert agent.trigger_calls and agent.trigger_calls[0]["manual_request"]["request"] == "整理して"
+
+
+def test_partner_is_reconnected_when_it_drops():
+    """相手役の接続が切れたら、ワーカーが 5 秒間隔で張り直す（誰も見ていないと沈黙のまま）."""
+    class DroppedPartner(FakePartner):
+        enabled = True
+
+        def __init__(self):
+            super().__init__()
+            self._connected = False
+            self.connects = 0
+
+        def connect(self):
+            self.connects += 1
+            self._connected = True
+
+    agent = FakeAgent()
+    partner = DroppedPartner()
+    state = FakeState(agent, partner)
+
+    _run_worker_briefly(state, until=lambda: partner.connects > 0, timeout=2.0)
+
+    assert partner.connects == 1 and partner._connected
 
 
 def test_manual_call_dropped_after_ttl():

@@ -569,8 +569,19 @@ class _InterventionReviewRecorder:
 
     def __init__(self) -> None:
         self._controller = FacilitationController()
-        self._last_fingerprint: tuple | None = None
+        # 候補集合ごとの前回指紋。barge-in レーンと通常レーンは候補集合が違い、
+        # 1スロットだと交互に「変化あり」になって 0.25 秒ごとに書いてしまう
+        self._last_fingerprints: dict[tuple, tuple] = {}
         self._warned_write_failure = False
+
+    def _changed(self, candidates, fingerprint: tuple) -> bool:
+        key = tuple(sorted({c.kind for c in candidates}))
+        if self._last_fingerprints.get(key) == fingerprint:
+            return False
+        self._last_fingerprints[key] = fingerprint
+        if len(self._last_fingerprints) > 32:
+            self._last_fingerprints.pop(next(iter(self._last_fingerprints)))
+        return True
 
     def evaluate(
         self,
@@ -613,9 +624,8 @@ class _InterventionReviewRecorder:
             (legacy or {}).get("reason"),
             (legacy or {}).get("detail"),
         )
-        if fingerprint == self._last_fingerprint:
+        if not self._changed(candidates, fingerprint):
             return  # 採否に変化なし → 記録しない
-        self._last_fingerprint = fingerprint
         try:
             add_review({
                 # dispatched=False: これは hold/echo/partner 等で発話しない局面の
@@ -662,9 +672,8 @@ class _InterventionReviewRecorder:
             (legacy or {}).get("reason"),
             (legacy or {}).get("detail"),
         )
-        if fingerprint == self._last_fingerprint:
+        if not self._changed(candidates, fingerprint):
             return
-        self._last_fingerprint = fingerprint
         try:
             add_review({
                 # dispatched=True: 実際に dispatch へ使った採否。controller_decision の
@@ -931,7 +940,7 @@ _NORMAL_SPECS: dict[str, _NormalSpec] = {
         trigger=("topics", "summary_focus", "recent_agent_texts"),
         consume="summarize", policy="structuring_value"),
     "silence": _NormalSpec(
-        trigger=("topics", "recent_agent_texts"),
+        trigger=("topics", "silence_sec", "recent_agent_texts"),
         pause_from="silence_summarize", policy="silence_summary"),
     "invite": _NormalSpec(
         trigger=("topics", "invite_target", "recent_agent_texts"),

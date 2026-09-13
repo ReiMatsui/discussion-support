@@ -179,12 +179,12 @@ class RecvLoop:
         for name, src in (("agent", s.agent), ("partner", s.partner)):
             if src is None:
                 continue
-            if name == "agent":
-                in_echo = (s.overlaps_ai_speech(self.cur_ms, self.cur_end,
-                                                source="agent")
-                           if use_intervals else src.in_echo_window)
-                if not in_echo:
-                    continue
+            # 相手役も再生区間で門を掛ける。掛けないと会議中ずっとテキスト類似だけで
+            # 落とすことになり、人が相手役の言葉を引用して反論した発言が消える
+            in_echo = (s.overlaps_ai_speech(self.cur_ms, self.cur_end, source=name)
+                       if use_intervals else src.in_echo_window)
+            if not in_echo:
+                continue
             sim = src._best_similarity(self.cur_text)
             if sim > ECHO_TEXT_SIM_THRESH:
                 return name, sim
@@ -754,7 +754,10 @@ class RecvLoop:
                     _print_line("# 終了")
                     return "finished"
         except KeyboardInterrupt:
-            pass
+            # ここで握りつぶすと呼び出し側の while が run() を再入し、Ctrl+C が
+            # 何度押しても効かない（レビュー 2026-09-13）。停止要求として扱う
+            print("\n# Ctrl+C を受信。議事録を保存して安全に終了します…", flush=True)
+            self.state.stop.set()
         finally:
             self.flush()
         return "ok"

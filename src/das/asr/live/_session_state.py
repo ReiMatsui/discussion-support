@@ -1013,7 +1013,11 @@ class SessionState:
         if self.agent is not None:
             agent = {"enabled": self.agent.enabled, "mode": self.agent.mode,
                      "voice": self.agent.voice,
-                     "model": getattr(self.agent, "model", None)}
+                     "model": getattr(self.agent, "model", None),
+                     # 接続の状態。切れていると呼び出しが「間が取れず破棄」に見えてしまう
+                     "connected": bool(getattr(self.agent, "_connected", False)),
+                     "ready": bool(getattr(self.agent, "ready", False)),
+                     "conn_error": str(getattr(self.agent, "_conn_error", "") or "")}
         return {
             "rev": self.rev,
             "mode": self.session_mode(),
@@ -1361,6 +1365,9 @@ class SessionState:
                 break
         if self.agent is not None:
             self.agent.reset_meeting()
+        if self.partner is not None:
+            with contextlib.suppress(Exception):
+                self.partner.reset_meeting()   # 前会議の続きを話させない
         should_wait_for_setup = bool(
             getattr(self.args, "setup", True)
             and self._serve

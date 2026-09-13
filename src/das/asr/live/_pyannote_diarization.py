@@ -65,6 +65,7 @@ logger = logging.getLogger(__name__)
 _CHUNK_MS = 100
 _CHUNK_SAMPLES = SR * _CHUNK_MS // 1000
 _CHUNK_BYTES_PCM16 = _CHUNK_SAMPLES * 2
+_SR_BYTES_PER_MS = _CHUNK_BYTES_PCM16 // _CHUNK_MS   # 16kHz PCM16 = 32 バイト/ms
 
 
 class PyannoteStreamingDiarizationProvider:
@@ -140,6 +141,19 @@ class PyannoteStreamingDiarizationProvider:
     @property
     def name(self) -> str:
         return "pyannote"
+
+    def reset_timeline(self) -> None:
+        """「新しい会議」でSTTの時刻が0に戻るのに合わせ、分離側の時刻も0に戻す.
+
+        start() は STT 切断復旧の名残で前セッション分を引き継ぐが、会議の
+        リセットでは STT 側（asr_pcm_total_bytes）が 0 から数え直すので、
+        引き継ぐと2会議目以降の区間が丸ごとずれて重なりが取れない。
+        close() の後、start() の前に呼ぶ。ラベルの epoch はそのまま進める。
+        """
+        self._session_base_ms = 0
+        self._sent_audio_ms = 0
+        self._dropped_ms = 0
+        self._pcm_buf.clear()
 
     def start(self) -> None:
         self._stop.clear()
@@ -237,6 +251,11 @@ class PyannoteStreamingDiarizationProvider:
         新セッションを作って同じチャンクを送り直す（自動再接続）。
         """
         if self._ws is None:
+            # 未接続（接続処理中・諦めた後）でも会議の時間は進んでいる。送らな
+            # かった分をタイムラインに足しておかないと、以後の区間の時刻が
+            # STT より早い側にずれて重なり判定が崩れる（レビュー 2026-09-13:
+            # 既定の UI 起動では STT 接続→分離接続の間の約1秒がこれに当たる）
+            self._session_base_ms += len(pcm16k) // _SR_BYTES_PER_MS
             return
         self._pcm_buf.extend(pcm16k)
         while len(self._pcm_buf) >= _CHUNK_BYTES_PCM16:

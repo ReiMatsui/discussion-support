@@ -48,6 +48,8 @@ def agent(monkeypatch):
     monkeypatch.setattr(LiveAgent, "_start_playback_thread", lambda self: None)
     monkeypatch.setattr(LiveAgent, "_start_clock", lambda self: None)
     monkeypatch.setattr(LiveAgent, "_start_watchdog", lambda self: None)
+    # 文字の静止待ち（0.3秒）は専用テストで見る。他のテストは即時に確定させる
+    monkeypatch.setattr(_live, "_TRANSCRIPT_QUIET_SEC", 0.0)
     a = LiveAgent(api_key="k")
     a.ws = FakeWS()
     a._connected = True
@@ -214,6 +216,8 @@ def test_conversation_mode_does_not_send_directives(agent):
 
 def test_feed_audio_resamples_to_24k(agent):
     agent.feed_audio(b"\x00\x00" * 1600)         # 100ms @16k
+    assert agent.ws.sent == []                   # コールバックでは送らない（積むだけ）
+    assert agent._flush_input() == 1             # 送信スレッドが送る
     msg = agent.ws.sent[-1]
     assert msg["type"] == "session.input_audio.append"
     assert len(base64.b64decode(msg["audio"])) == 2400 * 2
@@ -328,7 +332,7 @@ def test_trigger_reports_whether_it_could_send(agent):
     assert agent.trigger(invite_target="B") is True
 
 
-def test_voice_change_forgets_the_ai_voiceprint(agent, monkeypatch):
+def test_voice_change_reenrolls_the_ai_voiceprint_but_keeps_the_old_one(agent, monkeypatch):
     monkeypatch.setattr(LiveAgent, "_connect_locked", lambda self: None)
 
     class Tracker:
@@ -339,6 +343,97 @@ def test_voice_change_forgets_the_ai_voiceprint(agent, monkeypatch):
             self._lock = threading.Lock()
     agent._voice_tracker = Tracker()
     agent._ai_voice_enrolled = True
+    agent._ai_voice_sec = 3.0
     agent.apply_config(voice="cedar")
-    assert agent._ai_voice_enrolled is False
-    assert LiveAgent.AI_VOICE_KEY not in agent._voice_tracker.profiles
+    assert agent._ai_voice_enrolled is False and agent._ai_voice_sec == 0.0
+    # 旧声の声紋は新声で上書きされるまで残す（確定待ちの旧声エコーを落とすため）
+    assert LiveAgent.AI_VOICE_KEY in agent._voice_tracker.profiles
+
+
+# --- セルフレビュー（2026-09-13）で直した挙動 ------------------------------------
+
+
+def test_turn_end_waits_for_the_transcript_to_settle(agent, monkeypatch):
+    """音声の無音が 1.2 秒続いても、文字がまだ届いている間は確定しない（末尾欠け防止）."""
+    monkeypatch.setattr(_live, "_TRANSCRIPT_QUIET_SEC", 0.3)
+    agent._responding = True
+    for _ in range(3):
+        agent._handle({"type": "session.output_audio.delta", "delta": _voiced()})
+    agent._handle({"type": "session.output_transcript.delta", "delta": "前半と"})
+    for _ in range(int(_live._SPEECH_END_GAP_SEC * 10) - 2):
+        agent._handle({"type": "session.output_audio.delta", "delta": _silent()})
+    agent._handle({"type": "session.output_transcript.delta", "delta": "遅れて届く文字"})
+    for _ in range(4):                           # 無音は 1.2 秒を超えたが文字が動いた直後
+        agent._handle({"type": "session.output_audio.delta", "delta": _silent()})
+    assert agent.said == []
+    agent._last_transcript_at -= 1.0             # 文字が止まった
+    agent._handle({"type": "session.output_audio.delta", "delta": _silent()})
+    assert agent.said == ["前半と遅れて届く文字"]
+
+
+def test_resume_shortly_after_a_requested_turn_is_a_continuation(agent):
+    """指示で始まった発話が 1.2 秒の間で割れても、続きは指示なし発話に数えない."""
+    agent.feed("A", "x")
+    agent.trigger(invite_target="B")
+    agent._handle({"type": "session.output_audio.delta", "delta": _voiced()})
+    agent._handle({"type": "session.output_transcript.delta", "delta": "前半"})
+    for _ in range(int(_live._SPEECH_END_GAP_SEC * 10)):
+        agent._handle({"type": "session.output_audio.delta", "delta": _silent()})
+    assert agent.said == ["前半"]
+    agent._handle({"type": "session.output_audio.delta", "delta": _voiced()})   # すぐ再開
+    assert agent.unrequested_turns == 0 and agent._turn_requested is True
+    agent._finish_turn()
+    agent._last_turn_end_at -= 10.0              # 十分たってからの発話は別扱い
+    agent._handle({"type": "session.output_audio.delta", "delta": _voiced()})
+    assert agent.unrequested_turns == 1
+    assert agent.last_unrequested_speech_at > 0
+
+
+def test_context_sent_with_a_directive_is_capped(agent):
+    for i in range(60):
+        agent.feed("A", f"発話{i}")
+    assert agent.pending_count <= _live._PENDING_KEEP
+    agent.trigger(invite_target="B")
+    thinking = "".join(m["content"] for m in agent.ws.sent
+                       if m["type"] == "session.thinking.append")
+    assert "発話59" in thinking and "発話30" not in thinking
+    assert agent.pending_count == 0
+
+
+def test_silence_directive_tells_the_model_what_to_do(agent):
+    agent.feed("A", "x")
+    agent.trigger(silence_sec=18.4, topics=[{"topic": "議題X", "speaker": "議題"}])
+    instr = next(m for m in agent.ws.sent if m["type"] == "session.instructions.append")
+    assert "[沈黙]" in instr["content"] and "18秒" in instr["content"]
+    assert "一つだけ提案" in instr["content"]
+
+
+def test_feed_audio_drops_old_backlog(agent):
+    for _ in range(_live._INPUT_BACKLOG_MAX + 10):
+        agent.feed_audio(b"\x00\x00" * 1600)
+    assert agent._in_q.qsize() == _live._INPUT_BACKLOG_MAX
+
+
+def test_handle_exception_does_not_kill_the_recv_loop(agent):
+    class WS:
+        def __init__(self):
+            self.n = 0
+
+        def recv(self):
+            self.n += 1
+            if self.n == 1:
+                return '{"type": "session.output_audio.delta", "delta": "not-base64!!"}'
+            raise RuntimeError("closed")
+    agent._recv_loop(WS(), agent._session_gen)
+    assert agent._connected is False             # 例外で死なず、切断まで回って正しく落とす
+
+
+def test_giveup_cancels_the_pending_directive(agent):
+    agent.feed("A", "x")
+    agent.trigger(invite_target="B")
+    agent._speak_trigger_at = time.monotonic() - (_live._NO_SPEECH_GIVEUP_SEC + 1)
+    agent._watchdog_tick()
+    assert agent._responding is False
+    assert agent.ws.sent[-1]["type"] == "session.instructions.append"
+    assert "取り消し" in agent.ws.sent[-1]["content"]
+    assert agent._discarding is True             # 「了解」のような返事は捨てる

@@ -347,6 +347,16 @@ def _triage_classify_one(state, talk_rs, idx, r, text, *, retry_counts,
     }
 
 
+def _answered_directly(agent, queued_at: float, *, window_sec: float = 8.0) -> bool:
+    """呼びかけの前後 window_sec 秒以内に、指示なしで話し始めていたか.
+
+    呼びかけの音声は STT 確定と triage を経て queued_at になるので、GPT-Live の
+    直接応答は queued_at の数秒前に始まっていることが多い。
+    """
+    at = float(getattr(agent, "last_unrequested_speech_at", 0.0) or 0.0)
+    return at > 0.0 and at >= queued_at - window_sec
+
+
 def _dispatch_facilitator_voice_call(state, text: str, request: str) -> None:
     """検出した呼びかけを手動呼び出しキューへ積む（UIボタンと同じ経路）."""
     state.manual_call_requests.put({
@@ -363,7 +373,9 @@ def _dispatch_facilitator_voice_call(state, text: str, request: str) -> None:
                        request=request)
     # 「聞こえた」を即時に伝えるアック音（H）。UI由来のボタン呼び出しは
     # UIに既にフィードバックがあるため鳴らさない（voice経路だけ）。
-    _play_ack_chime()
+    # GPT-Live がすでに声で応じていれば、音は重なるだけなので鳴らさない
+    if not _answered_directly(getattr(state, "agent", None), time.monotonic()):
+        _play_ack_chime()
 
 
 @_resilient
@@ -1128,6 +1140,17 @@ def _on_partner_text_factory(state: SessionState):
 # 実行中のモード切替（F3）
 # ---------------------------------------------------------------------------
 
+def wire_partner_callbacks(state: SessionState, p) -> None:
+    """相手役の発話・再生区間を議事録側へつなぐ（起動時と実行中の接続で共用）.
+
+    再生区間（note_ai_speech_start/end）を記録しないと、Soniox 側のエコー除去が
+    区間で判定できず、相手役の声が人の発言として残る／人の発言が消える。
+    """
+    p.on_ai_utterance = _on_partner_text_factory(state)
+    p.on_speech_start = lambda: state.note_ai_speech_start("partner")
+    p.on_speech_end = lambda: state.note_ai_speech_end("partner")
+
+
 def _attach_partner(state: SessionState):
     """AIパートナーを生成・接続して state.partner にセットする（会話モード）."""
     if state.partner is not None:
@@ -1142,7 +1165,7 @@ def _attach_partner(state: SessionState):
                     topic=cfg.get("topic") or "")
     if state.tracker is not None:
         p.set_tracker(state.tracker)
-    p.on_ai_utterance = _on_partner_text_factory(state)
+    wire_partner_callbacks(state, p)
     p.connect()
     state.partner = p
     _print_line("# モード: AIと会話（パートナーを接続）")
@@ -1222,6 +1245,7 @@ class _AgentWorker:
         self.last_intervention_at = 0.0   # 直近の介入時刻（cooldown の時計）
         self.last_invited: str | None = None   # 直近に声をかけた相手（連続回避）
         self.last_agent_reconnect_at = 0.0
+        self.last_partner_reconnect_at = 0.0
         self.pending = _PendingInterventions()
         # 採否Controller: 固定優先順位に代わり最終採否を担当する。物理タイミング
         # （floor/barge-in）と fact fast lane は維持しつつ、「どの候補を今採るか／
@@ -1285,6 +1309,20 @@ class _AgentWorker:
                   f" conn={agent._connected if agent else '?'}"
                   f" enabled={agent.enabled if agent else '?'}", flush=True)
         return False
+
+    def _keep_partner_connected(self, partner) -> None:
+        """相手役の接続が切れていたら 5 秒間隔で張り直す（誰も見ていないと沈黙したまま）."""
+        if partner is None or not getattr(partner, "enabled", False):
+            return
+        if partner._connected or getattr(partner, "_reopening", False):
+            return
+        now = time.monotonic()
+        if now - self.last_partner_reconnect_at < 5.0:
+            return
+        self.last_partner_reconnect_at = now
+        print("# Partner: 再接続を試みます", flush=True)
+        with contextlib.suppress(Exception):
+            partner.connect()
 
     # -- 2. 新しい発話の取り込み ---------------------------------------
 
@@ -1521,13 +1559,25 @@ class _AgentWorker:
             detail = request or "直近の議論整理"
             queued_payload = self.pending.manual_call or {}
             queued_at = float(queued_payload.get("created_at", now))
+            if manual.get("source") == "voice" and _answered_directly(agent, queued_at):
+                # GPT-Live は室内の音声を聞いていて、呼びかけには自分で答える。
+                # STT→triage 経由で同じ依頼が届いても二度目は話させない
+                print("# [trigger] manual_call: 呼びかけには直接応答済み（再送しない）", flush=True)
+                _log_intervention_event(
+                    s, "manual_call", detail,
+                    timing={"source": "voice", "request": request, "queued_at": queued_at,
+                            "outcome": "answered_directly"})
+                _set_manual_status(s, "delivered", detail=detail, wait_sec=now - queued_at)
+                self.pending.clear_manual()
+                return False
             timing = _intervention_timing_metadata(
                 kind="manual", now=now, silence_elapsed=silence_elapsed,
                 pause_required=policy_for("manual").pause,
                 queued_at=queued_at,
                 queued_wall_at=str(queued_payload.get("created_wall_at") or ""),
                 policy="manual_call_pause")
-            if agent.trigger(topics=topics, manual_request=manual) is False:
+            if agent.trigger(topics=topics, manual_request=manual,
+                             recent_agent_texts=_recent_agent_texts(s)) is False:
                 return False
             print(f"# [trigger] manual_call: {detail}", flush=True)
             _log_intervention_event(
@@ -1674,6 +1724,7 @@ class _AgentWorker:
             "invite_target": decision.invite_target,
             "af_presentation": decision.af_text,
             "recent_agent_texts": _recent_agent_texts(self.state),
+            "silence_sec": silence_elapsed,
         }
         # 送れなかった（開き直し中・話し中・送信失敗）なら候補を消費せず、記帳もしない。
         # 次の tick で Controller が改めて判断する
@@ -1708,6 +1759,7 @@ class _AgentWorker:
             time.sleep(WORKER_TICK_SEC)
             self.diag_tick += 1
             partner = s.partner   # 動的参照: 実行中の接続/切断に追従（F3）
+            self._keep_partner_connected(partner)
             if not self._agent_ready():
                 continue
             # 積極性プロファイル（S5）: 介入クールダウンと沈黙要約の閾値
@@ -1751,8 +1803,23 @@ class _AgentWorker:
 
 
 def _run_agent_worker(state: SessionState):
-    """バックグラウンドでAI応答のトリガーを管理する（本体は `_AgentWorker`）."""
-    _AgentWorker(state).run()
+    """バックグラウンドでAI応答のトリガーを管理する（本体は `_AgentWorker`）.
+
+    このスレッド1本が介入の発火と GPT-Live の再接続を兼ねる。予期しない例外で
+    死ぬと介入も再接続も静かに止まるので、他のワーカーと同じく理由を出して
+    再入する。ワーカーの状態（候補・cooldown の時計）は同じインスタンスに残す。
+    """
+    import traceback
+    worker = _AgentWorker(state)
+    while not state.stop.is_set():
+        try:
+            worker.run()
+            return
+        except Exception:
+            traceback.print_exc()
+            print("# [_run_agent_worker] 予期しないエラー。5秒後に再開します", flush=True)
+            if state.stop.wait(timeout=5.0):
+                return
 
 
 def _run_stdin_commands(state: SessionState):
