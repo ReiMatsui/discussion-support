@@ -1147,16 +1147,20 @@ def test_factcheck_dedup_resets_on_meeting_epoch_change(monkeypatch):
 # 未確定話者の割り込み（C1）: 声紋が確定しない発話でもAIを止められる
 # ---------------------------------------------------------------------------
 
-def test_unconfirmed_speaker_interrupts_ai():
-    """speaker='?'（未確定）の長い発話でも、AI発話中なら interrupt される."""
+def test_human_speech_does_not_interrupt_facilitator_from_stt():
+    """人の発話による停止は GPT-Live が室内の声を聞いて自分で行う（WP2）.
+
+    STT で長い発話を見ても、こちらからは interrupt しない。発話は文脈として
+    供給される。
+    """
     agent = FakeAgent()
     agent.ai_speaking = True
     state = FakeState(agent, None)
     state.records = [{"speaker": "?", "text": "ちょっと待ってほしいのですが"}]
 
-    _run_worker_briefly(state, until=lambda: agent.interrupts > 0)
+    _run_worker_briefly(state, until=lambda: bool(agent.feeds), timeout=1.0)
 
-    assert agent.interrupts == 1
+    assert agent.interrupts == 0
 
 
 def test_as_bool_normalizes_llm_output():

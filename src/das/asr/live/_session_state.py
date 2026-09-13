@@ -1424,8 +1424,13 @@ class SessionState:
         """UIからファシリテーター介入の有効/無効を切り替える."""
         self.intervention_enabled = bool(enabled)
         if not self.intervention_enabled and self.agent is not None:
-            with contextlib.suppress(Exception):
-                self.agent.interrupt()
+            # 介入オフ: 話している最中なら再生を止める（こちらの都合の停止）。
+            # Realtime 版には stop_playback が無いので interrupt に落とす（WP8 で消す）。
+            stop = (getattr(self.agent, "stop_playback", None)
+                    or getattr(self.agent, "interrupt", None))
+            if stop is not None:
+                with contextlib.suppress(Exception):
+                    stop()
             with contextlib.suppress(Exception):
                 self.agent.reset_meeting()
         self.rev += 1

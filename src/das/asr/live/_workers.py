@@ -32,7 +32,6 @@ from ._constants import (
     _DRIFT_WARMUP,
     _FACTCHECK_CHECK_SEC,
     _FACTCHECK_MAX_RETRIES,
-    _INTERRUPT_MIN_CHARS,
     _INTERVENTION_COOLDOWN,
     _INVITE_CHECK_SEC,
     _INVITE_QUIET_RATIO,
@@ -887,97 +886,36 @@ def _af_checker_tick(
     return 1
 
 
-class _AfEarlyGenGate:
-    """af 介入の生成先行・再生ゲートの状態機械 (フェーズ6, **af 限定**).
+class _AfDeliveryGate:
+    """af 候補の配信ゲート（--af 有効時のみ・af 限定）.
 
-    毎ループ :meth:`tick` を呼ぶ。時計・沈黙・Controller の採否状態を引数で受けるので、
-    フェイク時計で状態遷移を単体テストできる。summarize 等ルールベース種別には一切
-    関与しない (モード方針: 対象は af_l1/af_l2 のみ)。
+    WHEN は Controller に委譲し、ここは「フロアが空いたら指示を送る」だけを担う。
+    以前は pause 成立前に生成だけ先行させて音声を溜め、フロア成立で一斉再生する
+    生成先行（hold/release）を持っていたが、GPT-Live は音声を実時間で流すので
+    溜めるとモデルの時間とずれる。指示から声までの遅延は記録して詰める
+    （docs/design/live_native_plan_2026-09.md §3.3）。
 
-    ``status`` は Controller から得た af 候補の採否状態 (三層分離の「WHEN」を委譲):
-      - ``"deliver"`` : cooldown/arbitration/フロアを通過し **今** 配信してよい (pause 成立)
-      - ``"hold"``    : ``awaiting_pause`` のみで抑制 = 採択見込みだが間待ち → 生成先行の対象
+    ``status`` は Controller から得た af 候補の採否状態:
+      - ``"deliver"`` : cooldown/arbitration/フロアを通過し **今** 配信してよい
+      - ``"hold"``    : 採択見込みだが間待ち → 何もしない（次の tick で再評価）
       - ``"none"``    : af 候補なし / cooldown・期限切れ・他候補優先などで見送り
-
-    遷移:
-      - 未 hold & status=hold & agent フリー & 沈黙>=0.3 → trigger(hold) で生成先行
-      - 未 hold & status=deliver & agent フリー & 沈黙>=0.3 → 即時 trigger (取り込み遅延で
-        pause 通過後に候補が来たケース。生成先行の余地なし。hold_to_release は付かない)
-      - hold 中 & status=deliver (フロア成立) → release_playback で一斉再生
-      - hold 中 & 新規確定発話 (会話が動いた) → cancel_held で破棄 (リトライにしない)
-      - hold 中 & 保持時間が上限超過 → cancel_held (フロアが返らないまま抱え込まない, B4)
     """
 
-    EARLY_GEN_SILENCE = 0.3
-    MAX_HOLD_SEC = 8.0  # フロアが返らないまま生成先行を抱え込む上限 (安全弁)
+    MIN_SILENCE = 0.3
 
-    def __init__(self) -> None:
-        self._holding = False
-        self._held_since: float | None = None
-        self._last_release_ms: float | None = None
-
-    @property
-    def is_holding(self) -> bool:
-        return self._holding
-
-    @property
-    def last_release_ms(self) -> float | None:
-        """直近の release で計測した hold→再生の所要 ms (未 release なら None)。"""
-        return self._last_release_ms
-
-    def reset(self) -> None:
-        self._holding = False
-        self._held_since = None
-
-    def _fire(self, agent: Any, af: dict[str, Any], *, hold: bool, topics: Any) -> None:
+    def tick(
+        self, *, agent: Any, af: dict[str, Any] | None, status: str,
+        silence: float, agent_busy: bool, topics: Any = None, **_unused,
+    ) -> str:
+        """1 ループ分の処理。行った操作名 (deliver/none) を返す。"""
+        if agent_busy or silence < self.MIN_SILENCE or not af or status != "deliver":
+            return "none"
         agent.trigger(
             topics=topics,
             af_presentation=str(af.get("af_text") or ""),
             invite_target=af.get("target_speaker"),
-            hold_playback=hold,
         )
-
-    def tick(
-        self, *, agent: Any, af: dict[str, Any] | None, status: str,
-        silence: float, new_utterance: bool, agent_busy: bool,
-        now: float | None = None, topics: Any = None,
-    ) -> str:
-        """1 ループ分の処理。行った操作名 (trigger/deliver/release/cancel/holding/none) を返す。"""
-        if self._holding:
-            # フロア成立前に新規確定発話が来たら、生成先行を破棄する (リトライにしない)。
-            if new_utterance:
-                agent.cancel_held()
-                self.reset()
-                return "cancel"
-            # 候補が消えた (TTL 失効・応答済みなど) → 破棄。
-            if not af:
-                agent.cancel_held()
-                self.reset()
-                return "cancel"
-            if status == "deliver":  # フロア成立 → 貯めた音声を一斉再生
-                agent.release_playback()
-                self._last_release_ms = getattr(agent, "last_hold_to_release_ms", None)
-                self.reset()
-                return "release"
-            # フロアが返らないまま抱え込まない (安全弁)。
-            if (now is not None and self._held_since is not None
-                    and now - self._held_since > self.MAX_HOLD_SEC):
-                agent.cancel_held()
-                self.reset()
-                return "cancel"
-            return "holding"
-        # 未 hold。生成先行は agent フリー & 沈黙が最小値以上のときだけ検討する。
-        if agent_busy or silence < self.EARLY_GEN_SILENCE or not af:
-            return "none"
-        if status == "hold":  # 採択見込み・間待ち → 生成先行 (hold)
-            self._fire(agent, af, hold=True, topics=topics)
-            self._holding = True
-            self._held_since = now
-            return "trigger"
-        if status == "deliver":  # 既に pause 成立 → 生成先行の余地なく即時配信
-            self._fire(agent, af, hold=False, topics=topics)
-            return "deliver"
-        return "none"
+        return "deliver"
 
 
 def _af_gate_status(
@@ -1259,12 +1197,7 @@ class _AgentWorker:
         # 黙るか」を一元裁定する。
         self.controller = FacilitationController()
         # af 生成先行・再生ゲート（フェーズ6, --af 有効時のみ作動。af 限定）。
-        self.af_gate = _AfEarlyGenGate()
-        self.af_held_text = ""
-        self.af_held_kind = "af_l1"
-        # 生成先行(hold)中の af が指名している相手。release 時に「誰を誘ったか」を
-        # 記録するために保持する（保持しないと同じ人を連続で指名しうる）。
-        self.af_held_target: str | None = None
+        self.af_gate = _AfDeliveryGate()
         # 採否の経緯（採択/抑制/latency）を intervention_review.jsonl へ記録する。
         self.review = _InterventionReviewRecorder()
         # maxlen はクールダウン照会に加えて同一内容抑止（duplicate_content, 10分窓）
@@ -1363,16 +1296,10 @@ class _AgentWorker:
             if s.meeting_epoch != meeting_epoch:
                 return False, af_new_utt
             s.agent_cursor = n
-        # --- 自動割り込み ---
-        # 発話の存在は話者未確定でも確実なので raw スライスで判定する。
-        # ファシリテーター/パートナーとも相槌は割り込みに使わない
-        # (T7: 長めの相槌でファシリテーター発話がキャンセルされるのを防ぐ)。
+        # --- パートナー（Realtime）への割り込み ---
+        # ファシリテーターは GPT-Live が室内の声を聞いて自分で止まるので、
+        # こちらでは検出しない（WP2）。パートナーは WP7 で Live に移すまで従来どおり。
         raw_texts = [str(r.get("text", "")) for r in raw_new]
-        human_spoke = any(len(t.strip()) > _INTERRUPT_MIN_CHARS
-                          and not _is_backchannel(t)
-                          for t in raw_texts)
-        if human_spoke and agent.ai_speaking:
-            agent.interrupt()
         if partner is not None and (partner.ai_speaking or partner._responding):
             real_utterances = [t.strip() for t in raw_texts
                                if not _is_backchannel(t)]
@@ -1405,19 +1332,16 @@ class _AgentWorker:
     # -- 4. af 生成先行ゲート ------------------------------------------
 
     def _run_af_gate(self, *, partner, cooldown, af_new_utt: bool) -> None:
-        """af の生成先行・再生ゲート（フェーズ6, --af 有効時のみ・af 限定）.
+        """af の配信ゲート（--af 有効時のみ・af 限定）.
 
         AF が無効（既定）ならこのブロックは丸ごとスキップされ、ルールベースの
         採否・trigger 経路は一切変わらない（モード方針）。summarize には関与
-        しない。WHEN は Controller に委譲し、ゲートは再生タイミングだけを担う。
-        pending.af を消費するのは deliver/release/cancel の時点だけで、hold 中は
-        保持し続ける（Controller の判定が pause 成立で "deliver" に変わるのを待つ）。
+        しない。WHEN は Controller に委譲し、ゲートは配信だけを担う。
         """
         s = self.state
         agent = self.agent
         try:
             now = time.monotonic()
-            # 同じ沈黙時間を4回計算していた（1tickに4回。判定は同じ）
             silence = _effective_silence(s, now, self.last_utt_time)
             with s.topics_lock:   # topics 読み出しは lock 取得で統一 (T9-5)
                 af_topics = list(s.topics) if s.topics else None
@@ -1440,18 +1364,10 @@ class _AgentWorker:
                 af=payload,
                 status=status,
                 silence=silence,
-                new_utterance=af_new_utt,
                 agent_busy=bool(agent._responding or agent.ai_speaking),
-                now=now,
                 topics=af_topics,
             )
-            if action == "trigger":     # 生成先行(hold)開始 — pending.af は保持
-                held = payload or {}
-                self.af_held_text = str(held.get("af_text") or "")
-                self.af_held_kind = str(held.get("kind") or "af_l1")
-                self.af_held_target = held.get("target_speaker") or None
-                _log_intervention_event(s, self.af_held_kind, "af 生成先行(hold)")
-            elif action == "deliver":   # 取り込み遅延で pause 通過後に来た → 即時配信
+            if action == "deliver":
                 held = payload or {}
                 kind = str(held.get("kind") or "af_l1")
                 text = str(held.get("af_text") or "")
@@ -1460,38 +1376,17 @@ class _AgentWorker:
                     with contextlib.suppress(Exception):
                         rt.note_intervention(kind, text)
                 self.pending.clear_af()   # 消費
-                self.note_intervention(now, kind, "af 即時配信",
+                self.note_intervention(now, kind, "af 配信",
                                        invite_target=held.get("target_speaker"))
                 _log_intervention_event(
-                    s, kind, "af 即時配信",
+                    s, kind, "af 配信",
                     timing=_intervention_timing_metadata(
                         kind=kind, now=now,
                         silence_elapsed=silence,
                         pause_required=policy_for(kind).pause,
                         policy="af_intervention"))
-            elif action == "release":   # フロア成立 → 生成先行分を一斉再生
-                rt = s.af_runtime
-                if rt is not None and self.af_held_text:
-                    with contextlib.suppress(Exception):
-                        rt.note_intervention(self.af_held_kind, self.af_held_text)
-                self.pending.clear_af()   # 消費
-                self.note_intervention(now, self.af_held_kind, "af release",
-                                       invite_target=self.af_held_target)
-                _log_intervention_event(
-                    s, self.af_held_kind, "af release",
-                    timing=_intervention_timing_metadata(
-                        kind=self.af_held_kind, now=now,
-                        silence_elapsed=silence,
-                        pause_required=policy_for(self.af_held_kind).pause,
-                        policy="af_intervention",
-                        hold_to_release_ms=self.af_gate.last_release_ms))
-                self.af_held_text = ""
-            elif action == "cancel":    # フロアが返らず/会話が動いた → 破棄
-                self.pending.clear_af()   # 消費 (リトライにしない, B4)
-                self.af_held_text = ""
-                print("# [af] 生成先行を破棄 (フロア未成立/新規発話)", flush=True)
         except Exception as e:  # pragma: no cover - 防御的
-            print(f"# [af] early-gen error: {e}", flush=True)
+            print(f"# [af] gate error: {e}", flush=True)
 
     # -- 5. 割り込み介入 -----------------------------------------------
 

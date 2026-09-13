@@ -22,7 +22,7 @@ from das.asr.live._workers import (
     _af_gate_status,
     _af_l1_presentation,
     _af_l2_reason_type,
-    _AfEarlyGenGate,
+    _AfDeliveryGate,
 )
 from das.graph.schema import Edge, Node
 from das.graph.store import NetworkXGraphStore
@@ -340,113 +340,50 @@ def test_drop_stale_af():
     assert pending.af is None
 
 
-# --- _AfEarlyGenGate: 生成先行・再生ゲートの状態機械 (フェーズ6) --------
+# --- _AfDeliveryGate: af 候補の配信ゲート（生成先行は WP2 で廃止） -------------
 
 
 def _gate_agent():
-    return MagicMock(trigger=MagicMock(), release_playback=MagicMock(),
-                     cancel_held=MagicMock())
+    return MagicMock(trigger=MagicMock())
 
 
 def _af_l1(af_text="[反論] X"):
     return {"kind": "af_l1", "af_text": af_text, "target_speaker": "A"}
 
 
-def test_gate_early_generates_on_hold_status():
-    """status=hold (採択見込み・間待ち) & agent フリー & 沈黙>=0.3 で hold 付き trigger。"""
-    gate = _AfEarlyGenGate()
+def test_gate_delivers_only_when_controller_says_deliver():
+    """status=deliver & agent フリー & 沈黙>=0.3 のときだけ trigger する。"""
+    gate = _AfDeliveryGate()
+    agent = _gate_agent()
+    assert gate.tick(agent=agent, af=_af_l1(), status="deliver", silence=2.0,
+                     agent_busy=False) == "deliver"
+    _, kwargs = agent.trigger.call_args
+    assert kwargs["af_presentation"] == "[反論] X"
+    assert kwargs["invite_target"] == "A"
+    assert "hold_playback" not in kwargs
+
+
+def test_gate_waits_on_hold_status_without_pregenerating():
+    """間待ち (status=hold) では何もしない。生成先行はしない。"""
+    gate = _AfDeliveryGate()
     agent = _gate_agent()
     assert gate.tick(agent=agent, af=_af_l1(), status="hold", silence=0.4,
-                     new_utterance=False, agent_busy=False, now=0.0) == "trigger"
-    assert gate.is_holding is True
-    _, kwargs = agent.trigger.call_args
-    assert kwargs["hold_playback"] is True
-    assert kwargs["af_presentation"] == "[反論] X"
-
-
-def test_gate_no_trigger_below_threshold_or_busy_or_status_none():
-    gate = _AfEarlyGenGate()
-    agent = _gate_agent()
-    # 沈黙不足
-    assert gate.tick(agent=agent, af=_af_l1(), status="hold", silence=0.1,
-                     new_utterance=False, agent_busy=False) == "none"
-    # agent busy
-    assert gate.tick(agent=agent, af=_af_l1(), status="hold", silence=0.5,
-                     new_utterance=False, agent_busy=True) == "none"
-    # Controller が採択見込みでない (cooldown 等) → status=none
-    assert gate.tick(agent=agent, af=_af_l1(), status="none", silence=0.5,
-                     new_utterance=False, agent_busy=False) == "none"
+                     agent_busy=False) == "none"
     agent.trigger.assert_not_called()
 
 
-def test_gate_immediate_deliver_when_pause_already_met():
-    """取り込み遅延で候補が pause 通過後に来た (status=deliver) → 生成先行なしで即時配信。"""
-    gate = _AfEarlyGenGate()
+def test_gate_no_trigger_below_threshold_or_busy_or_status_none():
+    gate = _AfDeliveryGate()
     agent = _gate_agent()
-    assert gate.tick(agent=agent, af=_af_l1(), status="deliver", silence=2.0,
-                     new_utterance=False, agent_busy=False) == "deliver"
-    assert gate.is_holding is False
-    _, kwargs = agent.trigger.call_args
-    assert kwargs["hold_playback"] is False
-
-
-def test_gate_releases_when_status_becomes_deliver():
-    """hold 中に Controller が pause 成立で deliver に転じたら一斉再生。"""
-    gate = _AfEarlyGenGate()
-    agent = _gate_agent()
-    agent.last_hold_to_release_ms = 120.0
-    gate.tick(agent=agent, af=_af_l1(), status="hold", silence=0.4,
-              new_utterance=False, agent_busy=False, now=0.0)
-    # まだ間待ち (status=hold) → 保留
-    assert gate.tick(agent=agent, af=_af_l1(), status="hold", silence=1.0,
-                     new_utterance=False, agent_busy=True, now=0.5) == "holding"
-    agent.release_playback.assert_not_called()
-    # フロア成立 (status=deliver) → 再生 + hold_to_release 計測
-    assert gate.tick(agent=agent, af=_af_l1(), status="deliver", silence=1.6,
-                     new_utterance=False, agent_busy=True, now=1.0) == "release"
-    agent.release_playback.assert_called_once()
-    assert gate.is_holding is False
-    assert gate.last_release_ms == 120.0
-
-
-def test_gate_cancels_on_new_utterance():
-    gate = _AfEarlyGenGate()
-    agent = _gate_agent()
-    gate.tick(agent=agent, af=_af_l1(), status="hold", silence=0.4,
-              new_utterance=False, agent_busy=False, now=0.0)
-    # フロア成立前に新規確定発話 → 破棄
-    assert gate.tick(agent=agent, af=_af_l1(), status="hold", silence=0.8,
-                     new_utterance=True, agent_busy=True, now=0.3) == "cancel"
-    agent.cancel_held.assert_called_once()
-    assert gate.is_holding is False
-
-
-def test_gate_cancels_when_candidate_disappears():
-    """hold 中に候補が消えた (TTL 失効など) → 破棄。"""
-    gate = _AfEarlyGenGate()
-    agent = _gate_agent()
-    gate.tick(agent=agent, af=_af_l1(), status="hold", silence=0.4,
-              new_utterance=False, agent_busy=False, now=0.0)
-    assert gate.tick(agent=agent, af=None, status="none", silence=0.8,
-                     new_utterance=False, agent_busy=True, now=0.3) == "cancel"
-    agent.cancel_held.assert_called_once()
-
-
-def test_gate_holds_while_floor_busy_then_times_out():
-    """status=none (フロア占有) の間は保留し続け、上限超過で破棄する (抱え込まない)。"""
-    gate = _AfEarlyGenGate()
-    agent = _gate_agent()
-    gate.tick(agent=agent, af=_af_l1(), status="hold", silence=0.4,
-              new_utterance=False, agent_busy=False, now=0.0)
-    # フロア占有中 (status=none だが候補は生存) → 保留継続
-    assert gate.tick(agent=agent, af=_af_l1(), status="none", silence=1.0,
-                     new_utterance=False, agent_busy=True, now=3.0) == "holding"
-    # 上限 (8s) 超過 → 破棄
-    assert gate.tick(agent=agent, af=_af_l1(), status="none", silence=1.0,
-                     new_utterance=False, agent_busy=True,
-                     now=_AfEarlyGenGate.MAX_HOLD_SEC + 0.1) == "cancel"
-    agent.cancel_held.assert_called_once()
-
+    assert gate.tick(agent=agent, af=_af_l1(), status="deliver", silence=0.1,
+                     agent_busy=False) == "none"
+    assert gate.tick(agent=agent, af=_af_l1(), status="deliver", silence=0.5,
+                     agent_busy=True) == "none"
+    assert gate.tick(agent=agent, af=_af_l1(), status="none", silence=0.5,
+                     agent_busy=False) == "none"
+    assert gate.tick(agent=agent, af=None, status="deliver", silence=0.5,
+                     agent_busy=False) == "none"
+    agent.trigger.assert_not_called()
 
 def test_af_l1_presentation_labels():
     from das.agents.facilitation import InfoItem, InterventionDecision
