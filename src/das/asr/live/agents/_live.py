@@ -1,58 +1,71 @@
-"""GPT-Live-1（全二重音声モデル）で介入を話すエージェント（2026-09 試験導入）.
+"""GPT-Live-1（全二重音声モデル）で介入を話すエージェント.
 
-Realtime API（`RealtimeAgent`）との違いは通信の作法だけで、上流の判断は変えない。
-「いつ・誰に・何を」は従来どおり FacilitationController が決め、本クラスは
-採択済みの介入を GPT-Live に話させる。
+責務の切り分け（docs/design/live_native_plan_2026-09.md §3）:
+  - 「いつ・誰に・何を」は FacilitationController が決めて `trigger()` を呼ぶ。
+    本クラスはそれを GPT-Live への指示に変え、話させ、話した文字を返す。
+  - 人の発話による停止と再開は GPT-Live が自分で行う（全二重）。本クラスは
+    検出も再送もしない。持つのは「終了」「新しい会議」のときの再生停止だけ。
+  - 参加者から直接呼びかけられたときの短い応答も GPT-Live に任せる。
 
-GPT-Live の作法（docs/research/gpt_live_api_2026-09.md）:
-  - `session.start` で model / instructions / 音声形式 / 委任方式を決める。
-    instructions と voice は開始後に変えられない。
-  - 話させるには `session.instructions.append`（指示）と
-    `session.thinking.append`（黙って読む文脈）を送る。1件 500 トークンまで。
-  - 音声は `session.output_audio.delta` で来る。終端イベントは無く、
-    無音は送られてこないので「一定時間 delta が来ない」を発話の終わりとみなす。
-  - 文字は `session.output_transcript.delta`（区切りは音声の都合で、文の切れ目ではない）。
-  - モデルが自分で背後の処理を求めると `session.delegation.created` が来る。
-    本システムは介入の内容を自前で決めるので「追加処理は不要」と返して閉じる。
-  - 割り込みは本来モデルが室内の音声を聞いて自分で止まる（全二重）。ただし
-    スピーカーの音がマイクに回り込む環境ではモデルが自分の声を聞くことになる
-    ため、既定では AI が話している間はマイク音声を送らず（`listen="idle"`）、
-    割り込みの検出は従来の STT 側の仕組み（`interrupt()`）に任せる。
-    `listen="always"` にすると全二重に任せる（エコー除去がある機材向け）。
-
-Realtime 版と同じ公開 API（connect / feed / trigger / interrupt / apply_config /
-close / ai_speaking / in_echo_window …）を持つので、`--agent-engine live` で
-差し替えられる。
+GPT-Live の作法（docs/research/gpt_live_api_2026-09.md §1, §1.1 の実測）:
+  - `session.start` で model / instructions / 音声形式 / 委任を決める。
+    instructions と voice は開始後に変えられない → 変更はセッションの開き直し。
+  - セッションの時間は入力音声の長さで進む。室内の音声を常に送り、送れない
+    間は無音で時計を進める（`_start_clock`）。
+  - 話させるには `session.thinking.append`（黙って読む文脈）と
+    `session.instructions.append`（指示）。1件 500 トークンまで。
+  - 出力音声は無音も含む連続ストリーム。音量で声の区間を切り、無音が
+    `_SPEECH_END_GAP_SEC` 続いたら1発話。文字は再生に遅れて届くので、発話の
+    終端で確定する。
+  - `session.delegation.created` には「追加処理は不要」と返す。
 """
 from __future__ import annotations
 
 import base64
+import collections
 import contextlib
 import json
+import queue
 import threading
 import time
 from typing import ClassVar
 
 import numpy as np
 
-from .._constants import _AGENT_TRIGGER
-from ._realtime import RealtimeAgent
+from .._constants import _AGENT_TRIGGER, _ECHO_COOLDOWN
+from .._voice_profiles import VoiceProfiles
+from . import _notes
+from ._base import _RealtimeBase
 
 LIVE_URL = "wss://api.openai.com/v1/live/sessions"
 LIVE_MODEL = "gpt-live-1"
 LIVE_DEFAULT_VOICE = "marin"
-_APPEND_MAX_CHARS = 600          # 500 トークンの目安（日本語）
-_SPEECH_END_GAP_SEC = 1.2        # ストリーム上でこれ以上無音が続いたら発話終了（「承知。…えっと」の間で切れない長さ）
+LIVE_VOICES = ("marin", "cedar")
 _OUT_RATE = 24000
+_APPEND_MAX_CHARS = 600          # 500 トークンの目安（日本語）
+_SPEECH_END_GAP_SEC = 1.2        # ストリーム上でこれ以上無音が続いたら発話終了
+_STREAM_STALL_SEC = 3.0          # delta 自体が止まったときの保険
+_NO_SPEECH_GIVEUP_SEC = 15.0     # 指示を送っても話し始めないときに諦めるまで
+_SILENCE_RMS = 200.0             # int16 の RMS。これ未満は無音（約 -44 dBFS）
 
-_PROMPT_LIVE = """\
+PROMPT_FACILITATOR = """\
 あなたは対面会議の進行役AIです。日本語で話します。
 基本は黙って聞きます。相槌や合いの手は出しません。
 話すのは次の2つの場合だけです。
 1. [指示] で始まる指示が届いたとき。その指示に沿って、1〜2文で短く話します。
-2. 参加者があなた（進行役・AI）に直接呼びかけて質問したとき。短く答えます。
+2. 参加者があなた（進行役・AI・ファシリテーター）に直接呼びかけたとき。
+   「はい」など一言か、聞かれたことに1文で短く答えます。
 それ以外では、参加者が何を話していても口を挟みません。
+参加者が話し始めたら、自分の発言の途中でもすぐにやめて聞きます。
 前置きや記号は付けず、本題だけを落ち着いた口調で話します。"""
+
+PROMPT_CONVERSATION = """\
+あなたは会議に参加しているAIの参加者です。日本語で話します。
+他の参加者と自然に議論してください。質問されたら答え、意見を求められたら
+短く自分の考えを述べます。一度に話すのは2〜3文までにし、他の人が
+話し始めたらすぐにやめて聞きます。
+[指示] で始まる指示が届いたときは、その指示に沿って短く話します。
+前置きや記号は付けず、本題だけを話します。"""
 
 
 def _resample_16_to_24(pcm16: bytes) -> bytes:
@@ -64,41 +77,109 @@ def _resample_16_to_24(pcm16: bytes) -> bytes:
     return np.clip(y, -32768, 32767).astype("<i2").tobytes()
 
 
-class LiveAgent(RealtimeAgent):
-    """GPT-Live-1 で会議に参加するファシリテーター（RealtimeAgent と同じ公開 API）."""
+def _chunks(text: str, n: int) -> list[str]:
+    text = text.strip()
+    return [text[i:i + n] for i in range(0, len(text), n)] if text else []
 
+
+class LiveAgent(_RealtimeBase):
+    """GPT-Live-1 で会議に参加する進行役（`mode="conversation"` なら会話相手）."""
+
+    MODES = ("off", "facilitator", "conversation")
+    AI_VOICE_KEY = "__AI__"
     _LABEL = "AI Agent(Live)"
     _EVENT_HANDLERS: ClassVar[dict[str, str]] = {
         "session.started": "_on_session_started",
-        "session.output_audio.delta": "_on_live_audio",
-        "session.output_transcript.delta": "_on_live_transcript",
-        "session.input_transcript.delta": "_on_live_input_transcript",
+        "session.output_audio.delta": "_on_audio",
+        "session.output_transcript.delta": "_on_transcript",
         "session.delegation.created": "_on_delegation",
         "session.closed": "_on_closed",
         "error": "_on_error",
     }
+    debug_events: bool = False   # True なら未処理のイベント種別を1回ずつ表示（疎通確認用）
 
     def __init__(self, api_key: str, voice: str = LIVE_DEFAULT_VOICE,
                  mode: str = "facilitator", trigger_n: int = _AGENT_TRIGGER,
-                 model: str = LIVE_MODEL, listen: str = "idle"):
-        super().__init__(api_key=api_key, voice=voice, mode=mode,
-                         trigger_n=trigger_n, model=model)
-        self.listen = listen                 # "idle" | "always" | "never"
+                 model: str = LIVE_MODEL):
+        self.api_key = api_key
+        self.model = model
+        self.voice = voice if voice in LIVE_VOICES else LIVE_DEFAULT_VOICE
+        self.mode = mode
+        self.trigger_n = trigger_n
+        self.ws = None
+        self._stop = threading.Event()
+        self._state_lock = threading.Lock()      # _pending / _responding を守る
+        self._pending: list[dict] = []
+        self.ai_speaking = False
+        self._responding = False
+        self._interrupted = False                # 基底の互換用。Live では常に False
+        self._ai_text_buf = ""
+        self._audio_q: queue.Queue[tuple[int, bytes | None]] = queue.Queue()
+        self._play_epoch = 0
+        self._connected = False
+        self._conn_error = ""
+        self.on_ai_utterance = None              # callback(text) 発話確定時
+        self.on_speech_start = None              # callback() 最初の声が出たとき
+        self.on_speech_end = None                # callback() 再生が終わったとき
+        self._speech_started = False
+        self._speak_trigger_at = 0.0
+        self._last_speak_latency_ms: float | None = None
+        self._playback_thread: threading.Thread | None = None
+        self._recent_ai_texts: collections.deque = collections.deque(maxlen=20)
+        self._last_speech_end = 0.0
+        self._echo_cooldown = _ECHO_COOLDOWN
+        self._played_bytes = 0
+        self._voice_tracker: VoiceProfiles | None = None
+        self._ai_voice_buf: list[np.ndarray] = []
+        self._ai_voice_sec = 0.0
+        self._ai_voice_enrolled = False
+        # --- GPT-Live 固有 ---
         self._session_id: str | None = None
         self._started = threading.Event()
-        self._last_audio_at = 0.0
-        self._audio_bytes_this_turn = 0
         self._ev_seq = 0
-        self._watchdog: threading.Thread | None = None
+        self._last_audio_at = 0.0                # 声か文字が最後に届いた時刻（壁時計）
+        self._audio_bytes_this_turn = 0
+        self._silent_run_ms = 0                  # 発話中に続いた無音（ストリーム時間）
         self._last_input_at = 0.0
-        self._clock: threading.Thread | None = None
-        self._silent_run_ms = 0          # 発話中に続いた無音の長さ（ストリーム時間）
-        if listen == "always":
-            # 全二重に任せる運用: 割り込みの検出と止め方はモデル側。こちらの
-            # 「中断された介入を後で再送する」仕組みは、モデルが自分で続きを
-            # 話すのと二重になる（2026-09-13 の一人試行で「承知。う」→ 続き →
-            # 再送、と3回に割れた）ので切る。
-            self._INTERVENTION_MAX_RETRIES = 0
+        self._seen_types: set[str] = set()
+        self._reconnect_lock = threading.Lock()
+        # --- WP2 で消す互換シム（workers の生成先行・再送がまだ参照する） ---
+        self._pending_intervention: dict | None = None
+        self._hold_playback = False
+
+    # ------------------------------------------------------------ 状態
+
+    @property
+    def enabled(self) -> bool:
+        return self.mode != "off"
+
+    @property
+    def _prompt(self) -> str:
+        return PROMPT_CONVERSATION if self.mode == "conversation" else PROMPT_FACILITATOR
+
+    @property
+    def in_echo_window(self) -> bool:
+        """AI 発話中、または発話終了後のエコー残留期間中か（Soniox 側の除去に使う）."""
+        if self.ai_speaking:
+            return True
+        if self._last_speech_end == 0.0:
+            return False
+        return (time.monotonic() - self._last_speech_end) < self._echo_cooldown
+
+    def pending_count(self) -> int:
+        with self._state_lock:
+            return sum(1 for u in self._pending if u.get("_count", True))
+
+    def reset_meeting(self):
+        """「新しい会議」: 溜めた発話を捨て、話している最中なら止める（接続は維持）."""
+        with self._state_lock:
+            self._pending.clear()
+        self.stop_playback()
+
+    def _log_state(self, transition: str):
+        print(f"# [state] {transition} "
+              f"(responding={self._responding} speaking={self.ai_speaking} "
+              f"epoch={self._play_epoch})", flush=True)
 
     # ------------------------------------------------------------ 接続
 
@@ -109,6 +190,8 @@ class LiveAgent(RealtimeAgent):
             self._conn_error = "websockets未インストール"
             print(f"# {self._LABEL}: websockets がインストールされていません", flush=True)
             return
+        if not self.enabled:
+            return
         try:
             self.ws = connect(LIVE_URL, additional_headers={
                 "Authorization": f"Bearer {self.api_key}"})
@@ -118,11 +201,12 @@ class LiveAgent(RealtimeAgent):
             return
         self._connected = True
         self._conn_error = ""
+        self._started.clear()
         self._send({
             "type": "session.start",
             "session": {
                 "model": self.model,
-                "instructions": _PROMPT_LIVE,
+                "instructions": self._prompt,
                 "audio": {"format": {"type": "audio/pcm", "rate": _OUT_RATE},
                           "output": {"voice": self.voice}},
                 "delegation": {"type": "client"},
@@ -137,39 +221,63 @@ class LiveAgent(RealtimeAgent):
             print(f"# {self._LABEL}: セッション開始の確認が10秒以内に届きません", flush=True)
         else:
             print(f"# {self._LABEL}: 接続完了（model={self.model}, voice={self.voice}, "
-                  f"listen={self.listen}）", flush=True)
+                  f"mode={self.mode}）", flush=True)
 
     def _send(self, ev: dict) -> bool:
-        if not self.ws:
+        ws = self.ws
+        if ws is None:
             return False
         self._ev_seq += 1
         ev.setdefault("event_id", f"das_{self._ev_seq}")
         try:
-            self.ws.send(json.dumps(ev, ensure_ascii=False))
+            ws.send(json.dumps(ev, ensure_ascii=False))
             return True
         except Exception as e:
             print(f"# {self._LABEL} 送信エラー: {e}", flush=True)
             return False
 
-    def _send_session_update(self):
-        """GPT-Live は開始後に instructions / voice を変えられない。モードは
-        本クラス内の判断（trigger の使い方）にだけ効く。"""
-        return
+    def _close_session(self) -> None:
+        """今のセッションを閉じる（再接続と終了で共用）."""
+        ws, self.ws = self.ws, None
+        self._connected = False
+        if ws is not None:
+            with contextlib.suppress(Exception):
+                ws.send(json.dumps({"type": "session.close", "event_id": "das_close"}))
+                time.sleep(0.3)
+            with contextlib.suppress(Exception):
+                ws.close()
+        self.stop_playback()
+
+    def apply_config(self, mode: str | None = None, voice: str | None = None,
+                     trigger_n: int | None = None):
+        """UI からの設定変更。指示と声は開始後に変えられないので、変わるなら開き直す."""
+        reopen = False
+        if mode is not None and mode in self.MODES and mode != self.mode:
+            self.mode = mode
+            reopen = True
+        if voice is not None and voice in LIVE_VOICES and voice != self.voice:
+            self.voice = voice
+            reopen = True
+        if trigger_n is not None and trigger_n > 0:
+            self.trigger_n = trigger_n
+        if not reopen:
+            return
+        with self._reconnect_lock:
+            self._close_session()
+            if self.enabled:
+                self._stop.clear()
+                self.connect()
+        print(f"# {self._LABEL}: 設定を反映（mode={self.mode} voice={self.voice}）", flush=True)
+
+    def close(self):
+        self._close_session()
+        super().close()
 
     # ------------------------------------------------------------ 音声入力
 
     def feed_audio(self, pcm_16k: bytes) -> None:
-        """室内の音声を渡す（16kHz PCM16）。listen の設定に従って送る.
-
-        送らない場合も時計は止めない（`_start_clock` が無音を送る）。GPT-Live の
-        時間は入力音声の長さで進むので、音声を送らないと指示や文脈の注入が
-        いつまでも「予定」のまま実行されない（2026-09-12 の疎通で確認:
-        音声ゼロだと20秒待っても話さず、close 時に "closed before the estimated
-        context injection completed" が返り usage も 0 秒だった）。
-        """
-        if not self._connected or self.listen == "never":
-            return
-        if self.listen == "idle" and (self.ai_speaking or self.in_echo_window):
+        """室内の音声（16kHz PCM16）を常に送る。全二重の割り込み検出はこれが前提."""
+        if not self._connected:
             return
         out = _resample_16_to_24(pcm_16k)
         if out:
@@ -178,7 +286,11 @@ class LiveAgent(RealtimeAgent):
                         "audio": base64.b64encode(out).decode("ascii")})
 
     def _start_clock(self) -> None:
-        """実音声を送っていない間、100ms ごとに無音を送ってセッションの時間を進める."""
+        """実音声が来ない間、100ms ごとに無音を送ってセッションの時間を進める.
+
+        GPT-Live の時間は入力音声の長さで進むので、音声が途切れると指示や文脈の
+        注入が「予定」のまま実行されない。マイクが止まったときの保険。
+        """
         silence = base64.b64encode(b"\x00" * (_OUT_RATE // 10 * 2)).decode("ascii")
 
         def _run():
@@ -187,135 +299,134 @@ class LiveAgent(RealtimeAgent):
                 if time.monotonic() - self._last_input_at >= 0.1:
                     self._last_input_at = time.monotonic()
                     self._send({"type": "session.input_audio.append", "audio": silence})
-        self._clock = threading.Thread(target=_run, daemon=True)
-        self._clock.start()
+        threading.Thread(target=_run, daemon=True).start()
 
-    # ------------------------------------------------------------ 送信
+    # ------------------------------------------------------------ 発話の供給と指示
 
-    def _send_trigger(self, conv: str, *, hold_playback, pending_snapshot,
-                      active_retryable, retry_fallback, pi, include_pi) -> None:
-        """組み立てた文脈を thinking、指示を instructions として送る.
+    def feed(self, speaker: str, text: str, *, trigger_count: bool = True):
+        """発話を文脈として蓄積する（次の指示に添える）."""
+        if not self._connected or not self.enabled:
+            return
+        with self._state_lock:
+            self._pending.append({"speaker": speaker, "text": text, "_count": trigger_count})
 
-        `conv` は RealtimeAgent が作る「[指示類]…\\n\\n[参加者発話]…」の文字列。
-        [参加者発話] 以降は黙って読む文脈（thinking）、それより前は指示
-        （instructions）として分けて送る。どちらも 500 トークン上限があるので
-        文字数で刻む。
+    def trigger(self, *, topics=None, drift_reason=None, invite_target=None,
+                fact_correction=None, manual_request=None, summary_focus=None,
+                af_presentation=None, recent_agent_texts=None, **_ignored):
+        """採択済みの介入を GPT-Live に話させる.
+
+        文脈（直近の発話）を thinking、介入の指示を instructions として送る。
+        `**_ignored` は Realtime 版にあった hold_playback / retry_intervention /
+        is_retry を受け流すためのもの（WP2 で呼び出し側から消す）。
         """
-        head, sep, tail = conv.partition("[参加者発話]")
-        context = (sep + tail) if sep else ""
-        directive = head.strip() or "直近の議論を踏まえ、必要なら短く一言だけ述べてください。"
+        if not self._connected or not self.enabled or self.ws is None:
+            return
+        if self.mode == "conversation":
+            return   # 会話相手は室内の音声に自分で応じる。指示は出さない
+        with self._state_lock:
+            if self._responding or self.ai_speaking:
+                return
+            has_intent = any((drift_reason, invite_target, fact_correction,
+                              manual_request, summary_focus, af_presentation))
+            if not self._pending and not has_intent:
+                return
+            self._responding = True
+            snapshot = list(self._pending)
+        conv = _notes.compose_trigger_notes(
+            _notes.format_utterance_context(snapshot), topics=topics,
+            drift_reason=drift_reason, invite_target=invite_target,
+            fact_correction=fact_correction, manual_request=manual_request,
+            summary_focus=summary_focus, af_presentation=af_presentation,
+            recent_agent_texts=recent_agent_texts)
+        directive, context = _notes.split_directive_and_context(conv)
+        directive = directive or "直近の議論を踏まえ、必要なら短く一言だけ述べてください。"
         ok = True
         for chunk in _chunks(context, _APPEND_MAX_CHARS):
             ok = ok and self._send({"type": "session.thinking.append",
                                     "delegation_id": None, "content": chunk})
-        if hold_playback:
-            with self._state_lock:
-                self._hold_playback = True
-                self._held_audio = []
-                self._hold_start_at = time.monotonic()
-                self._last_hold_to_release_ms = None
+        self._begin_turn()
         self._last_speak_latency_ms = None
         self._speak_trigger_at = time.monotonic()
-        self._begin_turn()
         for chunk in _chunks("[指示]\n" + directive, _APPEND_MAX_CHARS):
             ok = ok and self._send({"type": "session.instructions.append",
                                     "delegation_id": None, "content": chunk})
         if not ok:
-            self._responding = False
+            with self._state_lock:
+                self._responding = False
             self._speak_trigger_at = 0.0
-            print(f"# {self._LABEL} 送信エラー（内容を保持して再試行）", flush=True)
+            print(f"# {self._LABEL} 送信エラー（発話は保持して次回に）", flush=True)
             return
         with self._state_lock:
-            self._active_intervention_retryable = active_retryable
-            self._active_intervention_fallback = retry_fallback
-            del self._pending[:len(pending_snapshot)]
-            if include_pi and self._pending_intervention is pi:
-                self._pending_intervention = None
-        self._log_state("→RESPONDING (Live: instructions.append)")
-
-    def _begin_turn(self) -> None:
-        """新しい発話の受け皿を用意する（Realtime の output_item.added に相当）."""
-        self._current_item_id = None
-        self._played_bytes = 0
-        self._play_epoch += 1
-        self._speech_started = False
-        self._interrupted = False
-        self._audio_bytes_this_turn = 0
-        self._silent_run_ms = 0
+            del self._pending[:len(snapshot)]
+        self._log_state("→RESPONDING (指示を送信)")
 
     # ------------------------------------------------------------ 受信
 
-    debug_events: bool = False   # True なら未処理のイベント種別を1回ずつ表示（疎通確認用）
-    _seen_types: set[str] | None = None
-
     def _handle(self, ev: dict) -> None:
         etype = str(ev.get("type", ""))
-        if self.debug_events and not etype.endswith("audio.delta"):
-            if self._seen_types is None:
-                self._seen_types = set()
-            if etype not in self._seen_types:
-                self._seen_types.add(etype)
-                body = json.dumps(ev, ensure_ascii=False)
-                print(f"# {self._LABEL} event: {body[:300]}", flush=True)
-        if "error" in etype and etype not in self._EVENT_HANDLERS:
+        if self.debug_events and not etype.endswith("audio.delta") \
+                and etype not in self._seen_types:
+            self._seen_types.add(etype)
+            print(f"# {self._LABEL} event: {json.dumps(ev, ensure_ascii=False)[:300]}", flush=True)
+        name = self._EVENT_HANDLERS.get(etype)
+        if name is not None:
+            getattr(self, name)(ev)
+        elif "error" in etype:
             self._on_error(ev)
-            return
-        super()._handle(ev)
 
     def _on_session_started(self, ev: dict) -> None:
-        self._session_id = (ev.get("session") or {}).get("id") or ev.get("session_id")
+        self._session_id = (ev.get("session") or {}).get("id")
         self._started.set()
 
-    _SILENCE_RMS = 200.0        # int16 の RMS。これ未満は無音とみなす（約 -44 dBFS）
-    _NO_SPEECH_GIVEUP_SEC = 15.0   # 指示を送っても話し始めないときに諦めるまで
+    def _begin_turn(self) -> None:
+        self._played_bytes = 0
+        self._play_epoch += 1
+        self._speech_started = False
+        self._audio_bytes_this_turn = 0
+        self._silent_run_ms = 0
+        self._ai_text_buf = ""
 
-    def _on_live_audio(self, ev: dict) -> None:
-        """出力音声は途切れない連続ストリームとして届く（無音も含む）.
-
-        文書には「無音は省かれる」とあるが、実測（2026-09-12）では話していない間も
-        実時間で無音の delta が届き続けた。したがって「delta が途切れた」では
-        発話の終わりを判定できず、音量で話している区間を切り出す。無音の delta は
-        発話中だけ（文の間の息継ぎとして）再生キューへ流し、それ以外は捨てる。
-        """
-        if self._interrupted:
-            return
+    def _on_audio(self, ev: dict) -> None:
         chunk = ev.get("delta", "") or ev.get("audio", "")
         if not chunk:
             return
         pcm = base64.b64decode(chunk)
         x = np.frombuffer(pcm, dtype="<i2").astype(np.float32)
         rms = float(np.sqrt(np.mean(x * x))) if len(x) else 0.0
-        voiced = rms >= self._SILENCE_RMS
+        voiced = rms >= _SILENCE_RMS
         chunk_ms = len(pcm) * 1000 // (_OUT_RATE * 2)
         in_speech = self.ai_speaking or self._audio_bytes_this_turn > 0
         if not voiced and not in_speech:
             return                      # 話していない間の無音は捨てる
         if voiced:
             if not self._responding and not self.ai_speaking:
-                # こちらが求めていない発話（呼びかけへの返答など）。受け皿を作って通す
+                # こちらが求めていない発話（呼びかけへの応答）。受け皿を作って通す
                 self._begin_turn()
-                self._responding = True
+                with self._state_lock:
+                    self._responding = True
             self._silent_run_ms = 0
         else:
             self._silent_run_ms += chunk_ms
         self._last_audio_at = time.monotonic()
         self._audio_bytes_this_turn += len(pcm)
-        self._on_audio_delta({"delta": chunk})
-        # 終端は「ストリーム上の時間」で測る。届く間隔（壁時計）はネットワークや
-        # CPU の都合で 1 秒以上空くことがあり、それを終端と見ると1つの発話が
-        # 「テスト／段階での／フィードバック／…」のように細切れになる
-        # （2026-09-12 のシミュレーション実走で発生）。無音の delta が連続して
-        # _SPEECH_END_GAP_SEC 分たまったときだけ閉じる。
+        if not self._speech_started:
+            self._speech_started = True
+            if self._speak_trigger_at:
+                self._last_speak_latency_ms = round(
+                    (time.monotonic() - self._speak_trigger_at) * 1000, 1)
+                self._speak_trigger_at = 0.0
+            self._log_state("→SPEAKING (first audio)")
+            if self.on_speech_start:
+                with contextlib.suppress(Exception):
+                    self.on_speech_start()
+        self._q_put(pcm)
+        self.ai_speaking = True
         if self._silent_run_ms >= _SPEECH_END_GAP_SEC * 1000:
             self._finish_turn()
 
-    def _on_live_transcript(self, ev: dict) -> None:
-        if not self._interrupted:
-            self._ai_text_buf += ev.get("delta", "")
-            self._last_audio_at = time.monotonic()   # 文字も「まだ続いている」合図
-
-    def _on_live_input_transcript(self, ev: dict) -> None:
-        return   # 室内の文字起こしは Soniox 側が正本。ここでは使わない
+    def _on_transcript(self, ev: dict) -> None:
+        self._ai_text_buf += ev.get("delta", "")
+        self._last_audio_at = time.monotonic()
 
     def _on_delegation(self, ev: dict) -> None:
         did = (ev.get("delegation") or {}).get("id")
@@ -324,48 +435,41 @@ class LiveAgent(RealtimeAgent):
                         "content": "追加の処理は不要です。進行役として今の会話に短く応じてください。"})
 
     def _on_closed(self, ev: dict) -> None:
-        usage = ev.get("usage")
-        print(f"# {self._LABEL}: セッション終了（{ev.get('reason')}） usage={usage}", flush=True)
+        print(f"# {self._LABEL}: セッション終了（{ev.get('reason')}） usage={ev.get('usage')}",
+              flush=True)
         self._connected = False
 
     def _on_error(self, ev: dict) -> None:
         msg = (ev.get("error") or {}).get("message") or ev.get("message") or "unknown"
         print(f"# {self._LABEL} エラー: {msg}", flush=True)
-        if self._responding:
+        with self._state_lock:
             self._responding = False
-            self._interrupted = False
 
-    # ------------------------------------------------------------ 発話終端の監視
+    # ------------------------------------------------------------ 発話の終端
 
     def _start_watchdog(self) -> None:
         def _run():
             while not self._stop.is_set():
                 time.sleep(0.1)
-                # 指示を送ったのに話し始めない → 諦めて次の介入に備える
                 if self._responding and not self.ai_speaking and self._speak_trigger_at \
-                        and time.monotonic() - self._speak_trigger_at > self._NO_SPEECH_GIVEUP_SEC:
+                        and time.monotonic() - self._speak_trigger_at > _NO_SPEECH_GIVEUP_SEC:
                     self._speak_trigger_at = 0.0
-                    self._responding = False
+                    with self._state_lock:
+                        self._responding = False
                     self._ai_text_buf = ""
-                    print(f"# {self._LABEL}: 指示から{self._NO_SPEECH_GIVEUP_SEC:.0f}秒たっても"
+                    print(f"# {self._LABEL}: 指示から{_NO_SPEECH_GIVEUP_SEC:.0f}秒たっても"
                           "話し始めないので待つのをやめます", flush=True)
                     continue
-                # 終端の条件: 音声も文字も一定時間届かず、かつ再生が追いついている。
-                # モデルは1発話分をまとめて先に送ってくることがあり、再生中に
-                # 文字の delta が遅れて届く。届いていない段階で閉じると文字が
-                # 空のまま確定してしまう（2026-09-12 の疎通で発生）。
-                # 通常の終端は _on_live_audio がストリーム時間で決める。ここは
-                # ストリーム自体が止まった（delta が3秒来ない）ときの保険。
+                # 通常の終端は _on_audio がストリーム時間で決める。ここは delta 自体が
+                # 止まったときの保険。
                 if (self.ai_speaking or self._responding) and self._last_audio_at \
-                        and time.monotonic() - self._last_audio_at > 3.0 \
-                        and self._audio_bytes_this_turn > 0 \
-                        and self._audio_q.empty():
+                        and time.monotonic() - self._last_audio_at > _STREAM_STALL_SEC \
+                        and self._audio_bytes_this_turn > 0 and self._audio_q.empty():
                     self._finish_turn()
-        self._watchdog = threading.Thread(target=_run, daemon=True)
-        self._watchdog.start()
+        threading.Thread(target=_run, daemon=True).start()
 
     def _finish_turn(self) -> None:
-        """delta が途切れた → 1発話の終わり。文字を確定し、終端マーカーを流す."""
+        """1発話の終わり。文字を確定して議事録へ渡し、再生の終端マーカーを流す."""
         self._last_audio_at = 0.0
         self._audio_bytes_this_turn = 0
         self._silent_run_ms = 0
@@ -373,60 +477,55 @@ class LiveAgent(RealtimeAgent):
         self._ai_text_buf = ""
         if transcript:
             self._recent_ai_texts.append(transcript)
-            if not self._interrupted and self.on_ai_utterance:
+            if self.on_ai_utterance:
                 with contextlib.suppress(Exception):
                     self.on_ai_utterance(transcript)
-        if self._hold_playback:
-            self._held_audio.append((self._play_epoch, None))
-        else:
-            self._q_put(None)
-        self._responding = False
-        self._interrupted = False
-        self._active_intervention_fallback = ""
-        self._log_state(f"→IDLE (Live: 発話終端 {len(transcript)}字)")
+        self._q_put(None)
+        with self._state_lock:
+            self._responding = False
+        self._log_state(f"→IDLE (発話終端 {len(transcript)}字)")
 
-    # ------------------------------------------------------------ 割り込み
+    # ------------------------------------------------------------ 再生の停止
 
-    def interrupt(self):
-        """人間の割り込み。再生を止め、モデルにも黙るよう伝える.
+    def stop_playback(self) -> None:
+        """こちらの都合で再生を止める（終了・新しい会議・介入オフ）.
 
-        Realtime の response.cancel / truncate に相当するものは無い。
-        再生キューを捨てて ai_speaking を倒し（親クラスの処理）、モデルには
-        指示で「今すぐ話をやめて聞く」を送る。listen="always" ならモデル自身も
-        室内の声で止まる。
+        人の発話による停止はモデルが行うので、ここでは呼ばない。
         """
-        was_active = self.ai_speaking or self._responding
-        if self.listen == "always":
-            # モデルが室内の声を聞いているので、止まるかどうかはモデルに任せる。
-            # こちらで再生を切ると、モデル側の続きと食い違って文字が混ざる。
-            if was_active:
-                print(f"# {self._LABEL}: 参加者の発話を検出（全二重に任せる）", flush=True)
-            return
-        # 親の処理のうち WebSocket へ送る部分（response.cancel 等）は ws を
-        # 一時的に外して抑止する
-        ws, self.ws = self.ws, None
-        try:
-            super().interrupt()
-        finally:
-            self.ws = ws
-        if was_active:
-            self._last_audio_at = 0.0
-            self._audio_bytes_this_turn = 0
-            self._send({"type": "session.instructions.append", "delegation_id": None,
-                        "content": "[指示] 参加者が話し始めました。今の発言を直ちにやめ、黙って聞いてください。"})
+        was = self.ai_speaking or self._responding
+        while True:
+            try:
+                self._audio_q.get_nowait()
+            except queue.Empty:
+                break
+        self._ai_text_buf = ""
+        self._audio_bytes_this_turn = 0
+        self._silent_run_ms = 0
+        self._last_audio_at = 0.0
+        with self._state_lock:
+            self._responding = False
+        if self.ai_speaking:
+            self._q_put(None)
+            self._end_speech()
+        if was:
+            self._log_state("→IDLE (再生停止)")
 
-    # ------------------------------------------------------------ 終了
+    # --- WP2 で消す互換シム（workers / session_state がまだ呼ぶ） ---
 
-    def close(self):
-        if self.ws:
-            with contextlib.suppress(Exception):
-                self._send({"type": "session.close"})
-                time.sleep(0.3)
-        super().close()
+    def interrupt(self) -> None:
+        """人の発話による停止はモデルに任せる。何もしない（WP2 で呼び出しごと消す）."""
+        return
 
+    def cancel_held(self) -> None:
+        return
 
-def _chunks(text: str, n: int) -> list[str]:
-    text = text.strip()
-    if not text:
-        return []
-    return [text[i:i + n] for i in range(0, len(text), n)]
+    def release_playback(self) -> None:
+        return
+
+    @property
+    def is_holding_playback(self) -> bool:
+        return False
+
+    @property
+    def last_hold_to_release_ms(self) -> float | None:
+        return None

@@ -1210,8 +1210,7 @@ def run_session(args: LiveArgs) -> None:
                 from das.asr.live.agents._live import LIVE_DEFAULT_VOICE, LiveAgent
                 _voice = args.agent_voice if args.agent_voice != "shimmer" else LIVE_DEFAULT_VOICE
                 state.agent = LiveAgent(api_key=_agent_oai_key, voice=_voice,
-                                        mode="facilitator", trigger_n=args.agent_trigger,
-                                        listen=getattr(args, "live_listen", "idle"))
+                                        mode="facilitator", trigger_n=args.agent_trigger)
             else:
                 state.agent = RealtimeAgent(api_key=_agent_oai_key, voice=args.agent_voice,
                                             mode="facilitator", trigger_n=args.agent_trigger)

@@ -42,8 +42,7 @@ def main() -> None:
 
     said: list[tuple[float, str]] = []
     t0 = time.monotonic()
-    agent = LiveAgent(api_key=key, voice=args.voice or LIVE_DEFAULT_VOICE,
-                      listen="always" if args.mic else "never")
+    agent = LiveAgent(api_key=key, voice=args.voice or LIVE_DEFAULT_VOICE)
     agent.debug_events = True
     agent.on_ai_utterance = lambda text: said.append((time.monotonic() - t0, text))
     agent.on_speech_start = lambda: print(f"  [{time.monotonic() - t0:5.1f}s] 音声開始", flush=True)
