@@ -302,8 +302,8 @@ def test_standard_proactivity_silence_summarize_fires():
     assert agent.trigger_calls
 
 
-def test_intervention_disabled_skips_facilitator_but_keeps_partner_context():
-    """介入オフでもAIパートナーには人間発話を渡し、進行役トリガーだけ止める。"""
+def test_intervention_disabled_skips_facilitator_and_leaves_partner_alone():
+    """介入オフでは進行役トリガーを止める。パートナーは音声で自律する（WP7）。"""
     agent = FakeAgent()
     partner = FakePartner()
     partner.ai_speaking = True
@@ -311,12 +311,13 @@ def test_intervention_disabled_skips_facilitator_but_keeps_partner_context():
     state.intervention_enabled = False
     state.records = [{"speaker": "#1", "text": "この点は違うと思います", "ms": 0}]
 
-    _run_worker_briefly(state, until=lambda: bool(partner.injected), timeout=1.0)
+    _run_worker_briefly(state, until=lambda: False, timeout=0.6)
 
     assert agent.feeds == []
     assert agent.trigger_calls == []
-    assert partner.interrupts == 1
-    assert partner.injected == [("人間", "この点は違うと思います")]
+    # パートナーは室内の音声を自分で聞く（WP7）。こちらから止めたり注入したりしない
+    assert partner.interrupts == 0
+    assert partner.injected == []
 
 
 def test_drift_request_triggers_with_reason():
@@ -903,8 +904,8 @@ def _run_event_worker_briefly(state, on_text, *, until, timeout=1.5):
     t.join(timeout=1.0)
 
 
-def test_event_worker_utterance_appends_and_reacts_partner():
-    """utteranceイベントで議事録追記＋パートナー反応（割り込み＋注入）が起きる."""
+def test_event_worker_utterance_appends_and_informs_partner():
+    """utteranceイベントで議事録追記＋パートナーへ文字の補い（止めはしない）."""
     state = FakeState(FakeAgent(), None)
     p = FakePartner()
     p.ai_speaking = True
@@ -913,7 +914,7 @@ def test_event_worker_utterance_appends_and_reacts_partner():
     state.fac_events.put(("utterance", "本題に戻しましょう"))
     _run_event_worker_briefly(state, texts.append, until=lambda: bool(texts))
     assert texts == ["本題に戻しましょう"]
-    assert p.interrupts == 1
+    assert p.interrupts == 0
     assert p.injected and p.injected[0][1] == "本題に戻しましょう"
 
 
@@ -931,15 +932,15 @@ def test_event_worker_noop_utterance_does_not_react_partner():
     assert p.injected == []
 
 
-def test_event_worker_speech_start_interrupts_partner():
-    """speech_startイベントで、発話中のパートナーを割り込む."""
+def test_event_worker_speech_start_does_not_interrupt_partner():
+    """speech_startイベントでパートナーは止めない。進行役の声を聞いて自分で譲る（WP7）."""
     state = FakeState(FakeAgent(), None)
     p = FakePartner()
     p._responding = True
     state.partner = p
     state.fac_events.put(("speech_start", None))
-    _run_event_worker_briefly(state, lambda t: None, until=lambda: p.interrupts > 0)
-    assert p.interrupts == 1
+    _run_event_worker_briefly(state, lambda t: None, until=lambda: False)
+    assert p.interrupts == 0
 
 
 # ---------------------------------------------------------------------------

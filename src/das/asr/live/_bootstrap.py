@@ -64,7 +64,6 @@ from das.asr.live._workers import (
     _run_triage_worker,
 )
 from das.asr.live.agents._live import LIVE_DEFAULT_VOICE, LiveAgent
-from das.asr.live.agents._partner import ConversationPartner
 from das.asr.live.agents._simulator import DiscussionSimulator
 from das.asr.live.stt import STTBackend
 from das.asr.live.stt._soniox import SonioxBackend
@@ -106,7 +105,7 @@ class LiveArgs:
     simulate: str | None = None
     sim_scenario: str | None = None
     debate: str | None = None
-    debate_voice: str = "echo"
+    debate_voice: str = "cedar"
     topic: str | None = None   # 人間同士モードの議題（脱線判定の基準）
     proactivity: str = "standard"  # 介入の積極性（controlled/standard/active）
     af: bool = False  # AF ベース介入を有効化 (H1 フェーズ4)。既定 OFF (モード方針)。
@@ -1015,7 +1014,8 @@ def _setup_companions(state, args, tracker, oai_key: str) -> bool:
         if args.agent and args.debate_voice == args.agent_voice:
             print(f"# 警告: --debate-voice と --agent-voice が同じ ({args.debate_voice})。"
                   f"声紋分離に影響します。", flush=True)
-        state.partner = ConversationPartner(
+        from das.asr.live.agents._live import LivePartner
+        state.partner = LivePartner(
             api_key=oai_key, voice=args.debate_voice, topic=args.debate)
         if tracker is not None:
             state.partner.set_tracker(tracker)

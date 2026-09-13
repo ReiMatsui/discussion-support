@@ -25,7 +25,7 @@ def _make_state():
 class FakeAgent:
     def __init__(self, mode="facilitator"):
         self.mode = mode
-        self.voice = "shimmer"
+        self.voice = "marin"
         self.applied: list = []
 
     def apply_config(self, *, mode=None, voice=None, trigger_n=None):
@@ -93,11 +93,11 @@ def test_mode_facilitate_detaches_partner():
 
 
 def test_mode_converse_attaches_partner(monkeypatch):
-    import das.asr.live.agents._partner as partner_mod
-    monkeypatch.setattr(partner_mod, "ConversationPartner", FakePartner)
+    import das.asr.live.agents._live as live_mod
+    monkeypatch.setattr(live_mod, "LivePartner", FakePartner)
     s = _make_state()
     s.agent = FakeAgent(mode="facilitator")
-    s._partner_cfg = {"api_key": "k", "voice": "echo", "topic": "テーマ"}
+    s._partner_cfg = {"api_key": "k", "voice": "cedar", "topic": "テーマ"}
     r = set_session_mode(s, "converse")
     assert r == {"ok": True, "mode": "converse"}
     assert isinstance(s.partner, FakePartner)
@@ -109,7 +109,7 @@ def test_mode_converse_without_key_stays_facilitate(monkeypatch):
     """api_key無しではパートナーを作れず facilitate のままになる."""
     s = _make_state()
     s.agent = FakeAgent(mode="facilitator")
-    s._partner_cfg = {"api_key": "", "voice": "echo", "topic": ""}
+    s._partner_cfg = {"api_key": "", "voice": "cedar", "topic": ""}
     r = set_session_mode(s, "converse")
     assert r == {"ok": True, "mode": "facilitate"}
     assert s.partner is None

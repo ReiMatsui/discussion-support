@@ -1,7 +1,7 @@
 """live配下の介入・割り込みロジック用テスト基盤.
 
-実WebSocket / sounddevice を使わずに RealtimeAgent / ConversationPartner の
-イベント処理・トリガー・割り込みロジックを検証するためのスタブ群。
+実WebSocket / sounddevice を使わずにエージェントのイベント処理・トリガーの
+ロジックを検証するためのスタブ群。RealtimeAgent 用の fixture は WP8 で消す。
 """
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ import json
 
 import pytest
 
-from das.asr.live.agents._partner import ConversationPartner
 from das.asr.live.agents._realtime import RealtimeAgent
 
 
@@ -52,7 +51,7 @@ def make_chunk(n_samples: int = 1200) -> str:
     return base64.b64encode(b"\x01\x02" * n_samples).decode()
 
 
-def queue_real_chunks(agent: RealtimeAgent | ConversationPartner) -> int:
+def queue_real_chunks(agent: RealtimeAgent) -> int:
     """再生キューに積まれた実音声チャンク数（None終端を除く）.
 
     キュー要素は (epoch, payload) のタプル。payload が None でないものを数える。
@@ -68,15 +67,6 @@ def agent() -> RealtimeAgent:
     a.ws = FakeWS()  # type: ignore[assignment]
     a._connected = True
     return a
-
-
-@pytest.fixture
-def partner() -> ConversationPartner:
-    """FakeWS を接続済みにした対話パートナー（スレッド未起動）."""
-    p = ConversationPartner(api_key="test-key", topic="テスト議題")
-    p.ws = FakeWS()  # type: ignore[assignment]
-    p._connected = True
-    return p
 
 
 @pytest.fixture(autouse=True)

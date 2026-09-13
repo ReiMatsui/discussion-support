@@ -175,3 +175,25 @@ def test_feed_audio_resamples_to_24k(agent):
     msg = agent.ws.sent[-1]
     assert msg["type"] == "session.input_audio.append"
     assert len(base64.b64decode(msg["audio"])) == 2400 * 2
+
+
+# --- LivePartner: 「AIと会話」の相手役（GPT-Live の別セッション） -------------
+
+
+def test_partner_uses_its_own_voice_key_and_topic_prompt(monkeypatch):
+    from das.asr.live.agents._live import LivePartner
+    monkeypatch.setattr(LiveAgent, "_start_playback_thread", lambda self: None)
+    monkeypatch.setattr(LiveAgent, "_start_clock", lambda self: None)
+    monkeypatch.setattr(LiveAgent, "_start_watchdog", lambda self: None)
+    p = LivePartner(api_key="k", topic="AIツール導入の是非")
+    assert p.AI_VOICE_KEY == "__PARTNER__" and p.AI_VOICE_KEY != LiveAgent.AI_VOICE_KEY
+    assert p.mode == "conversation"
+    assert "AIツール導入の是非" in p._prompt
+    p.ws = FakeWS()
+    p._connected = True
+    p.feed("人間", "どう思う？")
+    p.trigger(invite_target="B")                 # 指示は受けない
+    assert p.ws.sent == []
+    p.inject_context("ファシリテーター", "本題に戻しましょう")
+    assert p.ws.sent[-1]["type"] == "session.thinking.append"
+    assert "本題に戻しましょう" in p.ws.sent[-1]["content"]

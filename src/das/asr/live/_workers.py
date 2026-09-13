@@ -62,7 +62,6 @@ from ._intervention import (
     _intervention_enabled,
     _intervention_timing_metadata,
     _InterventionReviewRecorder,
-    _is_backchannel,
     _legacy_decision_brief,
     _log_intervention_event,
     _log_voice_call_diag,
@@ -1040,15 +1039,14 @@ def _run_facilitator_event_worker(state: SessionState, on_text):
                 if "介入不要" not in text:
                     p = state.partner
                     if p is not None and p._connected:
-                        p.interrupt()
+                        # パートナーは進行役の声を室内の音声として聞いている。
+                        # 文字は聞き取れなかったときの補いとして渡す（止めはしない）。
                         p.inject_context("ファシリテーター", text)
                     sim = state.simulator
                     if sim is not None:
                         sim.inject_facilitator(text)
             elif kind == "speech_start":
-                p = state.partner
-                if p is not None and p._connected and (p.ai_speaking or p._responding):
-                    p.interrupt()
+                pass   # パートナーは進行役の声を聞いて自分で譲る（全二重）
         except Exception as e:
             print(f"# ファシリテーターイベント処理エラー: {e}", flush=True)
 
@@ -1105,10 +1103,10 @@ def _attach_partner(state: SessionState):
     if not cfg.get("api_key"):
         _print_line("# 会話モードにできません（OPENAI_API_KEYが未設定）")
         return
-    from das.asr.live.agents._partner import ConversationPartner
-    p = ConversationPartner(api_key=cfg["api_key"],
-                            voice=cfg.get("voice") or "echo",
-                            topic=cfg.get("topic") or "")
+    from das.asr.live.agents._live import LivePartner
+    p = LivePartner(api_key=cfg["api_key"],
+                    voice=cfg.get("voice") or "cedar",
+                    topic=cfg.get("topic") or "")
     if state.tracker is not None:
         p.set_tracker(state.tracker)
     p.on_ai_utterance = _on_partner_text_factory(state)
@@ -1296,18 +1294,8 @@ class _AgentWorker:
             if s.meeting_epoch != meeting_epoch:
                 return False, af_new_utt
             s.agent_cursor = n
-        # --- パートナー（Realtime）への割り込み ---
-        # ファシリテーターは GPT-Live が室内の声を聞いて自分で止まるので、
-        # こちらでは検出しない（WP2）。パートナーは WP7 で Live に移すまで従来どおり。
-        raw_texts = [str(r.get("text", "")) for r in raw_new]
-        if partner is not None and (partner.ai_speaking or partner._responding):
-            real_utterances = [t.strip() for t in raw_texts
-                               if not _is_backchannel(t)]
-            if real_utterances:
-                partner.interrupt()
-                for i, utt in enumerate(real_utterances):
-                    is_last = (i == len(real_utterances) - 1)
-                    partner.inject_context("人間", utt, request_response=is_last)
+        # ファシリテーターもパートナーも GPT-Live が室内の声を聞いて自分で
+        # 止まり、応じる。こちらでは割り込みを検出しない（WP2 / WP7）。
         return True, af_new_utt
 
     # -- 3. 介入オフ ---------------------------------------------------
@@ -1707,11 +1695,6 @@ class _AgentWorker:
             if not enabled:
                 self._discard_while_disabled()
                 continue
-            # --- ファシリテーター優先 ---
-            if (partner is not None
-                    and (partner.ai_speaking or partner._responding)
-                    and self.agent.ai_speaking):
-                partner.interrupt()
             # drift_checker/participation_checker からの要求を回収（R2/S4）。
             # busy でも取りこぼさないよう、キューは毎ループ必ず drain する。
             self.pending.drain(s, now=time.monotonic())

@@ -67,6 +67,14 @@ PROMPT_CONVERSATION = """\
 [指示] で始まる指示が届いたときは、その指示に沿って短く話します。
 前置きや記号は付けず、本題だけを話します。"""
 
+PROMPT_PARTNER = """\
+あなたは会議で人間と議論するAIの相手役です。日本語で話します。
+議題: {topic}
+自分の意見を持ち、根拠を添えて短く述べます。相手の意見には賛成でも反対でも
+率直に応じます。一度に話すのは2〜3文までにし、相手が話し始めたらすぐに
+やめて聞きます。相手が黙っているときに自分から話し続けることはしません。
+前置きや記号は付けず、本題だけを話します。"""
+
 
 def _resample_16_to_24(pcm16: bytes) -> bytes:
     x = np.frombuffer(pcm16, dtype="<i2").astype(np.float32)
@@ -143,9 +151,8 @@ class LiveAgent(_RealtimeBase):
         self._last_input_at = 0.0
         self._seen_types: set[str] = set()
         self._reconnect_lock = threading.Lock()
-        # --- WP2 で消す互換シム（workers の生成先行・再送がまだ参照する） ---
+        # Realtime 版の「中断された介入」。Live では常に None（WP8 で参照ごと消す）
         self._pending_intervention: dict | None = None
-        self._hold_playback = False
 
     # ------------------------------------------------------------ 状態
 
@@ -510,22 +517,33 @@ class LiveAgent(_RealtimeBase):
         if was:
             self._log_state("→IDLE (再生停止)")
 
-    # --- WP2 で消す互換シム（workers / session_state がまだ呼ぶ） ---
 
-    def interrupt(self) -> None:
-        """人の発話による停止はモデルに任せる。何もしない（WP2 で呼び出しごと消す）."""
-        return
+class LivePartner(LiveAgent):
+    """「AIと会話」モードの相手役。GPT-Live の別セッションで室内の音声に自分で応じる.
 
-    def cancel_held(self) -> None:
-        return
+    ファシリテーター（`LiveAgent`）とは声紋キーとラベルを分け、議事録の
+    エコー除去で区別できるようにする。Controller からの指示は受けない
+    （`trigger` は何もしない）。人の発話による停止と応答はモデルが行う。
+    """
 
-    def release_playback(self) -> None:
-        return
+    AI_VOICE_KEY = "__PARTNER__"
+    _LABEL = "Partner"
+
+    def __init__(self, api_key: str, voice: str = "cedar", topic: str = "",
+                 model: str = LIVE_MODEL):
+        super().__init__(api_key=api_key, voice=voice, mode="conversation", model=model)
+        self.topic = topic
 
     @property
-    def is_holding_playback(self) -> bool:
-        return False
+    def _prompt(self) -> str:
+        return PROMPT_PARTNER.format(topic=self.topic or "（自由）")
 
-    @property
-    def last_hold_to_release_ms(self) -> float | None:
-        return None
+    def trigger(self, **_kw):
+        return
+
+    def inject_context(self, speaker: str, text: str, **_kw) -> None:
+        """文字起こしを黙って読む文脈として渡す（音声を聞き取れなかったときの補い）."""
+        if self._connected and text.strip():
+            self._send({"type": "session.thinking.append", "delegation_id": None,
+                        "content": f"{speaker}: {text.strip()}"[:_APPEND_MAX_CHARS]})
+

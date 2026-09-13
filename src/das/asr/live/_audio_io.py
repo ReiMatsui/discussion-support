@@ -33,15 +33,11 @@ def _run_from_mic(state: SessionState, device):
     def cb(indata, frames, t, status):
         pcm = (np.clip(indata[:, 0], -1, 1) * 32767).astype("<i2").tobytes()
         state.audio_q.put(pcm)
-        partner = state.partner  # 動的参照: 実行中の接続/切断に追従（F3）
-        if (partner is not None and partner._connected
-                and not partner.in_echo_window
-                and not (agent is not None and agent.in_echo_window)):
-            partner.feed_audio(pcm)
-        # GPT-Live 版のエージェントは室内の音声も聞く（送るかどうかは agent 側の listen 設定）
-        feed = getattr(agent, "feed_audio", None)
-        if feed is not None and agent._connected:
-            feed(pcm)
+        # GPT-Live は全二重: 進行役もパートナーも室内の音声を常に聞く（自分の声が
+        # 回り込む間も送る。止まる・応じるの判断はモデル側）。
+        for src in (agent, state.partner):   # partner は動的参照（実行中の接続/切断に追従）
+            if src is not None and src._connected:
+                src.feed_audio(pcm)
     with sd.InputStream(samplerate=SR, channels=1, dtype="float32",
                         device=device, callback=cb, blocksize=int(SR * 0.1)):
         while not state.stop.is_set():
@@ -130,9 +126,9 @@ def _run_from_wav(state: SessionState, args):
             break
         pcm = (chunk * 32767).astype("<i2").tobytes()
         state.audio_q.put(pcm)
-        feed = getattr(agent, "feed_audio", None)
-        if feed is not None and agent._connected:
-            feed(pcm)
+        for src in (agent, state.partner):
+            if src is not None and src._connected:
+                src.feed_audio(pcm)
         time.sleep(0.12)
     state.audio_q.put(None)
 

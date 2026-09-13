@@ -47,8 +47,7 @@ from ._speaker_keys import (
     looks_like_system_name,
 )
 from ._voice_profiles import VoiceProfiles
-from .agents._live import LIVE_VOICES, LiveAgent
-from .agents._partner import ConversationPartner
+from .agents._live import LIVE_VOICES, LiveAgent, LivePartner
 from .agents._simulator import DiscussionSimulator
 
 
@@ -185,7 +184,7 @@ class SessionState:
         """AIエージェント・論点・介入要求キューの状態."""
         # AI
         self.agent: LiveAgent | None = None
-        self.partner: ConversationPartner | None = None
+        self.partner: LivePartner | None = None
         self.simulator: DiscussionSimulator | None = None
         # 会話モード(converse)でパートナーを動的生成するための設定（F3）。
         # bootstrapで {api_key, voice, topic} をセットする。
