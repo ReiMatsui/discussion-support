@@ -29,6 +29,7 @@ from das.asr.live._constants import (
     _INVITE_WARMUP,
     AGENT_SPEAKER,
 )
+from das.asr.live._drift import DriftRun
 from das.asr.live._participation import (
     participation_share_key,
     participation_share_label,
@@ -40,6 +41,7 @@ from das.asr.live._speaker_policy import is_intervention_signal, reliable_human_
 CheckFact = Callable[[list[dict], str, str], dict]
 ClassifyUtterance = Callable[[list[dict[str, str]], str, str], dict[str, object]]
 CheckDrift = Callable[[list[dict], list[dict], str, str], dict]
+LabelDrift = Callable[[list[dict], list[str], list[str], str, str], dict]
 CheckParticipation = Callable[[list[dict], list[dict], str, str], dict]
 
 AGENT_SPEAKERS = {AGENT_SPEAKER, "AI", "パートナー"}
@@ -157,7 +159,7 @@ const ignoredLabel = (s) => ({
 const liveInfo = (l) => {
   if (!l) return "";
   const parts = [];
-  if (!l.requested) parts.push("指示なしの発話");
+  if (!l.requested) parts.push(l.call_response ? "呼びかけへの応答（指示なし）" : "指示なしの発話");
   if (l.speak_start_latency_ms != null) parts.push(`指示→声 ${(l.speak_start_latency_ms / 1000).toFixed(1)}秒`);
   if (l.voiced_sec != null) parts.push(`声 ${l.voiced_sec}秒`);
   if (l.overlap_at_ms != null) parts.push(`${l.overlap_speaker || "参加者"}と重なり→${l.silenced_after_sec}秒で黙る`);
@@ -205,7 +207,9 @@ fetch("/api/replay").then((r) => r.json()).then((data) => {
           esc(reviewSummary.manual_call_expired ?? 0)}）</span>` : ""}
         ${reviewSummary.live_turns ? `<span class="chip">Live: 指示→声 中央値${
           esc(((reviewSummary.live_speak_latency_ms_median ?? 0) / 1000).toFixed(1))}秒 / 指示なし${
-          esc(reviewSummary.live_unrequested ?? 0)} / 重なり${
+          esc(reviewSummary.live_unrequested ?? 0)}（呼びかけ応答${
+          esc(reviewSummary.live_unrequested_call_responses ?? 0)}・それ以外${
+          esc(reviewSummary.live_unrequested_other ?? 0)}） / 重なり${
           esc(reviewSummary.live_overlaps ?? 0)}（黙るまで中央値${
           esc(reviewSummary.live_silenced_after_sec_median ?? "-")}秒、再開${
           esc(reviewSummary.live_resumed ?? 0)}）</span>` : ""}
@@ -264,6 +268,7 @@ class ReplayOptions:
     limit: int | None = None
     include_agent: bool = False
     fact_cooldown_turns: int = 6
+    drift_run_sec: float = 45.0   # standard と同じ。議題外の話がこの秒数続いたら戻す
 
 
 def load_turns(path: str | Path, *, include_agent: bool = False,
@@ -343,6 +348,17 @@ def _intervention_quality_flags(
     if len(delivery_text) > 80:
         flags.append("long_delivery")
     return flags
+
+
+def _event_time_delta_signed_sec(start: str | None, end: str | None) -> float | None:
+    """end - start（秒、負も可）。どちらかが無い・壊れていれば None."""
+    if not start or not end:
+        return None
+    try:
+        return round((datetime.datetime.fromisoformat(end)
+                      - datetime.datetime.fromisoformat(start)).total_seconds(), 3)
+    except ValueError:
+        return None
 
 
 def _event_time_delta_sec(start: str | None, end: str | None) -> float | None:
@@ -562,8 +578,17 @@ def _median(xs: list[float]) -> float | None:
     return round(mid, 3)
 
 
-def annotate_live_speech(items: list[dict[str, Any]], turns: list[dict[str, Any]]) -> dict[str, Any]:
+_CALL_RESPONSE_BEFORE_SEC = 5.0    # 呼びかけ検出（STT+分類後）より前に答え始めていることが多い
+_CALL_RESPONSE_AFTER_SEC = 12.0
+
+
+def annotate_live_speech(items: list[dict[str, Any]], turns: list[dict[str, Any]],
+                         voice_calls: list[str] | None = None) -> dict[str, Any]:
     """GPT-Live の発話観測（§3.5）を review item に貼り、集計を返す（純関数）.
+
+    voice_calls: 音声呼びかけとして検出された時刻（created_at, ISO）。指示なし発話の
+    うち検出の前後にあるものを「呼びかけへの応答」と印を付け、それ以外の指示なし
+    発話（口を挟んだ回数）と分けて数える。
 
     delivery.timing にある値（LiveAgent.last_turn_stats 由来）:
       requested / speak_start_latency_ms / voiced_sec / chars / end_reason /
@@ -593,7 +618,15 @@ def annotate_live_speech(items: list[dict[str, Any]], turns: list[dict[str, Any]
             "end_reason": timing.get("end_reason"),
             "overlap_at_ms": None, "overlap_speaker": None,
             "silenced_after_sec": None, "resumed": False,
+            "call_response": False,
         }
+        if not live["requested"]:
+            at = str(delivery.get("created_at") or "")
+            for call_at in voice_calls or ():
+                d = _event_time_delta_signed_sec(call_at, at)
+                if d is not None and -_CALL_RESPONSE_BEFORE_SEC <= d <= _CALL_RESPONSE_AFTER_SEC:
+                    live["call_response"] = True
+                    break
         start, end = timing.get("capture_start_ms"), timing.get("capture_end_ms")
         if isinstance(start, int | float) and isinstance(end, int | float):
             hit = next((t for t in humans if start <= float(t["ms"]) < end), None)
@@ -615,9 +648,12 @@ def annotate_live_speech(items: list[dict[str, Any]], turns: list[dict[str, Any]
     voiced = [float(x["voiced_sec"]) for x in lives if isinstance(x.get("voiced_sec"), int | float)]
     silenced = [float(x["silenced_after_sec"]) for x in lives
                 if isinstance(x.get("silenced_after_sec"), int | float)]
+    unrequested = [x for x in lives if not x["requested"]]
     return {
         "live_turns": len(lives),
-        "live_unrequested": sum(1 for x in lives if not x["requested"]),
+        "live_unrequested": len(unrequested),
+        "live_unrequested_call_responses": sum(1 for x in unrequested if x["call_response"]),
+        "live_unrequested_other": sum(1 for x in unrequested if not x["call_response"]),
         "live_overlaps": sum(1 for x in lives if x["overlap_at_ms"] is not None),
         "live_resumed": sum(1 for x in lives if x["resumed"]),
         "live_speak_latency_ms_median": _median(latencies),
@@ -691,18 +727,26 @@ def _run_drift_check(
     records: list[dict],
     turn: dict,
     opts: ReplayOptions,
-    check_drift: CheckDrift,
+    label_drift: LabelDrift,
+    run: DriftRun,
 ) -> dict | None:
+    """本番と同じ状態機械（DriftRun）で「議題外の話が続いた時間」を測る."""
     if "drift" not in opts.checks or not opts.topic or opts.no_api:
         return None
     n = len(records)
     if n < _DRIFT_WARMUP or n % _DRIFT_CHECK_INTERVAL != 0:
         return None
-    topics = [{"topic": opts.topic, "speaker": "議題"}]
-    result = check_drift(_utterance_window(records, _DRIFT_CHECK_WINDOW),
-                         topics, opts.api_key, opts.model)
-    if result.get("drift"):
-        return _event(turn, "drift", str(result.get("reason") or "脱線"))
+    window = records[-_DRIFT_CHECK_WINDOW:]
+    result = label_drift(_utterance_window(records, _DRIFT_CHECK_WINDOW),
+                         [opts.topic], [], opts.api_key, opts.model)
+    labels = result.get("labels") or []
+    if not labels:
+        return None
+    run.observe([{"ms": r.get("ms"), "end_ms": r.get("end_ms")} for r in window],
+                labels, str(result.get("reason") or ""))
+    reason = run.should_fire(threshold_sec=opts.drift_run_sec)
+    if reason:
+        return _event(turn, "drift", reason, run_sec=round(run.run_sec(), 1))
     return None
 
 
@@ -757,7 +801,7 @@ def run_replay(
     opts: ReplayOptions,
     *,
     check_fact: CheckFact | None = None,
-    check_drift: CheckDrift | None = None,
+    label_drift: LabelDrift | None = None,
     check_participation: CheckParticipation | None = None,
     classify: ClassifyUtterance | None = None,
 ) -> list[dict]:
@@ -766,7 +810,8 @@ def run_replay(
 
     check_fact = check_fact or _bootstrap.check_fact_correction
     classify = classify or _bootstrap.classify_utterance
-    check_drift = check_drift or _bootstrap.check_drift
+    label_drift = label_drift or _bootstrap.label_drift
+    drift_run = DriftRun()
     check_participation = check_participation or _bootstrap.check_participation
 
     records: list[dict] = []
@@ -781,7 +826,7 @@ def run_replay(
             elif len(records) - last_fact_event_at >= opts.fact_cooldown_turns:
                 events.append(fact_event)
                 last_fact_event_at = len(records)
-        drift_event = _run_drift_check(records, turn, opts, check_drift)
+        drift_event = _run_drift_check(records, turn, opts, label_drift, drift_run)
         if drift_event:
             events.append(drift_event)
         invite_event = _run_invite_check(records, turn, opts, check_participation)
@@ -807,7 +852,9 @@ def replay_snapshot(source: str | Path, turns: list[dict], events: list[dict],
     review_summary["voice_call_ignored"] = sum(
         1 for d in voice_diags if not d["detected"])
     # GPT-Live の発話観測（§3.5）。値が無いログ（旧形式）では 0 件になるだけ。
-    review_summary.update(annotate_live_speech(review_items, turns))
+    review_summary.update(annotate_live_speech(
+        review_items, turns,
+        voice_calls=[str(d["created_at"]) for d in voice_diags if d["detected"] and d.get("created_at")]))
     return {
         "source": str(source),
         "topic": opts.topic,

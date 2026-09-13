@@ -463,24 +463,28 @@ def test_run_replay_fact_retryable_error_is_visible():
     }]
 
 
-def test_run_replay_drift_with_mock_checker():
+def test_run_replay_drift_with_mock_labeler():
+    """本番と同じ状態機械: 議題外の話が閾値の秒数続いたところで1回だけ脱線イベント."""
     turns = [
-        {"turn_id": i, "speaker": "A", "text": f"発話{i}", "ms": i * 1000, "end_ms": i * 1000 + 500}
-        for i in range(1, 4)
+        {"turn_id": i, "speaker": "A", "text": f"発話{i}",
+         "ms": i * 10_000, "end_ms": i * 10_000 + 8_000}
+        for i in range(1, 9)
     ]
 
-    def fake_drift(_utts, topics, _key, _model):
-        assert topics[0]["topic"] == "AI導入"
-        return {"drift": True, "reason": "雑談"}
+    def fake_label(utts, agenda, _anchors, _key, _model):
+        assert agenda == ["AI導入"]
+        return {"labels": ["off"] * len(utts), "reason": "雑談"}
 
     events = run_replay(
         turns,
-        ReplayOptions(api_key="key", topic="AI導入", checks={"drift"}),
-        check_drift=fake_drift,
+        ReplayOptions(api_key="key", topic="AI導入", checks={"drift"}, drift_run_sec=45.0),
+        label_drift=fake_label,
     )
 
-    assert events[0]["type"] == "drift"
-    assert events[0]["detail"] == "雑談"
+    drift = [e for e in events if e["type"] == "drift"]
+    assert len(drift) == 1                      # 60秒以内の繰り返しは出さない
+    assert drift[0]["detail"] == "雑談"
+    assert drift[0]["run_sec"] >= 45.0
 
 
 def test_run_replay_invite_rejects_unknown_target():
@@ -686,8 +690,11 @@ def test_annotate_live_speech_overlap_silence_and_resume():
         {"speaker": "ファシリテーター", "text": "一言", "ms": 12_500},   # AI は数えない
         {"speaker": "Bさん", "text": "次の話", "ms": 70_000},            # 3件目の外
     ]
-    summary = annotate_live_speech(items, turns)
+    summary = annotate_live_speech(items, turns, voice_calls=["2026-09-13T10:00:08"])
     a, b, c, old = items
+    assert b["live"]["call_response"] is True          # 検出の3秒前に答え始めた指示なし発話
+    assert summary["live_unrequested_call_responses"] == 1
+    assert summary["live_unrequested_other"] == 0
     assert a["live"]["overlap_at_ms"] == 12_000 and a["live"]["overlap_speaker"] == "Aさん"
     assert a["live"]["silenced_after_sec"] == 1.0
     assert a["live"]["resumed"] is True            # 5秒後に指示なしで話した

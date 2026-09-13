@@ -29,6 +29,7 @@ from ._constants import (
     _AGENDA_WINDOW,
     _DRIFT_CHECK_INTERVAL,
     _DRIFT_CHECK_WINDOW,
+    _DRIFT_RUN_SEC_DEFAULT,
     _DRIFT_WARMUP,
     _FACTCHECK_CHECK_SEC,
     _FACTCHECK_MAX_RETRIES,
@@ -46,6 +47,7 @@ from ._constants import (
     SR,
     WORKER_TICK_SEC,
 )
+from ._drift import DriftRun
 from ._facilitation import (
     FacilitationController,
     FacilitationInput,
@@ -217,19 +219,19 @@ def _run_topic_worker(state: SessionState, oai_key: str, oai_model: str):
 def _run_drift_checker(state: SessionState, oai_key: str, oai_model: str):
     """脱線検出のバックグラウンドワーカー（並列監視）.
 
-    _run_topic_worker が抽出した論点(state.topics)を使い、
-    直近の発話が論点からズレていないかを軽量モデルで高頻度チェック。
+    2発話ごとに直近の発話へ on / aside / off を付け、DriftRun で「離れている時間」
+    を測る。閾値（積極性プロファイルの drift_run_sec）を超えたら理由を
+    state.drift_requests に積む。実際のトリガーは _run_agent_worker が裁定する
+    （R2: このワーカーは trigger() を呼ばない）。
 
     人間・パートナー双方の発話をチェック対象に含める。
     パートナーが脱線に付き合っている状態も検出するため。
-
-    R2: このワーカーは trigger() を呼ばない。脱線を検出したら理由を
-    state.drift_requests キューに積むだけ。実際のトリガーは
-    _run_agent_worker が一元的に行う（トリガー経路の単一化）。
     """
-    from das.asr.live._bootstrap import check_drift as _check_drift
+    from das.asr.live._bootstrap import label_drift as _label_drift
 
     _diag_tick = 0
+    run = DriftRun()
+    epoch_seen = state.meeting_epoch
     while not state.stop.is_set():
         time.sleep(1)
         _diag_tick += 1
@@ -240,16 +242,21 @@ def _run_drift_checker(state: SessionState, oai_key: str, oai_model: str):
             continue
         if agent.mode == "conversation":
             continue
+        if state.meeting_epoch != epoch_seen:
+            epoch_seen = state.meeting_epoch
+            run = DriftRun()
 
-        # 論点がまだなければスキップ
         with state.topics_lock:
-            _has_topics = bool(state.topics)
-            topics = list(state.topics) if _has_topics else []
-        if not _has_topics:
+            topics = list(state.topics)
+        agenda = [str(t.get("topic") or "") for t in topics
+                  if t.get("speaker") in ("議題", "議題(自動)")]
+        flow = [str(t.get("topic") or "") for t in topics
+                if t.get("speaker") not in ("議題", "議題(自動)")]
+        if not agenda and not flow:
             if _diag_tick % 30 == 0:
                 print("# [drift] 待機中: 論点未抽出", flush=True)
             continue
-        # ファシリテーター以外の全発話をカウント＆チェック対象にする
+        run.update_anchors(flow)
         with state.state_lock:
             epoch = state.meeting_epoch
             talk_rs = intervention_records([
@@ -265,7 +272,6 @@ def _run_drift_checker(state: SessionState, oai_key: str, oai_model: str):
             continue
         if n - state.drift_cursor < _DRIFT_CHECK_INTERVAL:
             continue
-        # 直近の発話を取得
         window = talk_rs[max(0, n - _DRIFT_CHECK_WINDOW):]
         utts = [{"speaker": intervention_speaker_name(state, r), "text": r["text"]}
                 for r in window]
@@ -274,19 +280,22 @@ def _run_drift_checker(state: SessionState, oai_key: str, oai_model: str):
             if state.meeting_epoch != epoch:
                 continue
             state.drift_cursor = n
-        print(f"# [drift] チェック実行: {len(utts)}発話, "
-              f"cursor={n}, topics={len(topics)}件", flush=True)
-        # 脱線判定
-        result = _check_drift(utts, topics, oai_key, oai_model)
-        if result.get("drift"):
-            reason = result.get("reason", "")
-            # キュー投入（副作用）の直前でも epoch を確認し、リセット後の
-            # 新会議に古い脱線要求が混ざらないようにする（H2）。
-            with state.state_lock:
-                if state.meeting_epoch != epoch:
-                    continue
-            _print_line(f"# 🔀 脱線検出: {reason}")
-            # R2: trigger()は呼ばず、要求をキューに積む。agent_workerが裁定する。
+        result = _label_drift(utts, agenda, run.anchor_topics, oai_key, oai_model)
+        labels = result.get("labels") or []
+        if not labels:
+            continue
+        with state.state_lock:
+            if state.meeting_epoch != epoch:
+                continue
+        run.observe([{"ms": r.get("ms"), "end_ms": r.get("end_ms")} for r in window],
+                    labels, result.get("reason", ""))
+        threshold = float(state.proactivity.get("drift_run_sec", _DRIFT_RUN_SEC_DEFAULT))
+        print(f"# [drift] 判定: {''.join('○' if x == 'on' else '△' if x == 'aside' else '×' for x in labels)}"
+              f" 離れている時間={run.run_sec():.0f}s/{threshold:.0f}s"
+              f"{'（' + run.reason + '）' if run.reason else ''}", flush=True)
+        reason = run.should_fire(threshold_sec=threshold)
+        if reason:
+            _print_line(f"# 🔀 脱線が{threshold:.0f}秒以上続いています: {reason}")
             state.drift_requests.put(reason)
             print("# [drift] → 介入要求をキューに投入", flush=True)
 

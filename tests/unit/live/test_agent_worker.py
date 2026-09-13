@@ -870,18 +870,19 @@ def test_invite_waits_for_pause():
 # ドリフトチェッカーのウォームアップ（Fix 11）
 # ---------------------------------------------------------------------------
 
-def _run_drift_checker_briefly(state, monkeypatch, *, records, seconds=2.5):
-    """check_drift をモックして _run_drift_checker を短時間動かし、呼び出しを記録."""
+def _run_drift_checker_briefly(state, monkeypatch, *, records, seconds=2.5,
+                               labels=None, reason=""):
+    """label_drift をモックして _run_drift_checker を短時間動かし、呼び出しを記録."""
     import das.asr.live._bootstrap as bootstrap
     from das.asr.live._workers import _run_drift_checker
 
     calls: list = []
 
-    def _fake_check(*_a, **_k):
-        calls.append(1)
-        return {"drift": False}
+    def _fake_label(utts, agenda, anchors, *_a, **_k):
+        calls.append({"n": len(utts), "agenda": agenda, "anchors": anchors})
+        return {"labels": (labels or ["on"] * len(utts))[:len(utts)], "reason": reason}
 
-    monkeypatch.setattr(bootstrap, "check_drift", _fake_check)
+    monkeypatch.setattr(bootstrap, "label_drift", _fake_label)
     state.topics = [{"topic": "AI導入の是非", "speaker": "議題"}]
     state.records = records
     t = threading.Thread(target=_run_drift_checker,
@@ -913,6 +914,36 @@ def test_drift_runs_after_warmup(monkeypatch):
     ]
     calls = _run_drift_checker_briefly(state, monkeypatch, records=records)
     assert calls, "ウォームアップ後は脱線判定が走るべき"
+    assert calls[0]["agenda"] == ["AI導入の是非"]
+
+
+def test_drift_request_is_queued_only_after_the_off_run_exceeds_the_threshold(monkeypatch):
+    """議題外の話が閾値の秒数続いたときだけ介入要求を積む（一言外れただけでは積まない）."""
+    agent = FakeAgent()
+    state = FakeState(agent, None)
+    state.proactivity = {"drift_run_sec": 45.0}
+    short = [
+        {"speaker": "話者1", "text": "AI導入は段階的に", "ms": 0, "end_ms": 5000},
+        {"speaker": "話者2", "text": "ところでリゾット", "ms": 6000, "end_ms": 9000},
+        {"speaker": "話者1", "text": "データ管理が先", "ms": 10000, "end_ms": 15000},
+        {"speaker": "話者2", "text": "美味しいよね", "ms": 16000, "end_ms": 19000},
+    ]
+    _run_drift_checker_briefly(state, monkeypatch, records=short,
+                               labels=["on", "off", "on", "off"], reason="雑談")
+    assert state.drift_requests.empty()
+
+    state = FakeState(FakeAgent(), None)
+    state.proactivity = {"drift_run_sec": 45.0}
+    long_off = [
+        {"speaker": "話者1", "text": "AI導入は段階的に", "ms": 0, "end_ms": 5000},
+        {"speaker": "話者2", "text": "リゾットの話1", "ms": 6000, "end_ms": 20000},
+        {"speaker": "話者1", "text": "リゾットの話2", "ms": 21000, "end_ms": 40000},
+        {"speaker": "話者2", "text": "リゾットの話3", "ms": 41000, "end_ms": 55000},
+    ]
+    _run_drift_checker_briefly(state, monkeypatch, records=long_off,
+                               labels=["on", "off", "off", "off"], reason="料理の話")
+    assert state.drift_requests.get_nowait() == "料理の話"
+    assert state.drift_requests.empty()          # 続けざまには積まない
 
 
 # ---------------------------------------------------------------------------

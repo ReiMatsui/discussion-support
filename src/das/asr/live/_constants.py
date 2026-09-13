@@ -234,6 +234,30 @@ _DRIFT_PROMPT = """\
 
 JSON1つのみ出力。形式: {{"drift": true/false, "reason": "10字以内"}}"""
 
+_DRIFT_LABEL_PROMPT = """\
+会議の直近の発話それぞれについて、議題との関係を判定してください。
+
+## 議題（戻るべき軸）
+{agenda}
+
+## 議題の上で出ている論点（参考。ここに無い話題が論点になっても議題外は議題外）
+{topics}
+
+## 直近の発話（古い順）
+{utterances}
+
+## 判定
+各発話に次のいずれかを付けます。
+- on   : 議題そのもの、または議題の論点を進める発話
+- aside: 議題から少し離れるが議題に役立つ寄り道（例え話・具体例・確認・進行の相談・
+         AIやファシリテーターへの言及・短い相槌や冗談）
+- off  : 議題と無関係で、会議の目的に寄与しない話題
+迷ったら aside。会話が自然に議題の別の側面へ移ったのは on。
+reason には、末尾の off が続いている話題を10字以内で書く（off が無ければ空）。
+
+JSON1つのみ出力。形式: {{"labels": ["on"|"aside"|"off", ...（発話と同じ数・同じ順）],
+"reason": "10字以内"}}"""
+
 _AGENDA_PROMPT = """\
 会議の冒頭の発話から、今日の主な議題（テーマ）を一言で推定してください。
 まだ議題が定まっていない・挨拶や雑談のみで判断できない場合は空文字を返してください。
@@ -522,7 +546,7 @@ _AGENT_DEBATE_SILENCE = 15.0  # N秒沈黙で応答検討(debate — Partner会�
 _AGENT_CONV_SILENCE = 1.5     # N秒沈黙で応答(conversation — 発話断片をまとめる)
 
 # --- 並列ドリフト（脱線）検出 ---
-_DRIFT_CHECK_INTERVAL = 3     # ドリフトチェックの発話間隔（短い発話に過敏にならない）
+_DRIFT_CHECK_INTERVAL = 2     # 脱線判定の発話間隔（離れている時間を測るので細かめに見る）
 _DRIFT_CHECK_WINDOW = 8       # チェック時に参照する最近の発話数
 _DRIFT_WARMUP = 3             # この発話数に達するまで脱線判定しない（開始時の挨拶の猶予）
 _INTERVENTION_COOLDOWN = 25.0 # 介入後この秒数は脱線介入を抑制（連発=しつこさの防止）
@@ -597,18 +621,22 @@ _PARTIAL_FLOOR_MAX_AGE = 10.0
 # --- 積極性プロファイル（人間ファシリテーションの介入頻度, S5） ---
 # silence_summarize: 沈黙がこの秒数続いたら要約/整理の介入を検討（None=しない）。
 # cooldown: 脱線介入・声かけの最小間隔（しつこさ防止）。
-# drift_confirmations: 脱線を採るまでに必要な連続検出回数。
+# drift_run_sec: 議題と無関係な話がこの秒数続いたら戻す（脱線の本質は「離れて
+#   いる時間」。一言外れただけでは戻さず、自力で戻る会話には何も言わない）。
+# drift_confirmations: 旧方式の連続検出回数。時間で測るようにしたので 1（ゲートなし）。
 # 既定は standard。デモや通常利用では、沈黙時の短い整理も許可する。
 # 注: 旧 stall_breaker（「介入不要」後のデッドエア一押し）は Phase3 で廃止した。
 # Speaker から「介入不要」判断を外したため、その履歴に依存する一押しは行わない。
 _PROACTIVITY_PROFILES = {
     "controlled": {"silence_summarize": None, "cooldown": 40.0,
-                   "drift_confirmations": 2},  # 明確な問題時のみ
+                   "drift_confirmations": 1, "drift_run_sec": 90.0},  # 明確な問題時のみ
     "standard":   {"silence_summarize": 18.0, "cooldown": 25.0,
-                   "drift_confirmations": 2},
+                   "drift_confirmations": 1, "drift_run_sec": 45.0},
     "active":     {"silence_summarize": 8.0,  "cooldown": 15.0,
-                   "drift_confirmations": 1},
+                   "drift_confirmations": 1, "drift_run_sec": 25.0},
 }
+_DRIFT_RUN_SEC_DEFAULT = 45.0
+_DRIFT_REPEAT_SEC = 60.0      # 戻した後も離れたままなら、この秒数あけてもう一度
 _PROACTIVITY_DEFAULT = "standard"
 # 相槌判定: 相槌パターンに一致する発話ではPartnerを止めない
 _BACKCHANNEL_RE = re.compile(

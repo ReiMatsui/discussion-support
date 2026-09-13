@@ -218,3 +218,28 @@ def test_other_400_is_not_retried(monkeypatch, capsys):
     assert bootstrap._post_chat_json(params, "k", timeout=1, label="topic") is None
     assert len(calls) == 1
     assert "unknown model" in capsys.readouterr().out
+
+
+def test_label_drift_validates_the_label_count(monkeypatch):
+    from das.asr.live import _bootstrap as bootstrap
+
+    answers = iter([
+        {"labels": ["on", "off"], "reason": "雑談"},
+        {"labels": ["on"], "reason": "数が足りない"},
+        "not a dict",
+    ])
+    prompts: list[str] = []
+
+    def fake_post(params, api_key, *, timeout, label):
+        prompts.append(params["messages"][-1]["content"] if "messages" in params
+                       else str(params))
+        return next(answers)
+
+    monkeypatch.setattr(bootstrap, "_post_chat_json", fake_post)
+    utts = [{"speaker": "A", "text": "議題の話"}, {"speaker": "B", "text": "雑談"}]
+    assert bootstrap.label_drift(utts, ["AI導入の是非"], ["コスト"], "key", "m") == {
+        "labels": ["on", "off"], "reason": "雑談"}
+    assert "AI導入の是非" in prompts[0] and "コスト" in prompts[0]
+    assert bootstrap.label_drift(utts, [], [], "key", "m")["labels"] == []   # 数が合わない
+    assert bootstrap.label_drift(utts, [], [], "key", "m")["labels"] == []   # 失敗
+    assert bootstrap.label_drift([], [], [], "key", "m")["labels"] == []     # 入力なし

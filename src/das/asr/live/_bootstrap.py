@@ -28,6 +28,7 @@ from das.asr.live._cluster_naming import ClusterVoiceNamer
 from das.asr.live._console_log import ConsoleLog
 from das.asr.live._constants import (
     _AGENDA_PROMPT,
+    _DRIFT_LABEL_PROMPT,
     _DRIFT_PROMPT,
     _FACTCHECK_PROMPT,
     _PARTICIPATION_PROMPT,
@@ -208,6 +209,17 @@ _DRIFT_SCHEMA = {
         "reason": {"type": "string"},
     },
     "required": ["drift", "reason"],
+    "additionalProperties": False,
+}
+
+_DRIFT_LABEL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "labels": {"type": "array",
+                   "items": {"type": "string", "enum": ["on", "aside", "off"]}},
+        "reason": {"type": "string"},
+    },
+    "required": ["labels", "reason"],
     "additionalProperties": False,
 }
 
@@ -434,6 +446,35 @@ def check_drift(utterances: list[dict], topics: list[dict],
         return {"drift": False}
     print(f"# [drift] 判定結果: {result}", flush=True)
     return result
+
+
+def label_drift(utterances: list[dict], agenda: list[str], anchor_topics: list[str],
+                api_key: str, model: str) -> dict:
+    """直近の発話それぞれに on / aside / off を付ける（脱線の状態機械の入力）.
+
+    Returns:
+        {"labels": [...], "reason": str}。発話数と合わない・失敗なら {"labels": []}。
+    """
+    if not utterances or not api_key:
+        return {"labels": [], "reason": ""}
+    utt_text = "\n".join(f"{i + 1}. {u['speaker']}: {u['text']}"
+                         for i, u in enumerate(utterances))
+    agenda_text = "\n".join(f"- {a}" for a in agenda if a) or "（明示議題なし。論点を軸にする）"
+    topic_text = "\n".join(f"- {t}" for t in anchor_topics if t) or "（まだなし）"
+    prompt = _DRIFT_LABEL_PROMPT.format(agenda=agenda_text, topics=topic_text,
+                                        utterances=utt_text)
+    params = _build_chat_params(
+        model, prompt, max_out=400, temperature=0.0,
+        schema_name="drift_labels", schema=_DRIFT_LABEL_SCHEMA)
+    result = _post_chat_json(params, api_key, timeout=15, label="drift")
+    if not isinstance(result, dict):
+        return {"labels": [], "reason": ""}
+    labels = [str(x) for x in (result.get("labels") or [])]
+    if len(labels) != len(utterances):
+        print(f"# [drift] 判定の数が発話数と合いません（{len(labels)}/{len(utterances)}）",
+              flush=True)
+        return {"labels": [], "reason": ""}
+    return {"labels": labels, "reason": str(result.get("reason") or "").strip()}
 
 
 def detect_agenda(utterances: list[dict], api_key: str, model: str) -> str | None:
