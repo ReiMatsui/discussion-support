@@ -36,6 +36,7 @@ from .._constants import _AGENT_TRIGGER, _ECHO_COOLDOWN
 from .._voice_profiles import VoiceProfiles
 from . import _notes
 from ._base import _VoiceAgentBase
+from ._jitter import JitterBuffer
 
 LIVE_URL = "wss://api.openai.com/v1/live/sessions"
 LIVE_MODEL = "gpt-live-1"
@@ -131,8 +132,10 @@ class LiveAgent(_VoiceAgentBase):
         self._interrupted = False                # 基底の互換用。Live では常に False
         self._ai_text_buf = ""
         self._audio_q: queue.Queue[tuple[int, bytes | None]] = queue.Queue()
-        self._queued_ms = 0                      # 再生待ちの音声の長さ（ジッタ吸収の判断用）
+        self._queued_ms = 0                      # 再生待ち（キュー）の音声の長さ
         self._queued_lock = threading.Lock()
+        self._jitter = JitterBuffer()            # 到着の揺れを吸収して一定速度で鳴らす
+        self._playback_status_warned = False
         self._play_epoch = 0
         self._connected = False
         self._conn_error = ""
@@ -558,6 +561,7 @@ class LiveAgent(_VoiceAgentBase):
         self._audio_bytes_this_turn = 0
         self._silent_run_ms = 0
         self._ai_text_buf = ""
+        self._jitter.begin_turn()
         self._turn_requested = requested
         self._turn_first_voice_at = 0.0
         self._turn_last_voice_at = 0.0
@@ -692,7 +696,7 @@ class LiveAgent(_VoiceAgentBase):
         # 止まったときの保険。
         if (self.ai_speaking or self._responding) and self._last_audio_at \
                 and time.monotonic() - self._last_audio_at > _STREAM_STALL_SEC \
-                and self._audio_bytes_this_turn > 0 and self._audio_q.empty():
+                and self._audio_bytes_this_turn > 0 and self._playback_idle():
             self._finish_turn(end_reason="stall")
 
     def _finish_turn(self, *, end_reason: str = "silence") -> None:
@@ -725,6 +729,8 @@ class LiveAgent(_VoiceAgentBase):
             "since_last_voice_sec": (round(now - self._turn_last_voice_at, 2)
                                      if self._turn_last_voice_at else None),
             "unrequested_turns": self.unrequested_turns,
+            # 再生の観測: 溜めた量、尽きた回数、到着の空白の最大と合計
+            "playback": self._jitter.end_turn(),
         }
         if transcript:
             self._recent_ai_texts.append(transcript)
@@ -734,7 +740,10 @@ class LiveAgent(_VoiceAgentBase):
         self._q_put(None)
         with self._state_lock:
             self._responding = False
-        self._log_state(f"→IDLE (発話終端 {len(transcript)}字)")
+        pb = self.last_turn_stats["playback"]
+        self._log_state(f"→IDLE (発話終端 {len(transcript)}字, 声{self.last_turn_stats['voiced_sec']}s"
+                        f" 到着の空白 最大{pb['max_gap_ms']}ms/合計{pb['stall_ms']}ms"
+                        f" 尽き{pb['underruns']}回 溜め{pb['target_ms']}ms)")
 
     # ------------------------------------------------------------ 再生の停止
 
@@ -751,6 +760,7 @@ class LiveAgent(_VoiceAgentBase):
                 break
         with self._queued_lock:
             self._queued_ms = 0
+        self._jitter.clear()
         if self._ai_text_buf.strip():
             # 止めた発話は議事録に入れないが、再生済みの分は Soniox の確定待ちで
             # まだ文字になって返ってくる。エコー照合の参照には残す

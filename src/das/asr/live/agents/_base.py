@@ -34,13 +34,6 @@ class _VoiceAgentBase:
     # サブクラスで上書きするクラス属性
     AI_VOICE_KEY: str = "__BASE__"   # VoiceProfiles内のAI声紋キー
     _AI_ENROLL_SEC: float = 3.0      # 声紋登録に必要な最小秒数（有声部分のみ）
-    # 再生のジッタ吸収。GPT-Live は音声を実時間で流すので、溜めずに鳴らすと
-    # ネットワークの揺れ（100〜500ms）がそのまま音の途切れになる。発話の頭で
-    # 少し溜めてから鳴らし、途中で尽きたら少し溜め直す（実測: 有声 5〜7 秒の
-    # 発話が壁時計で 9〜13 秒に伸び、ぶつ切りに聞こえた。2026-09-14）
-    _PLAY_PREBUFFER_MS: int = 400
-    _PLAY_REBUFFER_MS: int = 200
-    _PLAY_BUFFER_WAIT_SEC: float = 0.8   # 溜まらなくてもこの時間で諦めて鳴らす
     _AI_ENROLL_MAX_SEC: float = 30.0  # これ以上溜めても登録できないなら諦める
     _AI_ENROLL_MIN_RMS: float = 200.0 / 32768.0   # float32 正規化後の無音判定（_live._SILENCE_RMS と同じ）
     _LABEL: str = "Agent"            # ログ用ラベル
@@ -78,15 +71,10 @@ class _VoiceAgentBase:
         self._audio_q.put((self._play_epoch, payload))
 
     def _queued_audio_ms(self) -> int:
+        """再生待ち（キュー）と鳴らし中の残り（ジッタバッファ）の合計 ms."""
         with self._queued_lock:
-            return self._queued_ms
-
-    def _wait_for_buffer(self, target_ms: int) -> None:
-        """再生キューに target_ms 以上たまるまで待つ（上限つき）."""
-        deadline = time.monotonic() + self._PLAY_BUFFER_WAIT_SEC
-        while (self._queued_audio_ms() < target_ms and not self._stop.is_set()
-               and time.monotonic() < deadline):
-            time.sleep(0.02)
+            q = self._queued_ms
+        return q + self._jitter.buffered_ms
 
     def _on_playback_terminator(self, epoch: int):
         """終端マーカー取り出し時、最新応答の終端のみ ai_speaking を倒す（Bug 6）."""
@@ -137,48 +125,53 @@ class _VoiceAgentBase:
     # --- ストリーミング音声再生 ---
 
     def _start_playback_thread(self):
-        """PCMキューから読み出して逐次再生するスレッド。
+        """再生スレッド: 受信キューの PCM をジッタバッファへ移し、デバイスはコールバックで
+        一定速度に取り出す（届いた順に書く方式だと到着の揺れがそのまま途切れになる）。
 
-        再生済みバイト数を_played_bytesに蓄積（truncate用）。
-        声紋未登録時は16kHzリサンプル音声を蓄積して自動登録。
-        キュー要素は (epoch, payload)。payload=None は応答の終端マーカー。
+        キュー要素は (epoch, payload)。payload=None は応答の終端マーカーで、
+        バッファが鳴り終わってから ai_speaking を倒す。
+        声紋未登録時は有声チャンクを16kHzにして蓄積し、自動登録する。
         """
         def _player():
+            jb = self._jitter
             try:
                 import sounddevice as sd
+
+                def _cb(outdata, frames, _t, status):
+                    if status and not self._playback_status_warned:
+                        self._playback_status_warned = True
+                        print(f"# {self._LABEL} 再生デバイス: {status}", flush=True)
+                    pcm = jb.pull(frames * 2)
+                    outdata[:, 0] = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768.0
+
                 stream = sd.OutputStream(samplerate=24000, channels=1,
-                                         dtype="float32", blocksize=2400)
+                                         dtype="float32", blocksize=1200, callback=_cb)
                 stream.start()
-                need_buffer_ms = self._PLAY_PREBUFFER_MS
                 while not self._stop.is_set():
                     epoch, chunk = self._audio_q.get()
-                    if chunk is None:          # 1応答の終端
+                    if chunk is None:          # 1応答の終端: 鳴り終わるまで待ってから
+                        deadline = time.monotonic() + 3.0
+                        while (jb.buffered_ms > 0 and not self._stop.is_set()
+                               and time.monotonic() < deadline):
+                            time.sleep(0.02)
                         self._on_playback_terminator(epoch)
-                        need_buffer_ms = self._PLAY_PREBUFFER_MS
                         continue
-                    if need_buffer_ms:
-                        # 取り出した1個ぶんは _queued_ms に含まれたまま待つ
-                        self._wait_for_buffer(need_buffer_ms)
-                        need_buffer_ms = 0
                     with self._queued_lock:
                         self._queued_ms = max(0, self._queued_ms - len(chunk) * 1000 // (24000 * 2))
-                    pcm = np.frombuffer(chunk, dtype="<i2").astype(np.float32) / 32768.0
-                    stream.write(pcm.reshape(-1, 1))
+                    jb.push(chunk)
                     self._played_bytes += len(chunk)
-                    if self._audio_q.empty():
-                        # 尽きた（音が途切れる）。次は少し溜め直してから続ける
-                        need_buffer_ms = self._PLAY_REBUFFER_MS
                     # 声紋登録用: 16kHzにリサンプルして蓄積。無音のチャンク（文の間、
                     # 終端前の 1.2 秒）は声紋を薄めるだけなので入れない。登録に失敗し
                     # 続けるときは溜め続けない（メモリと毎回の連結を抑える）
                     if (not self._ai_voice_enrolled and self._voice_tracker is not None
-                            and self._ai_voice_sec < self._AI_ENROLL_MAX_SEC
-                            and float(np.sqrt(np.mean(pcm * pcm))) >= self._AI_ENROLL_MIN_RMS):
-                        ref16 = _resample_24_to_16(pcm)
-                        if len(ref16) > 0:
-                            self._ai_voice_buf.append(ref16.copy())
-                            self._ai_voice_sec += len(ref16) / 16000.0
-                            self._try_enroll_voice()
+                            and self._ai_voice_sec < self._AI_ENROLL_MAX_SEC):
+                        pcm = np.frombuffer(chunk, dtype="<i2").astype(np.float32) / 32768.0
+                        if float(np.sqrt(np.mean(pcm * pcm))) >= self._AI_ENROLL_MIN_RMS:
+                            ref16 = _resample_24_to_16(pcm)
+                            if len(ref16) > 0:
+                                self._ai_voice_buf.append(ref16.copy())
+                                self._ai_voice_sec += len(ref16) / 16000.0
+                                self._try_enroll_voice()
                 stream.stop()
                 stream.close()
             except Exception as e:
@@ -189,11 +182,9 @@ class _VoiceAgentBase:
         self._playback_thread = threading.Thread(target=_player, daemon=True)
         self._playback_thread.start()
 
-    # --- WebSocket受信 ---
-
-    def _handle(self, ev: dict):  # pragma: no cover - サブクラスで実装
-        """受信イベントを処理する。サブクラスで必ず実装する。"""
-        raise NotImplementedError
+    def _playback_idle(self) -> bool:
+        """再生待ちも鳴らし中の残りも無いか."""
+        return self._audio_q.empty() and self._jitter.buffered_ms == 0
 
     # --- 終了処理 ---
 

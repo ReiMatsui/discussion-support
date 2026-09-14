@@ -451,19 +451,6 @@ def test_queued_audio_is_tracked_for_buffering(agent):
     assert agent._queued_audio_ms() == 0
 
 
-def test_wait_for_buffer_returns_when_enough_is_queued_or_on_timeout(agent, monkeypatch):
-    monkeypatch.setattr(type(agent), "_PLAY_BUFFER_WAIT_SEC", 0.2)
-    agent._responding = True
-    for _ in range(4):
-        agent._handle({"type": "session.output_audio.delta", "delta": _voiced()})
-    t0 = time.monotonic()
-    agent._wait_for_buffer(400)                  # もう溜まっている → すぐ戻る
-    assert time.monotonic() - t0 < 0.05
-    t0 = time.monotonic()
-    agent._wait_for_buffer(2000)                 # 溜まらない → 上限で諦める
-    assert 0.15 <= time.monotonic() - t0 < 0.6
-
-
 def test_turn_stats_include_stream_seconds(agent):
     agent._responding = True
     for _ in range(3):

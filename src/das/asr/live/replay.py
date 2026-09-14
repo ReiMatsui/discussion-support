@@ -164,6 +164,7 @@ const liveInfo = (l) => {
   if (l.voiced_sec != null) parts.push(`声 ${l.voiced_sec}秒` + (l.span_sec != null ? `（届くまで${l.span_sec}秒）` : ""));
   if (l.overlap_at_ms != null) parts.push(`${l.overlap_speaker || "参加者"}と重なり→${l.silenced_after_sec}秒で黙る`);
   if (l.resumed) parts.push("自力で再開");
+  if (l.playback) parts.push(`到着の空白 最大${l.playback.max_gap_ms}ms・尽き${l.playback.underruns}回・溜め${l.playback.target_ms}ms`);
   if (l.end_reason === "stall") parts.push("終端: ストリーム停止");
   return `<div class="manual-info">${esc(parts.join(" / "))}</div>`;
 };
@@ -617,6 +618,7 @@ def annotate_live_speech(items: list[dict[str, Any]], turns: list[dict[str, Any]
             "voiced_sec": timing.get("voiced_sec"),
             "stream_sec": timing.get("stream_sec"),
             "span_sec": timing.get("span_sec"),
+            "playback": timing.get("playback") if isinstance(timing.get("playback"), dict) else None,
             "end_reason": timing.get("end_reason"),
             "overlap_at_ms": None, "overlap_speaker": None,
             "silenced_after_sec": None, "resumed": False,
