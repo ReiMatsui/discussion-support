@@ -437,3 +437,38 @@ def test_giveup_cancels_the_pending_directive(agent):
     assert agent.ws.sent[-1]["type"] == "session.instructions.append"
     assert "取り消し" in agent.ws.sent[-1]["content"]
     assert agent._discarding is True             # 「了解」のような返事は捨てる
+
+
+# --- 再生のジッタ吸収（2026-09-14: 発話がぶつ切りに聞こえた） ------------------
+
+
+def test_queued_audio_is_tracked_for_buffering(agent):
+    agent._responding = True
+    for _ in range(3):
+        agent._handle({"type": "session.output_audio.delta", "delta": _voiced()})
+    assert agent._queued_audio_ms() == 300
+    agent.stop_playback()
+    assert agent._queued_audio_ms() == 0
+
+
+def test_wait_for_buffer_returns_when_enough_is_queued_or_on_timeout(agent, monkeypatch):
+    monkeypatch.setattr(type(agent), "_PLAY_BUFFER_WAIT_SEC", 0.2)
+    agent._responding = True
+    for _ in range(4):
+        agent._handle({"type": "session.output_audio.delta", "delta": _voiced()})
+    t0 = time.monotonic()
+    agent._wait_for_buffer(400)                  # もう溜まっている → すぐ戻る
+    assert time.monotonic() - t0 < 0.05
+    t0 = time.monotonic()
+    agent._wait_for_buffer(2000)                 # 溜まらない → 上限で諦める
+    assert 0.15 <= time.monotonic() - t0 < 0.6
+
+
+def test_turn_stats_include_stream_seconds(agent):
+    agent._responding = True
+    for _ in range(3):
+        agent._handle({"type": "session.output_audio.delta", "delta": _voiced()})
+    for _ in range(int(_live._SPEECH_END_GAP_SEC * 10)):
+        agent._handle({"type": "session.output_audio.delta", "delta": _silent()})
+    st = agent.last_turn_stats
+    assert st["voiced_sec"] == 0.3 and st["stream_sec"] == 1.5   # 無音 1.2 秒を含む

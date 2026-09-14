@@ -130,6 +130,8 @@ class LiveAgent(_VoiceAgentBase):
         self._interrupted = False                # 基底の互換用。Live では常に False
         self._ai_text_buf = ""
         self._audio_q: queue.Queue[tuple[int, bytes | None]] = queue.Queue()
+        self._queued_ms = 0                      # 再生待ちの音声の長さ（ジッタ吸収の判断用）
+        self._queued_lock = threading.Lock()
         self._play_epoch = 0
         self._connected = False
         self._conn_error = ""
@@ -170,6 +172,7 @@ class LiveAgent(_VoiceAgentBase):
         self._turn_first_voice_at = 0.0          # 最初の声（壁時計）
         self._turn_last_voice_at = 0.0           # 最後の声（壁時計）
         self._voiced_ms_this_turn = 0            # 声の区間の合計（ストリーム時間）
+        self._stream_ms_this_turn = 0            # 発話中に届いた音声の総量（無音含む）
         self.unrequested_turns = 0               # 指示なしで話した回数（会議通算）
         # こちらの都合で止めた後、モデルがまだ流している残りを捨てる（無音1.2秒で解除）
         self._discarding = False
@@ -525,6 +528,7 @@ class LiveAgent(_VoiceAgentBase):
         self._turn_first_voice_at = 0.0
         self._turn_last_voice_at = 0.0
         self._voiced_ms_this_turn = 0
+        self._stream_ms_this_turn = 0
         if not requested:
             self.unrequested_turns += 1
             self.last_unrequested_speech_at = time.monotonic()
@@ -572,6 +576,7 @@ class LiveAgent(_VoiceAgentBase):
             self._silent_run_ms += chunk_ms
         self._last_audio_at = time.monotonic()
         self._audio_bytes_this_turn += len(pcm)
+        self._stream_ms_this_turn += chunk_ms
         if not self._speech_started:
             self._speech_started = True
             self._turn_first_voice_at = time.monotonic()
@@ -677,6 +682,7 @@ class LiveAgent(_VoiceAgentBase):
             "requested": self._turn_requested,
             "speak_start_latency_ms": self._last_speak_latency_ms if self._turn_requested else None,
             "voiced_sec": round(self._voiced_ms_this_turn / 1000, 2),
+            "stream_sec": round(self._stream_ms_this_turn / 1000, 2),
             "span_sec": (round(self._turn_last_voice_at - self._turn_first_voice_at, 2)
                          if self._turn_first_voice_at else 0.0),
             "chars": len(transcript),
@@ -709,6 +715,8 @@ class LiveAgent(_VoiceAgentBase):
                 self._audio_q.get_nowait()
             except queue.Empty:
                 break
+        with self._queued_lock:
+            self._queued_ms = 0
         if self._ai_text_buf.strip():
             # 止めた発話は議事録に入れないが、再生済みの分は Soniox の確定待ちで
             # まだ文字になって返ってくる。エコー照合の参照には残す

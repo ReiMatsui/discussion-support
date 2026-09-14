@@ -34,6 +34,13 @@ class _VoiceAgentBase:
     # サブクラスで上書きするクラス属性
     AI_VOICE_KEY: str = "__BASE__"   # VoiceProfiles内のAI声紋キー
     _AI_ENROLL_SEC: float = 3.0      # 声紋登録に必要な最小秒数（有声部分のみ）
+    # 再生のジッタ吸収。GPT-Live は音声を実時間で流すので、溜めずに鳴らすと
+    # ネットワークの揺れ（100〜500ms）がそのまま音の途切れになる。発話の頭で
+    # 少し溜めてから鳴らし、途中で尽きたら少し溜め直す（実測: 有声 5〜7 秒の
+    # 発話が壁時計で 9〜13 秒に伸び、ぶつ切りに聞こえた。2026-09-14）
+    _PLAY_PREBUFFER_MS: int = 400
+    _PLAY_REBUFFER_MS: int = 200
+    _PLAY_BUFFER_WAIT_SEC: float = 0.8   # 溜まらなくてもこの時間で諦めて鳴らす
     _AI_ENROLL_MAX_SEC: float = 30.0  # これ以上溜めても登録できないなら諦める
     _AI_ENROLL_MIN_RMS: float = 200.0 / 32768.0   # float32 正規化後の無音判定（_live._SILENCE_RMS と同じ）
     _LABEL: str = "Agent"            # ログ用ラベル
@@ -65,7 +72,21 @@ class _VoiceAgentBase:
 
         payload=None は応答の終端マーカー。
         """
+        if payload:
+            with self._queued_lock:
+                self._queued_ms += len(payload) * 1000 // (24000 * 2)
         self._audio_q.put((self._play_epoch, payload))
+
+    def _queued_audio_ms(self) -> int:
+        with self._queued_lock:
+            return self._queued_ms
+
+    def _wait_for_buffer(self, target_ms: int) -> None:
+        """再生キューに target_ms 以上たまるまで待つ（上限つき）."""
+        deadline = time.monotonic() + self._PLAY_BUFFER_WAIT_SEC
+        while (self._queued_audio_ms() < target_ms and not self._stop.is_set()
+               and time.monotonic() < deadline):
+            time.sleep(0.02)
 
     def _on_playback_terminator(self, epoch: int):
         """終端マーカー取り出し時、最新応答の終端のみ ai_speaking を倒す（Bug 6）."""
@@ -128,14 +149,25 @@ class _VoiceAgentBase:
                 stream = sd.OutputStream(samplerate=24000, channels=1,
                                          dtype="float32", blocksize=2400)
                 stream.start()
+                need_buffer_ms = self._PLAY_PREBUFFER_MS
                 while not self._stop.is_set():
                     epoch, chunk = self._audio_q.get()
                     if chunk is None:          # 1応答の終端
                         self._on_playback_terminator(epoch)
+                        need_buffer_ms = self._PLAY_PREBUFFER_MS
                         continue
+                    if need_buffer_ms:
+                        # 取り出した1個ぶんは _queued_ms に含まれたまま待つ
+                        self._wait_for_buffer(need_buffer_ms)
+                        need_buffer_ms = 0
+                    with self._queued_lock:
+                        self._queued_ms = max(0, self._queued_ms - len(chunk) * 1000 // (24000 * 2))
                     pcm = np.frombuffer(chunk, dtype="<i2").astype(np.float32) / 32768.0
                     stream.write(pcm.reshape(-1, 1))
                     self._played_bytes += len(chunk)
+                    if self._audio_q.empty():
+                        # 尽きた（音が途切れる）。次は少し溜め直してから続ける
+                        need_buffer_ms = self._PLAY_REBUFFER_MS
                     # 声紋登録用: 16kHzにリサンプルして蓄積。無音のチャンク（文の間、
                     # 終端前の 1.2 秒）は声紋を薄めるだけなので入れない。登録に失敗し
                     # 続けるときは溜め続けない（メモリと毎回の連結を抑える）

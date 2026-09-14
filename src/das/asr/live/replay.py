@@ -161,7 +161,7 @@ const liveInfo = (l) => {
   const parts = [];
   if (!l.requested) parts.push(l.call_response ? "呼びかけへの応答（指示なし）" : "指示なしの発話");
   if (l.speak_start_latency_ms != null) parts.push(`指示→声 ${(l.speak_start_latency_ms / 1000).toFixed(1)}秒`);
-  if (l.voiced_sec != null) parts.push(`声 ${l.voiced_sec}秒`);
+  if (l.voiced_sec != null) parts.push(`声 ${l.voiced_sec}秒` + (l.span_sec != null ? `（届くまで${l.span_sec}秒）` : ""));
   if (l.overlap_at_ms != null) parts.push(`${l.overlap_speaker || "参加者"}と重なり→${l.silenced_after_sec}秒で黙る`);
   if (l.resumed) parts.push("自力で再開");
   if (l.end_reason === "stall") parts.push("終端: ストリーム停止");
@@ -615,6 +615,8 @@ def annotate_live_speech(items: list[dict[str, Any]], turns: list[dict[str, Any]
             "requested": bool(timing.get("requested")),
             "speak_start_latency_ms": timing.get("speak_start_latency_ms"),
             "voiced_sec": timing.get("voiced_sec"),
+            "stream_sec": timing.get("stream_sec"),
+            "span_sec": timing.get("span_sec"),
             "end_reason": timing.get("end_reason"),
             "overlap_at_ms": None, "overlap_speaker": None,
             "silenced_after_sec": None, "resumed": False,
