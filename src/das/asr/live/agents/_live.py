@@ -52,19 +52,24 @@ _CLOCK_IDLE_SEC = 0.3            # 入力がこの秒数ぶん壁時計に遅れ
 _CLOCK_REBASE_SEC = 5.0          # これ以上遅れたら（スリープ等）埋めずに基準を取り直す
 _INPUT_BACKLOG_MAX = 30          # 送信待ちの室内音声（100ms 単位）。超えた古い分は捨てる（3秒）
 _TRANSCRIPT_QUIET_SEC = 0.3      # 文字が止まってからでないと発話を確定しない（文字は音声に遅れる）
+_TEXT_LAG_INIT_SEC = 1.0         # 文字が音声に遅れる量の初期値。発話ごとに実測して更新する
+_TEXT_TAIL_SEC = 0.5             # 最後の声 + 遅れ + この余裕まで、その発話の文字を待つ
+_REMINDER_MIN_INTERVAL_SEC = 60.0  # 求められていない発話への注意は、この間隔以上あけて送る
 _RESUME_GRACE_SEC = 4.0          # 直前の発話の終端からこの秒数内の再開は同じ発話の続きとみなす
 _PENDING_KEEP = 40               # 溜めておく発話の上限。指示が長く出ないと際限なく増える
 _CONTEXT_MAX_UTTS = 15           # 指示に添える発話の上限（モデルは室内の音声も聞いている）
 
 PROMPT_FACILITATOR = """\
 あなたは対面会議の進行役AIです。日本語で話します。
-基本は黙って聞きます。相槌や合いの手は出しません。
+あなたは参加者ではありません。議論に意見を足さず、感想・同意・相槌も言いません。
 話すのは次の2つの場合だけです。
 1. [指示] で始まる指示が届いたとき。その指示に沿って、1〜2文で短く話します。
-2. 参加者があなた（進行役・AI・ファシリテーター）に直接呼びかけたとき。
-   「はい」など一言か、聞かれたことに1文で短く答えます。
-   議題の中に「AI」という言葉が出てくるだけでは呼びかけではありません。
-それ以外では、参加者が何を話していても口を挟みません。
+   話し終えたら黙ります。参加者がその発言に反応しても、返事はしません。
+2. 参加者が「ファシリテーター」「進行役」「AIさん」などとあなたを名指しして、
+   質問か依頼をしたとき。「はい」など一言か、1文で短く答えます。
+   名指しでも質問でもない発言（あなたの発言への感想や同意、議題の中に出てくる
+   「AI」という語）には答えません。
+それ以外では、会議がどれだけ進んでも、話が途切れても、口を挟みません。
 参加者が話し始めたら、自分の発言の途中でもすぐにやめて聞きます。
 前置きや記号は付けず、本題だけを落ち着いた口調で話します。"""
 
@@ -188,6 +193,11 @@ class LiveAgent(_VoiceAgentBase):
         self._last_turn_requested = False
         self.last_unrequested_speech_at = 0.0    # 指示なしで話し始めた直近の時刻（呼びかけ応答の検出用）
         self._finish_lock = threading.Lock()     # _finish_turn の二重実行を防ぐ
+        # 文字の割り当て。文字は音声より遅れて届くので、発話の終端（音声で決める）
+        # のあとに届いた文字をどの発話のものか時刻で決め、揃ってから議事録へ渡す
+        self._text_lag = _TEXT_LAG_INIT_SEC
+        self._turns: list[dict] = []             # 文字待ちの発話（古い順。末尾が進行中）
+        self._last_reminder_at = 0.0
         self._in_q: queue.Queue[bytes] = queue.Queue()   # 室内音声の送信待ち
         self._playback_restart_at = 0.0
 
@@ -225,6 +235,8 @@ class LiveAgent(_VoiceAgentBase):
         with self._state_lock:
             self._pending.clear()
         self.stop_playback()
+        self._turns.clear()                      # 前会議の文字待ちは捨てる
+        self._ai_text_buf = ""
 
     def _log_state(self, transition: str):
         print(f"# [state] {transition} "
@@ -348,6 +360,7 @@ class LiveAgent(_VoiceAgentBase):
             with contextlib.suppress(Exception):
                 ws.close()
         self.stop_playback()
+        self._flush_texts(force=True)            # 文字待ちの発話は今ある分で議事録へ
 
     def apply_config(self, mode: str | None = None, voice: str | None = None,
                      trigger_n: int | None = None):
@@ -560,9 +573,10 @@ class LiveAgent(_VoiceAgentBase):
         self._speech_started = False
         self._audio_bytes_this_turn = 0
         self._silent_run_ms = 0
-        self._ai_text_buf = ""
         self._jitter.begin_turn()
         self._turn_requested = requested
+        self._turns.append({"first": None, "last": None, "text": "", "first_text_at": None,
+                            "requested": requested, "stats": None})
         self._turn_first_voice_at = 0.0
         self._turn_last_voice_at = 0.0
         self._voiced_ms_this_turn = 0
@@ -618,6 +632,8 @@ class LiveAgent(_VoiceAgentBase):
         if not self._speech_started:
             self._speech_started = True
             self._turn_first_voice_at = time.monotonic()
+            if self._turns:
+                self._turns[-1]["first"] = self._turn_first_voice_at
             if self._speak_trigger_at:
                 self._last_speak_latency_ms = round(
                     (time.monotonic() - self._speak_trigger_at) * 1000, 1)
@@ -634,9 +650,73 @@ class LiveAgent(_VoiceAgentBase):
             self._finish_turn()
 
     def _on_transcript(self, ev: dict) -> None:
-        self._ai_text_buf += ev.get("delta", "")
-        self._last_audio_at = time.monotonic()
-        self._last_transcript_at = self._last_audio_at
+        delta = ev.get("delta", "")
+        now = time.monotonic()
+        self._last_audio_at = now
+        self._last_transcript_at = now
+        if not delta:
+            return
+        turn = self._turn_for_text(now)
+        if turn is None:
+            # どの発話にも属さない文字（発話の記録前に届いた等）。受け皿を作る
+            turn = {"first": None, "last": None, "text": "", "first_text_at": None,
+                    "requested": self._turn_requested, "stats": None}
+            self._turns.append(turn)
+        if turn["first_text_at"] is None:
+            turn["first_text_at"] = now
+            # 遅れの実測: 声が出てから最初の文字まで（重なりの無い発話だけで測る）
+            if turn["first"] is not None and turn is self._turns[-1] and len(self._turns) == 1:
+                sample = now - turn["first"]
+                if 0.0 <= sample <= 4.0:
+                    self._text_lag = min(3.0, max(0.2, 0.5 * self._text_lag + 0.5 * sample))
+        turn["text"] += delta
+        self._ai_text_buf = "".join(t["text"] for t in self._turns)   # エコー照合の参照
+        self._flush_texts(now)
+
+    def _turn_for_text(self, now: float) -> dict | None:
+        """いま届いた文字がどの発話のものかを、届いた時刻から遅れ分を引いて決める."""
+        if not self._turns:
+            return None
+        t = now - self._text_lag
+        for turn in self._turns:
+            if turn["first"] is None:
+                continue
+            lo = turn["first"] - 0.3
+            hi = (turn["last"] + 0.3) if turn["last"] is not None else float("inf")
+            if lo <= t <= hi:
+                return turn
+        first_known = next((x for x in self._turns if x["first"] is not None), None)
+        if first_known is not None and t < first_known["first"]:
+            return first_known
+        return self._turns[-1]
+
+    def _flush_texts(self, now: float | None = None, *, force: bool = False) -> None:
+        """音声が終わった発話の文字が揃ったら（古い順に）議事録へ渡す.
+
+        揃ったとみなす条件: 最後の声 + 遅れ + 余裕を過ぎた、または次の発話に
+        文字が届き始めた（それ以降の文字はもうこの発話のものではない）。
+        """
+        now = time.monotonic() if now is None else now
+        while self._turns:
+            turn = self._turns[0]
+            if turn["last"] is None and not force:
+                break                                    # 音声がまだ続いている
+            newer_has_text = any(x["first_text_at"] is not None for x in self._turns[1:])
+            due = turn["last"] is not None and now >= turn["last"] + self._text_lag + _TEXT_TAIL_SEC
+            quiet = now - self._last_transcript_at >= _TRANSCRIPT_QUIET_SEC
+            if not (force or due or (newer_has_text and quiet)):
+                break
+            self._turns.pop(0)
+            self._ai_text_buf = "".join(t["text"] for t in self._turns)
+            text = turn["text"].strip()
+            stats = turn["stats"] or {}
+            stats["chars"] = len(text)
+            self.last_turn_stats = stats
+            if text:
+                self._recent_ai_texts.append(text)
+                if self.on_ai_utterance:
+                    with contextlib.suppress(Exception):
+                        self.on_ai_utterance(text)
 
     def _on_delegation(self, ev: dict) -> None:
         did = (ev.get("delegation") or {}).get("id")
@@ -667,13 +747,15 @@ class LiveAgent(_VoiceAgentBase):
         threading.Thread(target=_run, daemon=True).start()
 
     def _watchdog_tick(self) -> None:
-        """監視の1周（諦め・停止したストリームの終端・再生スレッドの立て直し）."""
+        """監視の1周（諦め・停止したストリームの終端・再生スレッドの立て直し・文字の確定）."""
+        self._flush_texts()
         if self._responding and not self.ai_speaking and self._speak_trigger_at \
                 and time.monotonic() - self._speak_trigger_at > _NO_SPEECH_GIVEUP_SEC:
             self._speak_trigger_at = 0.0
             with self._state_lock:
                 self._responding = False
-            self._ai_text_buf = ""
+            if self._turns and self._turns[-1]["first"] is None:
+                self._turns.pop()               # 声の出なかった発話の受け皿を捨てる
             # 指示はモデル側に残っている。取り消さないと、後で静かになった
             # ときに古い内容を話し出す（次の指示と重なる）
             self._discarding = True
@@ -706,24 +788,21 @@ class LiveAgent(_VoiceAgentBase):
         受信スレッドと監視スレッドの両方から呼ばれうるので、1発話につき1回に絞る。
         """
         with self._finish_lock:
-            if self._audio_bytes_this_turn == 0 and not self._ai_text_buf:
+            if self._audio_bytes_this_turn == 0:
                 return                  # もう確定済み（二重呼び出し）
             self._last_audio_at = 0.0
             self._audio_bytes_this_turn = 0
             self._silent_run_ms = 0
-            transcript = self._ai_text_buf.strip()
-            self._ai_text_buf = ""
         now = time.monotonic()
         self._last_turn_end_at = now
         self._last_turn_requested = self._turn_requested
-        self.last_turn_stats = {
+        stats = {
             "requested": self._turn_requested,
             "speak_start_latency_ms": self._last_speak_latency_ms if self._turn_requested else None,
             "voiced_sec": round(self._voiced_ms_this_turn / 1000, 2),
             "stream_sec": round(self._stream_ms_this_turn / 1000, 2),
             "span_sec": (round(self._turn_last_voice_at - self._turn_first_voice_at, 2)
                          if self._turn_first_voice_at else 0.0),
-            "chars": len(transcript),
             "end_reason": end_reason,
             # 最後の声から確定までの経過（壁時計）。議事録側が捕捉msに換算するのに使う
             "since_last_voice_sec": (round(now - self._turn_last_voice_at, 2)
@@ -732,18 +811,43 @@ class LiveAgent(_VoiceAgentBase):
             # 再生の観測: 溜めた量、尽きた回数、到着の空白の最大と合計
             "playback": self._jitter.end_turn(),
         }
-        if transcript:
-            self._recent_ai_texts.append(transcript)
-            if self.on_ai_utterance:
-                with contextlib.suppress(Exception):
-                    self.on_ai_utterance(transcript)
+        # 文字はまだ届き切っていないことがある。発話の記録に音声の終端を書き、
+        # 文字が揃ってから _flush_texts が議事録へ渡す
+        turn = self._turns[-1] if self._turns else None
+        if turn is None or turn["last"] is not None:
+            # 受け皿が無い（_begin_turn を経ずに _responding が立った）ときは作る
+            turn = {"first": self._turn_first_voice_at or None, "last": None, "text": "",
+                    "first_text_at": None, "requested": self._turn_requested, "stats": None}
+            self._turns.append(turn)
+        turn["last"] = self._turn_last_voice_at or now
+        turn["stats"] = stats
         self._q_put(None)
         with self._state_lock:
             self._responding = False
-        pb = self.last_turn_stats["playback"]
-        self._log_state(f"→IDLE (発話終端 {len(transcript)}字, 声{self.last_turn_stats['voiced_sec']}s"
+        pb = stats["playback"]
+        self._log_state(f"→IDLE (発話終端 声{stats['voiced_sec']}s"
                         f" 到着の空白 最大{pb['max_gap_ms']}ms/合計{pb['stall_ms']}ms"
                         f" 尽き{pb['underruns']}回 溜め{pb['target_ms']}ms)")
+        if not self._turn_requested:
+            self._remind_to_stay_quiet(now)
+        self._flush_texts(now)
+
+    def _remind_to_stay_quiet(self, now: float) -> None:
+        """求められていない発話のあとに、黙って聞くよう指示を送る（60秒に1回まで）.
+
+        呼びかけへの正当な応答だった場合にも届くが、文面は「名指しの質問でなければ」
+        なので害はない。音響リハーサル（2026-09-14）では、参加者の議論を聞いた
+        モデルが 4 分で 13 回自発的に口を挟んだ。
+        """
+        if now - self._last_reminder_at < _REMINDER_MIN_INTERVAL_SEC:
+            return
+        if not self._connected or self.ws is None or self.mode == "conversation":
+            return
+        self._last_reminder_at = now
+        self._send({"type": "session.instructions.append", "delegation_id": None,
+                    "content": "[指示]\n参加者から名指しで質問されたのでなければ、いまの発言は"
+                               "求められていません。次の [指示] か名指しの質問があるまで、"
+                               "議論に加わらず黙って聞いてください。"})
 
     # ------------------------------------------------------------ 再生の停止
 
@@ -761,11 +865,13 @@ class LiveAgent(_VoiceAgentBase):
         with self._queued_lock:
             self._queued_ms = 0
         self._jitter.clear()
-        if self._ai_text_buf.strip():
+        if self._turns and self._turns[-1]["last"] is None:
             # 止めた発話は議事録に入れないが、再生済みの分は Soniox の確定待ちで
             # まだ文字になって返ってくる。エコー照合の参照には残す
-            self._recent_ai_texts.append(self._ai_text_buf.strip())
-        self._ai_text_buf = ""
+            dropped = self._turns.pop()
+            if dropped["text"].strip():
+                self._recent_ai_texts.append(dropped["text"].strip())
+            self._ai_text_buf = "".join(t["text"] for t in self._turns)
         self._audio_bytes_this_turn = 0
         self._silent_run_ms = 0
         self._last_audio_at = 0.0

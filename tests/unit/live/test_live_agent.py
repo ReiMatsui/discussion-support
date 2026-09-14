@@ -42,6 +42,11 @@ def _silent(ms: int = 100) -> str:
     return base64.b64encode(b"\x00" * (_live._OUT_RATE * ms // 1000 * 2)).decode()
 
 
+def _settle(agent):
+    """文字待ちの発話を今ある文字で確定させる（本番では遅れ分を待ってから確定）."""
+    agent._flush_texts(force=True)
+
+
 @pytest.fixture
 def agent(monkeypatch):
     # スレッド（再生・時計・監視）は起動しない。受信は _handle を直接呼ぶ
@@ -117,8 +122,9 @@ def test_turn_ends_on_stream_silence_not_wall_clock(agent):
     assert agent.said == []
     for _ in range(int(_live._SPEECH_END_GAP_SEC * 10)):
         agent._handle({"type": "session.output_audio.delta", "delta": _silent()})
-    assert agent.said == ["テスト段階での"]     # 1発話にまとまる
     assert agent._responding is False
+    _settle(agent)
+    assert agent.said == ["テスト段階での"]     # 1発話にまとまる
     # 終端マーカーが再生キューの最後に入る
     items = []
     while not agent._audio_q.empty():
@@ -133,6 +139,7 @@ def test_unrequested_speech_gets_its_own_turn(agent):
     agent._handle({"type": "session.output_transcript.delta", "delta": "はい"})
     for _ in range(int(_live._SPEECH_END_GAP_SEC * 10)):
         agent._handle({"type": "session.output_audio.delta", "delta": _silent()})
+    _settle(agent)
     assert agent.said == ["はい"]
 
 
@@ -258,6 +265,7 @@ def test_turn_stats_for_requested_speech(agent):
     agent._handle({"type": "session.output_transcript.delta", "delta": "Bさんはどうですか"})
     for _ in range(int(_live._SPEECH_END_GAP_SEC * 10)):
         agent._handle({"type": "session.output_audio.delta", "delta": _silent()})
+    _settle(agent)
     st = agent.last_turn_stats
     assert st["requested"] is True
     assert st["speak_start_latency_ms"] >= 700
@@ -270,6 +278,7 @@ def test_turn_stats_count_unrequested_speech(agent):
         agent._handle({"type": "session.output_audio.delta", "delta": _voiced()})
     agent._handle({"type": "session.output_transcript.delta", "delta": "はい"})
     agent._finish_turn(end_reason="stall")
+    _settle(agent)
     st = agent.last_turn_stats
     assert st["requested"] is False and st["speak_start_latency_ms"] is None
     assert st["end_reason"] == "stall" and st["unrequested_turns"] == 1
@@ -294,11 +303,13 @@ def test_trailing_silence_after_turn_end_does_not_start_a_ghost_turn(agent):
     agent._handle({"type": "session.output_transcript.delta", "delta": "一言"})
     for _ in range(int(_live._SPEECH_END_GAP_SEC * 10)):
         agent._handle({"type": "session.output_audio.delta", "delta": _silent()})
+    _settle(agent)
     assert agent.said == ["一言"]
     assert agent.ai_speaking is True                 # 再生スレッドがまだ終端を取り出していない
     finished = agent.last_turn_stats
     for _ in range(60):                               # 6秒の無音が流れ続ける
         agent._handle({"type": "session.output_audio.delta", "delta": _silent()})
+    _settle(agent)
     assert agent.said == ["一言"]
     assert agent.last_turn_stats is finished          # 0字の幽霊ターンで上書きされない
     assert agent._responding is False
@@ -353,22 +364,44 @@ def test_voice_change_reenrolls_the_ai_voiceprint_but_keeps_the_old_one(agent, m
 # --- セルフレビュー（2026-09-13）で直した挙動 ------------------------------------
 
 
-def test_turn_end_waits_for_the_transcript_to_settle(agent, monkeypatch):
-    """音声の無音が 1.2 秒続いても、文字がまだ届いている間は確定しない（末尾欠け防止）."""
-    monkeypatch.setattr(_live, "_TRANSCRIPT_QUIET_SEC", 0.3)
+def test_late_transcript_still_lands_in_the_finished_utterance(agent):
+    """音声の終端のあとに届いた文字も、遅れ分の窓の中ならその発話の文字になる.
+
+    音響リハーサル（2026-09-14）では文字が音声より 1.5 秒以上遅れ、終端で確定した
+    あとに届いた分が次の発話の開始で捨てられて「などが考」「せて従業員へ」の
+    ように行が欠けていた。
+    """
     agent._responding = True
     for _ in range(3):
         agent._handle({"type": "session.output_audio.delta", "delta": _voiced()})
-    agent._handle({"type": "session.output_transcript.delta", "delta": "前半と"})
-    for _ in range(int(_live._SPEECH_END_GAP_SEC * 10) - 2):
+    for _ in range(int(_live._SPEECH_END_GAP_SEC * 10)):
         agent._handle({"type": "session.output_audio.delta", "delta": _silent()})
-    agent._handle({"type": "session.output_transcript.delta", "delta": "遅れて届く文字"})
-    for _ in range(4):                           # 無音は 1.2 秒を超えたが文字が動いた直後
+    assert agent._responding is False and agent.said == []   # 音声は終わったが文字待ち
+    agent._handle({"type": "session.output_transcript.delta", "delta": "遅れて届く"})
+    agent._handle({"type": "session.output_transcript.delta", "delta": "文字"})
+    assert agent.said == []                          # まだ遅れの窓の中
+    agent._flush_texts(agent._turns[0]["last"] + agent._text_lag + _live._TEXT_TAIL_SEC + 0.1)
+    assert agent.said == ["遅れて届く文字"]
+
+
+def test_transcript_arriving_after_the_next_turn_started_goes_to_the_right_turn(agent):
+    """前の発話の末尾の文字が、次の発話の声が出たあとに届いても前の発話に付く."""
+    agent._text_lag = 1.0
+    t0 = time.monotonic()
+    for _ in range(3):                             # 指示なしの発話（受け皿ができる）
+        agent._handle({"type": "session.output_audio.delta", "delta": _voiced()})
+    agent._turns[0]["first"] = t0 - 3.0            # 前の発話: 3秒前に始まり
+    for _ in range(int(_live._SPEECH_END_GAP_SEC * 10)):
         agent._handle({"type": "session.output_audio.delta", "delta": _silent()})
-    assert agent.said == []
-    agent._last_transcript_at -= 1.0             # 文字が止まった
-    agent._handle({"type": "session.output_audio.delta", "delta": _silent()})
-    assert agent.said == ["前半と遅れて届く文字"]
+    agent._turns[0]["last"] = t0 - 0.5             # 0.5秒前に声が終わった
+    agent._handle({"type": "session.output_audio.delta", "delta": _voiced()})   # 次の発話が始まる
+    assert len(agent._turns) == 2
+    # いま届いた文字は「遅れ 1 秒」を引くと前の発話の区間（-3.0〜-0.5+0.3）に入る
+    agent._handle({"type": "session.output_transcript.delta", "delta": "前の末尾"})
+    assert agent._turns[0]["text"] == "前の末尾" and agent._turns[1]["text"] == ""
+    # 1.5 秒後に届く文字は次の発話のもの
+    agent._turns[1]["first"] = t0 + 0.2
+    assert agent._turn_for_text(t0 + 1.6) is agent._turns[1]
 
 
 def test_resume_shortly_after_a_requested_turn_is_a_continuation(agent):
@@ -379,6 +412,7 @@ def test_resume_shortly_after_a_requested_turn_is_a_continuation(agent):
     agent._handle({"type": "session.output_transcript.delta", "delta": "前半"})
     for _ in range(int(_live._SPEECH_END_GAP_SEC * 10)):
         agent._handle({"type": "session.output_audio.delta", "delta": _silent()})
+    _settle(agent)
     assert agent.said == ["前半"]
     agent._handle({"type": "session.output_audio.delta", "delta": _voiced()})   # すぐ再開
     assert agent.unrequested_turns == 0 and agent._turn_requested is True
@@ -457,6 +491,7 @@ def test_turn_stats_include_stream_seconds(agent):
         agent._handle({"type": "session.output_audio.delta", "delta": _voiced()})
     for _ in range(int(_live._SPEECH_END_GAP_SEC * 10)):
         agent._handle({"type": "session.output_audio.delta", "delta": _silent()})
+    _settle(agent)
     st = agent.last_turn_stats
     assert st["voiced_sec"] == 0.3 and st["stream_sec"] == 1.5   # 無音 1.2 秒を含む
 
@@ -486,3 +521,29 @@ def test_clock_rebases_after_a_long_stall(agent):
     agent._input_base_at = time.monotonic() - 30.0   # スリープ明けなど
     assert agent._fill_clock() == 0
     assert agent._input_sent_ms == 0 and time.monotonic() - agent._input_base_at < 0.1
+
+
+def test_unrequested_turn_triggers_a_quiet_reminder_at_most_once_a_minute(agent):
+    for _ in range(3):
+        agent._handle({"type": "session.output_audio.delta", "delta": _voiced()})
+    for _ in range(int(_live._SPEECH_END_GAP_SEC * 10)):
+        agent._handle({"type": "session.output_audio.delta", "delta": _silent()})
+    reminders = [m for m in agent.ws.sent if m["type"] == "session.instructions.append"]
+    assert len(reminders) == 1 and "求められていません" in reminders[0]["content"]
+    for _ in range(3):                                # すぐにもう一度、指示なしで話す
+        agent._handle({"type": "session.output_audio.delta", "delta": _voiced()})
+    for _ in range(int(_live._SPEECH_END_GAP_SEC * 10)):
+        agent._handle({"type": "session.output_audio.delta", "delta": _silent()})
+    reminders = [m for m in agent.ws.sent if m["type"] == "session.instructions.append"]
+    assert len(reminders) == 1                        # 60 秒以内は送らない
+
+
+def test_requested_turn_does_not_trigger_a_reminder(agent):
+    agent.feed("A", "x")
+    agent.trigger(invite_target="B")
+    n = len(agent.ws.sent)
+    for _ in range(3):
+        agent._handle({"type": "session.output_audio.delta", "delta": _voiced()})
+    for _ in range(int(_live._SPEECH_END_GAP_SEC * 10)):
+        agent._handle({"type": "session.output_audio.delta", "delta": _silent()})
+    assert len(agent.ws.sent) == n

@@ -139,10 +139,14 @@ class DiscussionSimulator:
                     break
             if facilitator_msgs:
                 for msg in facilitator_msgs:
+                    # 実際の会議では、進行役の一言に毎回返事をする人はいない。返事を
+                    # 求めると進行役がそれに答え、往復が止まらなくなる（音響リハーサル
+                    # 2026-09-14 で 4 分に 13 回）。発言を踏まえて議論を続けさせる
                     self._history.append({
                         "role": "user",
-                        "content": f"[ファシリテーターからの介入]: {msg}\n\n"
-                                   "この介入を受けて、次の参加者の反応を生成してください。"
+                        "content": f"[進行役の発言]: {msg}\n\n"
+                                   "参加者は進行役に返事や感謝を言わず、この発言を踏まえて"
+                                   "議論を続けてください（次の参加者の発言を1つ生成）。"
                     })
                     print("# Simulator: ファシリテーター介入を受信 → 反応生成",
                           flush=True)
