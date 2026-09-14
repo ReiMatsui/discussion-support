@@ -44,7 +44,6 @@ from ._constants import (
     _TRIAGE_MAX_RETRIES,
     _TRIAGE_MIN_CHARS,
     AGENT_SPEAKER,
-    SR,
     WORKER_TICK_SEC,
 )
 from ._drift import DriftRun
@@ -312,15 +311,21 @@ def _play_ack_chime() -> None:
         return
 
     def _play() -> None:
+        # 共有のスピーカー出力（24kHz, 1本）に載せる。別にストリームを開くと
+        # 進行役の声と同時に鳴ったときに音が粗くなる
         with contextlib.suppress(Exception):
-            import sounddevice as sd
+            from . import _audio_out
+            from .agents._jitter import JitterBuffer
             dur = 0.15
-            t = np.linspace(0, dur, int(SR * dur), endpoint=False)
+            rate = _audio_out.RATE
+            t = np.linspace(0, dur, int(rate * dur), endpoint=False)
             envelope = np.exp(-t * 12.0)                 # なめらかな減衰
-            wave = (0.2 * envelope
-                    * np.sin(2 * np.pi * 880.0 * t)).astype(np.float32)
-            sd.play(wave, SR)
-            sd.wait()
+            wave = 0.2 * envelope * np.sin(2 * np.pi * 880.0 * t)
+            src = JitterBuffer(target_ms=0, min_ms=0)
+            src.push((wave * 32767).astype("<i2").tobytes())
+            _audio_out.register(src)
+            time.sleep(dur + 0.3)
+            _audio_out.unregister(src)
 
     threading.Thread(target=_play, daemon=True).start()
 

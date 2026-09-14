@@ -125,28 +125,19 @@ class _VoiceAgentBase:
     # --- ストリーミング音声再生 ---
 
     def _start_playback_thread(self):
-        """再生スレッド: 受信キューの PCM をジッタバッファへ移し、デバイスはコールバックで
-        一定速度に取り出す（届いた順に書く方式だと到着の揺れがそのまま途切れになる）。
+        """再生スレッド: 受信キューの PCM をジッタバッファへ移す。鳴らすのは共有の
+        スピーカー出力（_audio_out）で、進行役・相手役・シミュレータの声を 1 本の
+        ストリームで混ぜる（別々に開くとレート違いで音が粗くなる）。
 
         キュー要素は (epoch, payload)。payload=None は応答の終端マーカーで、
         バッファが鳴り終わってから ai_speaking を倒す。
         声紋未登録時は有声チャンクを16kHzにして蓄積し、自動登録する。
         """
         def _player():
+            from .. import _audio_out
             jb = self._jitter
+            _audio_out.register(jb)
             try:
-                import sounddevice as sd
-
-                def _cb(outdata, frames, _t, status):
-                    if status and not self._playback_status_warned:
-                        self._playback_status_warned = True
-                        print(f"# {self._LABEL} 再生デバイス: {status}", flush=True)
-                    pcm = jb.pull(frames * 2)
-                    outdata[:, 0] = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768.0
-
-                stream = sd.OutputStream(samplerate=24000, channels=1,
-                                         dtype="float32", blocksize=1200, callback=_cb)
-                stream.start()
                 while not self._stop.is_set():
                     epoch, chunk = self._audio_q.get()
                     if chunk is None:          # 1応答の終端: 鳴り終わるまで待ってから
@@ -172,10 +163,10 @@ class _VoiceAgentBase:
                                 self._ai_voice_buf.append(ref16.copy())
                                 self._ai_voice_sec += len(ref16) / 16000.0
                                 self._try_enroll_voice()
-                stream.stop()
-                stream.close()
             except Exception as e:
                 print(f"# {self._LABEL} 音声再生異常: {e}", flush=True)
+            finally:
+                _audio_out.unregister(jb)
 
         if self._playback_thread is not None and self._playback_thread.is_alive():
             return

@@ -83,13 +83,14 @@ class DiscussionSimulator:
         import openai
         client = openai.OpenAI(api_key=self.api_key)
 
-        # スピーカー再生のセットアップ
+        # スピーカー再生: 進行役と同じ共有出力（24kHz, 1本）に混ぜる。別々に
+        # ストリームを開くとレート違いで片方が粗い音になる（2026-09-14）
         if self._play_audio:
             try:
-                import sounddevice as sd
-                self._play_out = sd.OutputStream(
-                    samplerate=SR, channels=1, dtype="float32")
-                self._play_out.start()
+                from .. import _audio_out
+                from ._jitter import JitterBuffer
+                self._play_out = JitterBuffer(target_ms=240, min_ms=120, max_ms=600)
+                _audio_out.register(self._play_out)
             except Exception as e:
                 print(f"# Simulator: スピーカー再生の初期化失敗: {e}", flush=True)
                 self._play_out = None
@@ -193,8 +194,8 @@ class DiscussionSimulator:
                 self._send_silence(self.DEFAULT_PAUSE)
 
         if self._play_out:
-            self._play_out.stop()
-            self._play_out.close()
+            from .. import _audio_out
+            _audio_out.unregister(self._play_out)
         # senderスレッドに終端を通知
         if self._audio_q is not None:
             self._audio_q.put(None)
@@ -257,8 +258,9 @@ class DiscussionSimulator:
         return np.clip(samples_16k, -32768, 32767).astype("<i2").tobytes()
 
     def _send_pcm(self, pcm: bytes):
-        """PCMをチャンクに分割してaudio_qとスピーカーに送出."""
+        """PCMをチャンクに分割してaudio_qとスピーカーに送出（実時間のペースで）."""
         step_bytes = int(SR * 0.12) * 2  # 120ms分のバイト数
+        next_at = time.monotonic()
         for off in range(0, len(pcm), step_bytes):
             if self._stop.is_set():
                 return
@@ -266,13 +268,21 @@ class DiscussionSimulator:
             # パイプラインに送出（Soniox ASRへ）
             self._audio_q.put(chunk)
             self._feed_agent(chunk)
-            # スピーカー再生
-            if self._play_out:
-                samples = np.frombuffer(chunk, dtype="<i2").astype(np.float32) / 32768.0
-                with contextlib.suppress(Exception):
-                    self._play_out.write(samples.reshape(-1, 1))
-            else:
-                time.sleep(0.12)  # 再生なしの場合はリアルタイムペースを維持
+            self._play_chunk(chunk)
+            next_at += 0.12
+            time.sleep(max(0.0, next_at - time.monotonic()))
+
+    def _play_chunk(self, pcm16k: bytes) -> None:
+        """16kHz のチャンクを 24kHz にして共有出力へ積む."""
+        if not self._play_out:
+            return
+        x = np.frombuffer(pcm16k, dtype="<i2").astype(np.float32)
+        if len(x) < 2:
+            return
+        n = int(len(x) * 24000 / SR)
+        y = np.interp(np.linspace(0, len(x) - 1, n), np.arange(len(x)), x)
+        with contextlib.suppress(Exception):
+            self._play_out.push(np.clip(y, -32768, 32767).astype("<i2").tobytes())
 
     def _feed_agent(self, chunk: bytes) -> None:
         """進行役にも室内の音声として流す（マイクと同じ）.
@@ -290,14 +300,11 @@ class DiscussionSimulator:
         n_samples = int(SR * duration)
         silence = b"\x00\x00" * n_samples
         step_bytes = int(SR * 0.12) * 2
+        next_at = time.monotonic()
         for off in range(0, len(silence), step_bytes):
             if self._stop.is_set():
                 return
             self._audio_q.put(silence[off:off + step_bytes])
             self._feed_agent(silence[off:off + step_bytes])
-            if self._play_out:
-                z = np.zeros(min(step_bytes // 2, n_samples - off // 2), dtype=np.float32)
-                with contextlib.suppress(Exception):
-                    self._play_out.write(z.reshape(-1, 1))
-            else:
-                time.sleep(0.12)
+            next_at += 0.12
+            time.sleep(max(0.0, next_at - time.monotonic()))
