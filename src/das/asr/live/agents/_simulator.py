@@ -57,15 +57,22 @@ class DiscussionSimulator:
         self._facilitator_q: queue.Queue[str] = queue.Queue()
         self._thread: threading.Thread | None = None
         self._history: list[dict] = []
-        self._play_out = None  # スピーカー再生用OutputStream
+        self._play_out = None  # スピーカー再生用（共有出力のバッファ）
+        self._play_audio = False
+        self._feed_pipeline = True
         self._agent_ref: LiveAgent | None = None  # ファシリテーター待機用
 
     def start(self, audio_q: queue.Queue, stop: threading.Event,
-              play_audio: bool = False):
-        """バックグラウンドで議論音声の生成を開始する."""
+              play_audio: bool = False, feed_pipeline: bool = True):
+        """バックグラウンドで議論音声の生成を開始する.
+
+        feed_pipeline=False は音響リハーサル: 声はスピーカーだけに出し、STT・分離・
+        GPT-Live へは入れない（マイクが部屋の音として拾う）。
+        """
         self._audio_q = audio_q
         self._stop = stop
         self._play_audio = play_audio
+        self._feed_pipeline = feed_pipeline
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
@@ -196,8 +203,8 @@ class DiscussionSimulator:
         if self._play_out:
             from .. import _audio_out
             _audio_out.unregister(self._play_out)
-        # senderスレッドに終端を通知
-        if self._audio_q is not None:
+        # senderスレッドに終端を通知（マイク経路のときはマイク側が終端を入れる）
+        if self._audio_q is not None and self._feed_pipeline:
             self._audio_q.put(None)
         print("# Simulator: 終了", flush=True)
 
@@ -265,9 +272,9 @@ class DiscussionSimulator:
             if self._stop.is_set():
                 return
             chunk = pcm[off:off + step_bytes]
-            # パイプラインに送出（Soniox ASRへ）
-            self._audio_q.put(chunk)
-            self._feed_agent(chunk)
+            if self._feed_pipeline:
+                self._audio_q.put(chunk)       # パイプラインに送出（Soniox ASRへ）
+                self._feed_agent(chunk)
             self._play_chunk(chunk)
             next_at += 0.12
             time.sleep(max(0.0, next_at - time.monotonic()))
@@ -304,7 +311,8 @@ class DiscussionSimulator:
         for off in range(0, len(silence), step_bytes):
             if self._stop.is_set():
                 return
-            self._audio_q.put(silence[off:off + step_bytes])
-            self._feed_agent(silence[off:off + step_bytes])
+            if self._feed_pipeline:
+                self._audio_q.put(silence[off:off + step_bytes])
+                self._feed_agent(silence[off:off + step_bytes])
             next_at += 0.12
             time.sleep(max(0.0, next_at - time.monotonic()))

@@ -85,6 +85,9 @@ def post_system(text: str) -> None:
               type=click.Choice(["stalled", "biased", "derailed",
                                  "consensus_needed", "healthy", "imbalanced"]),
               help="シミュレーションの議論パターン")
+@click.option("--sim-acoustic", is_flag=True, default=False,
+              help="シミュレーションの声をスピーカーから鳴らしてマイクで拾う（部屋の音響で"
+                   "エコー除去と割り込みを試す。一人で口を挟める）")
 @click.option("--debate", metavar="TOPIC", default=None,
               help="AI会話相手と議論（GPT-Live で音声対話）")
 @click.option("--debate-voice", default="cedar", help="会話相手の声（GPT-Live: marin / cedar）")

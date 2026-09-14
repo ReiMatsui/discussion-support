@@ -75,3 +75,10 @@ def test_listen_forwards_docs_only_when_explicit():
     assert "--docs" not in _build_soniox_argv()
     argv = _build_soniox_argv(af_docs=Path("data/docs"))
     assert argv[argv.index("--docs") + 1] == "data/docs"
+
+
+def test_cli_exposes_sim_acoustic_flag() -> None:
+    from das.asr.live._bootstrap import LiveArgs
+    result = CliRunner().invoke(main, ["--help"])
+    assert "--sim-acoustic" in result.output
+    assert LiveArgs().sim_acoustic is False

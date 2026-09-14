@@ -92,6 +92,11 @@ uv run python -m das.asr.live --agent-voice cedar
 
 # AIファシリテーターを使わない
 uv run python -m das.asr.live --no-agent
+
+# 音響リハーサル: シミュレーションの声をスピーカーから鳴らし、マイクで拾う
+# （部屋の音響でエコー除去と割り込みを試す。一人で口を挟める。手順は
+#  docs/design/rehearsal_checklist_2026-09.md）
+uv run python -m das.asr.live --simulate 'AIツール導入の是非' --sim-scenario derailed --sim-acoustic
 ```
 
 ターミナルに出る進行ログは `transcripts/<日時>.log` にも自動で残る（議事録と同じ名前）。

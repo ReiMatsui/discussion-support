@@ -106,6 +106,7 @@ class LiveArgs:
     no_llm: bool = False
     simulate: str | None = None
     sim_scenario: str | None = None
+    sim_acoustic: bool = False    # シミュレータの声をスピーカー→マイク経由で流す（音響リハーサル）
     debate: str | None = None
     debate_voice: str = "cedar"
     topic: str | None = None   # 人間同士モードの議題（脱線判定の基準）
@@ -1135,8 +1136,18 @@ def _launch_runtime(state, args, backend, *, audio_started: bool,
     if state.simulator is not None:
         if state.agent is not None:
             state.simulator._agent_ref = state.agent
-        state.simulator.start(state.audio_q, state.stop, play_audio=True)
-        print(f"# Simulator: 議論を自動生成中（議題: {args.simulate}）", flush=True)
+        if args.sim_acoustic:
+            # 音響リハーサル: 参加者の声はスピーカーだけに出し、STT・分離・GPT-Live には
+            # マイクで拾った部屋の音を入れる。AI の回り込みも人の割り込みも本番と同じ経路
+            threading.Thread(target=_run_from_mic, args=(state, args.device),
+                             daemon=True).start()
+            state.simulator.start(state.audio_q, state.stop, play_audio=True,
+                                  feed_pipeline=False)
+            print(f"# Simulator: 音響リハーサル（議題: {args.simulate}）— 声はスピーカーから、"
+                  "入力はマイクから。口を挟んで試してください", flush=True)
+        else:
+            state.simulator.start(state.audio_q, state.stop, play_audio=True)
+            print(f"# Simulator: 議論を自動生成中（議題: {args.simulate}）", flush=True)
     else:
         if args.wav:
             threading.Thread(target=_run_from_wav, args=(state, args),
