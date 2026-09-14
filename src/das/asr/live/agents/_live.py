@@ -47,7 +47,8 @@ _SPEECH_END_GAP_SEC = 1.2        # ストリーム上でこれ以上無音が続
 _STREAM_STALL_SEC = 3.0          # delta 自体が止まったときの保険
 _NO_SPEECH_GIVEUP_SEC = 15.0     # 指示を送っても話し始めないときに諦めるまで
 _SILENCE_RMS = 200.0             # int16 の RMS。これ未満は無音（約 -44 dBFS）
-_CLOCK_IDLE_SEC = 0.3            # マイク入力がこの秒数途切れたら無音で時間を進める
+_CLOCK_IDLE_SEC = 0.3            # 入力がこの秒数ぶん壁時計に遅れたら無音で埋める
+_CLOCK_REBASE_SEC = 5.0          # これ以上遅れたら（スリープ等）埋めずに基準を取り直す
 _INPUT_BACKLOG_MAX = 30          # 送信待ちの室内音声（100ms 単位）。超えた古い分は捨てる（3秒）
 _TRANSCRIPT_QUIET_SEC = 0.3      # 文字が止まってからでないと発話を確定しない（文字は音声に遅れる）
 _RESUME_GRACE_SEC = 4.0          # 直前の発話の終端からこの秒数内の再開は同じ発話の続きとみなす
@@ -158,6 +159,8 @@ class LiveAgent(_VoiceAgentBase):
         self._audio_bytes_this_turn = 0
         self._silent_run_ms = 0                  # 発話中に続いた無音（ストリーム時間）
         self._last_input_at = 0.0
+        self._input_base_at = 0.0                # 入力時計の基準（接続時）
+        self._input_sent_ms = 0                  # 接続後に送った入力音声の合計
         self._seen_types: set[str] = set()
         # 開き直し（mode/voice 変更）の制御。セッションごとに世代番号を振り、
         # 古いセッションの受信スレッドが新しいセッションの状態を触らないようにする。
@@ -256,6 +259,13 @@ class LiveAgent(_VoiceAgentBase):
         gen = self._session_gen
         self.ws = ws
         self._discarding = False      # 新しいセッションの音声は最初から通す
+        self._input_base_at = time.monotonic()
+        self._input_sent_ms = 0
+        while True:                   # 前セッション宛ての送信待ちは捨てる
+            try:
+                self._in_q.get_nowait()
+            except queue.Empty:
+                break
         self._connected = True
         self._conn_error = ""
         self._started.clear()
@@ -396,6 +406,12 @@ class LiveAgent(_VoiceAgentBase):
             with contextlib.suppress(queue.Empty):
                 self._in_q.get_nowait()   # 溜まりすぎた古い音声は捨てる（実時間に追従）
 
+    def _send_input_pcm24(self, out: bytes) -> None:
+        self._last_input_at = time.monotonic()
+        self._input_sent_ms += len(out) * 1000 // (_OUT_RATE * 2)
+        self._send({"type": "session.input_audio.append",
+                    "audio": base64.b64encode(out).decode("ascii")})
+
     def _flush_input(self, max_items: int = 100) -> int:
         """送信待ちの室内音声を送る。送った個数を返す（送信スレッドとテストから）."""
         n = 0
@@ -406,27 +422,45 @@ class LiveAgent(_VoiceAgentBase):
                 break
             out = _resample_16_to_24(pcm)
             if out and self._connected:
-                self._last_input_at = time.monotonic()
-                self._send({"type": "session.input_audio.append",
-                            "audio": base64.b64encode(out).decode("ascii")})
+                self._send_input_pcm24(out)
             n += 1
         return n
 
-    def _start_clock(self) -> None:
-        """室内音声の送信スレッド。実音声が来ない間は無音を送って時間を進める.
+    def _fill_clock(self, now: float | None = None) -> int:
+        """入力の合計が壁時計に遅れていれば、その分だけ無音を送って追いつかせる.
 
-        GPT-Live の時間は入力音声の長さで進むので、音声が途切れると指示や文脈の
-        注入が「予定」のまま実行されない。マイクが止まったときの保険。
+        GPT-Live のセッション時間は入力音声の長さで進み、出力もそれに合わせて
+        流れてくる。入力が実時間より遅いと、指示の実行も出力音声も遅れて
+        途切れる（マイクなしのシミュレーションでは 0.3 秒ごとに 100ms しか
+        送っておらず、時間が 1/3 の速さでしか進んでいなかった。2026-09-14）。
+        戻り値: 送った無音の ms。
         """
-        silence = base64.b64encode(b"\x00" * (_OUT_RATE // 10 * 2)).decode("ascii")
+        now = time.monotonic() if now is None else now
+        if not self._connected or self._input_base_at == 0.0:
+            return 0
+        elapsed_ms = int((now - self._input_base_at) * 1000)
+        deficit = elapsed_ms - self._input_sent_ms
+        if deficit > _CLOCK_REBASE_SEC * 1000:
+            # 長い停止（スリープ・切断）。埋めると「先行しすぎ」になるので基準を取り直す
+            self._input_base_at = now
+            self._input_sent_ms = 0
+            return 0
+        if deficit < _CLOCK_IDLE_SEC * 1000:
+            return 0
+        sent = 0
+        chunk = b"\x00" * (_OUT_RATE // 10 * 2)          # 100ms
+        while deficit - sent >= 100:
+            self._send_input_pcm24(chunk)
+            sent += 100
+        return sent
 
+    def _start_clock(self) -> None:
+        """室内音声の送信スレッド。入力が壁時計に遅れたら無音で埋めて時間を進める."""
         def _run():
             while not self._stop.is_set():
                 if not self._flush_input():
                     time.sleep(0.02)
-                if self._connected and time.monotonic() - self._last_input_at >= _CLOCK_IDLE_SEC:
-                    self._last_input_at = time.monotonic()
-                    self._send({"type": "session.input_audio.append", "audio": silence})
+                self._fill_clock()
         threading.Thread(target=_run, daemon=True).start()
 
     # ------------------------------------------------------------ 発話の供給と指示

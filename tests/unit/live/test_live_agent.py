@@ -472,3 +472,30 @@ def test_turn_stats_include_stream_seconds(agent):
         agent._handle({"type": "session.output_audio.delta", "delta": _silent()})
     st = agent.last_turn_stats
     assert st["voiced_sec"] == 0.3 and st["stream_sec"] == 1.5   # 無音 1.2 秒を含む
+
+
+# --- 入力時計（2026-09-14: 無音の埋め方が壁時計に追いついていなかった） ------------
+
+
+def test_clock_fills_silence_to_keep_input_in_step_with_wall_time(agent):
+    agent._input_base_at = time.monotonic() - 1.0    # 接続から 1 秒たったのに入力なし
+    agent._input_sent_ms = 0
+    sent = agent._fill_clock()
+    assert sent == 1000                              # 1 秒ぶんの無音で追いつく
+    assert agent._input_sent_ms == 1000
+    assert agent._fill_clock() == 0                  # 追いついた直後は送らない
+    assert all(m["type"] == "session.input_audio.append" for m in agent.ws.sent)
+
+
+def test_clock_counts_real_audio_and_only_fills_the_gap(agent):
+    agent._input_base_at = time.monotonic() - 0.5
+    agent.feed_audio(b"\x00\x00" * 1600)             # 100ms の実音声
+    agent._flush_input()
+    assert agent._input_sent_ms == 100
+    assert agent._fill_clock() == 400                 # 残り 400ms を無音で
+
+
+def test_clock_rebases_after_a_long_stall(agent):
+    agent._input_base_at = time.monotonic() - 30.0   # スリープ明けなど
+    assert agent._fill_clock() == 0
+    assert agent._input_sent_ms == 0 and time.monotonic() - agent._input_base_at < 0.1

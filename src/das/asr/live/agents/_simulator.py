@@ -265,6 +265,7 @@ class DiscussionSimulator:
             chunk = pcm[off:off + step_bytes]
             # パイプラインに送出（Soniox ASRへ）
             self._audio_q.put(chunk)
+            self._feed_agent(chunk)
             # スピーカー再生
             if self._play_out:
                 samples = np.frombuffer(chunk, dtype="<i2").astype(np.float32) / 32768.0
@@ -272,6 +273,17 @@ class DiscussionSimulator:
                     self._play_out.write(samples.reshape(-1, 1))
             else:
                 time.sleep(0.12)  # 再生なしの場合はリアルタイムペースを維持
+
+    def _feed_agent(self, chunk: bytes) -> None:
+        """進行役にも室内の音声として流す（マイクと同じ）.
+
+        流さないと GPT-Live は参加者の声を一切聞かず、文字の文脈だけで話すことに
+        なる。実会議ではマイクが常に音を運ぶので、シミュレーションもそれに合わせる。
+        """
+        agent = self._agent_ref
+        if agent is not None and getattr(agent, "_connected", False):
+            with contextlib.suppress(Exception):
+                agent.feed_audio(chunk)
 
     def _send_silence(self, duration: float):
         """無音をパイプラインに送出."""
@@ -282,6 +294,7 @@ class DiscussionSimulator:
             if self._stop.is_set():
                 return
             self._audio_q.put(silence[off:off + step_bytes])
+            self._feed_agent(silence[off:off + step_bytes])
             if self._play_out:
                 z = np.zeros(min(step_bytes // 2, n_samples - off // 2), dtype=np.float32)
                 with contextlib.suppress(Exception):
