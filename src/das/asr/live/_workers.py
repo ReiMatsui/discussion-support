@@ -1061,8 +1061,15 @@ def _on_agent_text_factory(state: SessionState):
         from das.asr.live import ON_UTTERANCE
 
         text = text.strip()
+        # 声が鳴っていたマイク座標の区間を行の時刻にする（無ければ従来どおり --:--）。
+        # 遡及訂正は speaker_source を持つ行しか触らず、席の回収・声かけの対象は
+        # 話者名で除外しているので、AI 行に ms が付いても帰属処理には影響しない
+        ms = end_ms = None
+        if isinstance(timing, dict):
+            ms = timing.get("capture_start_ms")
+            end_ms = timing.get("capture_end_ms")
         with state.state_lock:
-            state.records.append({"ms": None, "end_ms": None,
+            state.records.append({"ms": ms, "end_ms": end_ms,
                                   "speaker": AGENT_SPEAKER, "text": text})
             state.color_of(AGENT_SPEAKER)
         if ON_UTTERANCE is not None:

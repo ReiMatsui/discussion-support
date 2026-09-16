@@ -227,6 +227,20 @@ def test_facilitator_delivery_is_persisted_to_intervention_log(tmp_path):
         "text": "本題に戻しましょう",
     }]
     assert s.records[-1]["text"] == "本題に戻しましょう"
+    assert s.records[-1]["ms"] is None                 # 再生区間が分からなければ --:--
+
+
+def test_facilitator_line_takes_its_time_from_the_playback_interval(tmp_path):
+    s = SessionState(
+        args=object(), started=datetime.datetime(2026, 1, 1, 9, 0, 0),
+        out_path=str(tmp_path / "o.md"), html_path=str(tmp_path / "o.html"),
+        diag_path=str(tmp_path / "o.diag"), turns_path=str(tmp_path / "o.turns.jsonl"),
+        wav_path=str(tmp_path / "o.wav"),
+    )
+    _on_agent_text_factory(s)("本題に戻しましょう",
+                              {"capture_start_ms": 85_000, "capture_end_ms": 92_000})
+    assert s.records[-1]["ms"] == 85_000 and s.records[-1]["end_ms"] == 92_000
+    assert "[01:25] ファシリテーター" in (tmp_path / "o.md").read_text(encoding="utf-8")
 
 
 def test_facilitator_delivery_links_to_latest_trigger_event(tmp_path):
