@@ -54,6 +54,7 @@ _INPUT_BACKLOG_MAX = 30          # 送信待ちの室内音声（100ms 単位）
 _TRANSCRIPT_QUIET_SEC = 0.3      # 文字が止まってからでないと発話を確定しない（文字は音声に遅れる）
 _TEXT_LAG_INIT_SEC = 1.0         # 文字が音声に遅れる量の初期値。発話ごとに実測して更新する
 _TEXT_TAIL_SEC = 0.5             # 最後の声 + 遅れ + この余裕まで、その発話の文字を待つ
+_ORPHAN_ADOPT_SEC = 1.0          # 声の無い文字をこの秒数まで待ち、声が続けばその発話の頭にする
 _REMINDER_MIN_INTERVAL_SEC = 60.0  # 求められていない発話への注意は、この間隔以上あけて送る
 _RESUME_GRACE_SEC = 4.0          # 直前の発話の終端からこの秒数内の再開は同じ発話の続きとみなす
 _PENDING_KEEP = 40               # 溜めておく発話の上限。指示が長く出ないと際限なく増える
@@ -575,8 +576,18 @@ class LiveAgent(_VoiceAgentBase):
         self._silent_run_ms = 0
         self._jitter.begin_turn()
         self._turn_requested = requested
-        self._turns.append({"first": None, "last": None, "text": "", "first_text_at": None,
-                            "requested": requested, "stats": None})
+        head = self._turns[-1] if self._turns else None
+        now = time.monotonic()
+        if (head is not None and head.get("orphan") and not requested
+                and head["first_text_at"] is not None
+                and now - head["first_text_at"] < _ORPHAN_ADOPT_SEC):
+            # 声より先に文字が届いて作られた受け皿（直前）。この発話のものとして使う。
+            # 指示ありの発話は、指示を送る前に届いた文字が返事であるはずがないので使わない
+            head["orphan"] = False
+            head["requested"] = requested
+        else:
+            self._turns.append({"first": None, "last": None, "text": "", "first_text_at": None,
+                                "requested": requested, "stats": None})
         self._turn_first_voice_at = 0.0
         self._turn_last_voice_at = 0.0
         self._voiced_ms_this_turn = 0
@@ -660,7 +671,7 @@ class LiveAgent(_VoiceAgentBase):
         if turn is None:
             # どの発話にも属さない文字（発話の記録前に届いた等）。受け皿を作る
             turn = {"first": None, "last": None, "text": "", "first_text_at": None,
-                    "requested": self._turn_requested, "stats": None}
+                    "requested": self._turn_requested, "stats": None, "orphan": True}
             self._turns.append(turn)
         if turn["first_text_at"] is None:
             turn["first_text_at"] = now
@@ -687,6 +698,9 @@ class LiveAgent(_VoiceAgentBase):
                 return turn
         first_known = next((x for x in self._turns if x["first"] is not None), None)
         if first_known is not None and t < first_known["first"]:
+            # 最初の声より前に話された文字。前に声の無い受け皿（前の発話の末尾）が残って
+            # いても、遅れの推定が大きめだと新しい発話の頭をそちらに奪われ、議事録の行が
+            # 文の途中から始まる。新しい発話のものとみなす
             return first_known
         return self._turns[-1]
 
@@ -699,6 +713,17 @@ class LiveAgent(_VoiceAgentBase):
         now = time.monotonic() if now is None else now
         while self._turns:
             turn = self._turns[0]
+            if turn["last"] is None and turn["first"] is None and turn.get("orphan") \
+                    and turn["text"] \
+                    and (len(self._turns) > 1
+                         or now - turn["first_text_at"] >= _ORPHAN_ADOPT_SEC):
+                # 声の出ないまま残った文字（前の発話の遅れた末尾など）。先頭で待ち続けると
+                # 後ろの発話が全部詰まる（音響リハーサル 2 回目で 3 発話が議事録に
+                # 載らなかった）。声が続かなければ閉じて次へ（声の時刻は文字の到着から
+                # 遅れ分を引いた推定）
+                turn["last"] = turn["first_text_at"] - self._text_lag
+                turn["stats"] = turn["stats"] or {"requested": turn["requested"],
+                                                  "end_reason": "text_only"}
             if turn["last"] is None and not force:
                 break                                    # 音声がまだ続いている
             newer_has_text = any(x["first_text_at"] is not None for x in self._turns[1:])
@@ -754,7 +779,8 @@ class LiveAgent(_VoiceAgentBase):
             self._speak_trigger_at = 0.0
             with self._state_lock:
                 self._responding = False
-            if self._turns and self._turns[-1]["first"] is None:
+            if self._turns and self._turns[-1]["first"] is None \
+                    and not self._turns[-1].get("orphan"):
                 self._turns.pop()               # 声の出なかった発話の受け皿を捨てる
             # 指示はモデル側に残っている。取り消さないと、後で静かになった
             # ときに古い内容を話し出す（次の指示と重なる）

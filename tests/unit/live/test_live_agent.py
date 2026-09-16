@@ -547,3 +547,43 @@ def test_requested_turn_does_not_trigger_a_reminder(agent):
     for _ in range(int(_live._SPEECH_END_GAP_SEC * 10)):
         agent._handle({"type": "session.output_audio.delta", "delta": _silent()})
     assert len(agent.ws.sent) == n
+
+
+def test_orphan_transcript_does_not_block_later_utterances(agent):
+    """声の無い文字（前の発話の遅れた末尾）が先頭に残っても、後ろの発話は議事録に出る.
+
+    音響リハーサル 2 回目（2026-09-14 17:37）で、これが詰まって 3 発話が載らなかった。
+    """
+    agent._handle({"type": "session.output_transcript.delta", "delta": "遅れた末尾。"})
+    assert len(agent._turns) == 1 and agent._turns[0]["first"] is None
+    # 次の発話（指示あり）
+    agent.feed("A", "x")
+    agent.trigger(invite_target="B")
+    for _ in range(3):
+        agent._handle({"type": "session.output_audio.delta", "delta": _voiced()})
+    agent._handle({"type": "session.output_transcript.delta", "delta": "Bさんどうですか"})
+    for _ in range(int(_live._SPEECH_END_GAP_SEC * 10)):
+        agent._handle({"type": "session.output_audio.delta", "delta": _silent()})
+    agent._flush_texts(time.monotonic() + 10)
+    assert agent.said == ["遅れた末尾。", "Bさんどうですか"]
+    assert not agent._turns
+
+
+def test_orphan_transcript_is_emitted_alone_when_no_voice_follows(agent):
+    agent._handle({"type": "session.output_transcript.delta", "delta": "遅れた末尾。"})
+    agent._flush_texts(time.monotonic() + 0.5)
+    assert agent.said == []                      # 声が続くかもしれないので少し待つ
+    agent._flush_texts(time.monotonic() + 5)
+    assert agent.said == ["遅れた末尾。"] and not agent._turns
+    assert agent.last_turn_stats["end_reason"] == "text_only"
+
+
+def test_text_arriving_before_the_first_voice_belongs_to_that_turn(agent):
+    agent._handle({"type": "session.output_transcript.delta", "delta": "はい"})
+    agent._handle({"type": "session.output_audio.delta", "delta": _voiced()})   # 指示なし発話
+    assert len(agent._turns) == 1 and agent._turns[0]["text"] == "はい"
+    agent._handle({"type": "session.output_transcript.delta", "delta": "、そうです"})
+    for _ in range(int(_live._SPEECH_END_GAP_SEC * 10)):
+        agent._handle({"type": "session.output_audio.delta", "delta": _silent()})
+    _settle(agent)
+    assert agent.said == ["はい、そうです"]
