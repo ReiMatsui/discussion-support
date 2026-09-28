@@ -337,3 +337,116 @@ def test_reset_timeline_for_a_new_meeting(monkeypatch) -> None:
     provider.start()
     assert provider._session_base_ms == 0
     assert provider._label_epoch == 1               # ラベルの世代は進める
+
+
+def test_catching_up_after_a_backlog_resumes_sending(monkeypatch) -> None:
+    """再接続直後の溜まり分を捨てたあと、実時間で届く音声は送り続ける.
+
+    2026-09-28 の YouTube 再生ラン 4 本中 3 本で、サーバ都合の切断（1011）の
+    後に再接続してから 20〜50 秒で「5 秒間音声が届かない」（1008）で再び切られ、
+    3 回で分離が死んだ。原因は先行判定に「捨てた音声」まで数えていたこと。
+    捨てても先行量が減らないので、一度 3.5 秒を超えると以後の全チャンクを
+    捨て続け、サーバには何も届かなくなる。
+    """
+    import das.asr.live._pyannote_diarization as mod
+
+    sent: list[bytes] = []
+
+    class WS:
+        def send(self, payload) -> None:
+            sent.append(payload)
+
+    now = [1000.0]
+    monkeypatch.setattr(mod.time, "monotonic", lambda: now[0])
+    provider = PyannoteStreamingDiarizationProvider("k")
+    provider._ws = WS()
+    provider._connected_at = now[0]
+    chunk = struct.pack("<1600h", *([0] * 1600))   # 100ms
+
+    # 再接続の間に溜まった 6 秒分が一気に届く（実時間は進んでいない）
+    for _ in range(60):
+        provider.send_audio(chunk)
+    burst_sent = len(sent)
+    assert 0 < burst_sent <= 36, "先行 3.5 秒までは送り、残りは捨てる"
+    assert provider._session_base_ms == (60 - burst_sent) * 100, "捨てた分だけ基点を進める"
+
+    # その後は実時間どおり 100ms ごとに届く。これが送られなければサーバは 5 秒で切る
+    before = len(sent)
+    for _ in range(100):
+        now[0] += 0.1
+        provider.send_audio(chunk)
+    assert len(sent) - before == 100, "実時間で届く音声を捨て続けてはいけない"
+
+
+def test_reconnect_runs_off_the_audio_thread_and_keeps_the_timeline(monkeypatch) -> None:
+    """再接続は送信スレッドを止めない。再接続中の音声は捨てて基点だけ進める.
+
+    送信スレッドは STT にも音声を流しているので、ここで数秒止まると文字起こし
+    まで遅れ、再接続後に溜まった分を一気に送るとサーバに切られる。
+    """
+    import threading
+    import das.asr.live._pyannote_diarization as mod
+
+    gate = threading.Event()
+    sent: list[bytes] = []
+
+    class GoodWS:
+        def send(self, payload) -> None:
+            sent.append(payload)
+
+    class BrokenWS:
+        def send(self, payload) -> None:
+            raise ConnectionError("received 1011 (internal error)")
+
+        def close(self) -> None:
+            pass
+
+    provider = PyannoteStreamingDiarizationProvider("k")
+
+    def fake_connect() -> None:
+        gate.wait(timeout=5)          # 「セッション作成に時間がかかる」
+        provider._ws = GoodWS()
+        provider._connected_at = mod.time.monotonic()
+        provider._dropped_ms = 0
+
+    monkeypatch.setattr(provider, "_connect", fake_connect)
+    provider._ws = BrokenWS()
+    provider._connected_at = mod.time.monotonic() - 10.0
+    provider._sent_audio_ms = 5_000       # 切断前に 5 秒送っていた
+    chunk = struct.pack("<1600h", *([0] * 1600))
+
+    provider.send_audio(chunk)            # ここで切断を検知。すぐ戻る
+    assert provider._ws is None and provider.alive, "再接続中は死んでいない"
+    assert provider._reconnects == 1 and provider._label_epoch == 1
+    assert provider._session_base_ms == 5_100, "送れた 5 秒＋失敗した 100ms"
+
+    for _ in range(20):                   # 再接続中に届いた 2 秒
+        provider.send_audio(chunk)
+    assert provider._session_base_ms == 7_100 and sent == []
+
+    gate.set()
+    provider._reconnect_thread.join(timeout=5)
+    assert provider._ws is not None and not provider._reconnecting
+    provider.send_audio(chunk)
+    assert len(sent) == 1 and provider._sent_audio_ms == 100
+    # 新セッションの 0.0 秒 = 会議の 7.1 秒
+    start = {"type": "diarization_speaker_start", "data": {"timestamp": 0.0, "speaker": "SPEAKER_00"}}
+    end = {"type": "diarization_speaker_end", "data": {"timestamp": 1.0, "speaker": "SPEAKER_00"}}
+    provider._parse_message(json.dumps(start))
+    ev = provider._parse_message(json.dumps(end))
+    assert (ev.start_ms, ev.end_ms, ev.speaker) == (7_100, 8_100, "R1:SPEAKER_00")
+
+
+def test_gives_up_after_the_limit_and_reports_dead() -> None:
+    class BrokenWS:
+        def send(self, payload) -> None:
+            raise ConnectionError("boom")
+
+        def close(self) -> None:
+            pass
+
+    provider = PyannoteStreamingDiarizationProvider("k", max_reconnects=1)
+    provider._ws = BrokenWS()
+    provider._reconnects = 1
+    provider.send_audio(struct.pack("<1600h", *([0] * 1600)))
+    assert provider._ws is None and not provider.alive and not provider._reconnecting

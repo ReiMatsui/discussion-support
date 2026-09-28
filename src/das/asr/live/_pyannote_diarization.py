@@ -92,6 +92,14 @@ class PyannoteStreamingDiarizationProvider:
       ``_session_state.py`` の ``key_for_diarization_speaker`` 参照)が
       吸収する設計。再接続直後の短い揺れでは偽参加者を作らず、既存参加者の
       発話が3秒以上そのラベルに乗り続けた場合のみ新規参加者として確定する。
+
+      再接続は別スレッドで行い（``_reconnect_worker``）、送信スレッドは止めない。
+      再接続中に届いた音声は分離には送らず時刻の基点だけ進める。溜め込んで
+      再接続後に一気に送るとサーバの「実時間より 5 秒以上先行」で切られる。
+      2026-09-28 の実測（YouTube 再生 4 本中 3 本、過去の AMI 一括実行の多く）
+      では、10 分前後でサーバ都合の 1011 が来た後、再接続→溜まり分の全捨て→
+      5 秒無音で 1008→再接続、の連鎖で 3 回の上限を使い切って分離が死んでいた。
+      原因は先行判定に捨てた音声まで数えていたこと（``send_audio`` 内の注記）。
     """
 
     _CREATE_URL = "https://api.pyannote.ai/v1/live"
@@ -137,6 +145,12 @@ class PyannoteStreamingDiarizationProvider:
         self._started_once = False
         self._connected_at = 0.0     # 現セッションの接続時刻（実時間より先行しない送り方の基準）
         self._dropped_ms = 0         # 先行しすぎて送らなかった音声（タイムラインは進める）
+        # 再接続は送信スレッドを止めずに別スレッドで行う。送信スレッドは STT にも
+        # 音声を流しているので、ここで数秒止まると文字起こしまで遅れる。再接続中
+        # に届いた音声は分離には送らず（送れないので）時刻の基点だけ進める。
+        self._reconnecting = False
+        self._reconnect_thread: threading.Thread | None = None
+        self._timeline_lock = threading.Lock()
 
     @property
     def name(self) -> str:
@@ -207,39 +221,57 @@ class PyannoteStreamingDiarizationProvider:
         self._reader.start()
 
     def _handle_disconnect(self, exc: Exception) -> None:
-        """送信失敗を検知した際に自動再接続を試みる（再接続数上限あり）."""
+        """送信失敗を検知した際に自動再接続を試みる（再接続数上限あり）.
+
+        再接続そのもの（HTTP でセッション作成→WS 接続、1〜数秒）は別スレッドで
+        行い、送信スレッドはすぐ戻る。再接続中は ``_ws`` が None なので
+        ``send_audio`` は音声を捨てて基点だけ進める。溜め込んで後で一気に送ると
+        サーバの「実時間より 5 秒以上先行」で切られるため、溜めない方が正しい。
+        """
         logger.warning("pyannote Live-1: 送信中に切断を検知しました (%s)。", exc)
+        old_ws = self._ws
+        self._ws = None
         if not self.auto_reconnect or self._reconnects >= self.max_reconnects:
             logger.error(
                 "pyannote Live-1: 再接続を行いません（auto_reconnect=%s, %d/%d回）。",
                 self.auto_reconnect, self._reconnects, self.max_reconnects,
             )
-            self._ws = None
             return
-        with contextlib.suppress(Exception):
-            if self._ws is not None:
-                self._ws.close()
-        if self._reader is not None:
-            self._reader.join(timeout=1.0)
         self._reconnects += 1
-        # これまでに送信できた音声の累計msをオフセットとして次セッションに引き継ぐ。
-        self._session_base_ms += self._sent_audio_ms
-        self._sent_audio_ms = 0
+        self._reconnecting = True
+        with self._timeline_lock:
+            # これまでに送信できた音声の累計msをオフセットとして次セッションに引き継ぐ。
+            self._session_base_ms += self._sent_audio_ms
+            self._sent_audio_ms = 0
         self._label_epoch += 1
         with self._active_lock:
             self._active_starts.clear()
+        self._pcm_buf.clear()
+        attempt = self._reconnects
+        self._reconnect_thread = threading.Thread(
+            target=self._reconnect_worker, args=(old_ws, attempt), daemon=True)
+        self._reconnect_thread.start()
+
+    def _reconnect_worker(self, old_ws: Any, attempt: int) -> None:
+        with contextlib.suppress(Exception):
+            if old_ws is not None:
+                old_ws.close()
+        if self._reader is not None:
+            self._reader.join(timeout=1.0)
         self._stop.clear()
         try:
             self._connect()
             logger.warning(
                 "pyannote Live-1: 新セッションで再接続しました (%d/%d回目、"
                 "音声内位置 %dms から再開、ラベルepoch=%d)。",
-                self._reconnects, self.max_reconnects,
+                attempt, self.max_reconnects,
                 self._session_base_ms, self._label_epoch,
             )
         except Exception:
             logger.exception("pyannote Live-1: 再接続に失敗しました。")
             self._ws = None
+        finally:
+            self._reconnecting = False
 
     def send_audio(self, pcm16k: bytes) -> None:
         """16kHz mono PCM16 bytes を受け取り、Live-1 仕様の100ms固定 f32le
@@ -251,11 +283,12 @@ class PyannoteStreamingDiarizationProvider:
         新セッションを作って同じチャンクを送り直す（自動再接続）。
         """
         if self._ws is None:
-            # 未接続（接続処理中・諦めた後）でも会議の時間は進んでいる。送らな
-            # かった分をタイムラインに足しておかないと、以後の区間の時刻が
+            # 未接続（接続処理中・再接続中・諦めた後）でも会議の時間は進んでいる。
+            # 送らなかった分をタイムラインに足しておかないと、以後の区間の時刻が
             # STT より早い側にずれて重なり判定が崩れる（レビュー 2026-09-13:
             # 既定の UI 起動では STT 接続→分離接続の間の約1秒がこれに当たる）
-            self._session_base_ms += len(pcm16k) // _SR_BYTES_PER_MS
+            with self._timeline_lock:
+                self._session_base_ms += len(pcm16k) // _SR_BYTES_PER_MS
             return
         self._pcm_buf.extend(pcm16k)
         while len(self._pcm_buf) >= _CHUNK_BYTES_PCM16:
@@ -270,10 +303,17 @@ class PyannoteStreamingDiarizationProvider:
             # 実走と AMI 一括実行で再現）。先行しすぎる分は送らずに捨て、
             # その長さをタイムラインのオフセットに足して以後の区間の時刻を
             # 会議の時間に合わせ続ける。
+            # 先行量は「サーバに実際に送った音声」と実時間の差で見る。捨てた音声を
+            # 数えると、捨てても先行量が減らず、一度しきい値を超えた後は以後の
+            # 全チャンクを捨て続けてサーバに何も届かなくなる。すると 5 秒の無音で
+            # 1008（client timeout）で切られ、再接続→溜まる→全部捨てる→1008 の
+            # 連鎖で 3 回の上限を使い切って分離が死ぬ（2026-09-28 の YouTube
+            # 再生ラン 4 本中 3 本で再現。切断の起点はサーバ都合の 1011 だった）。
             elapsed_ms = (time.monotonic() - self._connected_at) * 1000.0
-            if self._sent_audio_ms + self._dropped_ms - elapsed_ms > self._MAX_AHEAD_MS:
+            if self._sent_audio_ms - elapsed_ms > self._MAX_AHEAD_MS:
                 self._dropped_ms += _CHUNK_MS
-                self._session_base_ms += _CHUNK_MS
+                with self._timeline_lock:
+                    self._session_base_ms += _CHUNK_MS
                 if self._dropped_ms == _CHUNK_MS:
                     logger.warning("pyannote Live-1: 実時間より先行した音声を捨てて追従します"
                                    "（再接続直後の溜まり分）。")
@@ -282,9 +322,11 @@ class PyannoteStreamingDiarizationProvider:
                 self._ws.send(payload)
             except Exception as exc:
                 self._handle_disconnect(exc)
-                if self._ws is None:
-                    raise
-                self._ws.send(payload)
+                # このチャンクと、バッファに残った端数は送れない。時刻だけ進める
+                with self._timeline_lock:
+                    self._session_base_ms += _CHUNK_MS + len(self._pcm_buf) // _SR_BYTES_PER_MS
+                self._pcm_buf.clear()
+                return
             self._sent_audio_ms += _CHUNK_MS
             # 1分間安定して送れたら再接続カウンタを忘れる（§48.5）。
             # 上限3回は「連続失敗の暴走止め」であって生涯回数ではない。
@@ -296,8 +338,8 @@ class PyannoteStreamingDiarizationProvider:
 
     @property
     def alive(self) -> bool:
-        """接続が生きているか（自動再接続を諦めた後は False, §48.5）."""
-        return self._ws is not None
+        """接続が生きているか（再接続中は True、諦めた後は False, §48.5）."""
+        return self._ws is not None or self._reconnecting
 
     def drain_events(self) -> list[DiarizationEvent]:
         events: list[DiarizationEvent] = []
@@ -323,6 +365,8 @@ class PyannoteStreamingDiarizationProvider:
         _stop を即セットしてreaderを止めるのではなく、reader(recvループ)が
         サーバ側クローズで自然終了するのを timeout 付きで待ってから閉じる。
         """
+        if self._reconnect_thread is not None:
+            self._reconnect_thread.join(timeout=5.0)
         if self._ws is not None:
             # 100ms境界に満たない端数(< 3200バイトPCM16)が残っていれば、
             # 失うよりはそのまま送る（サーバはend_of_stream前の最終フレーム
