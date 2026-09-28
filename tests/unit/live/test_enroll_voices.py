@@ -254,3 +254,17 @@ def test_from_gt_uses_hand_labelled_segments_from_turns_or_vad(tmp_path) -> None
     assert ev.parse_from_gt("黒田=eval/gt_tail.json/S1:data/pairs/tail.wav") == (
         "黒田", "eval/gt_tail.json", "S1", "data/pairs/tail.wav")
     assert ev.parse_from_gt("としや=eval/gt_s.json/S2") == ("としや", "eval/gt_s.json", "S2", None)
+
+
+def test_annotate_page_has_per_row_speaker_buttons_and_names_option() -> None:
+    """正解付けは行のボタンを押す選択式でもできる。--names で話者名を先に与えられる."""
+    sys.path.insert(0, str(ROOT / "eval"))
+    import _annot_html
+    assert 'class="pick"' in _annot_html.PAGE and "dataset.code" in _annot_html.PAGE
+    spec = importlib.util.spec_from_file_location("annotate", ROOT / "eval" / "annotate.py")
+    an = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(an)
+    st = an._State.__new__(an._State)
+    st.default_names = {}
+    names = {f"S{i + 1}": n.strip() for i, n in enumerate("尾原, 西野,箕輪,成田".split(",")) if n.strip()}
+    assert names == {"S1": "尾原", "S2": "西野", "S3": "箕輪", "S4": "成田"}

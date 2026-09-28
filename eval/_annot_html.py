@@ -56,6 +56,10 @@ PAGE = r"""<!DOCTYPE html>
             font-variant-numeric:tabular-nums; }
   .seg .txt { flex:1; line-height:1.5; word-break:break-word; }
   .seg .txt.empty { color:#9ca3af; }
+  .seg .pick { display:flex; gap:4px; flex-wrap:wrap; flex-shrink:0; max-width:260px;
+               justify-content:flex-end; }
+  .seg .pick button { padding:3px 8px; font-size:12px; border-radius:6px; }
+  .seg .pick button.sel { color:#fff; }
   .seg .who { width:96px; flex-shrink:0; text-align:center; font-weight:600;
               border-radius:7px; padding:4px 0; background:#f1f3f5; color:#9ca3af;
               font-size:12px; }
@@ -101,7 +105,7 @@ PAGE = r"""<!DOCTYPE html>
   <span id="progress">—</span>
   <span id="bar"><i></i></span>
   <span class="keys">
-    <kbd>1</kbd>…<kbd>9</kbd>話者　<kbd>S</kbd>直前と同じ　<kbd>M</kbd>複数人
+    行のボタンを押すか <kbd>1</kbd>…<kbd>9</kbd>話者　<kbd>S</kbd>直前と同じ　<kbd>M</kbd>複数人
     <kbd>0</kbd>不明　<kbd>Backspace</kbd>取消　<kbd>Space</kbd>再生/停止
     <kbd>Enter</kbd>もう一度　<kbd>↑↓</kbd>移動　<kbd>←→</kbd>3秒
   </span>
@@ -188,9 +192,19 @@ function renderList(){
       `<div class="t">#${s.id}<br>${fmt(s.start)}<br>${(s.end-s.start).toFixed(1)}s</div>`
       + `<div class="txt${s.text ? "" : " empty"}">${s.text || "（文字起こしなし）"}</div>`
       + `<div class="who"></div>`
+      + `<div class="pick"></div>`
       + `<button class="play">▶</button>`;
     d.querySelector(".play").addEventListener("click", e => {
       e.stopPropagation(); select(i); playSeg(); });
+    // 選択式: 行ごとに話者の名前ボタン（キーを打たなくても押すだけで付く）
+    const pick = d.querySelector(".pick");
+    codes().concat([MULTI, UNK]).forEach(c => {
+      const b = document.createElement("button");
+      b.textContent = c === MULTI ? "複数" : c === UNK ? "不明" : nameOf(c);
+      b.dataset.code = c;
+      b.addEventListener("click", e => { e.stopPropagation(); select(i, false); assign(c); });
+      pick.appendChild(b);
+    });
     d.addEventListener("click", () => select(i));
     list.appendChild(d);
     paintRow(i);
@@ -202,6 +216,12 @@ function paintRow(i){
   const code = labels[SEGS[i].id];
   const who = el.querySelector(".who");
   who.textContent = nameOf(code);
+  el.querySelectorAll(".pick button").forEach(b => {
+    const on = b.dataset.code === code;
+    b.classList.toggle("sel", on);
+    b.style.background = on ? colorOf(code) : "";
+    b.style.borderColor = on ? colorOf(code) : "";
+  });
   if (code){
     who.style.background = colorOf(code) + "22";
     who.style.color = colorOf(code);

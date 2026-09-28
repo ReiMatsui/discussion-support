@@ -207,6 +207,7 @@ class _State:
         self.seg_path = seg_path
         self.lock = threading.Lock()
         self.backup_done = False
+        self.default_names: dict[str, str] = {}   # --names で与えた話者名（S1, S2, …）
 
     def load_gt(self) -> dict:
         if self.gt_path.exists():
@@ -266,7 +267,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, PAGE.encode(), "text/html; charset=utf-8")
         elif self.path.startswith("/info"):
             gt = s.load_gt()
-            names = gt.get("speaker_names") or {
+            names = gt.get("speaker_names") or s.default_names or {
                 f"S{i}": f"話者{i}" for i in (1, 2, 3)}
             body = {"title": s.title, "segments": s.segments, "peaks": s.peaks,
                     "duration": s.duration, "labels": gt.get("labels") or {},
@@ -358,11 +359,17 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("target", help="収録セッション名、または音声ファイルのパス")
     p.add_argument("--minutes", type=float, default=None,
                    help="頭から何分だけを対象にするか（既定: 全部）")
+    p.add_argument("--names", default=None,
+                   help="話者名をカンマ区切りで先に与える（例: 尾原,西野,箕輪,成田 → 1〜4）。"
+                        "画面で打たなくてよい。既に正解ファイルに名前があればそちらを使う")
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--no-open", action="store_true", help="ブラウザを開かない")
     args = p.parse_args(argv)
 
     state = build_state(args.target, args.minutes)
+    if args.names:
+        state.default_names = {f"S{i + 1}": n.strip()
+                               for i, n in enumerate(args.names.split(",")) if n.strip()}
     _Handler.state = state
     srv = ThreadingHTTPServer(("127.0.0.1", args.port), _Handler)
     url = f"http://127.0.0.1:{args.port}/"
