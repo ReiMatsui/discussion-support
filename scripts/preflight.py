@@ -9,6 +9,8 @@
     uv run python scripts/preflight.py --no-agent      # 介入なし運用（OpenAI を見ない）
     uv run python scripts/preflight.py --device "USB"  # マイクを名前の一部で指定
     uv run python scripts/preflight.py --seconds 5     # レベル測定の長さ
+    uv run python scripts/preflight.py --voices voices.json --expect 田中,佐藤,鈴木
+                                                       # 事前登録の台帳に今日の参加者が揃っているか
 """
 from __future__ import annotations
 
@@ -134,6 +136,41 @@ def check_disk(path: str = "transcripts", need_gb: float = 2.0) -> list[tuple[st
     return out
 
 
+def check_voices(path: str | None, expect: str | None) -> list[tuple[str, str]]:
+    """事前登録の声紋台帳を見る（--voices）。--expect の名前が全部あるか."""
+    if not path:
+        return []
+    import json
+    if not os.path.exists(path):
+        return [(NG, f"声紋台帳 {path} が無い（scripts/enroll_voices.py --record で作る）")]
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError) as e:
+        return [(NG, f"声紋台帳 {path} が読めない: {e}")]
+    model = data.pop("_model", None)
+    names = sorted(k for k in data if not k.startswith("__") and not k.startswith("人物"))
+    out: list[tuple[str, str]] = []
+    if model != "redimnet":
+        out.append((NG, f"声紋台帳のモデルが {model!r}（現行は redimnet）。作り直す"))
+    if not names:
+        out.append((NG, f"声紋台帳 {path} に名前付きの声紋が無い"))
+    else:
+        out.append((OK, f"声紋台帳 {path}: {', '.join(names)}"))
+    if expect:
+        want = [n.strip() for n in expect.split(",") if n.strip()]
+        missing = [n for n in want if n not in names]
+        if missing:
+            out.append((NG, f"登録が無い参加者: {', '.join(missing)}（enroll_voices.py --record で登録）"))
+        else:
+            out.append((OK, f"参加者 {len(want)} 人ぶんの登録あり"))
+        extra = [n for n in names if n not in want]
+        if extra:
+            out.append((WARN, f"今日の参加者以外の登録が残っている: {', '.join(extra)}"
+                              "（--activate で今日の名前だけ有効化すれば照合されない）"))
+    return out
+
+
 def check_power() -> list[tuple[str, str]]:
     if sys.platform != "darwin":
         return []
@@ -152,6 +189,8 @@ def main() -> None:
     ap.add_argument("--device", default=None, help="入力デバイス名の一部")
     ap.add_argument("--seconds", type=float, default=3.0, help="レベル測定の秒数")
     ap.add_argument("--skip-mic", action="store_true")
+    ap.add_argument("--voices", default=None, help="事前登録の声紋台帳（voices.json）を点検する")
+    ap.add_argument("--expect", default=None, help="--voices に居るべき参加者名（カンマ区切り）")
     args = ap.parse_args()
 
     _load_env()
@@ -161,6 +200,7 @@ def main() -> None:
     results += check_network(need)
     results += check_model()
     results += check_disk()
+    results += check_voices(args.voices, args.expect)
     results += check_power()
     if not args.skip_mic:
         results += check_mic(args.device, args.seconds)

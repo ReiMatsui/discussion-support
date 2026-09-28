@@ -13,6 +13,10 @@
     uv run python scripts/enroll_voices.py --voices data/chiba/voices_chiba0132_e60.json \\
         --chiba chiba0132 --seconds 60
 
+    # 実験当日: その場のマイクで一人ずつ録って登録（30秒。録音は data/voices/<名前>.wav に残す）
+    uv run python scripts/enroll_voices.py --voices voices.json --record 田中 --seconds 30
+    uv run python scripts/enroll_voices.py --voices voices.json --record 佐藤 --seconds 30
+
 --chiba は Morph の時刻で「その人が話している区間」だけをその人のチャンネルから
 切り出して繋ぐので、他人の声の回り込みが少ないクリーンな登録音声になる。
 """
@@ -84,6 +88,56 @@ def speech_segments(conv: str, who: str) -> list[tuple[float, float]]:
     return segs
 
 
+def record_from_mic(seconds: float, device: str | None = None) -> np.ndarray:
+    """その場のマイクから seconds 秒録る（16kHz mono float32）. 3 秒のカウントダウン付き."""
+    import time
+    import sounddevice as sd
+    dev = None
+    if device:
+        for i, d in enumerate(sd.query_devices()):
+            if d["max_input_channels"] > 0 and device.lower() in d["name"].lower():
+                dev = i
+                break
+        else:
+            raise SystemExit(f"入力デバイスが見つかりません: {device}")
+    info = sd.query_devices(dev if dev is not None else sd.default.device[0])
+    print(f"# 入力デバイス: {info['name']}。{seconds:.0f} 秒録ります。"
+          "普段の声で、自己紹介や今日の予定など何でも話し続けてください", flush=True)
+    for i in (3, 2, 1):
+        print(f"  {i}…", flush=True)
+        time.sleep(1)
+    print("  ● 録音中", flush=True)
+    x = sd.rec(int(seconds * SR), samplerate=SR, channels=1, dtype="float32", device=dev)
+    sd.wait()
+    print("  ■ 終了", flush=True)
+    return np.asarray(x, dtype="float32").reshape(-1)
+
+
+def check_level(wav: np.ndarray) -> str | None:
+    """録音が登録に使える音量かを見る。問題があれば理由を返す."""
+    if wav.size < SR * 2:
+        return f"短すぎます（{wav.size / SR:.1f}s）"
+    rms = float(np.sqrt((wav ** 2).mean() + 1e-12))
+    db = 20 * np.log10(rms + 1e-9)
+    if db < -50:
+        return f"ほぼ無音です（{db:.1f} dBFS）。ミュートやデバイス選択を確認"
+    if db < -40:
+        return f"小さいです（{db:.1f} dBFS）。マイクに近づいて録り直しを推奨"
+    if float(np.abs(wav).max()) > 0.98:
+        return "クリップしています。入力ゲインを下げて録り直しを推奨"
+    return None
+
+
+def save_wav_16k(path: Path, wav: np.ndarray) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pcm = np.clip(wav, -1.0, 1.0)
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(SR)
+        w.writeframes((pcm * 32767).astype("<i2").tobytes())
+
+
 def build_clip(wav: np.ndarray, segs: list[tuple[float, float]], seconds: float,
                min_seg: float = 0.5, after: float = 0.0) -> tuple[np.ndarray, float]:
     """発話区間を繋いで seconds ぶんの登録音声を作る.
@@ -123,6 +177,10 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--after", type=float, default=0.0, metavar="SEC",
                    help="--chiba で、会議の SEC 秒より後の発話だけを登録に使う"
                         "（先頭を採点する再生ランと登録音声を重ねないため）")
+    p.add_argument("--record", action="append", default=[], metavar="名前",
+                   help="その場のマイクで録って登録する（--seconds 秒。複数可）。"
+                        "録音は data/voices/<名前>.wav に残す")
+    p.add_argument("--device", default=None, help="--record の入力デバイス名の一部")
     a = p.parse_args(argv)
 
     from das.asr.live._voice_profiles import VoiceProfiles
@@ -141,8 +199,17 @@ def main(argv: list[str] | None = None) -> None:
             clip, until = build_clip(wav, speech_segments(a.chiba, who), a.seconds, after=a.after)
             jobs.append((who, clip, f"{a.chiba}-{who} 発話 {clip.size / SR:.1f}s"
                          f"（会議の {a.after:.0f}〜{until:.0f} 秒の範囲）"))
+    for name in a.record:
+        name = name.strip()
+        wav = record_from_mic(a.seconds, a.device)
+        problem = check_level(wav)
+        if problem:
+            print(f"# {name}: 録音に問題があります: {problem}", flush=True)
+        out = ROOT / "data" / "voices" / f"{name}.wav"
+        save_wav_16k(out, wav)
+        jobs.append((name, wav, f"マイク録音 {wav.size / SR:.0f}s → {out.relative_to(ROOT)}"))
     if not jobs:
-        raise SystemExit("--add か --chiba を指定してください")
+        raise SystemExit("--add か --chiba か --record を指定してください")
 
     for name, wav, note in jobs:
         if wav.size < SR * 2:

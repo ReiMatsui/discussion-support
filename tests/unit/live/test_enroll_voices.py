@@ -91,3 +91,37 @@ def test_activate_option_turns_on_saved_profiles_at_startup(capsys) -> None:
 
 def test_live_args_default_activate_is_empty() -> None:
     assert _bootstrap.LiveArgs().activate == ""
+
+
+def test_check_level_flags_silent_short_and_clipped_recordings() -> None:
+    ev = _load_script()
+    assert "短すぎ" in ev.check_level(np.zeros(SR, dtype="float32"))
+    assert "無音" in ev.check_level(np.zeros(SR * 5, dtype="float32"))
+    loud = np.ones(SR * 5, dtype="float32")
+    assert "クリップ" in ev.check_level(loud)
+    ok = (np.sin(np.arange(SR * 5) / 20.0) * 0.1).astype("float32")
+    assert ev.check_level(ok) is None
+
+
+def test_save_wav_16k_roundtrips(tmp_path) -> None:
+    ev = _load_script()
+    wav = (np.sin(np.arange(SR * 3) / 30.0) * 0.5).astype("float32")
+    out = tmp_path / "v" / "田中.wav"
+    ev.save_wav_16k(out, wav)
+    back = ev.read_wav_16k(out)
+    assert back.size == wav.size and float(np.abs(back - wav).max()) < 1e-3
+
+
+def test_preflight_voices_check_reports_missing_names(tmp_path) -> None:
+    spec = importlib.util.spec_from_file_location("preflight", ROOT / "scripts" / "preflight.py")
+    pf = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(pf)
+    path = tmp_path / "voices.json"
+    path.write_text(json.dumps({"_model": "redimnet", "田中": [1.0, 0.0], "人物1": [0.0, 1.0]}),
+                    encoding="utf-8")
+    res = pf.check_voices(str(path), "田中,佐藤")
+    msgs = " / ".join(m for _, m in res)
+    assert "田中" in msgs and "登録が無い参加者: 佐藤" in msgs
+    assert any(mark == pf.NG for mark, _ in res)
+    assert pf.check_voices(None, None) == []
+    assert pf.check_voices(str(tmp_path / "none.json"), None)[0][0] == pf.NG
