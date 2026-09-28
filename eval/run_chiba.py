@@ -15,6 +15,9 @@
         chiba0132 は話者Bが序盤ほぼ無言のため全体版を推奨。handoff §15.2）
     uv run python eval/run_chiba.py --skip-run --session <既存セッション名>
         # 実走を飛ばして既存ランを再採点だけしたいとき
+    uv run python eval/run_chiba.py --conv chiba0232 --enroll-seconds 60
+        # 事前登録あり条件: 各話者の声を先頭60秒ぶん登録してから流す
+        # （登録なしの通常ランと results.csv で並べて比べる）
 
 設計: docs/design/handoff_2026-07-14_unregistered_speakers.md §14（CallHome
 と同一の測定経路）・§15.2（Chiba3Party の位置づけ）。
@@ -83,12 +86,17 @@ _MODE_FLAGS = {
 
 
 def run_live(mix_path: Path, max_speakers: int, extra_soniox: str,
-             mode: str) -> str:
-    """listen-soniox を実走し、新規セッション名を自動検出して返す."""
+             mode: str, voices: Path | None = None) -> str:
+    """listen-soniox を実走し、新規セッション名を自動検出して返す.
+
+    voices を渡すと、その voices.json の登録済み声紋を全員有効化して始める
+    （事前登録あり条件。scripts/enroll_voices.py で作ったもの）。
+    """
     before = {p.name for p in TRANSCRIPTS.glob("*.turns.jsonl")}
     started = datetime.datetime.now()
+    enroll_flags = ["--voices", str(voices), "--activate", "all"] if voices else []
     cmd = [*das_command(),
-        "listen-soniox", *_MODE_FLAGS[mode],
+        "listen-soniox", *_MODE_FLAGS[mode], *enroll_flags,
         "--max-speakers", str(max_speakers),
         # 帰属測定に介入系は不要: docsの事前AF化・発話ごとのAF構築の入口・
         # 3秒周期の介入判定を止める（LLM呼び出しの純減。--soniox-args の
@@ -147,16 +155,38 @@ def main() -> None:
                    help="実走を飛ばして --session の再採点のみ")
     p.add_argument("--session", default=None,
                    help="--skip-run 時に採点する既存セッション名")
+    p.add_argument("--enroll-seconds", type=float, default=None, metavar="SEC",
+                   help="事前登録あり条件: 各話者のヘッドセット録音から先頭 SEC 秒ぶんの"
+                        "発話で声紋を作って登録してから実走する（scripts/enroll_voices.py）")
+    p.add_argument("--voices", default=None,
+                   help="事前登録あり条件: 作成済みの voices.json を使う（--enroll-seconds と排他）")
     a = p.parse_args()
 
     gt_path, mix_path = ensure_prepared(a.conv, a.minutes, a.gap, a.force_prep)
+
+    voices: Path | None = None
+    if a.enroll_seconds is not None and a.voices:
+        sys.exit("--enroll-seconds と --voices は同時に指定できません")
+    if a.enroll_seconds is not None:
+        voices = ROOT / "data" / "chiba" / f"voices_{a.conv}_e{a.enroll_seconds:g}.json"
+        if voices.exists():
+            voices.unlink()   # 古い登録を混ぜない（毎回作り直す）
+        subprocess.run([sys.executable, str(ROOT / "scripts" / "enroll_voices.py"),
+                        "--voices", str(voices), "--chiba", a.conv,
+                        "--seconds", str(a.enroll_seconds)], check=True)
+    elif a.voices:
+        voices = Path(a.voices)
+        if not voices.exists():
+            sys.exit(f"--voices {voices} が見つかりません")
+    mode_label = a.mode + (f"+enroll{a.enroll_seconds:g}" if a.enroll_seconds is not None
+                           else ("+voices" if a.voices else ""))
 
     if a.skip_run:
         if not a.session:
             sys.exit("--skip-run には --session <セッション名> が必要です")
         session = a.session
     else:
-        session = run_live(mix_path, a.max_speakers, a.soniox_args, a.mode)
+        session = run_live(mix_path, a.max_speakers, a.soniox_args, a.mode, voices)
         print(f"# 新セッション: {session}")
 
     # 採点（eval_speaker_gt の main をそのまま使い、出力を拾って要約も残す）
@@ -169,7 +199,7 @@ def main() -> None:
                  else session)
     text = buf.getvalue()
     print(text)
-    append_result(a.conv, session, a.minutes, a.mode, text)
+    append_result(a.conv, session, a.minutes, mode_label, text)
 
 
 if __name__ == "__main__":

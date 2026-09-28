@@ -63,6 +63,9 @@ def post_system(text: str) -> None:
               help="起動時にブラウザで開始前設定を行う")
 @click.option("--no-vp", is_flag=True, help="声紋照合を無効化")
 @click.option("--voices", default="voices.json", help="声紋プロファイルの保存先")
+@click.option("--activate", default="", metavar="NAMES",
+              help="起動時に有効化する登録済み声紋の名前（カンマ区切り。all で保存済み全員）。"
+                   "事前登録の再生評価用。未指定なら従来どおりUIで有効化する")
 @click.option("--vp-debug", is_flag=True, help="声紋判定の内訳を表示")
 @click.option("--diarization", default="pyannote",
               type=click.Choice(["none", "pyannote"]),

@@ -85,6 +85,7 @@ class LiveArgs:
     no_open: bool = False
     no_vp: bool = False
     voices: str = "voices.json"
+    activate: str = ""           # 起動時に有効化する登録済み声紋（カンマ区切り / all）
     vp_model: str = "redimnet"   # 内部既定（CLIからは変えない）
     vp_debug: bool = False
     diarization: str = "pyannote"  # 既定=推奨構成（none で Soniox 単独）
@@ -699,7 +700,33 @@ def _build_tracker(args) -> VoiceProfiles | None:
               f"ブラウザUIで名前を登録すると次回から自動表示（{args.voices}）", flush=True)
     if tracker is not None:
         tracker.set_max_human_speakers(args.diarization_max_speakers)
+        _activate_saved_profiles(tracker, getattr(args, "activate", "") or "")
     return tracker
+
+
+def _activate_saved_profiles(tracker, spec: str) -> list[str]:
+    """--activate で指定された登録済み声紋を起動時に有効化する.
+
+    voices.json の名前付きプロファイルは既定では非アクティブで始まり、UI で
+    ON にしたものだけが照合対象になる（VoiceProfiles._active_keys）。事前登録の
+    効果を再生ランで測るときは UI 操作を挟めないので、ここで有効化する。
+    "all" は保存済み全員。無い名前は警告して飛ばす（起動は止めない）。
+    """
+    spec = spec.strip()
+    if not spec:
+        return []
+    saved = list(tracker.all_profile_names())
+    names = saved if spec == "all" else [n.strip() for n in spec.split(",") if n.strip()]
+    done: list[str] = []
+    for name in names:
+        if name not in saved:
+            print(f"# 警告: 声紋「{name}」は {tracker.path} に無いので有効化できません", flush=True)
+            continue
+        tracker.activate(name)
+        done.append(name)
+    if done:
+        print(f"# 起動時に有効化した声紋: {', '.join(done)}", flush=True)
+    return done
 
 
 def _speaker_cap_hint(args) -> str:
