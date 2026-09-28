@@ -450,3 +450,48 @@ def test_gives_up_after_the_limit_and_reports_dead() -> None:
     provider._reconnects = 1
     provider.send_audio(struct.pack("<1600h", *([0] * 1600)))
     assert provider._ws is None and not provider.alive and not provider._reconnecting
+
+
+def test_start_failure_does_not_raise_and_retries_in_background(monkeypatch) -> None:
+    """開始時に接続できなくても会議は止めず、裏で間を置いて接続を試す.
+
+    2026-09-28: 同時に流した 2 本が両方ともハンドシェイク待ちのタイムアウトで
+    起動時に落ち、文字起こしごと死んだ。
+    """
+    import das.asr.live._pyannote_diarization as mod
+
+    calls = {"n": 0}
+
+    class GoodWS:
+        def send(self, payload) -> None:
+            pass
+
+    provider = PyannoteStreamingDiarizationProvider("k", max_reconnects=3)
+    monkeypatch.setattr(provider, "_RETRY_BACKOFF_S", (0.01, 0.01, 0.01))
+
+    def flaky_connect() -> None:
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise TimeoutError("timed out while waiting for handshake response")
+        provider._ws = GoodWS()
+        provider._connected_at = mod.time.monotonic()
+
+    monkeypatch.setattr(provider, "_connect", flaky_connect)
+    provider.start()                       # 例外を上げない
+    assert provider.alive, "接続を試している間は死んでいない"
+    provider._reconnect_thread.join(timeout=5)
+    assert provider._ws is not None and calls["n"] == 3
+    assert not provider._reconnecting
+
+
+def test_start_failure_gives_up_after_the_limit(monkeypatch) -> None:
+    provider = PyannoteStreamingDiarizationProvider("k", max_reconnects=2)
+    monkeypatch.setattr(provider, "_RETRY_BACKOFF_S", (0.01,))
+
+    def always_fail() -> None:
+        raise TimeoutError("handshake")
+
+    monkeypatch.setattr(provider, "_connect", always_fail)
+    provider.start()
+    provider._reconnect_thread.join(timeout=5)
+    assert provider._ws is None and not provider.alive

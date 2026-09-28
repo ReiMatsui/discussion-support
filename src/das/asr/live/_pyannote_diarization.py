@@ -190,7 +190,20 @@ class PyannoteStreamingDiarizationProvider:
             self._session_base_ms += self._sent_audio_ms
         self._started_once = True
         self._sent_audio_ms = 0
-        self._connect()
+        try:
+            self._connect()
+        except Exception as exc:
+            # 開始時にセッション作成や WS のハンドシェイクが失敗しても会議は止めない
+            # （2026-09-28: 同時に流した 2 本が両方ともハンドシェイク待ちで落ち、
+            # 文字起こしごと死んだ）。分離なしで始め、裏で接続を試し続ける。
+            # 接続できるまでの音声は send_audio が時刻の基点に足す。
+            logger.warning("pyannote Live-1: 開始時の接続に失敗しました (%s)。"
+                           "分離なしで続行し、裏で接続を試します。", exc)
+            self._ws = None
+            self._reconnecting = True
+            self._reconnect_thread = threading.Thread(
+                target=self._reconnect_worker, args=(None, 0), daemon=True)
+            self._reconnect_thread.start()
 
     def _connect(self) -> None:
         """新しい Live-1 セッションを作成しWS接続する（初回start/再接続共通）."""
@@ -252,24 +265,47 @@ class PyannoteStreamingDiarizationProvider:
             target=self._reconnect_worker, args=(old_ws, attempt), daemon=True)
         self._reconnect_thread.start()
 
+    _RETRY_BACKOFF_S = (2.0, 4.0, 8.0)
+
     def _reconnect_worker(self, old_ws: Any, attempt: int) -> None:
+        """別スレッドで新セッションに繋ぎ直す。失敗したら間を置いて上限まで試す.
+
+        attempt は「この呼び出しが何回目の再接続か」（0 は開始時の接続失敗からの
+        再試行）。1 回の失敗で諦めると、サーバが数秒応答しないだけで会議の残り
+        全部で分離が止まる。
+        """
         with contextlib.suppress(Exception):
             if old_ws is not None:
                 old_ws.close()
-        if self._reader is not None:
+        if self._reader is not None and self._reader is not threading.current_thread():
             self._reader.join(timeout=1.0)
         self._stop.clear()
         try:
-            self._connect()
-            logger.warning(
-                "pyannote Live-1: 新セッションで再接続しました (%d/%d回目、"
-                "音声内位置 %dms から再開、ラベルepoch=%d)。",
-                attempt, self.max_reconnects,
-                self._session_base_ms, self._label_epoch,
-            )
-        except Exception:
-            logger.exception("pyannote Live-1: 再接続に失敗しました。")
-            self._ws = None
+            while True:
+                try:
+                    self._connect()
+                except Exception as exc:
+                    if self._reconnects >= self.max_reconnects:
+                        logger.error("pyannote Live-1: 再接続に失敗しました (%s)。"
+                                     "上限 %d 回に達したので諦めます。", exc, self.max_reconnects)
+                        self._ws = None
+                        return
+                    wait = self._RETRY_BACKOFF_S[min(self._reconnects, len(self._RETRY_BACKOFF_S) - 1)]
+                    self._reconnects += 1
+                    attempt = self._reconnects
+                    logger.warning("pyannote Live-1: 接続に失敗しました (%s)。%.0f 秒後に再試行"
+                                   "（%d/%d回目）。", exc, wait, attempt, self.max_reconnects)
+                    if self._stop.wait(timeout=wait):
+                        return
+                    continue
+                logger.warning(
+                    "pyannote Live-1: 新セッションで%s (%d/%d回目、"
+                    "音声内位置 %dms から再開、ラベルepoch=%d)。",
+                    "接続しました" if attempt == 0 else "再接続しました",
+                    attempt, self.max_reconnects,
+                    self._session_base_ms, self._label_epoch,
+                )
+                return
         finally:
             self._reconnecting = False
 
@@ -365,7 +401,9 @@ class PyannoteStreamingDiarizationProvider:
         _stop を即セットしてreaderを止めるのではなく、reader(recvループ)が
         サーバ側クローズで自然終了するのを timeout 付きで待ってから閉じる。
         """
-        if self._reconnect_thread is not None:
+        if self._reconnect_thread is not None and self._reconnect_thread.is_alive():
+            if self._ws is None:
+                self._stop.set()          # 再試行の待ちを打ち切る
             self._reconnect_thread.join(timeout=5.0)
         if self._ws is not None:
             # 100ms境界に満たない端数(< 3200バイトPCM16)が残っていれば、
