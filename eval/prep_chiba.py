@@ -14,8 +14,8 @@
 前提のためコーパスには使わない。§14「測定手順の知見」参照）:
 
     uv run python eval/prep_chiba.py --conv chiba0132 --minutes 5
-    uv run das listen-soniox --hybrid --max-speakers 3 \
-        --wav data/chiba/chiba0132_mix_5min.wav --soniox-args "--no-agent"
+    uv run das listen-soniox --no-intervention --max-speakers 3 \
+        --wav data/chiba/chiba0132_mix_5min.wav
     uv run python eval/eval_speaker_gt.py eval/gt_chiba0132m5.json <新セッション名>
 
 注意:
@@ -174,8 +174,8 @@ def main() -> None:
     print(f"  GT: {gt_path.relative_to(ROOT)} / {turns_path.relative_to(ROOT)}")
     print(f"  音声: {mix_path.relative_to(ROOT)}")
     print("\n次の手順（実機）:")
-    print("  uv run das listen-soniox --hybrid --max-speakers 3 \\")
-    print(f"      --wav {mix_path.relative_to(ROOT)} --soniox-args \"--no-agent\"")
+    print("  uv run das listen-soniox --no-intervention --max-speakers 3 \\")
+    print(f"      --wav {mix_path.relative_to(ROOT)}")
     print(f"  uv run python eval/eval_speaker_gt.py {gt_path.relative_to(ROOT)} <新セッション名>")
 
 

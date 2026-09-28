@@ -3,7 +3,7 @@
 
 やること:
 1. eval/prep_chiba.py 相当の前処理（GT・ミックス音声が無ければ自動生成）
-2. das listen-soniox --hybrid を --wav で実走（Soniox APIを使用、要APIキー）
+2. das listen-soniox --no-intervention を --wav で実走（Soniox APIを使用、要APIキー）
 3. 新しく生成されたセッションを自動検出（セッション名の手入力不要）
 4. eval/eval_speaker_gt.py のタイムライン突合で採点
 5. 結果1行を data/chiba/results.csv に追記（会話をまたいだ比較用）
@@ -28,6 +28,7 @@ import argparse
 import csv
 import datetime
 import importlib.util
+import shlex
 import shutil
 import subprocess
 import sys
@@ -76,12 +77,14 @@ def das_command() -> list[str]:
     return ["uv", "run", "das"]   # フォールバック（uv 経由で起動された場合は不要）
 
 
-# 構成比較用（handoff §15.7）。hybrid=3役分業（現行）、soniox=旧デフォルト
-# （STTラベル＋断片声紋）、pyannote=クラスタ単独（名前付けなし）。
-_MODE_FLAGS = {
-    "hybrid": ["--hybrid"],
-    "soniox": [],
-    "pyannote": ["--diarization", "pyannote"],
+# 構成比較用（handoff §15.7）。hybrid=3役分業（現行の既定。CLI 簡素化
+# 2026-07-31 以降は何も足さない）、soniox=旧デフォルト（STTラベル＋断片声紋）、
+# pyannote=クラスタ単独（名前付けなし）。文字起こし側（das.asr.live）の
+# オプションなので --soniox-args 経由で渡す。
+_MODE_SONIOX_ARGS = {
+    "hybrid": "",
+    "soniox": "--diarization none --no-vp-cluster-naming",
+    "pyannote": "--no-vp-cluster-naming",
 }
 
 
@@ -91,21 +94,26 @@ def run_live(mix_path: Path, max_speakers: int, extra_soniox: str,
 
     voices を渡すと、その voices.json の登録済み声紋を全員有効化して始める
     （事前登録あり条件。scripts/enroll_voices.py で作ったもの）。
+    --voices / --activate は文字起こし側のオプションなので --soniox-args に載せる。
     """
     before = {p.name for p in TRANSCRIPTS.glob("*.turns.jsonl")}
     started = datetime.datetime.now()
-    enroll_flags = ["--voices", str(voices), "--activate", "all"] if voices else []
+    soniox_parts = [_MODE_SONIOX_ARGS[mode], extra_soniox]
+    if voices:
+        soniox_parts.append(f"--voices {shlex.quote(str(voices))} --activate all")
+    soniox_args = " ".join(x for x in soniox_parts if x)
     cmd = [*das_command(),
-        "listen-soniox", *_MODE_FLAGS[mode], *enroll_flags,
+        "listen-soniox",
         "--max-speakers", str(max_speakers),
-        # 帰属測定に介入系は不要: docsの事前AF化・発話ごとのAF構築の入口・
-        # 3秒周期の介入判定を止める（LLM呼び出しの純減。--soniox-args の
-        # --no-agent は音声ファシリテーターのみで、これらは別レイヤ。
+        # 帰属測定に介入系は不要: --no-intervention で介入層を組み立てず、
+        # 下層にも --no-agent --no-llm を渡す（LLM 呼び出しゼロ）。
         # 2026-07-20 まで（chiba0132 管制ラン含む）の測定は介入込み条件、
-        # 以後は本軽量化条件——比較時はこの切り替え点に注意）。
-        "--skip-docs", "--facilitate-interval", "0",
-        "--wav", str(mix_path), "--soniox-args", extra_soniox,
+        # 以後は本軽量化条件——比較時はこの切り替え点に注意。
+        "--no-intervention",
+        "--wav", str(mix_path),
     ]
+    if soniox_args:
+        cmd += ["--soniox-args", soniox_args]
     print(f"# 実行: {' '.join(cmd)}")
     subprocess.run(cmd, check=True)
     new = [p for p in TRANSCRIPTS.glob("*.turns.jsonl")
@@ -145,11 +153,12 @@ def main() -> None:
     p.add_argument("--minutes", type=float, default=None)
     p.add_argument("--gap", type=float, default=0.5)
     p.add_argument("--max-speakers", type=int, default=3)
-    p.add_argument("--mode", choices=sorted(_MODE_FLAGS), default="hybrid",
+    p.add_argument("--mode", choices=sorted(_MODE_SONIOX_ARGS), default="hybrid",
                    help="構成: hybrid（現行）/ soniox（旧デフォルト）/ "
                         "pyannote（クラスタ単独）。構成A/B比較用（handoff §15.7）")
-    p.add_argument("--soniox-args", default="--no-agent",
-                   help="listen-soniox へ渡す追加引数（既定: エージェント停止）")
+    p.add_argument("--soniox-args", default="",
+                   help="文字起こし側（das.asr.live）へ渡す追加引数。"
+                        "エージェント停止は --no-intervention で常に行う")
     p.add_argument("--force-prep", action="store_true", help="GT・音声を作り直す")
     p.add_argument("--skip-run", action="store_true",
                    help="実走を飛ばして --session の再採点のみ")
