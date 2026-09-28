@@ -63,9 +63,14 @@ def gt_timeline(gt_turns, labels) -> dict[str, list[tuple[int, int]]]:
     tl: dict[str, list[tuple[int, int]]] = {}
     for g in gt_turns:
         c = labels.get(str(g["turn_id"])) or labels.get(g["turn_id"])
-        if c in ("S1", "S2", "S3"):
+        if is_speaker_code(c):
             tl.setdefault(c, []).append((g["ms"], g["end_ms"]))
     return tl
+
+
+def is_speaker_code(code) -> bool:
+    """GT の話者コード（S1…S9。annotate.py は 9 人まで付ける）か. MULTI/UNK は含まない."""
+    return isinstance(code, str) and len(code) >= 2 and code[0] == "S" and code[1:].isdigit()
 
 
 def gt_code_by_timeline(ms: int, end_ms: int,

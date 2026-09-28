@@ -16,8 +16,8 @@ eval/gt_<会話>m<分>.json を読み、会話ごと・時間帯ごとに 正解
 from __future__ import annotations
 
 import argparse
-import itertools
 import json
+import math
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -28,7 +28,34 @@ import _gtlib  # noqa: E402
 from _gtlib import gt_timeline, read_jsonl  # noqa: E402
 
 BC = _gtlib.load_backchannel_re()
-GTS = ("S1", "S2", "S3")
+
+
+def best_assignment(cnt: dict[str, Counter], gts: list[str]) -> dict[str, str]:
+    """システムのラベルと正解話者の、文字数が最大になる 1:1 対応.
+
+    ラベル数×正解話者の部分集合の DP（ラベル 10 個・話者 9 人でも一瞬）。
+    permutations の総当たりは 3 人までしか現実的でないので、4 人以上の
+    会議（ゼミ録音など）に備えて置き換えた。
+    """
+    labels = [s for s in cnt if sum(cnt[s].values()) > 0]
+    g_n = len(gts)
+    # dp[mask] = (最大文字数, 対応) で、ラベルを 1 つずつ見ていく
+    dp: dict[int, tuple[int, dict[str, str]]] = {0: (0, {})}
+    for s in labels:
+        nxt = dict(dp)
+        for mask, (v, m) in dp.items():
+            for j in range(g_n):
+                if mask & (1 << j):
+                    continue
+                gain = cnt[s][gts[j]]
+                if gain <= 0:
+                    continue
+                nm = mask | (1 << j)
+                cand = v + gain
+                if cand > nxt.get(nm, (-1, {}))[0]:
+                    nxt[nm] = (cand, {**m, s: gts[j]})
+        dp = nxt
+    return max(dp.values(), key=lambda x: x[0])[1]
 
 
 def score(conv: str, cond: str, stamp: str, minutes: float, wins):
@@ -42,25 +69,18 @@ def score_session(gt_path: Path, session: str, wins):
     gt = json.loads(gt_path.read_text(encoding="utf-8"))
     gtt = read_jsonl(ROOT / "transcripts" / f"{gt['session']}.turns.jsonl")
     tl = gt_timeline(gtt, gt["labels"])
+    gts = sorted(tl, key=lambda c: int(c[1:]))
     turns = read_jsonl(ROOT / "transcripts" / f"{session}.turns.jsonl")
     rows = []
     for t in turns:
         code = _gtlib.gt_code_by_timeline(t["ms"], t["end_ms"], tl)
-        if code in GTS and not BC.match(t.get("text", "").strip()):
+        if code in gts and not BC.match(t.get("text", "").strip()):
             rows.append((t["ms"] / 60000, t["speaker"], code, len(t.get("text", ""))))
     cnt: dict[str, Counter] = defaultdict(Counter)
     for _, s, g, n in rows:
         if s != "未確定":
             cnt[s][g] += n
-    labels = list(cnt)
-    best: dict[str, str] = {}
-    bestv = -1
-    for k in range(1, min(3, len(labels)) + 1):
-        for combo in itertools.permutations(labels, k):
-            for perm in itertools.permutations(GTS, k):
-                v = sum(cnt[a][b] for a, b in zip(combo, perm))
-                if v > bestv:
-                    bestv, best = v, dict(zip(combo, perm))
+    best = best_assignment(cnt, gts)
     out = {}
     for a, b in wins:
         seg = [r for r in rows if a <= r[0] < b]
@@ -84,7 +104,7 @@ def main() -> None:
     p.add_argument("--none", default=None, help="任意の 2 ラン用: 登録なしのセッション名")
     p.add_argument("--enroll", default=None, help="任意の 2 ラン用: 登録ありのセッション名")
     a = p.parse_args()
-    m = int(a.minutes)
+    m = math.ceil(a.minutes)   # 11.3 分の録音は --minutes 11.3 で 0-12 分まで見る
     wins = [(i, i + 1) for i in range(m)] + [(0, m)]
     conds = ("none", "enroll")
 

@@ -17,8 +17,17 @@
     uv run python scripts/enroll_voices.py --voices voices.json --record 田中 --seconds 30
     uv run python scripts/enroll_voices.py --voices voices.json --record 佐藤 --seconds 30
 
+    # 過去の収録セッションの、あるラベルの発話から（名前=セッション/ラベル[@開始-終了 秒]）
+    # 別のセッションで登録して本番のセッションを流す＝「事前に声を登録した」状況の再現
+    uv run python scripts/enroll_voices.py --voices data/voices_zemi.json --seconds 60 \\
+        --from-session 伊藤先生=2026-06-25_140652/伊藤先生 \\
+        --from-session 岡田さん=2026-06-25_1520/岡田さん@600-
+
 --chiba は Morph の時刻で「その人が話している区間」だけをその人のチャンネルから
 切り出して繋ぐので、他人の声の回り込みが少ないクリーンな登録音声になる。
+--from-session は transcripts/<セッション>.turns.jsonl のラベルで区間を選ぶので、
+そのランの話者ラベルの誤りがそのまま混ざる。作ったクリップは
+data/voices/<名前>.wav に残すので、登録前に一度聞いて確かめられる。
 """
 from __future__ import annotations
 
@@ -82,6 +91,45 @@ def speech_segments(conv: str, who: str) -> list[tuple[float, float]]:
             if e <= s:
                 continue
             if segs and s - segs[-1][1] <= 0.3:
+                segs[-1] = (segs[-1][0], max(segs[-1][1], e))
+            else:
+                segs.append((s, e))
+    return segs
+
+
+def parse_from_session(spec: str) -> tuple[str, str, str, float | None, float | None]:
+    """'名前=セッション/ラベル' または '…/ラベル@開始-終了' を分解する."""
+    if "=" not in spec or "/" not in spec.split("=", 1)[1]:
+        raise SystemExit(f"--from-session は 名前=セッション/ラベル[@開始-終了] の形で: {spec}")
+    name, rest = spec.split("=", 1)
+    start = end = None
+    if "@" in rest:
+        rest, rng = rest.rsplit("@", 1)
+        a, _, b = rng.partition("-")
+        start = float(a) if a else None
+        end = float(b) if b else None
+    session, label = rest.split("/", 1)
+    return name.strip(), session.strip(), label.strip(), start, end
+
+
+def session_segments(session: str, label: str, *, gap: float = 0.3,
+                     transcripts: Path | None = None) -> list[tuple[float, float]]:
+    """収録セッションの turns から、そのラベルが付いた発話区間（秒）を順に返す."""
+    import json
+    tdir = transcripts or (ROOT / "transcripts")
+    path = tdir / f"{session}.turns.jsonl"
+    if not path.exists():
+        raise SystemExit(f"{path} がありません")
+    segs: list[tuple[float, float]] = []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            t = json.loads(line)
+            if t.get("speaker") != label or t.get("end_ms") is None:
+                continue
+            s, e = t["ms"] / 1000.0, t["end_ms"] / 1000.0
+            if e <= s:
+                continue
+            if segs and s - segs[-1][1] <= gap:
                 segs[-1] = (segs[-1][0], max(segs[-1][1], e))
             else:
                 segs.append((s, e))
@@ -177,6 +225,11 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--after", type=float, default=0.0, metavar="SEC",
                    help="--chiba で、会議の SEC 秒より後の発話だけを登録に使う"
                         "（先頭を採点する再生ランと登録音声を重ねないため）")
+    p.add_argument("--from-session", action="append", default=[],
+                   metavar="名前=セッション/ラベル[@開始-終了]",
+                   help="過去の収録セッション（transcripts/）で、そのラベルが付いた発話を"
+                        "--seconds 秒ぶん繋いで登録する。@開始-終了 は使う範囲（秒）。"
+                        "クリップは data/voices/<名前>.wav に残す")
     p.add_argument("--record", action="append", default=[], metavar="名前",
                    help="その場のマイクで録って登録する（--seconds 秒。複数可）。"
                         "録音は data/voices/<名前>.wav に残す")
@@ -199,6 +252,21 @@ def main(argv: list[str] | None = None) -> None:
             clip, until = build_clip(wav, speech_segments(a.chiba, who), a.seconds, after=a.after)
             jobs.append((who, clip, f"{a.chiba}-{who} 発話 {clip.size / SR:.1f}s"
                          f"（会議の {a.after:.0f}〜{until:.0f} 秒の範囲）"))
+    for spec in a.from_session:
+        name, session, label, s, e = parse_from_session(spec)
+        wav = read_wav_16k(ROOT / "transcripts" / f"{session}.wav")
+        segs = [(x, y) for x, y in session_segments(session, label)
+                if e is None or y <= e]
+        # ラベル付きの区間は他人の声が混ざりやすいので、1 秒未満の区間は使わない
+        clip, until = build_clip(wav, segs, a.seconds, min_seg=1.0, after=s or 0.0)
+        if clip.size == 0:
+            print(f"# {name}: {session} に「{label}」の使える発話がありません"
+                  f"（ラベル名は transcripts/{session}.md の話者欄と同じ表記で）", flush=True)
+            continue
+        out = ROOT / "data" / "voices" / f"{name}.wav"
+        save_wav_16k(out, clip)
+        jobs.append((name, clip, f"{session} の「{label}」 発話 {clip.size / SR:.1f}s"
+                     f"（{s or 0:.0f}〜{until:.0f} 秒の範囲）→ {out.relative_to(ROOT)}"))
     for name in a.record:
         name = name.strip()
         wav = record_from_mic(a.seconds, a.device)
@@ -209,7 +277,15 @@ def main(argv: list[str] | None = None) -> None:
         save_wav_16k(out, wav)
         jobs.append((name, wav, f"マイク録音 {wav.size / SR:.0f}s → {out.relative_to(ROOT)}"))
     if not jobs:
-        raise SystemExit("--add か --chiba か --record を指定してください")
+        raise SystemExit("--add か --chiba か --from-session か --record を指定してください")
+
+    # 同じ名前を複数回渡したら（--add 名前=…@10-40 --add 名前=…@90-120 など）繋いで 1 人ぶんにする
+    merged: dict[str, tuple[list[np.ndarray], list[str]]] = {}
+    for name, wav, note in jobs:
+        merged.setdefault(name, ([], []))
+        merged[name][0].append(wav)
+        merged[name][1].append(note)
+    jobs = [(name, np.concatenate(ws), " + ".join(ns)) for name, (ws, ns) in merged.items()]
 
     for name, wav, note in jobs:
         if wav.size < SR * 2:

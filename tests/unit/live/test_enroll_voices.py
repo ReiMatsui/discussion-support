@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -125,3 +126,97 @@ def test_preflight_voices_check_reports_missing_names(tmp_path) -> None:
     assert any(mark == pf.NG for mark, _ in res)
     assert pf.check_voices(None, None) == []
     assert pf.check_voices(str(tmp_path / "none.json"), None)[0][0] == pf.NG
+
+
+# ----------------------------------------------------------------------
+# ゼミ録音など、過去の収録セッションから登録して別セッションを流す経路
+# ----------------------------------------------------------------------
+def test_parse_from_session_splits_name_session_label_and_range() -> None:
+    ev = _load_script()
+    assert ev.parse_from_session("伊藤先生=2026-06-25_140652/伊藤先生") == (
+        "伊藤先生", "2026-06-25_140652", "伊藤先生", None, None)
+    assert ev.parse_from_session("岡田さん=2026-06-25_1520/岡田さん@600-") == (
+        "岡田さん", "2026-06-25_1520", "岡田さん", 600.0, None)
+    assert ev.parse_from_session("A=s/ラベル@30-90")[3:] == (30.0, 90.0)
+
+
+def test_session_segments_picks_only_that_label_and_merges_adjacent(tmp_path) -> None:
+    ev = _load_script()
+    rows = [
+        {"turn_id": 1, "ms": 0, "end_ms": 1000, "speaker": "A", "text": "a"},
+        {"turn_id": 2, "ms": 1200, "end_ms": 3000, "speaker": "A", "text": "b"},   # 0.2s 空き → 繋ぐ
+        {"turn_id": 3, "ms": 3100, "end_ms": 5000, "speaker": "B", "text": "c"},
+        {"turn_id": 4, "ms": 8000, "end_ms": 9000, "speaker": "A", "text": "d"},
+        {"turn_id": 5, "ms": 9500, "end_ms": None, "speaker": "A", "text": "e"},  # 終端なしは捨てる
+    ]
+    (tmp_path / "s.turns.jsonl").write_text(
+        "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n", encoding="utf-8")
+    assert ev.session_segments("s", "A", transcripts=tmp_path) == [(0.0, 3.0), (8.0, 9.0)]
+    assert ev.session_segments("s", "C", transcripts=tmp_path) == []
+
+
+def test_gt_timeline_accepts_more_than_three_speakers() -> None:
+    sys.path.insert(0, str(ROOT / "eval"))
+    import _gtlib
+    turns = [{"turn_id": i, "ms": i * 1000, "end_ms": i * 1000 + 900} for i in range(6)]
+    labels = {"0": "S1", "1": "S4", "2": "S9", "3": "MULTI", "4": "UNK", "5": "S2"}
+    tl = _gtlib.gt_timeline(turns, labels)
+    assert set(tl) == {"S1", "S2", "S4", "S9"}
+    assert _gtlib.is_speaker_code("S10") and not _gtlib.is_speaker_code("MULTI")
+
+
+def test_best_assignment_is_one_to_one_and_maximises_chars() -> None:
+    sys.path.insert(0, str(ROOT / "eval"))
+    import enroll_breakdown as eb
+    from collections import Counter
+    cnt = {"a": Counter({"S1": 10, "S2": 3}), "b": Counter({"S1": 9}),
+           "c": Counter({"S3": 5}), "d": Counter()}
+    # a→S1 (10) + c→S3 (5) = 15 より、a→S2 (3) + b→S1 (9) + c→S3 (5) = 17 が大きい
+    assert eb.best_assignment(cnt, ["S1", "S2", "S3", "S4", "S5"]) == {"a": "S2", "b": "S1", "c": "S3"}
+    assert eb.best_assignment({"x": Counter()}, ["S1"]) == {}
+
+
+def test_run_pair_builds_two_sessions_and_cuts_head(tmp_path, monkeypatch) -> None:
+    spec = importlib.util.spec_from_file_location("run_pair", ROOT / "eval" / "run_pair.py")
+    rp = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(rp)
+    monkeypatch.setattr(rp, "PAIRS", tmp_path / "pairs")
+    src = tmp_path / "in.wav"
+    _load_script().save_wav_16k(src, np.zeros(SR * 90, dtype="float32"))
+    cut = rp.head_wav(src, 1.0, "zemi")
+    assert cut.name == "zemi_m1.wav" and _load_script().read_wav_16k(cut).size == SR * 60
+
+    jobs = rp.build_commands(cut, "zemi", Path("v.json"), 5)
+    assert [s for s, _ in jobs] == ["zemi_none", "zemi_enroll"]
+    none_cmd, enroll_cmd = (" ".join(c) for _, c in jobs)
+    assert "--no-intervention" in none_cmd and "--max-speakers 5" in none_cmd
+    assert "--voices" not in none_cmd and "zemi_none.md" in none_cmd
+    assert "--voices v.json --activate all" in enroll_cmd and "zemi_enroll.md" in enroll_cmd
+    assert len(rp.build_commands(cut, "zemi", None, 3)) == 1, "--voices 無しは登録なしのみ"
+
+
+def test_same_name_given_twice_is_concatenated_before_enrolling(tmp_path, monkeypatch) -> None:
+    """--add 名前=…@a-b を複数回渡したら繋いで 1 人ぶんにする（上書きで最後だけにならない）."""
+    ev = _load_script()
+    src = tmp_path / "s.wav"
+    ev.save_wav_16k(src, (np.sin(np.arange(SR * 20) / 25.0) * 0.3).astype("float32"))
+    seen: dict[str, int] = {}
+
+    class _VP:
+        def __init__(self, path, auto=False):
+            self.path = path
+
+        def enroll_from_audio(self, name, wav):
+            seen[name] = wav.size
+            return True
+
+        def all_profile_names(self):
+            return list(seen)
+
+    import types
+    fake = types.ModuleType("das.asr.live._voice_profiles")
+    fake.VoiceProfiles = _VP
+    monkeypatch.setitem(sys.modules, "das.asr.live._voice_profiles", fake)
+    ev.main(["--voices", str(tmp_path / "v.json"),
+             "--add", f"A={src}@0-3", "--add", f"A={src}@10-14", "--add", f"B={src}@5-7"])
+    assert seen == {"A": SR * 7, "B": SR * 2}
