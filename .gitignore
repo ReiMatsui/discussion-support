@@ -86,3 +86,25 @@ data/*
 !data/docs_policy/
 
 eval/_annot_audio/
+
+# クラウド側で作ったパッチの受け渡し場所（git am したら用済み）
+_incoming/
+
+# 正解付けの中間物。gt_chiba*m4.json は eval/prep_chiba.py が作り直せる
+eval/*.json.bak
+eval/*.json.tmp
+eval/gt_chiba*m4.json
+eval/segments_*.json
+
+# LaTeX build artifacts (docs/abstract)
+docs/abstract/*.aux
+docs/abstract/*.log
+docs/abstract/*.fls
+docs/abstract/*.fdb_latexmk
+docs/abstract/*.synctex.gz
+docs/abstract/*.out
+docs/abstract/*.toc
+
+# Cowork scratch
+_to_delete/
+Claude outputs/
