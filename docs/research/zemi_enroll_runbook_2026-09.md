@@ -5,7 +5,7 @@
 千葉コーパス（`enroll_eval_2026-09-28.md`）は録音環境が整った雑談だが、こちらは
 1 本のマイクで録った実際の場で、関西弁の被り・相槌・笑いが多い。実環境の下限に近い。
 
-所要時間の目安は約 25 分（登録 5 分＋実走 10 分＋正解付け 10 分）。
+所要時間の目安は約 35 分（登録 15 分＋実走 10 分＋正解付け 10 分）。
 
 ## 1. 使う録音
 
@@ -41,20 +41,39 @@
 前提: `_incoming/enroll_docs.mbox` `_incoming/live_prep.mbox` `_incoming/zemi_eval.mbox` を
 `git am` 済み（`eval/run_pair.py` と `enroll_voices.py --from-session` が要る）。
 
-### 2.1 声の登録（クリップを聞く時間込みで 5 分）
+### 2.1 声の登録（耳で正解を付けてから作る。15 分）
+
+当時のラベルで作ったクリップ（`--from-session`）は他人の声が混ざりすぎて使えなかった
+（2026-09-28 に確認）。なので、登録元の 1554 に **耳で正解を付け**、その区間から作る。
+これは実験当日の「議論の前に一人ずつ録る」と同じくらいきれいな登録音声になる。
 
 ```
+uv run python eval/annotate.py 2026-06-25_1554
+```
+
+6.3 分・229 区間。1〜9 で人、0 不明、M 複数人。番号と人の対応をメモ（例: 1=としや 2=わっち 3=松井 4=ペンタて）。
+終わったら、その対応で登録する（松井は自分なのでマイクで録ってもよい: `--record 松井 --seconds 30`）。
+
+```
+rm -f data/voices_zemi.json
 uv run python scripts/enroll_voices.py --voices data/voices_zemi.json --seconds 60 \
-  --from-session としや=2026-06-25_1554/としや \
-  --from-session わっち=2026-06-25_1554/わっち \
-  --from-session 松井=2026-06-25_1554/松井 \
-  --from-session ペンタて=2026-06-25_1554/ペンタて \
-  --from-session 黒田=2026-06-25_1614/黒田@600-
+  --from-gt としや=eval/gt_2026-06-25_1554.json/S1 \
+  --from-gt わっち=eval/gt_2026-06-25_1554.json/S2 \
+  --from-gt 松井=eval/gt_2026-06-25_1554.json/S3 \
+  --from-gt ペンタて=eval/gt_2026-06-25_1554.json/S4
 ```
 
-`# としや: 登録  2026-06-25_1554 の「としや」 発話 60.0s（0〜xxx 秒の範囲）→ data/voices/としや.wav`
-のように出る。`data/voices/*.wav` を聞いて、他人の声が目立つ人は上の `--add` で作り直す
-（`--voices` を同じにして `--add` だけ渡せば、その人だけ上書きされる）。
+黒田は 1554 にいない。1614 の 10〜13 分を切り出して同じように正解を付けて登録する
+（＋3 分。省いて「未登録の人が一人いる」条件で測ってもよい）:
+
+```
+ffmpeg -i transcripts/2026-06-25_1614.wav -ss 600 -t 180 data/pairs/1614_tail.wav
+uv run python eval/annotate.py data/pairs/1614_tail.wav
+uv run python scripts/enroll_voices.py --voices data/voices_zemi.json --seconds 60 \
+  --from-gt 黒田=eval/gt_1614_tail.json/S1:data/pairs/1614_tail.wav
+```
+
+（自動区切りなので番号は付け直し。黒田に付けた番号を S1 の所に入れる。）
 最後に `uv run python scripts/preflight.py --voices data/voices_zemi.json --expect としや,わっち,松井,ペンタて,黒田`。
 
 ### 2.2 実走（10 分。登録なし・登録ありを同時に流す）

@@ -136,6 +136,63 @@ def session_segments(session: str, label: str, *, gap: float = 0.3,
     return segs
 
 
+def parse_from_gt(spec: str) -> tuple[str, str, str, str | None]:
+    """'名前=GTのjson/コード' または '…/コード:wavパス' を分解する."""
+    if "=" not in spec or "/" not in spec.split("=", 1)[1]:
+        raise SystemExit(f"--from-gt は 名前=eval/gt_X.json/S1[:wavパス] の形で: {spec}")
+    name, rest = spec.split("=", 1)
+    wav = None
+    if ":" in rest:
+        rest, wav = rest.rsplit(":", 1)
+    gt_path, code = rest.rsplit("/", 1)
+    return name.strip(), gt_path.strip(), code.strip(), (wav.strip() if wav else None)
+
+
+def gt_segments(gt_path: Path, code: str, *, gap: float = 0.3,
+                root: Path | None = None) -> tuple[list[tuple[float, float]], Path | None]:
+    """annotate.py の正解（labels）から、そのコードが付いた区間（秒）と音声の場所を返す.
+
+    区間は、収録セッションなら transcripts/<session>.turns.jsonl の turn_id から、
+    任意の音声（無音で自動区切り）なら eval/segments_<name>.json から引く。
+    音声は transcripts/<session>.wav か eval/_annot_audio/<name>*.wav を探す（無ければ None）。
+    """
+    import json
+    root = root or ROOT
+    gt = json.loads(gt_path.read_text(encoding="utf-8"))
+    session = gt.get("session") or gt_path.stem.removeprefix("gt_")
+    labels = {str(k): v for k, v in (gt.get("labels") or {}).items()}
+    raw: list[tuple[float, float]] = []
+    turns = root / "transcripts" / f"{session}.turns.jsonl"
+    segs_json = root / "eval" / f"segments_{session}.json"
+    if turns.exists():
+        with open(turns, encoding="utf-8") as f:
+            for line in f:
+                t = json.loads(line)
+                if labels.get(str(t["turn_id"])) == code and t.get("end_ms"):
+                    raw.append((t["ms"] / 1000.0, t["end_ms"] / 1000.0))
+    elif segs_json.exists():
+        for sg in json.loads(segs_json.read_text(encoding="utf-8")):
+            if labels.get(str(sg["id"])) == code:
+                raw.append((float(sg["start"]), float(sg["end"])))
+    else:
+        raise SystemExit(f"{gt_path}: 区間の元（transcripts/{session}.turns.jsonl か "
+                         f"eval/segments_{session}.json）が見つかりません")
+    segs: list[tuple[float, float]] = []
+    for s, e in sorted(raw):
+        if e <= s:
+            continue
+        if segs and s - segs[-1][1] <= gap:
+            segs[-1] = (segs[-1][0], max(segs[-1][1], e))
+        else:
+            segs.append((s, e))
+    wav = root / "transcripts" / f"{session}.wav"
+    if not wav.exists():
+        cands = sorted((root / "eval" / "_annot_audio").glob(f"{session}*.wav")) \
+            if (root / "eval" / "_annot_audio").exists() else []
+        wav = cands[0] if cands else None
+    return segs, wav
+
+
 def record_from_mic(seconds: float, device: str | None = None) -> np.ndarray:
     """その場のマイクから seconds 秒録る（16kHz mono float32）. 3 秒のカウントダウン付き."""
     import time
@@ -230,6 +287,11 @@ def main(argv: list[str] | None = None) -> None:
                    help="過去の収録セッション（transcripts/）で、そのラベルが付いた発話を"
                         "--seconds 秒ぶん繋いで登録する。@開始-終了 は使う範囲（秒）。"
                         "クリップは data/voices/<名前>.wav に残す")
+    p.add_argument("--from-gt", action="append", default=[],
+                   metavar="名前=GTのjson/コード[:wavパス]",
+                   help="eval/annotate.py で耳で付けた正解から、そのコード（S1 など）の区間を"
+                        "--seconds 秒ぶん繋いで登録する。当時のラベルが信用できない録音向け。"
+                        "音声は transcripts/ か eval/_annot_audio/ から探す（:wavパス で明示も可）")
     p.add_argument("--record", action="append", default=[], metavar="名前",
                    help="その場のマイクで録って登録する（--seconds 秒。複数可）。"
                         "録音は data/voices/<名前>.wav に残す")
@@ -267,6 +329,21 @@ def main(argv: list[str] | None = None) -> None:
         save_wav_16k(out, clip)
         jobs.append((name, clip, f"{session} の「{label}」 発話 {clip.size / SR:.1f}s"
                      f"（{s or 0:.0f}〜{until:.0f} 秒の範囲）→ {out.relative_to(ROOT)}"))
+    for spec in a.from_gt:
+        name, gt_path, code, wav_hint = parse_from_gt(spec)
+        segs, wav_path = gt_segments(ROOT / gt_path if not Path(gt_path).is_absolute() else Path(gt_path), code)
+        if wav_hint:
+            wav_path = Path(wav_hint)
+        if wav_path is None or not wav_path.exists():
+            raise SystemExit(f"{name}: 音声が見つかりません（名前=GT/コード:wavパス で指定してください）")
+        clip, until = build_clip(read_wav_16k(wav_path), segs, a.seconds, min_seg=1.0)
+        if clip.size == 0:
+            print(f"# {name}: {gt_path} に「{code}」の使える区間がありません", flush=True)
+            continue
+        out = ROOT / "data" / "voices" / f"{name}.wav"
+        save_wav_16k(out, clip)
+        jobs.append((name, clip, f"{gt_path} の {code} 区間 {clip.size / SR:.1f}s"
+                     f"（〜{until:.0f} 秒）→ {out.relative_to(ROOT)}"))
     for name in a.record:
         name = name.strip()
         wav = record_from_mic(a.seconds, a.device)
@@ -277,7 +354,7 @@ def main(argv: list[str] | None = None) -> None:
         save_wav_16k(out, wav)
         jobs.append((name, wav, f"マイク録音 {wav.size / SR:.0f}s → {out.relative_to(ROOT)}"))
     if not jobs:
-        raise SystemExit("--add か --chiba か --from-session か --record を指定してください")
+        raise SystemExit("--add か --chiba か --from-session か --from-gt か --record を指定してください")
 
     # 同じ名前を複数回渡したら（--add 名前=…@10-40 --add 名前=…@90-120 など）繋いで 1 人ぶんにする
     merged: dict[str, tuple[list[np.ndarray], list[str]]] = {}

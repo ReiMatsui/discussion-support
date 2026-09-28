@@ -220,3 +220,37 @@ def test_same_name_given_twice_is_concatenated_before_enrolling(tmp_path, monkey
     ev.main(["--voices", str(tmp_path / "v.json"),
              "--add", f"A={src}@0-3", "--add", f"A={src}@10-14", "--add", f"B={src}@5-7"])
     assert seen == {"A": SR * 7, "B": SR * 2}
+
+
+def test_from_gt_uses_hand_labelled_segments_from_turns_or_vad(tmp_path) -> None:
+    """耳で付けた正解（annotate.py の labels）から区間を引く。turns 型と自動区切り型の両方."""
+    ev = _load_script()
+    (tmp_path / "transcripts").mkdir()
+    (tmp_path / "eval").mkdir()
+    rows = [{"turn_id": 1, "ms": 0, "end_ms": 2000}, {"turn_id": 2, "ms": 2100, "end_ms": 4000},
+            {"turn_id": 3, "ms": 5000, "end_ms": 7000}, {"turn_id": 4, "ms": 8000, "end_ms": 9000}]
+    (tmp_path / "transcripts" / "s.turns.jsonl").write_text(
+        "\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    ev.save_wav_16k(tmp_path / "transcripts" / "s.wav", np.zeros(SR * 10, dtype="float32"))
+    gt = tmp_path / "eval" / "gt_s.json"
+    gt.write_text(json.dumps({"session": "s", "labels": {"1": "S1", "2": "S1", "3": "MULTI", "4": "S2"}}),
+                  encoding="utf-8")
+    segs, wav = ev.gt_segments(gt, "S1", root=tmp_path)
+    assert segs == [(0.0, 4.0)] and wav == tmp_path / "transcripts" / "s.wav"
+    assert ev.gt_segments(gt, "S2", root=tmp_path)[0] == [(8.0, 9.0)]
+    assert ev.gt_segments(gt, "S3", root=tmp_path)[0] == []
+
+    # 任意の音声を無音で区切ったもの（eval/segments_<name>.json）＋ eval/_annot_audio/ の音声
+    (tmp_path / "eval" / "segments_tail.json").write_text(
+        json.dumps([{"id": "0", "start": 1.0, "end": 3.5}, {"id": "1", "start": 4.0, "end": 6.0}]),
+        encoding="utf-8")
+    (tmp_path / "eval" / "_annot_audio").mkdir()
+    ev.save_wav_16k(tmp_path / "eval" / "_annot_audio" / "tail.wav", np.zeros(SR * 8, dtype="float32"))
+    gt2 = tmp_path / "eval" / "gt_tail.json"
+    gt2.write_text(json.dumps({"session": "tail", "labels": {"0": "S1", "1": "S1"}}), encoding="utf-8")
+    segs, wav = ev.gt_segments(gt2, "S1", root=tmp_path)
+    assert segs == [(1.0, 3.5), (4.0, 6.0)] and wav.name == "tail.wav"
+
+    assert ev.parse_from_gt("黒田=eval/gt_tail.json/S1:data/pairs/tail.wav") == (
+        "黒田", "eval/gt_tail.json", "S1", "data/pairs/tail.wav")
+    assert ev.parse_from_gt("としや=eval/gt_s.json/S2") == ("としや", "eval/gt_s.json", "S2", None)
