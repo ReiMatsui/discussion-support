@@ -303,7 +303,12 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Range", f"bytes {a}-{b}/{len(data)}")
         self.send_header("Content-Length", str(len(chunk)))
         self.end_headers()
-        self.wfile.write(chunk)
+        try:
+            self.wfile.write(chunk)
+        except (BrokenPipeError, ConnectionResetError):
+            # ブラウザは音声を先読みして途中で接続を切る（頭出しのたびに起きる正常な動き）。
+            # 落ちる訳ではないので、画面を汚す長いトレースは出さない
+            pass
 
     def do_POST(self):
         if not self.path.startswith("/labels"):
