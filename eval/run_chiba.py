@@ -89,18 +89,25 @@ _MODE_SONIOX_ARGS = {
 
 
 def run_live(mix_path: Path, max_speakers: int, extra_soniox: str,
-             mode: str, voices: Path | None = None) -> str:
-    """listen-soniox を実走し、新規セッション名を自動検出して返す.
+             mode: str, voices: Path | None = None,
+             session_name: str | None = None) -> str:
+    """listen-soniox を実走し、セッション名を返す.
 
     voices を渡すと、その voices.json の登録済み声紋を全員有効化して始める
     （事前登録あり条件。scripts/enroll_voices.py で作ったもの）。
-    --voices / --activate は文字起こし側のオプションなので --soniox-args に載せる。
+    session_name を渡すと transcripts/<名前>.* に書かせる（--out）。既定の
+    日時名は分単位なので、並列に走らせると衝突する——並列実行は必ず名前を
+    付ける（run_chiba_batch.py が付ける）。
+    --voices / --activate / --out は文字起こし側のオプションなので --soniox-args に載せる。
     """
     before = {p.name for p in TRANSCRIPTS.glob("*.turns.jsonl")}
     started = datetime.datetime.now()
     soniox_parts = [_MODE_SONIOX_ARGS[mode], extra_soniox]
     if voices:
         soniox_parts.append(f"--voices {shlex.quote(str(voices))} --activate all")
+    if session_name:
+        TRANSCRIPTS.mkdir(exist_ok=True)
+        soniox_parts.append(f"--out {shlex.quote(str(TRANSCRIPTS / (session_name + '.md')))}")
     soniox_args = " ".join(x for x in soniox_parts if x)
     cmd = [*das_command(),
         "listen-soniox",
@@ -116,6 +123,10 @@ def run_live(mix_path: Path, max_speakers: int, extra_soniox: str,
         cmd += ["--soniox-args", soniox_args]
     print(f"# 実行: {' '.join(cmd)}")
     subprocess.run(cmd, check=True)
+    if session_name:
+        if not (TRANSCRIPTS / f"{session_name}.turns.jsonl").exists():
+            sys.exit(f"実走後に transcripts/{session_name}.turns.jsonl がありません。実走ログを確認してください")
+        return session_name
     new = [p for p in TRANSCRIPTS.glob("*.turns.jsonl")
            if p.name not in before]
     if not new:
@@ -169,6 +180,11 @@ def main() -> None:
                         "発話で声紋を作って登録してから実走する（scripts/enroll_voices.py）")
     p.add_argument("--voices", default=None,
                    help="事前登録あり条件: 作成済みの voices.json を使う（--enroll-seconds と排他）")
+    p.add_argument("--enroll-after", type=float, default=None, metavar="SEC",
+                   help="--enroll-seconds で、会議の SEC 秒より後の発話を登録に使う。"
+                        "既定は --minutes があればその末尾（採点範囲と重ねない）、無ければ 0")
+    p.add_argument("--session-name", default=None,
+                   help="transcripts/<名前>.* に書く（並列実行の衝突回避。未指定なら日時名）")
     a = p.parse_args()
 
     gt_path, mix_path = ensure_prepared(a.conv, a.minutes, a.gap, a.force_prep)
@@ -177,17 +193,23 @@ def main() -> None:
     if a.enroll_seconds is not None and a.voices:
         sys.exit("--enroll-seconds と --voices は同時に指定できません")
     if a.enroll_seconds is not None:
-        voices = ROOT / "data" / "chiba" / f"voices_{a.conv}_e{a.enroll_seconds:g}.json"
+        after = a.enroll_after
+        if after is None:
+            after = a.minutes * 60.0 if a.minutes else 0.0
+        tag = f"e{a.enroll_seconds:g}" + (f"a{after:g}" if after else "")
+        voices = ROOT / "data" / "chiba" / f"voices_{a.conv}_{tag}.json"
         if voices.exists():
             voices.unlink()   # 古い登録を混ぜない（毎回作り直す）
         subprocess.run([sys.executable, str(ROOT / "scripts" / "enroll_voices.py"),
                         "--voices", str(voices), "--chiba", a.conv,
-                        "--seconds", str(a.enroll_seconds)], check=True)
+                        "--seconds", str(a.enroll_seconds), "--after", str(after)],
+                       check=True)
     elif a.voices:
         voices = Path(a.voices)
         if not voices.exists():
             sys.exit(f"--voices {voices} が見つかりません")
-    mode_label = a.mode + (f"+enroll{a.enroll_seconds:g}" if a.enroll_seconds is not None
+    mode_label = a.mode + (f"+enroll{a.enroll_seconds:g}" + (f"a{after:g}" if after else "")
+                           if a.enroll_seconds is not None
                            else ("+voices" if a.voices else ""))
 
     if a.skip_run:
@@ -195,7 +217,8 @@ def main() -> None:
             sys.exit("--skip-run には --session <セッション名> が必要です")
         session = a.session
     else:
-        session = run_live(mix_path, a.max_speakers, a.soniox_args, a.mode, voices)
+        session = run_live(mix_path, a.max_speakers, a.soniox_args, a.mode, voices,
+                           a.session_name)
         print(f"# 新セッション: {session}")
 
     # 採点（eval_speaker_gt の main をそのまま使い、出力を拾って要約も残す）

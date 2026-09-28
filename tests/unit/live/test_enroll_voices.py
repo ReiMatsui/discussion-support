@@ -41,6 +41,15 @@ def test_build_clip_skips_short_segments_and_stops_at_requested_seconds() -> Non
     assert clip[0] == SR * 1.0, "最初の区間は 1.0 秒から始まる"
 
 
+def test_build_clip_after_uses_only_segments_starting_later() -> None:
+    """after より前に始まる区間は使わない（採点する先頭と登録音声を重ねない）."""
+    ev = _load_script()
+    wav = np.arange(SR * 10, dtype="float32")
+    segs = [(1.0, 3.0), (4.0, 5.5), (6.0, 9.0)]
+    clip, until = ev.build_clip(wav, segs, seconds=2.0, after=5.0)
+    assert clip[0] == SR * 6.0 and until == 9.0
+
+
 def test_build_clip_returns_empty_when_nothing_usable() -> None:
     ev = _load_script()
     clip, until = ev.build_clip(np.zeros(SR, dtype="float32"), [(0.0, 0.2)], 5.0)

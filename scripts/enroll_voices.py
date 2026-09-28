@@ -85,18 +85,20 @@ def speech_segments(conv: str, who: str) -> list[tuple[float, float]]:
 
 
 def build_clip(wav: np.ndarray, segs: list[tuple[float, float]], seconds: float,
-               min_seg: float = 0.5) -> tuple[np.ndarray, float]:
-    """発話区間を先頭から繋いで seconds ぶんの登録音声を作る.
+               min_seg: float = 0.5, after: float = 0.0) -> tuple[np.ndarray, float]:
+    """発話区間を繋いで seconds ぶんの登録音声を作る.
 
-    短すぎる区間（min_seg 未満）は相槌の可能性が高いので使わない。
+    短すぎる区間（min_seg 未満）は相槌の可能性が高いので使わない。after を
+    渡すと、その秒より後に始まる区間だけを使う（採点する先頭 N 分と登録音声を
+    重ねないため。例: 先頭 4 分を採点するなら after=240）。
     戻り値は (音声, 使った区間の末尾の秒)。末尾の秒は「会議の何秒目までを
-    登録に使ったか」の記録用（採点で先頭を除外したいときに使う）。
+    登録に使ったか」の記録用。
     """
     parts: list[np.ndarray] = []
     got = 0.0
     used_until = 0.0
     for s, e in segs:
-        if e - s < min_seg:
+        if s < after or e - s < min_seg:
             continue
         piece = wav[int(s * SR):int(e * SR)]
         if piece.size == 0:
@@ -118,6 +120,9 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--chiba", default=None, metavar="CONV", help="千葉コーパスの会話名（例 chiba0132）")
     p.add_argument("--seconds", type=float, default=60.0, help="--chiba で各話者に使う発話の秒数")
     p.add_argument("--speakers", default="A,B,C", help="--chiba で登録する話者（カンマ区切り）")
+    p.add_argument("--after", type=float, default=0.0, metavar="SEC",
+                   help="--chiba で、会議の SEC 秒より後の発話だけを登録に使う"
+                        "（先頭を採点する再生ランと登録音声を重ねないため）")
     a = p.parse_args(argv)
 
     from das.asr.live._voice_profiles import VoiceProfiles
@@ -133,8 +138,9 @@ def main(argv: list[str] | None = None) -> None:
             if who not in SPEAKERS:
                 raise SystemExit(f"--speakers は A,B,C の中から: {who}")
             wav = read_wav_16k(CORPUS / "Wav1" / f"{a.chiba}-{who}.wav")
-            clip, until = build_clip(wav, speech_segments(a.chiba, who), a.seconds)
-            jobs.append((who, clip, f"{a.chiba}-{who} 発話 {clip.size / SR:.1f}s（会議の {until:.0f} 秒目まで）"))
+            clip, until = build_clip(wav, speech_segments(a.chiba, who), a.seconds, after=a.after)
+            jobs.append((who, clip, f"{a.chiba}-{who} 発話 {clip.size / SR:.1f}s"
+                         f"（会議の {a.after:.0f}〜{until:.0f} 秒の範囲）"))
     if not jobs:
         raise SystemExit("--add か --chiba を指定してください")
 
