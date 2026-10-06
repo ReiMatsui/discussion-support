@@ -16,7 +16,8 @@ docs/discussion_structure/
 ├── README.md              この文書（入口・表記・読む順番）
 ├── spec/                  仕様（何をするか）
 ├── decisions/             設計判断の記録（なぜそうしたか。ADR）
-└── research/              先行研究のまとめと文献一覧
+├── research/              先行研究のまとめと文献一覧
+└── work/                  Codex への作業依頼（受け渡しの記録）
 ```
 
 ### 仕様（`spec/`）
@@ -48,6 +49,12 @@ docs/discussion_structure/
 |---|---|
 | [related_work.md](research/related_work.md) | 先行研究のまとめ（分野ごとの流れと、本研究の位置づけ） |
 | [references.md](research/references.md) | 文献一覧（各文献から使った内容と、原文の確認範囲） |
+
+### 作業依頼（`work/`）
+
+| 文書 | 状態 |
+|---|---|
+| [2026-10-06_offline_prototype.md](work/2026-10-06_offline_prototype.md) | オフライン試作（議事録の再生から木を作る） |
 
 ## 読む順番
 
