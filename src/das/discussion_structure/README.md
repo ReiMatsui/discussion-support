@@ -89,3 +89,18 @@ ASR 確定時刻がないため、ASR 区間の遅延は `null`。描画や AI �
   件数と根拠一覧。本人の懸念の印は応答だけでは消えない。
 - `Tracker.switch_agenda(agenda)` は前の木を `archived_agendas` に保存し、新しい木を始める API。
   CLI 再生からは呼ばない。AI 音声や既存ライブ基盤への接続は追加していない。
+
+2026-10-06 の追加規則:
+
+- 「する」の懸念、「しない」の元の提案への賛成は、本人の決定後の
+  `agreement=yes`（確率 0.8 以上）がなければ決定候補にする。
+  `resolution_evidence.explicit_agreements` は、この同意を前の賛成と分けて保持する。
+- 焦点の表示待ちの間も、同じ問い（配下の案を含む）への途切れない実質発話の
+  賛成を同意の根拠に数える。他の問いへの実質発話で区切り、相槌・対象外発話は無視する。
+- `internal.unanswered_concerns` の `during_discussion` が途中で伝える対象かを表す。
+  保留中は `false`、`summary_role=take_home` として持ち帰り事項を抽出できる。
+  `reopen` と別人の応答で保留から未解決へ戻すと、対象に戻る。
+- 話者の遡及訂正で決定の根拠が崩れた場合、問いに `needs_confirmation` と
+  `confirmation_reasons` を記録する。`internal.decision_confirmations` は
+  決定候補と並べるまとめ確認用の一覧。状態・決定内容の表示は維持する。
+  まとめ確認の音声・対話フローは、このオフライン試作の対象外。
