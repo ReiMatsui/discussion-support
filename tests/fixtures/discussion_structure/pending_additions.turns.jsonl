@@ -1,0 +1,11 @@
+{"turn_id": "t1", "speaker": "A", "text": "廃止しよう", "ms": 1000, "end_ms": 2000}
+{"turn_id": "t2", "speaker": "A", "text": "やはり廃止しよう", "ms": 4000, "end_ms": 5000}
+{"turn_id": "t3", "speaker": "B", "text": "次の内容を話しましょう", "ms": 62000, "end_ms": 63000}
+{"turn_id": "t4", "speaker": "A", "text": "紙にするか？", "ms": 65000, "end_ms": 66000}
+{"turn_id": "t5", "speaker": "B", "text": "紙の件を話しましょう", "ms": 75000, "end_ms": 76000}
+{"turn_id": "t6", "speaker": "A", "text": "紙に加えて持参も勧めよう", "ms": 79000, "end_ms": 80000}
+{"turn_id": "t7", "speaker": "B", "text": "持参の推奨にも賛成します", "ms": 83000, "end_ms": 84000}
+{"turn_id": "t8", "speaker": "A", "text": "予算が足りない", "ms": 88000, "end_ms": 89000}
+{"turn_id": "t9", "speaker": "B", "text": "どう賄うか考えましょう", "ms": 91000, "end_ms": 92000}
+{"turn_id": "t10", "speaker": "A", "text": "締切いつだっけ？", "ms": 96000, "end_ms": 97000}
+{"turn_id": "t11", "speaker": "B", "text": "締切の調整について議論しよう", "ms": 99000, "end_ms": 100000}

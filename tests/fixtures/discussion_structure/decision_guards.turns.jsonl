@@ -1,0 +1,14 @@
+{"turn_id": "t1", "speaker": "A", "text": "紙を導入するか？", "ms": 1000, "end_ms": 2000}
+{"turn_id": "t2", "speaker": "B", "text": "紙の導入について検討しよう", "ms": 11000, "end_ms": 12000}
+{"turn_id": "t3", "speaker": "A", "text": "紙の導入で決定します", "ms": 15000, "end_ms": 16000}
+{"turn_id": "t4", "speaker": "B", "text": "", "ms": 27000, "end_ms": 28000}
+{"turn_id": "t5", "speaker": "A", "text": "改めて紙で決定しよう", "ms": 31000, "end_ms": 32000}
+{"turn_id": "t6", "speaker": "B", "text": "紙に賛成します", "ms": 34000, "end_ms": 35000}
+{"turn_id": "t7", "speaker": "C", "text": "その決定に異議があります", "ms": 39000, "end_ms": 40000}
+{"turn_id": "t8", "speaker": "D", "text": "", "ms": 43000, "end_ms": 44000}
+{"turn_id": "t9", "speaker": "A", "text": "紙を導入しないと決定しよう", "ms": 47000, "end_ms": 48000}
+{"turn_id": "t10", "speaker": "B", "text": "その決定に賛成します", "ms": 50000, "end_ms": 51000}
+{"turn_id": "t11", "speaker": "C", "text": "", "ms": 58000, "end_ms": 59000}
+{"turn_id": "t12", "speaker": "C", "text": "費用についてどうするか？", "ms": 62000, "end_ms": 63000}
+{"turn_id": "t13", "speaker": "C", "text": "次は納期についてどうするか？", "ms": 66000, "end_ms": 67000}
+{"turn_id": "t14", "speaker": "A", "text": "紙を導入しないでいい？", "ms": 70000, "end_ms": 71000}

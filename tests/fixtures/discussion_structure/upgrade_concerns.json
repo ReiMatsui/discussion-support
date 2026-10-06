@@ -1,0 +1,986 @@
+{
+  "name": "upgrade_concerns",
+  "agenda": "学食の環境対策",
+  "scenes": [
+    "単独提案と応答",
+    "懸念の子",
+    "比較の理由のみ",
+    "格上げ",
+    "子は動かない",
+    "選択型の乗り換え",
+    "未確定話者",
+    "相槌",
+    "off"
+  ],
+  "turns": [
+    {
+      "turn_id": "t1",
+      "speaker": "A",
+      "text": "ストローを紙に切り替えない？",
+      "ms": 1000,
+      "end_ms": 2000
+    },
+    {
+      "turn_id": "t2",
+      "speaker": "B",
+      "text": "いいと思う、でも高くない？",
+      "ms": 3000,
+      "end_ms": 4000
+    },
+    {
+      "turn_id": "t3",
+      "speaker": "A",
+      "text": "紙ストローについて引き続き検討しよう",
+      "ms": 13000,
+      "end_ms": 14000
+    },
+    {
+      "turn_id": "t4",
+      "speaker": "A",
+      "text": "いつから切り替えるかを話し合おう？",
+      "ms": 17000,
+      "end_ms": 18000
+    },
+    {
+      "turn_id": "t5",
+      "speaker": "C",
+      "text": "Bさんの懸念の紙の費用を話し合いたい",
+      "ms": 20000,
+      "end_ms": 21000
+    },
+    {
+      "turn_id": "t6",
+      "speaker": "D",
+      "text": "紙よりバイオプラの方が安いよ",
+      "ms": 24000,
+      "end_ms": 25000
+    },
+    {
+      "turn_id": "t7",
+      "speaker": "A",
+      "text": "やっぱりバイオプラがいい、賛成です",
+      "ms": 28000,
+      "end_ms": 29000
+    },
+    {
+      "turn_id": "t8",
+      "speaker": "表示してはいけない名前",
+      "text": "私は紙ストローに賛成します",
+      "ms": 32000,
+      "end_ms": 33000,
+      "unsure": true,
+      "speaker_uid": "u1",
+      "speaker_confidence": 0.3
+    },
+    {
+      "turn_id": "t9",
+      "speaker": "C",
+      "text": "ところでサッカーはどうする？",
+      "ms": 35000,
+      "end_ms": 36000
+    },
+    {
+      "turn_id": "t10",
+      "speaker": "B",
+      "text": "そうですね",
+      "ms": 38000,
+      "end_ms": 39000
+    }
+  ],
+  "judgements": {
+    "t1": {
+      "target": {
+        "probabilities": {
+          "new_position": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "alternative": {
+        "probabilities": {
+          "additional": 1.0
+        }
+      },
+      "shift": {
+        "probabilities": {
+          "no": 1.0
+        }
+      },
+      "relevance": {
+        "probabilities": {
+          "on": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "correction": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "trigger": {
+        "probabilities": {
+          "proposal": 1.0
+        }
+      },
+      "parent": {
+        "probabilities": {
+          "root": 1.0
+        }
+      },
+      "response_to": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "switch": {
+        "probabilities": {
+          "default": 1.0
+        }
+      },
+      "decision_answer": {
+        "probabilities": {
+          "yes": 1.0
+        }
+      }
+    },
+    "t2": {
+      "target": {
+        "probabilities": {
+          "new_issue": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "concern": 1.0
+        }
+      },
+      "alternative": {
+        "probabilities": {
+          "additional": 1.0
+        }
+      },
+      "shift": {
+        "probabilities": {
+          "no": 1.0
+        }
+      },
+      "relevance": {
+        "probabilities": {
+          "on": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "correction": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "trigger": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "parent": {
+        "probabilities": {
+          "focus": 1.0
+        }
+      },
+      "response_to": {
+        "probabilities": {
+          "pending:t1": 1.0
+        }
+      },
+      "switch": {
+        "probabilities": {
+          "default": 1.0
+        }
+      },
+      "decision_answer": {
+        "probabilities": {
+          "yes": 1.0
+        }
+      }
+    },
+    "t3": {
+      "target": {
+        "probabilities": {
+          "i1": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "alternative": {
+        "probabilities": {
+          "additional": 1.0
+        }
+      },
+      "shift": {
+        "probabilities": {
+          "no": 1.0
+        }
+      },
+      "relevance": {
+        "probabilities": {
+          "on": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "correction": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "trigger": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "parent": {
+        "probabilities": {
+          "focus": 1.0
+        }
+      },
+      "response_to": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "switch": {
+        "probabilities": {
+          "default": 1.0
+        }
+      },
+      "decision_answer": {
+        "probabilities": {
+          "yes": 1.0
+        }
+      }
+    },
+    "t4": {
+      "target": {
+        "probabilities": {
+          "new_issue": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "alternative": {
+        "probabilities": {
+          "additional": 1.0
+        }
+      },
+      "shift": {
+        "probabilities": {
+          "no": 1.0
+        }
+      },
+      "relevance": {
+        "probabilities": {
+          "on": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "correction": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "trigger": {
+        "probabilities": {
+          "explicit": 1.0
+        }
+      },
+      "parent": {
+        "probabilities": {
+          "i1": 1.0
+        }
+      },
+      "response_to": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "switch": {
+        "probabilities": {
+          "default": 1.0
+        }
+      },
+      "decision_answer": {
+        "probabilities": {
+          "yes": 1.0
+        }
+      }
+    },
+    "t5": {
+      "target": {
+        "probabilities": {
+          "new_issue": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "alternative": {
+        "probabilities": {
+          "additional": 1.0
+        }
+      },
+      "shift": {
+        "probabilities": {
+          "no": 1.0
+        }
+      },
+      "relevance": {
+        "probabilities": {
+          "on": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "correction": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "trigger": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "parent": {
+        "probabilities": {
+          "i1": 1.0
+        }
+      },
+      "response_to": {
+        "probabilities": {
+          "pending:t2": 1.0
+        }
+      },
+      "switch": {
+        "probabilities": {
+          "default": 1.0
+        }
+      },
+      "decision_answer": {
+        "probabilities": {
+          "yes": 1.0
+        }
+      }
+    },
+    "t6": {
+      "target": {
+        "probabilities": {
+          "new_position": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "alternative": {
+        "probabilities": {
+          "alternative": 1.0
+        }
+      },
+      "shift": {
+        "probabilities": {
+          "no": 1.0
+        }
+      },
+      "relevance": {
+        "probabilities": {
+          "on": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "correction": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "trigger": {
+        "probabilities": {
+          "proposal": 1.0
+        }
+      },
+      "parent": {
+        "probabilities": {
+          "i1": 1.0
+        }
+      },
+      "response_to": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "switch": {
+        "probabilities": {
+          "default": 1.0
+        }
+      },
+      "decision_answer": {
+        "probabilities": {
+          "yes": 1.0
+        }
+      }
+    },
+    "t7": {
+      "target": {
+        "probabilities": {
+          "p5": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "support": 1.0
+        }
+      },
+      "alternative": {
+        "probabilities": {
+          "additional": 1.0
+        }
+      },
+      "shift": {
+        "probabilities": {
+          "no": 1.0
+        }
+      },
+      "relevance": {
+        "probabilities": {
+          "on": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "correction": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "trigger": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "parent": {
+        "probabilities": {
+          "focus": 1.0
+        }
+      },
+      "response_to": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "switch": {
+        "probabilities": {
+          "replace": 1.0
+        }
+      },
+      "decision_answer": {
+        "probabilities": {
+          "yes": 1.0
+        }
+      }
+    },
+    "t8": {
+      "target": {
+        "probabilities": {
+          "p4": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "support": 1.0
+        }
+      },
+      "alternative": {
+        "probabilities": {
+          "additional": 1.0
+        }
+      },
+      "shift": {
+        "probabilities": {
+          "no": 1.0
+        }
+      },
+      "relevance": {
+        "probabilities": {
+          "on": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "correction": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "trigger": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "parent": {
+        "probabilities": {
+          "focus": 1.0
+        }
+      },
+      "response_to": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "switch": {
+        "probabilities": {
+          "default": 1.0
+        }
+      },
+      "decision_answer": {
+        "probabilities": {
+          "yes": 1.0
+        }
+      }
+    },
+    "t9": {
+      "target": {
+        "probabilities": {
+          "new_issue": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "alternative": {
+        "probabilities": {
+          "additional": 1.0
+        }
+      },
+      "shift": {
+        "probabilities": {
+          "no": 1.0
+        }
+      },
+      "relevance": {
+        "probabilities": {
+          "off": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "correction": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "trigger": {
+        "probabilities": {
+          "explicit": 1.0
+        }
+      },
+      "parent": {
+        "probabilities": {
+          "focus": 1.0
+        }
+      },
+      "response_to": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "switch": {
+        "probabilities": {
+          "default": 1.0
+        }
+      },
+      "decision_answer": {
+        "probabilities": {
+          "yes": 1.0
+        }
+      }
+    }
+  },
+  "labels": {
+    "t2": {
+      "issue": {
+        "label": "紙ストローに切り替えるか？",
+        "answer_type": "yes_no",
+        "original_position": "紙ストロー"
+      }
+    },
+    "t4": {
+      "issue": {
+        "label": "いつから切り替えるか？",
+        "answer_type": "open",
+        "original_position": ""
+      }
+    },
+    "t5": {
+      "issue": {
+        "label": "紙の費用は問題ないか？",
+        "answer_type": "yes_no",
+        "original_position": "紙の費用"
+      }
+    },
+    "t6": {
+      "upgrade": {
+        "label": "ストローを何にするか？",
+        "answer_type": "choice",
+        "original_position": ""
+      },
+      "position": {
+        "label": "バイオプラ",
+        "answer_type": "open",
+        "original_position": ""
+      }
+    }
+  },
+  "expected": {
+    "focus_id": "i1",
+    "nodes": [
+      {
+        "id": "root",
+        "kind": "issue",
+        "label": "学食の環境対策",
+        "parent_id": null,
+        "status": "open",
+        "answer_type": "open",
+        "decided_answer": null,
+        "stances": {}
+      },
+      {
+        "id": "i1",
+        "kind": "issue",
+        "label": "ストローを何にするか？",
+        "parent_id": "root",
+        "status": "open",
+        "answer_type": "choice",
+        "decided_answer": null,
+        "stances": {}
+      },
+      {
+        "id": "i2",
+        "kind": "issue",
+        "label": "いつから切り替えるか？",
+        "parent_id": "i1",
+        "status": "open",
+        "answer_type": "open",
+        "decided_answer": null,
+        "stances": {}
+      },
+      {
+        "id": "i3",
+        "kind": "issue",
+        "label": "紙の費用は問題ないか？",
+        "parent_id": "i1",
+        "status": "open",
+        "answer_type": "yes_no",
+        "decided_answer": null,
+        "stances": {}
+      },
+      {
+        "id": "p4",
+        "kind": "position",
+        "label": "紙ストロー",
+        "parent_id": "i1",
+        "status": "proposed",
+        "answer_type": null,
+        "decided_answer": null,
+        "stances": {
+          "B": {
+            "value": "concern",
+            "name": "B"
+          },
+          "u1": {
+            "value": "support",
+            "name": "?"
+          }
+        }
+      },
+      {
+        "id": "p5",
+        "kind": "position",
+        "label": "バイオプラ",
+        "parent_id": "i1",
+        "status": "proposed",
+        "answer_type": null,
+        "decided_answer": null,
+        "stances": {
+          "D": {
+            "value": "support",
+            "name": "D"
+          },
+          "A": {
+            "value": "support",
+            "name": "A"
+          }
+        }
+      }
+    ]
+  },
+  "checkpoints": {
+    "t1": {
+      "focus_id": "root",
+      "nodes": [
+        {
+          "id": "root",
+          "kind": "issue",
+          "label": "学食の環境対策",
+          "parent_id": null,
+          "status": "open",
+          "answer_type": "open",
+          "decided_answer": null,
+          "stances": {}
+        }
+      ]
+    },
+    "t2": {
+      "focus_id": "root",
+      "nodes": [
+        {
+          "id": "root",
+          "kind": "issue",
+          "label": "学食の環境対策",
+          "parent_id": null,
+          "status": "open",
+          "answer_type": "open",
+          "decided_answer": null,
+          "stances": {}
+        },
+        {
+          "id": "i1",
+          "kind": "issue",
+          "label": "紙ストローに切り替えるか？",
+          "parent_id": "root",
+          "status": "open",
+          "answer_type": "yes_no",
+          "decided_answer": null,
+          "stances": {
+            "A": {
+              "value": "support",
+              "name": "A"
+            },
+            "B": {
+              "value": "concern",
+              "name": "B"
+            }
+          }
+        }
+      ]
+    },
+    "t3": {
+      "focus_id": "i1",
+      "nodes": [
+        {
+          "id": "root",
+          "kind": "issue",
+          "label": "学食の環境対策",
+          "parent_id": null,
+          "status": "open",
+          "answer_type": "open",
+          "decided_answer": null,
+          "stances": {}
+        },
+        {
+          "id": "i1",
+          "kind": "issue",
+          "label": "紙ストローに切り替えるか？",
+          "parent_id": "root",
+          "status": "open",
+          "answer_type": "yes_no",
+          "decided_answer": null,
+          "stances": {
+            "A": {
+              "value": "support",
+              "name": "A"
+            },
+            "B": {
+              "value": "concern",
+              "name": "B"
+            }
+          }
+        }
+      ]
+    },
+    "t5": {
+      "focus_id": "i1",
+      "nodes": [
+        {
+          "id": "root",
+          "kind": "issue",
+          "label": "学食の環境対策",
+          "parent_id": null,
+          "status": "open",
+          "answer_type": "open",
+          "decided_answer": null,
+          "stances": {}
+        },
+        {
+          "id": "i1",
+          "kind": "issue",
+          "label": "紙ストローに切り替えるか？",
+          "parent_id": "root",
+          "status": "open",
+          "answer_type": "yes_no",
+          "decided_answer": null,
+          "stances": {
+            "A": {
+              "value": "support",
+              "name": "A"
+            },
+            "B": {
+              "value": "concern",
+              "name": "B"
+            }
+          }
+        },
+        {
+          "id": "i2",
+          "kind": "issue",
+          "label": "いつから切り替えるか？",
+          "parent_id": "i1",
+          "status": "open",
+          "answer_type": "open",
+          "decided_answer": null,
+          "stances": {}
+        },
+        {
+          "id": "i3",
+          "kind": "issue",
+          "label": "紙の費用は問題ないか？",
+          "parent_id": "i1",
+          "status": "open",
+          "answer_type": "yes_no",
+          "decided_answer": null,
+          "stances": {}
+        }
+      ]
+    },
+    "t6": {
+      "focus_id": "i1",
+      "nodes": [
+        {
+          "id": "root",
+          "kind": "issue",
+          "label": "学食の環境対策",
+          "parent_id": null,
+          "status": "open",
+          "answer_type": "open",
+          "decided_answer": null,
+          "stances": {}
+        },
+        {
+          "id": "i1",
+          "kind": "issue",
+          "label": "ストローを何にするか？",
+          "parent_id": "root",
+          "status": "open",
+          "answer_type": "choice",
+          "decided_answer": null,
+          "stances": {}
+        },
+        {
+          "id": "i2",
+          "kind": "issue",
+          "label": "いつから切り替えるか？",
+          "parent_id": "i1",
+          "status": "open",
+          "answer_type": "open",
+          "decided_answer": null,
+          "stances": {}
+        },
+        {
+          "id": "i3",
+          "kind": "issue",
+          "label": "紙の費用は問題ないか？",
+          "parent_id": "i1",
+          "status": "open",
+          "answer_type": "yes_no",
+          "decided_answer": null,
+          "stances": {}
+        },
+        {
+          "id": "p4",
+          "kind": "position",
+          "label": "紙ストロー",
+          "parent_id": "i1",
+          "status": "proposed",
+          "answer_type": null,
+          "decided_answer": null,
+          "stances": {
+            "A": {
+              "value": "support",
+              "name": "A"
+            },
+            "B": {
+              "value": "concern",
+              "name": "B"
+            }
+          }
+        },
+        {
+          "id": "p5",
+          "kind": "position",
+          "label": "バイオプラ",
+          "parent_id": "i1",
+          "status": "proposed",
+          "answer_type": null,
+          "decided_answer": null,
+          "stances": {
+            "D": {
+              "value": "support",
+              "name": "D"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

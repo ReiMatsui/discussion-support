@@ -1,0 +1,10 @@
+{"turn_id": "t1", "speaker": "A", "text": "ストローを紙に切り替えない？", "ms": 1000, "end_ms": 2000}
+{"turn_id": "t2", "speaker": "B", "text": "いいと思う、でも高くない？", "ms": 3000, "end_ms": 4000}
+{"turn_id": "t3", "speaker": "A", "text": "紙ストローについて引き続き検討しよう", "ms": 13000, "end_ms": 14000}
+{"turn_id": "t4", "speaker": "A", "text": "いつから切り替えるかを話し合おう？", "ms": 17000, "end_ms": 18000}
+{"turn_id": "t5", "speaker": "C", "text": "Bさんの懸念の紙の費用を話し合いたい", "ms": 20000, "end_ms": 21000}
+{"turn_id": "t6", "speaker": "D", "text": "紙よりバイオプラの方が安いよ", "ms": 24000, "end_ms": 25000}
+{"turn_id": "t7", "speaker": "A", "text": "やっぱりバイオプラがいい、賛成です", "ms": 28000, "end_ms": 29000}
+{"turn_id": "t8", "speaker": "表示してはいけない名前", "text": "私は紙ストローに賛成します", "ms": 32000, "end_ms": 33000, "unsure": true, "speaker_uid": "u1", "speaker_confidence": 0.3}
+{"turn_id": "t9", "speaker": "C", "text": "ところでサッカーはどうする？", "ms": 35000, "end_ms": 36000}
+{"turn_id": "t10", "speaker": "B", "text": "そうですね", "ms": 38000, "end_ms": 39000}

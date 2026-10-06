@@ -1,0 +1,969 @@
+{
+  "name": "pending_additions",
+  "agenda": "学食の環境対策",
+  "scenes": [
+    "応答なし60秒で失効",
+    "同一話者は応答にならない",
+    "追加の案は格上げしない",
+    "問題の提示",
+    "事実確認は継続時のみ"
+  ],
+  "turns": [
+    {
+      "turn_id": "t1",
+      "speaker": "A",
+      "text": "廃止しよう",
+      "ms": 1000,
+      "end_ms": 2000
+    },
+    {
+      "turn_id": "t2",
+      "speaker": "A",
+      "text": "やはり廃止しよう",
+      "ms": 4000,
+      "end_ms": 5000
+    },
+    {
+      "turn_id": "t3",
+      "speaker": "B",
+      "text": "次の内容を話しましょう",
+      "ms": 62000,
+      "end_ms": 63000
+    },
+    {
+      "turn_id": "t4",
+      "speaker": "A",
+      "text": "紙にするか？",
+      "ms": 65000,
+      "end_ms": 66000
+    },
+    {
+      "turn_id": "t5",
+      "speaker": "B",
+      "text": "紙の件を話しましょう",
+      "ms": 75000,
+      "end_ms": 76000
+    },
+    {
+      "turn_id": "t6",
+      "speaker": "A",
+      "text": "紙に加えて持参も勧めよう",
+      "ms": 79000,
+      "end_ms": 80000
+    },
+    {
+      "turn_id": "t7",
+      "speaker": "B",
+      "text": "持参の推奨にも賛成します",
+      "ms": 83000,
+      "end_ms": 84000
+    },
+    {
+      "turn_id": "t8",
+      "speaker": "A",
+      "text": "予算が足りない",
+      "ms": 88000,
+      "end_ms": 89000
+    },
+    {
+      "turn_id": "t9",
+      "speaker": "B",
+      "text": "どう賄うか考えましょう",
+      "ms": 91000,
+      "end_ms": 92000
+    },
+    {
+      "turn_id": "t10",
+      "speaker": "A",
+      "text": "締切いつだっけ？",
+      "ms": 96000,
+      "end_ms": 97000
+    },
+    {
+      "turn_id": "t11",
+      "speaker": "B",
+      "text": "締切の調整について議論しよう",
+      "ms": 99000,
+      "end_ms": 100000
+    }
+  ],
+  "judgements": {
+    "t1": {
+      "target": {
+        "probabilities": {
+          "new_position": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "alternative": {
+        "probabilities": {
+          "additional": 1.0
+        }
+      },
+      "shift": {
+        "probabilities": {
+          "no": 1.0
+        }
+      },
+      "relevance": {
+        "probabilities": {
+          "on": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "correction": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "trigger": {
+        "probabilities": {
+          "proposal": 1.0
+        }
+      },
+      "parent": {
+        "probabilities": {
+          "root": 1.0
+        }
+      },
+      "response_to": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "switch": {
+        "probabilities": {
+          "default": 1.0
+        }
+      },
+      "decision_answer": {
+        "probabilities": {
+          "yes": 1.0
+        }
+      }
+    },
+    "t2": {
+      "target": {
+        "probabilities": {
+          "new_position": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "alternative": {
+        "probabilities": {
+          "additional": 1.0
+        }
+      },
+      "shift": {
+        "probabilities": {
+          "no": 1.0
+        }
+      },
+      "relevance": {
+        "probabilities": {
+          "on": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "correction": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "trigger": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "parent": {
+        "probabilities": {
+          "focus": 1.0
+        }
+      },
+      "response_to": {
+        "probabilities": {
+          "pending:t1": 1.0
+        }
+      },
+      "switch": {
+        "probabilities": {
+          "default": 1.0
+        }
+      },
+      "decision_answer": {
+        "probabilities": {
+          "yes": 1.0
+        }
+      }
+    },
+    "t3": {
+      "target": {
+        "probabilities": {
+          "unrelated": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "alternative": {
+        "probabilities": {
+          "additional": 1.0
+        }
+      },
+      "shift": {
+        "probabilities": {
+          "no": 1.0
+        }
+      },
+      "relevance": {
+        "probabilities": {
+          "on": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "correction": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "trigger": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "parent": {
+        "probabilities": {
+          "focus": 1.0
+        }
+      },
+      "response_to": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "switch": {
+        "probabilities": {
+          "default": 1.0
+        }
+      },
+      "decision_answer": {
+        "probabilities": {
+          "yes": 1.0
+        }
+      }
+    },
+    "t4": {
+      "target": {
+        "probabilities": {
+          "new_issue": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "alternative": {
+        "probabilities": {
+          "additional": 1.0
+        }
+      },
+      "shift": {
+        "probabilities": {
+          "no": 1.0
+        }
+      },
+      "relevance": {
+        "probabilities": {
+          "on": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "correction": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "trigger": {
+        "probabilities": {
+          "explicit": 1.0
+        }
+      },
+      "parent": {
+        "probabilities": {
+          "root": 1.0
+        }
+      },
+      "response_to": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "switch": {
+        "probabilities": {
+          "default": 1.0
+        }
+      },
+      "decision_answer": {
+        "probabilities": {
+          "yes": 1.0
+        }
+      }
+    },
+    "t5": {
+      "target": {
+        "probabilities": {
+          "i1": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "alternative": {
+        "probabilities": {
+          "additional": 1.0
+        }
+      },
+      "shift": {
+        "probabilities": {
+          "no": 1.0
+        }
+      },
+      "relevance": {
+        "probabilities": {
+          "on": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "correction": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "trigger": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "parent": {
+        "probabilities": {
+          "focus": 1.0
+        }
+      },
+      "response_to": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "switch": {
+        "probabilities": {
+          "default": 1.0
+        }
+      },
+      "decision_answer": {
+        "probabilities": {
+          "yes": 1.0
+        }
+      }
+    },
+    "t6": {
+      "target": {
+        "probabilities": {
+          "new_position": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "alternative": {
+        "probabilities": {
+          "additional": 1.0
+        }
+      },
+      "shift": {
+        "probabilities": {
+          "no": 1.0
+        }
+      },
+      "relevance": {
+        "probabilities": {
+          "on": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "correction": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "trigger": {
+        "probabilities": {
+          "proposal": 1.0
+        }
+      },
+      "parent": {
+        "probabilities": {
+          "i1": 1.0
+        }
+      },
+      "response_to": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "switch": {
+        "probabilities": {
+          "default": 1.0
+        }
+      },
+      "decision_answer": {
+        "probabilities": {
+          "yes": 1.0
+        }
+      }
+    },
+    "t7": {
+      "target": {
+        "probabilities": {
+          "new_issue": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "support": 1.0
+        }
+      },
+      "alternative": {
+        "probabilities": {
+          "additional": 1.0
+        }
+      },
+      "shift": {
+        "probabilities": {
+          "no": 1.0
+        }
+      },
+      "relevance": {
+        "probabilities": {
+          "on": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "correction": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "trigger": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "parent": {
+        "probabilities": {
+          "focus": 1.0
+        }
+      },
+      "response_to": {
+        "probabilities": {
+          "pending:t6": 1.0
+        }
+      },
+      "switch": {
+        "probabilities": {
+          "default": 1.0
+        }
+      },
+      "decision_answer": {
+        "probabilities": {
+          "yes": 1.0
+        }
+      }
+    },
+    "t8": {
+      "target": {
+        "probabilities": {
+          "new_issue": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "alternative": {
+        "probabilities": {
+          "additional": 1.0
+        }
+      },
+      "shift": {
+        "probabilities": {
+          "no": 1.0
+        }
+      },
+      "relevance": {
+        "probabilities": {
+          "on": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "correction": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "trigger": {
+        "probabilities": {
+          "problem": 1.0
+        }
+      },
+      "parent": {
+        "probabilities": {
+          "root": 1.0
+        }
+      },
+      "response_to": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "switch": {
+        "probabilities": {
+          "default": 1.0
+        }
+      },
+      "decision_answer": {
+        "probabilities": {
+          "yes": 1.0
+        }
+      }
+    },
+    "t9": {
+      "target": {
+        "probabilities": {
+          "new_issue": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "alternative": {
+        "probabilities": {
+          "additional": 1.0
+        }
+      },
+      "shift": {
+        "probabilities": {
+          "no": 1.0
+        }
+      },
+      "relevance": {
+        "probabilities": {
+          "on": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "correction": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "trigger": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "parent": {
+        "probabilities": {
+          "focus": 1.0
+        }
+      },
+      "response_to": {
+        "probabilities": {
+          "pending:t8": 1.0
+        }
+      },
+      "switch": {
+        "probabilities": {
+          "default": 1.0
+        }
+      },
+      "decision_answer": {
+        "probabilities": {
+          "yes": 1.0
+        }
+      }
+    },
+    "t10": {
+      "target": {
+        "probabilities": {
+          "new_issue": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "alternative": {
+        "probabilities": {
+          "additional": 1.0
+        }
+      },
+      "shift": {
+        "probabilities": {
+          "no": 1.0
+        }
+      },
+      "relevance": {
+        "probabilities": {
+          "on": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "correction": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "trigger": {
+        "probabilities": {
+          "fact": 1.0
+        }
+      },
+      "parent": {
+        "probabilities": {
+          "root": 1.0
+        }
+      },
+      "response_to": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "switch": {
+        "probabilities": {
+          "default": 1.0
+        }
+      },
+      "decision_answer": {
+        "probabilities": {
+          "yes": 1.0
+        }
+      }
+    },
+    "t11": {
+      "target": {
+        "probabilities": {
+          "new_issue": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "alternative": {
+        "probabilities": {
+          "additional": 1.0
+        }
+      },
+      "shift": {
+        "probabilities": {
+          "no": 1.0
+        }
+      },
+      "relevance": {
+        "probabilities": {
+          "on": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "correction": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "trigger": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "parent": {
+        "probabilities": {
+          "focus": 1.0
+        }
+      },
+      "response_to": {
+        "probabilities": {
+          "pending:t10": 1.0
+        }
+      },
+      "switch": {
+        "probabilities": {
+          "default": 1.0
+        }
+      },
+      "decision_answer": {
+        "probabilities": {
+          "yes": 1.0
+        }
+      }
+    }
+  },
+  "labels": {
+    "t4": {
+      "issue": {
+        "label": "紙にするか？",
+        "answer_type": "yes_no",
+        "original_position": "紙"
+      }
+    },
+    "t7": {
+      "issue": {
+        "label": "持参を勧めるか？",
+        "answer_type": "yes_no",
+        "original_position": "持参の推奨"
+      }
+    },
+    "t9": {
+      "issue": {
+        "label": "予算をどう賄うか？",
+        "answer_type": "open",
+        "original_position": ""
+      }
+    },
+    "t11": {
+      "issue": {
+        "label": "締切をいつにするか？",
+        "answer_type": "open",
+        "original_position": ""
+      }
+    }
+  },
+  "expected": {
+    "focus_id": "i1",
+    "nodes": [
+      {
+        "id": "root",
+        "kind": "issue",
+        "label": "学食の環境対策",
+        "parent_id": null,
+        "status": "open",
+        "answer_type": "open",
+        "decided_answer": null,
+        "stances": {}
+      },
+      {
+        "id": "i1",
+        "kind": "issue",
+        "label": "紙にするか？",
+        "parent_id": "root",
+        "status": "open",
+        "answer_type": "yes_no",
+        "decided_answer": null,
+        "stances": {}
+      },
+      {
+        "id": "i2",
+        "kind": "issue",
+        "label": "持参を勧めるか？",
+        "parent_id": "i1",
+        "status": "open",
+        "answer_type": "yes_no",
+        "decided_answer": null,
+        "stances": {
+          "A": {
+            "value": "support",
+            "name": "A"
+          },
+          "B": {
+            "value": "support",
+            "name": "B"
+          }
+        }
+      },
+      {
+        "id": "i3",
+        "kind": "issue",
+        "label": "予算をどう賄うか？",
+        "parent_id": "root",
+        "status": "open",
+        "answer_type": "open",
+        "decided_answer": null,
+        "stances": {}
+      },
+      {
+        "id": "i4",
+        "kind": "issue",
+        "label": "締切をいつにするか？",
+        "parent_id": "root",
+        "status": "open",
+        "answer_type": "open",
+        "decided_answer": null,
+        "stances": {}
+      }
+    ]
+  },
+  "checkpoints": {
+    "t2": {
+      "focus_id": "root",
+      "nodes": [
+        {
+          "id": "root",
+          "kind": "issue",
+          "label": "学食の環境対策",
+          "parent_id": null,
+          "status": "open",
+          "answer_type": "open",
+          "decided_answer": null,
+          "stances": {}
+        }
+      ]
+    },
+    "t3": {
+      "focus_id": "root",
+      "nodes": [
+        {
+          "id": "root",
+          "kind": "issue",
+          "label": "学食の環境対策",
+          "parent_id": null,
+          "status": "open",
+          "answer_type": "open",
+          "decided_answer": null,
+          "stances": {}
+        }
+      ]
+    },
+    "t6": {
+      "focus_id": "i1",
+      "nodes": [
+        {
+          "id": "root",
+          "kind": "issue",
+          "label": "学食の環境対策",
+          "parent_id": null,
+          "status": "open",
+          "answer_type": "open",
+          "decided_answer": null,
+          "stances": {}
+        },
+        {
+          "id": "i1",
+          "kind": "issue",
+          "label": "紙にするか？",
+          "parent_id": "root",
+          "status": "open",
+          "answer_type": "yes_no",
+          "decided_answer": null,
+          "stances": {}
+        }
+      ]
+    },
+    "t7": {
+      "focus_id": "i1",
+      "nodes": [
+        {
+          "id": "root",
+          "kind": "issue",
+          "label": "学食の環境対策",
+          "parent_id": null,
+          "status": "open",
+          "answer_type": "open",
+          "decided_answer": null,
+          "stances": {}
+        },
+        {
+          "id": "i1",
+          "kind": "issue",
+          "label": "紙にするか？",
+          "parent_id": "root",
+          "status": "open",
+          "answer_type": "yes_no",
+          "decided_answer": null,
+          "stances": {}
+        },
+        {
+          "id": "i2",
+          "kind": "issue",
+          "label": "持参を勧めるか？",
+          "parent_id": "i1",
+          "status": "open",
+          "answer_type": "yes_no",
+          "decided_answer": null,
+          "stances": {
+            "A": {
+              "value": "support",
+              "name": "A"
+            },
+            "B": {
+              "value": "support",
+              "name": "B"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,1133 @@
+{
+  "name": "decisions_reopen",
+  "agenda": "学食の環境対策",
+  "scenes": [
+    "明示的な問い",
+    "決定と同意",
+    "沈黙は同意ではない",
+    "決定済みの代替案",
+    "応答で再開と格上げ",
+    "懸念のある決定候補",
+    "異議",
+    "保留",
+    "取り下げ"
+  ],
+  "turns": [
+    {
+      "turn_id": "t1",
+      "speaker": "A",
+      "text": "紙に切り替えるかを話し合おう？",
+      "ms": 1000,
+      "end_ms": 2000
+    },
+    {
+      "turn_id": "t2",
+      "speaker": "B",
+      "text": "紙の件について話を続けましょう",
+      "ms": 11000,
+      "end_ms": 12000
+    },
+    {
+      "turn_id": "t3",
+      "speaker": "A",
+      "text": "じゃあ紙に切り替えると決定しよう",
+      "ms": 14000,
+      "end_ms": 15000
+    },
+    {
+      "turn_id": "t4",
+      "speaker": "B",
+      "text": "その決定に賛成します",
+      "ms": 17000,
+      "end_ms": 18000
+    },
+    {
+      "turn_id": "t5",
+      "speaker": "C",
+      "text": "",
+      "ms": 25000,
+      "end_ms": 26000
+    },
+    {
+      "turn_id": "t6",
+      "speaker": "A",
+      "text": "決定したけど紙じゃなくてバイオでは？",
+      "ms": 29000,
+      "end_ms": 30000
+    },
+    {
+      "turn_id": "t7",
+      "speaker": "B",
+      "text": "バイオに変えることに賛成です",
+      "ms": 33000,
+      "end_ms": 34000
+    },
+    {
+      "turn_id": "t8",
+      "speaker": "A",
+      "text": "バイオで決定しよう",
+      "ms": 39000,
+      "end_ms": 40000
+    },
+    {
+      "turn_id": "t9",
+      "speaker": "B",
+      "text": "そうですね、ただ耐久性が心配です",
+      "ms": 41000,
+      "end_ms": 42000
+    },
+    {
+      "turn_id": "t10",
+      "speaker": "C",
+      "text": "",
+      "ms": 50000,
+      "end_ms": 51000
+    },
+    {
+      "turn_id": "t11",
+      "speaker": "B",
+      "text": "その決定には異議があります",
+      "ms": 53000,
+      "end_ms": 54000
+    },
+    {
+      "turn_id": "t12",
+      "speaker": "A",
+      "text": "この件は持ち帰りにしよう",
+      "ms": 57000,
+      "end_ms": 58000
+    },
+    {
+      "turn_id": "t13",
+      "speaker": "A",
+      "text": "この案は取り下げます",
+      "ms": 61000,
+      "end_ms": 62000
+    }
+  ],
+  "judgements": {
+    "t1": {
+      "target": {
+        "probabilities": {
+          "new_issue": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "alternative": {
+        "probabilities": {
+          "additional": 1.0
+        }
+      },
+      "shift": {
+        "probabilities": {
+          "no": 1.0
+        }
+      },
+      "relevance": {
+        "probabilities": {
+          "on": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "correction": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "trigger": {
+        "probabilities": {
+          "explicit": 1.0
+        }
+      },
+      "parent": {
+        "probabilities": {
+          "root": 1.0
+        }
+      },
+      "response_to": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "switch": {
+        "probabilities": {
+          "default": 1.0
+        }
+      },
+      "decision_answer": {
+        "probabilities": {
+          "yes": 1.0
+        }
+      }
+    },
+    "t2": {
+      "target": {
+        "probabilities": {
+          "i1": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "alternative": {
+        "probabilities": {
+          "additional": 1.0
+        }
+      },
+      "shift": {
+        "probabilities": {
+          "no": 1.0
+        }
+      },
+      "relevance": {
+        "probabilities": {
+          "on": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "correction": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "trigger": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "parent": {
+        "probabilities": {
+          "focus": 1.0
+        }
+      },
+      "response_to": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "switch": {
+        "probabilities": {
+          "default": 1.0
+        }
+      },
+      "decision_answer": {
+        "probabilities": {
+          "yes": 1.0
+        }
+      }
+    },
+    "t3": {
+      "target": {
+        "probabilities": {
+          "i1": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "support": 1.0
+        }
+      },
+      "alternative": {
+        "probabilities": {
+          "additional": 1.0
+        }
+      },
+      "shift": {
+        "probabilities": {
+          "no": 1.0
+        }
+      },
+      "relevance": {
+        "probabilities": {
+          "on": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "decide": 1.0
+        }
+      },
+      "correction": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "trigger": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "parent": {
+        "probabilities": {
+          "focus": 1.0
+        }
+      },
+      "response_to": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "switch": {
+        "probabilities": {
+          "default": 1.0
+        }
+      },
+      "decision_answer": {
+        "probabilities": {
+          "yes": 1.0
+        }
+      }
+    },
+    "t4": {
+      "target": {
+        "probabilities": {
+          "i1": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "support": 1.0
+        }
+      },
+      "alternative": {
+        "probabilities": {
+          "additional": 1.0
+        }
+      },
+      "shift": {
+        "probabilities": {
+          "no": 1.0
+        }
+      },
+      "relevance": {
+        "probabilities": {
+          "on": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "correction": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "trigger": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "parent": {
+        "probabilities": {
+          "focus": 1.0
+        }
+      },
+      "response_to": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "switch": {
+        "probabilities": {
+          "default": 1.0
+        }
+      },
+      "decision_answer": {
+        "probabilities": {
+          "yes": 1.0
+        }
+      }
+    },
+    "t6": {
+      "target": {
+        "probabilities": {
+          "new_position": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "alternative": {
+        "probabilities": {
+          "alternative": 1.0
+        }
+      },
+      "shift": {
+        "probabilities": {
+          "no": 1.0
+        }
+      },
+      "relevance": {
+        "probabilities": {
+          "on": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "correction": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "trigger": {
+        "probabilities": {
+          "proposal": 1.0
+        }
+      },
+      "parent": {
+        "probabilities": {
+          "i1": 1.0
+        }
+      },
+      "response_to": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "switch": {
+        "probabilities": {
+          "default": 1.0
+        }
+      },
+      "decision_answer": {
+        "probabilities": {
+          "yes": 1.0
+        }
+      }
+    },
+    "t7": {
+      "target": {
+        "probabilities": {
+          "new_position": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "support": 1.0
+        }
+      },
+      "alternative": {
+        "probabilities": {
+          "additional": 1.0
+        }
+      },
+      "shift": {
+        "probabilities": {
+          "no": 1.0
+        }
+      },
+      "relevance": {
+        "probabilities": {
+          "on": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "correction": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "trigger": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "parent": {
+        "probabilities": {
+          "focus": 1.0
+        }
+      },
+      "response_to": {
+        "probabilities": {
+          "pending:t6": 1.0
+        }
+      },
+      "switch": {
+        "probabilities": {
+          "default": 1.0
+        }
+      },
+      "decision_answer": {
+        "probabilities": {
+          "yes": 1.0
+        }
+      }
+    },
+    "t8": {
+      "target": {
+        "probabilities": {
+          "p3": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "support": 1.0
+        }
+      },
+      "alternative": {
+        "probabilities": {
+          "additional": 1.0
+        }
+      },
+      "shift": {
+        "probabilities": {
+          "no": 1.0
+        }
+      },
+      "relevance": {
+        "probabilities": {
+          "on": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "decide": 1.0
+        }
+      },
+      "correction": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "trigger": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "parent": {
+        "probabilities": {
+          "focus": 1.0
+        }
+      },
+      "response_to": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "switch": {
+        "probabilities": {
+          "default": 1.0
+        }
+      },
+      "decision_answer": {
+        "probabilities": {
+          "yes": 1.0
+        }
+      }
+    },
+    "t9": {
+      "target": {
+        "probabilities": {
+          "p3": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "concern": 1.0
+        }
+      },
+      "alternative": {
+        "probabilities": {
+          "additional": 1.0
+        }
+      },
+      "shift": {
+        "probabilities": {
+          "no": 1.0
+        }
+      },
+      "relevance": {
+        "probabilities": {
+          "on": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "correction": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "trigger": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "parent": {
+        "probabilities": {
+          "focus": 1.0
+        }
+      },
+      "response_to": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "switch": {
+        "probabilities": {
+          "default": 1.0
+        }
+      },
+      "decision_answer": {
+        "probabilities": {
+          "yes": 1.0
+        }
+      }
+    },
+    "t11": {
+      "target": {
+        "probabilities": {
+          "p3": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "alternative": {
+        "probabilities": {
+          "additional": 1.0
+        }
+      },
+      "shift": {
+        "probabilities": {
+          "no": 1.0
+        }
+      },
+      "relevance": {
+        "probabilities": {
+          "on": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "object": 1.0
+        }
+      },
+      "correction": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "trigger": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "parent": {
+        "probabilities": {
+          "focus": 1.0
+        }
+      },
+      "response_to": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "switch": {
+        "probabilities": {
+          "default": 1.0
+        }
+      },
+      "decision_answer": {
+        "probabilities": {
+          "yes": 1.0
+        }
+      }
+    },
+    "t12": {
+      "target": {
+        "probabilities": {
+          "i1": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "alternative": {
+        "probabilities": {
+          "additional": 1.0
+        }
+      },
+      "shift": {
+        "probabilities": {
+          "no": 1.0
+        }
+      },
+      "relevance": {
+        "probabilities": {
+          "on": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "hold": 1.0
+        }
+      },
+      "correction": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "trigger": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "parent": {
+        "probabilities": {
+          "focus": 1.0
+        }
+      },
+      "response_to": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "switch": {
+        "probabilities": {
+          "default": 1.0
+        }
+      },
+      "decision_answer": {
+        "probabilities": {
+          "yes": 1.0
+        }
+      }
+    },
+    "t13": {
+      "target": {
+        "probabilities": {
+          "i1": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "alternative": {
+        "probabilities": {
+          "additional": 1.0
+        }
+      },
+      "shift": {
+        "probabilities": {
+          "no": 1.0
+        }
+      },
+      "relevance": {
+        "probabilities": {
+          "on": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "withdraw": 1.0
+        }
+      },
+      "correction": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "trigger": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "parent": {
+        "probabilities": {
+          "focus": 1.0
+        }
+      },
+      "response_to": {
+        "probabilities": {
+          "none": 1.0
+        }
+      },
+      "switch": {
+        "probabilities": {
+          "default": 1.0
+        }
+      },
+      "decision_answer": {
+        "probabilities": {
+          "yes": 1.0
+        }
+      }
+    }
+  },
+  "labels": {
+    "t1": {
+      "issue": {
+        "label": "紙に切り替えるか？",
+        "answer_type": "yes_no",
+        "original_position": "紙"
+      }
+    },
+    "t6": {
+      "upgrade": {
+        "label": "ストローを何にするか？",
+        "answer_type": "choice",
+        "original_position": ""
+      },
+      "position": {
+        "label": "バイオ",
+        "answer_type": "open",
+        "original_position": ""
+      }
+    }
+  },
+  "expected": {
+    "focus_id": "i1",
+    "nodes": [
+      {
+        "id": "root",
+        "kind": "issue",
+        "label": "学食の環境対策",
+        "parent_id": null,
+        "status": "open",
+        "answer_type": "open",
+        "decided_answer": null,
+        "stances": {}
+      },
+      {
+        "id": "i1",
+        "kind": "issue",
+        "label": "ストローを何にするか？",
+        "parent_id": "root",
+        "status": "withdrawn",
+        "answer_type": "choice",
+        "decided_answer": null,
+        "stances": {}
+      },
+      {
+        "id": "p2",
+        "kind": "position",
+        "label": "紙",
+        "parent_id": "i1",
+        "status": "proposed",
+        "answer_type": null,
+        "decided_answer": null,
+        "stances": {}
+      },
+      {
+        "id": "p3",
+        "kind": "position",
+        "label": "バイオ",
+        "parent_id": "i1",
+        "status": "proposed",
+        "answer_type": null,
+        "decided_answer": null,
+        "stances": {
+          "A": {
+            "value": "support",
+            "name": "A"
+          },
+          "B": {
+            "value": "concern",
+            "name": "B"
+          }
+        }
+      }
+    ]
+  },
+  "checkpoints": {
+    "t4": {
+      "focus_id": "i1",
+      "nodes": [
+        {
+          "id": "root",
+          "kind": "issue",
+          "label": "学食の環境対策",
+          "parent_id": null,
+          "status": "open",
+          "answer_type": "open",
+          "decided_answer": null,
+          "stances": {}
+        },
+        {
+          "id": "i1",
+          "kind": "issue",
+          "label": "紙に切り替えるか？",
+          "parent_id": "root",
+          "status": "open",
+          "answer_type": "yes_no",
+          "decided_answer": null,
+          "stances": {
+            "A": {
+              "value": "support",
+              "name": "A"
+            },
+            "B": {
+              "value": "support",
+              "name": "B"
+            }
+          }
+        }
+      ]
+    },
+    "t5": {
+      "focus_id": "i1",
+      "nodes": [
+        {
+          "id": "root",
+          "kind": "issue",
+          "label": "学食の環境対策",
+          "parent_id": null,
+          "status": "open",
+          "answer_type": "open",
+          "decided_answer": null,
+          "stances": {}
+        },
+        {
+          "id": "i1",
+          "kind": "issue",
+          "label": "紙に切り替えるか？",
+          "parent_id": "root",
+          "status": "decided",
+          "answer_type": "yes_no",
+          "decided_answer": "yes",
+          "stances": {
+            "A": {
+              "value": "support",
+              "name": "A"
+            },
+            "B": {
+              "value": "support",
+              "name": "B"
+            }
+          }
+        }
+      ]
+    },
+    "t6": {
+      "focus_id": "i1",
+      "nodes": [
+        {
+          "id": "root",
+          "kind": "issue",
+          "label": "学食の環境対策",
+          "parent_id": null,
+          "status": "open",
+          "answer_type": "open",
+          "decided_answer": null,
+          "stances": {}
+        },
+        {
+          "id": "i1",
+          "kind": "issue",
+          "label": "紙に切り替えるか？",
+          "parent_id": "root",
+          "status": "decided",
+          "answer_type": "yes_no",
+          "decided_answer": "yes",
+          "stances": {
+            "A": {
+              "value": "support",
+              "name": "A"
+            },
+            "B": {
+              "value": "support",
+              "name": "B"
+            }
+          }
+        }
+      ]
+    },
+    "t7": {
+      "focus_id": "i1",
+      "nodes": [
+        {
+          "id": "root",
+          "kind": "issue",
+          "label": "学食の環境対策",
+          "parent_id": null,
+          "status": "open",
+          "answer_type": "open",
+          "decided_answer": null,
+          "stances": {}
+        },
+        {
+          "id": "i1",
+          "kind": "issue",
+          "label": "ストローを何にするか？",
+          "parent_id": "root",
+          "status": "open",
+          "answer_type": "choice",
+          "decided_answer": null,
+          "stances": {}
+        },
+        {
+          "id": "p2",
+          "kind": "position",
+          "label": "紙",
+          "parent_id": "i1",
+          "status": "proposed",
+          "answer_type": null,
+          "decided_answer": null,
+          "stances": {}
+        },
+        {
+          "id": "p3",
+          "kind": "position",
+          "label": "バイオ",
+          "parent_id": "i1",
+          "status": "proposed",
+          "answer_type": null,
+          "decided_answer": null,
+          "stances": {
+            "A": {
+              "value": "support",
+              "name": "A"
+            },
+            "B": {
+              "value": "support",
+              "name": "B"
+            }
+          }
+        }
+      ]
+    },
+    "t10": {
+      "focus_id": "i1",
+      "nodes": [
+        {
+          "id": "root",
+          "kind": "issue",
+          "label": "学食の環境対策",
+          "parent_id": null,
+          "status": "open",
+          "answer_type": "open",
+          "decided_answer": null,
+          "stances": {}
+        },
+        {
+          "id": "i1",
+          "kind": "issue",
+          "label": "ストローを何にするか？",
+          "parent_id": "root",
+          "status": "open",
+          "answer_type": "choice",
+          "decided_answer": null,
+          "stances": {}
+        },
+        {
+          "id": "p2",
+          "kind": "position",
+          "label": "紙",
+          "parent_id": "i1",
+          "status": "proposed",
+          "answer_type": null,
+          "decided_answer": null,
+          "stances": {}
+        },
+        {
+          "id": "p3",
+          "kind": "position",
+          "label": "バイオ",
+          "parent_id": "i1",
+          "status": "proposed",
+          "answer_type": null,
+          "decided_answer": null,
+          "stances": {
+            "A": {
+              "value": "support",
+              "name": "A"
+            },
+            "B": {
+              "value": "concern",
+              "name": "B"
+            }
+          }
+        }
+      ]
+    },
+    "t12": {
+      "focus_id": "i1",
+      "nodes": [
+        {
+          "id": "root",
+          "kind": "issue",
+          "label": "学食の環境対策",
+          "parent_id": null,
+          "status": "open",
+          "answer_type": "open",
+          "decided_answer": null,
+          "stances": {}
+        },
+        {
+          "id": "i1",
+          "kind": "issue",
+          "label": "ストローを何にするか？",
+          "parent_id": "root",
+          "status": "held",
+          "answer_type": "choice",
+          "decided_answer": null,
+          "stances": {}
+        },
+        {
+          "id": "p2",
+          "kind": "position",
+          "label": "紙",
+          "parent_id": "i1",
+          "status": "proposed",
+          "answer_type": null,
+          "decided_answer": null,
+          "stances": {}
+        },
+        {
+          "id": "p3",
+          "kind": "position",
+          "label": "バイオ",
+          "parent_id": "i1",
+          "status": "proposed",
+          "answer_type": null,
+          "decided_answer": null,
+          "stances": {
+            "A": {
+              "value": "support",
+              "name": "A"
+            },
+            "B": {
+              "value": "concern",
+              "name": "B"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

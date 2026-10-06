@@ -1,0 +1,13 @@
+{"turn_id": "t1", "speaker": "A", "text": "紙に切り替えるかを話し合おう？", "ms": 1000, "end_ms": 2000}
+{"turn_id": "t2", "speaker": "B", "text": "紙の件について話を続けましょう", "ms": 11000, "end_ms": 12000}
+{"turn_id": "t3", "speaker": "A", "text": "じゃあ紙に切り替えると決定しよう", "ms": 14000, "end_ms": 15000}
+{"turn_id": "t4", "speaker": "B", "text": "その決定に賛成します", "ms": 17000, "end_ms": 18000}
+{"turn_id": "t5", "speaker": "C", "text": "", "ms": 25000, "end_ms": 26000}
+{"turn_id": "t6", "speaker": "A", "text": "決定したけど紙じゃなくてバイオでは？", "ms": 29000, "end_ms": 30000}
+{"turn_id": "t7", "speaker": "B", "text": "バイオに変えることに賛成です", "ms": 33000, "end_ms": 34000}
+{"turn_id": "t8", "speaker": "A", "text": "バイオで決定しよう", "ms": 39000, "end_ms": 40000}
+{"turn_id": "t9", "speaker": "B", "text": "そうですね、ただ耐久性が心配です", "ms": 41000, "end_ms": 42000}
+{"turn_id": "t10", "speaker": "C", "text": "", "ms": 50000, "end_ms": 51000}
+{"turn_id": "t11", "speaker": "B", "text": "その決定には異議があります", "ms": 53000, "end_ms": 54000}
+{"turn_id": "t12", "speaker": "A", "text": "この件は持ち帰りにしよう", "ms": 57000, "end_ms": 58000}
+{"turn_id": "t13", "speaker": "A", "text": "この案は取り下げます", "ms": 61000, "end_ms": 62000}
