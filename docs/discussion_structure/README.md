@@ -56,7 +56,8 @@ docs/discussion_structure/
 |---|---|
 | [2026-10-06_offline_prototype.md](work/2026-10-06_offline_prototype.md) | オフライン試作（議事録の再生から木を作る）。完了（報告: [report](work/2026-10-06_offline_prototype_report.md)） |
 | [2026-10-06_rules_update.md](work/2026-10-06_rules_update.md) | 試作の規則を 2026-10-06 の決定に合わせる。完了（報告: [report](work/2026-10-06_rules_update_report.md)） |
-| [2026-10-06_rules_update2.md](work/2026-10-06_rules_update2.md) | 試作の規則の追加更新（決定の対称化ほか） |
+| [2026-10-06_rules_update2.md](work/2026-10-06_rules_update2.md) | 試作の規則の追加更新（決定の対称化ほか）。完了（報告: [report](work/2026-10-06_rules_update2_report.md)） |
+| [2026-10-06_rules_update3.md](work/2026-10-06_rules_update3.md) | 決定者本人の決定の発話を本人の同意として扱う |
 
 ## 読む順番
 
