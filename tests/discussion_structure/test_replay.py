@@ -349,7 +349,7 @@ def test_scripted_suite_produces_aggregate_report(tmp_path):
     from das.discussion_structure.compare import run_suite
 
     summary = run_suite(FIXTURES, tmp_path, backend="scripted")
-    assert len(summary["completed"]) == 5
+    assert len(summary["completed"]) == len(SCENARIOS)
     assert summary["failure"] is None
     assert summary["api_cost_usd"] == 0
     assert all(row["accuracy"] == 1 for row in summary["agreement_by_item"].values())

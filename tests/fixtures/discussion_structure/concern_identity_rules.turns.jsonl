@@ -1,0 +1,17 @@
+{"turn_id": "t1", "speaker": "A", "text": "紙を導入するか？", "ms": 1000, "end_ms": 2000, "speaker_key": "a"}
+{"turn_id": "t2", "speaker": "A", "text": "紙に賛成です", "ms": 11000, "end_ms": 12000, "speaker_key": "a"}
+{"turn_id": "t3", "speaker": "B", "text": "費用が心配です", "ms": 12000, "end_ms": 13000, "speaker_key": "b"}
+{"turn_id": "t4", "speaker": "C", "text": "耐久性が心配です", "ms": 13000, "end_ms": 14000, "speaker_key": "c"}
+{"turn_id": "t5", "speaker": "D", "text": "費用は補助金で対応できますか？", "ms": 14000, "end_ms": 15000, "speaker_key": "d"}
+{"turn_id": "t6", "speaker": "C", "text": "耐久性は大丈夫です", "ms": 15000, "end_ms": 16000, "speaker_key": "c"}
+{"turn_id": "t7", "speaker": "C", "text": "やはり耐久性に懸念があります", "ms": 16000, "end_ms": 17000, "speaker_key": "c"}
+{"turn_id": "t8", "speaker": "A", "text": "紙を導入しないと決定しよう", "ms": 17000, "end_ms": 18000, "speaker_key": "a"}
+{"turn_id": "t9", "speaker": "A", "text": "", "ms": 28000, "end_ms": 29000}
+{"turn_id": "t10", "speaker": "D", "text": "しない決定に同意します", "ms": 29000, "end_ms": 30000, "speaker_key": "d"}
+{"turn_id": "t11", "speaker": "A", "text": "さっきの決定を再検討しよう", "ms": 30000, "end_ms": 31000, "speaker_key": "a"}
+{"turn_id": "t12", "speaker": "未確定", "text": "決定を再検討しましょう", "ms": 31000, "end_ms": 32000, "unsure": true}
+{"turn_id": "t13", "speaker": "A", "text": "", "ms": 90000, "end_ms": 91000}
+{"turn_id": "t14", "speaker": "A", "text": "もう一度決定を再検討しよう", "ms": 91000, "end_ms": 92000, "speaker_key": "a"}
+{"turn_id": "t15", "speaker": "未確定", "text": "決定を再検討しましょう", "ms": 92000, "end_ms": 93000, "unsure": true, "speaker_key": "e"}
+{"turn_id": "t16", "speaker": "E", "text": "紙の導入に賛成です", "ms": 93000, "end_ms": 94000, "speaker_key": "x", "speaker_confidence": 0.49}
+{"turn_id": "t17", "speaker": "E", "text": "引き続き紙について検討しよう", "ms": 94000, "end_ms": 95000, "speaker_key": "x", "speaker_confidence": 0.5}

@@ -241,6 +241,7 @@ def test_stubbed_openai_replay_writes_all_outputs(tmp_path):
         "parent": "root",
         "response_to": "none",
         "switch": "default",
+        "agreement": "no",
         "decision_answer": "yes",
     }
 
@@ -261,4 +262,4 @@ def test_stubbed_openai_replay_writes_all_outputs(tmp_path):
     )
     assert tracker.tree.nodes["i1"].label == "費用をどう賄うか？"
     assert len(list((tmp_path / "out").iterdir())) == 4
-    assert transport.calls == 13
+    assert transport.calls == 14

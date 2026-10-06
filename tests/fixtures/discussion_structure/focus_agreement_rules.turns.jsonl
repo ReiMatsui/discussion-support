@@ -1,0 +1,14 @@
+{"turn_id": "t1", "speaker": "A", "text": "紙を導入するか？", "ms": 1000, "end_ms": 2000}
+{"turn_id": "t2", "speaker": "B", "text": "紙の導入に賛成です", "ms": 11000, "end_ms": 12000}
+{"turn_id": "t3", "speaker": "A", "text": "紙の導入で決定します", "ms": 14000, "end_ms": 15000}
+{"turn_id": "t4", "speaker": "A", "text": "", "ms": 25000, "end_ms": 26000}
+{"turn_id": "t5", "speaker": "B", "text": "回収制を導入するか？", "ms": 29000, "end_ms": 30000}
+{"turn_id": "t6", "speaker": "B", "text": "回収制に賛成です", "ms": 39000, "end_ms": 40000}
+{"turn_id": "t7", "speaker": "B", "text": "回収制で決定します", "ms": 40000, "end_ms": 41000}
+{"turn_id": "t8", "speaker": "A", "text": "", "ms": 51000, "end_ms": 52000}
+{"turn_id": "t9", "speaker": "C", "text": "告知はどうするか？", "ms": 52000, "end_ms": 53000}
+{"turn_id": "t10", "speaker": "C", "text": "告知について話しましょう", "ms": 62000, "end_ms": 63000}
+{"turn_id": "t11", "speaker": "A", "text": "回収制の話に戻します", "ms": 63000, "end_ms": 64000}
+{"turn_id": "t12", "speaker": "A", "text": "回収制について検討しよう", "ms": 73000, "end_ms": 74000}
+{"turn_id": "t13", "speaker": "A", "text": "回収制で決定します", "ms": 74000, "end_ms": 75000}
+{"turn_id": "t14", "speaker": "A", "text": "", "ms": 85000, "end_ms": 86000}

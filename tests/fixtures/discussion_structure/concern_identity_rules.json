@@ -1,0 +1,606 @@
+{
+  "name": "concern_identity_rules",
+  "agenda": "学食の環境対策",
+  "scenes": [
+    "懸念2件をまとめる",
+    "応答で未応答だけ消す",
+    "本人の立場変更",
+    "しない決定は後の明示同意のみ",
+    "決定で未応答を終了",
+    "蒸し返し60秒失効",
+    "未確定話者の応答",
+    "名前の閾値と後の確定"
+  ],
+  "turns": [
+    {
+      "turn_id": "t1",
+      "speaker": "A",
+      "text": "紙を導入するか？",
+      "ms": 1000,
+      "end_ms": 2000,
+      "speaker_key": "a"
+    },
+    {
+      "turn_id": "t2",
+      "speaker": "A",
+      "text": "紙に賛成です",
+      "ms": 11000,
+      "end_ms": 12000,
+      "speaker_key": "a"
+    },
+    {
+      "turn_id": "t3",
+      "speaker": "B",
+      "text": "費用が心配です",
+      "ms": 12000,
+      "end_ms": 13000,
+      "speaker_key": "b"
+    },
+    {
+      "turn_id": "t4",
+      "speaker": "C",
+      "text": "耐久性が心配です",
+      "ms": 13000,
+      "end_ms": 14000,
+      "speaker_key": "c"
+    },
+    {
+      "turn_id": "t5",
+      "speaker": "D",
+      "text": "費用は補助金で対応できますか？",
+      "ms": 14000,
+      "end_ms": 15000,
+      "speaker_key": "d"
+    },
+    {
+      "turn_id": "t6",
+      "speaker": "C",
+      "text": "耐久性は大丈夫です",
+      "ms": 15000,
+      "end_ms": 16000,
+      "speaker_key": "c"
+    },
+    {
+      "turn_id": "t7",
+      "speaker": "C",
+      "text": "やはり耐久性に懸念があります",
+      "ms": 16000,
+      "end_ms": 17000,
+      "speaker_key": "c"
+    },
+    {
+      "turn_id": "t8",
+      "speaker": "A",
+      "text": "紙を導入しないと決定しよう",
+      "ms": 17000,
+      "end_ms": 18000,
+      "speaker_key": "a"
+    },
+    {
+      "turn_id": "t9",
+      "speaker": "A",
+      "text": "",
+      "ms": 28000,
+      "end_ms": 29000
+    },
+    {
+      "turn_id": "t10",
+      "speaker": "D",
+      "text": "しない決定に同意します",
+      "ms": 29000,
+      "end_ms": 30000,
+      "speaker_key": "d"
+    },
+    {
+      "turn_id": "t11",
+      "speaker": "A",
+      "text": "さっきの決定を再検討しよう",
+      "ms": 30000,
+      "end_ms": 31000,
+      "speaker_key": "a"
+    },
+    {
+      "turn_id": "t12",
+      "speaker": "未確定",
+      "text": "決定を再検討しましょう",
+      "ms": 31000,
+      "end_ms": 32000,
+      "unsure": true
+    },
+    {
+      "turn_id": "t13",
+      "speaker": "A",
+      "text": "",
+      "ms": 90000,
+      "end_ms": 91000
+    },
+    {
+      "turn_id": "t14",
+      "speaker": "A",
+      "text": "もう一度決定を再検討しよう",
+      "ms": 91000,
+      "end_ms": 92000,
+      "speaker_key": "a"
+    },
+    {
+      "turn_id": "t15",
+      "speaker": "未確定",
+      "text": "決定を再検討しましょう",
+      "ms": 92000,
+      "end_ms": 93000,
+      "unsure": true,
+      "speaker_key": "e"
+    },
+    {
+      "turn_id": "t16",
+      "speaker": "E",
+      "text": "紙の導入に賛成です",
+      "ms": 93000,
+      "end_ms": 94000,
+      "speaker_key": "x",
+      "speaker_confidence": 0.49
+    },
+    {
+      "turn_id": "t17",
+      "speaker": "E",
+      "text": "引き続き紙について検討しよう",
+      "ms": 94000,
+      "end_ms": 95000,
+      "speaker_key": "x",
+      "speaker_confidence": 0.5
+    }
+  ],
+  "judgements": {
+    "t1": {
+      "target": {
+        "probabilities": {
+          "new_issue": 1.0
+        }
+      },
+      "trigger": {
+        "probabilities": {
+          "explicit": 1.0
+        }
+      },
+      "parent": {
+        "probabilities": {
+          "root": 1.0
+        }
+      }
+    },
+    "t2": {
+      "target": {
+        "probabilities": {
+          "i1": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "support": 1.0
+        }
+      }
+    },
+    "t3": {
+      "target": {
+        "probabilities": {
+          "i1": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "concern": 1.0
+        }
+      }
+    },
+    "t4": {
+      "target": {
+        "probabilities": {
+          "i1": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "concern": 1.0
+        }
+      }
+    },
+    "t5": {
+      "target": {
+        "probabilities": {
+          "i1": 1.0
+        }
+      },
+      "response_to": {
+        "probabilities": {
+          "pending:t3": 1.0
+        }
+      }
+    },
+    "t6": {
+      "target": {
+        "probabilities": {
+          "i1": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "support": 1.0
+        }
+      }
+    },
+    "t7": {
+      "target": {
+        "probabilities": {
+          "i1": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "concern": 1.0
+        }
+      }
+    },
+    "t8": {
+      "target": {
+        "probabilities": {
+          "i1": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "decide": 1.0
+        }
+      },
+      "decision_answer": {
+        "probabilities": {
+          "no": 1.0
+        }
+      }
+    },
+    "t10": {
+      "target": {
+        "probabilities": {
+          "i1": 1.0
+        }
+      },
+      "agreement": {
+        "probabilities": {
+          "yes": 1.0
+        }
+      }
+    },
+    "t11": {
+      "target": {
+        "probabilities": {
+          "i1": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "reopen": 1.0
+        }
+      }
+    },
+    "t12": {
+      "target": {
+        "probabilities": {
+          "i1": 1.0
+        }
+      },
+      "response_to": {
+        "probabilities": {
+          "pending:t11": 1.0
+        }
+      }
+    },
+    "t14": {
+      "target": {
+        "probabilities": {
+          "i1": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "reopen": 1.0
+        }
+      }
+    },
+    "t15": {
+      "target": {
+        "probabilities": {
+          "i1": 1.0
+        }
+      },
+      "response_to": {
+        "probabilities": {
+          "pending:t14": 1.0
+        }
+      }
+    },
+    "t16": {
+      "target": {
+        "probabilities": {
+          "i1": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "support": 1.0
+        }
+      }
+    },
+    "t17": {
+      "target": {
+        "probabilities": {
+          "i1": 1.0
+        }
+      }
+    }
+  },
+  "labels": {
+    "t1": {
+      "issue": {
+        "label": "紙を導入するか？",
+        "answer_type": "yes_no",
+        "original_position": "紙"
+      }
+    },
+    "t5": {
+      "issue": {
+        "label": "費用は問題ないか？",
+        "answer_type": "yes_no",
+        "original_position": "費用"
+      }
+    }
+  },
+  "expected": {
+    "focus_id": "i1",
+    "nodes": [
+      {
+        "id": "root",
+        "kind": "issue",
+        "label": "学食の環境対策",
+        "parent_id": null,
+        "status": "open",
+        "answer_type": "open",
+        "decided_answer": null,
+        "stances": {}
+      },
+      {
+        "id": "i1",
+        "kind": "issue",
+        "label": "紙を導入するか？",
+        "parent_id": "root",
+        "status": "open",
+        "answer_type": "yes_no",
+        "decided_answer": null,
+        "stances": {
+          "cluster:a": {
+            "value": "support",
+            "name": "A"
+          },
+          "cluster:b": {
+            "value": "concern",
+            "name": "B"
+          },
+          "cluster:c": {
+            "value": "concern",
+            "name": "C"
+          },
+          "cluster:x": {
+            "value": "support",
+            "name": "E"
+          }
+        }
+      },
+      {
+        "id": "i2",
+        "kind": "issue",
+        "label": "費用は問題ないか？",
+        "parent_id": "i1",
+        "status": "open",
+        "answer_type": "yes_no",
+        "decided_answer": null,
+        "stances": {}
+      }
+    ]
+  },
+  "checkpoints": {
+    "t9": {
+      "focus_id": "i1",
+      "nodes": [
+        {
+          "id": "root",
+          "kind": "issue",
+          "label": "学食の環境対策",
+          "parent_id": null,
+          "status": "open",
+          "answer_type": "open",
+          "decided_answer": null,
+          "stances": {}
+        },
+        {
+          "id": "i1",
+          "kind": "issue",
+          "label": "紙を導入するか？",
+          "parent_id": "root",
+          "status": "open",
+          "answer_type": "yes_no",
+          "decided_answer": null,
+          "stances": {
+            "cluster:a": {
+              "value": "support",
+              "name": "A"
+            },
+            "cluster:b": {
+              "value": "concern",
+              "name": "B"
+            },
+            "cluster:c": {
+              "value": "concern",
+              "name": "C"
+            }
+          }
+        },
+        {
+          "id": "i2",
+          "kind": "issue",
+          "label": "費用は問題ないか？",
+          "parent_id": "i1",
+          "status": "open",
+          "answer_type": "yes_no",
+          "decided_answer": null,
+          "stances": {}
+        }
+      ]
+    },
+    "t10": {
+      "focus_id": "i1",
+      "nodes": [
+        {
+          "id": "root",
+          "kind": "issue",
+          "label": "学食の環境対策",
+          "parent_id": null,
+          "status": "open",
+          "answer_type": "open",
+          "decided_answer": null,
+          "stances": {}
+        },
+        {
+          "id": "i1",
+          "kind": "issue",
+          "label": "紙を導入するか？",
+          "parent_id": "root",
+          "status": "decided",
+          "answer_type": "yes_no",
+          "decided_answer": "no",
+          "stances": {
+            "cluster:a": {
+              "value": "support",
+              "name": "A"
+            },
+            "cluster:b": {
+              "value": "concern",
+              "name": "B"
+            },
+            "cluster:c": {
+              "value": "concern",
+              "name": "C"
+            }
+          }
+        },
+        {
+          "id": "i2",
+          "kind": "issue",
+          "label": "費用は問題ないか？",
+          "parent_id": "i1",
+          "status": "open",
+          "answer_type": "yes_no",
+          "decided_answer": null,
+          "stances": {}
+        }
+      ]
+    },
+    "t13": {
+      "focus_id": "i1",
+      "nodes": [
+        {
+          "id": "root",
+          "kind": "issue",
+          "label": "学食の環境対策",
+          "parent_id": null,
+          "status": "open",
+          "answer_type": "open",
+          "decided_answer": null,
+          "stances": {}
+        },
+        {
+          "id": "i1",
+          "kind": "issue",
+          "label": "紙を導入するか？",
+          "parent_id": "root",
+          "status": "decided",
+          "answer_type": "yes_no",
+          "decided_answer": "no",
+          "stances": {
+            "cluster:a": {
+              "value": "support",
+              "name": "A"
+            },
+            "cluster:b": {
+              "value": "concern",
+              "name": "B"
+            },
+            "cluster:c": {
+              "value": "concern",
+              "name": "C"
+            }
+          }
+        },
+        {
+          "id": "i2",
+          "kind": "issue",
+          "label": "費用は問題ないか？",
+          "parent_id": "i1",
+          "status": "open",
+          "answer_type": "yes_no",
+          "decided_answer": null,
+          "stances": {}
+        }
+      ]
+    },
+    "t16": {
+      "focus_id": "i1",
+      "nodes": [
+        {
+          "id": "root",
+          "kind": "issue",
+          "label": "学食の環境対策",
+          "parent_id": null,
+          "status": "open",
+          "answer_type": "open",
+          "decided_answer": null,
+          "stances": {}
+        },
+        {
+          "id": "i1",
+          "kind": "issue",
+          "label": "紙を導入するか？",
+          "parent_id": "root",
+          "status": "open",
+          "answer_type": "yes_no",
+          "decided_answer": null,
+          "stances": {
+            "cluster:a": {
+              "value": "support",
+              "name": "A"
+            },
+            "cluster:b": {
+              "value": "concern",
+              "name": "B"
+            },
+            "cluster:c": {
+              "value": "concern",
+              "name": "C"
+            },
+            "cluster:x": {
+              "value": "support",
+              "name": "?"
+            }
+          }
+        },
+        {
+          "id": "i2",
+          "kind": "issue",
+          "label": "費用は問題ないか？",
+          "parent_id": "i1",
+          "status": "open",
+          "answer_type": "yes_no",
+          "decided_answer": null,
+          "stances": {}
+        }
+      ]
+    }
+  }
+}

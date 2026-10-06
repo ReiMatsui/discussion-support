@@ -1,0 +1,402 @@
+{
+  "name": "focus_agreement_rules",
+  "agenda": "学食の環境対策",
+  "scenes": [
+    "同じ焦点区間の前の賛成",
+    "本人の前の賛成を除外",
+    "焦点を離れて戻った場合の古い賛成を除外"
+  ],
+  "turns": [
+    {
+      "turn_id": "t1",
+      "speaker": "A",
+      "text": "紙を導入するか？",
+      "ms": 1000,
+      "end_ms": 2000
+    },
+    {
+      "turn_id": "t2",
+      "speaker": "B",
+      "text": "紙の導入に賛成です",
+      "ms": 11000,
+      "end_ms": 12000
+    },
+    {
+      "turn_id": "t3",
+      "speaker": "A",
+      "text": "紙の導入で決定します",
+      "ms": 14000,
+      "end_ms": 15000
+    },
+    {
+      "turn_id": "t4",
+      "speaker": "A",
+      "text": "",
+      "ms": 25000,
+      "end_ms": 26000
+    },
+    {
+      "turn_id": "t5",
+      "speaker": "B",
+      "text": "回収制を導入するか？",
+      "ms": 29000,
+      "end_ms": 30000
+    },
+    {
+      "turn_id": "t6",
+      "speaker": "B",
+      "text": "回収制に賛成です",
+      "ms": 39000,
+      "end_ms": 40000
+    },
+    {
+      "turn_id": "t7",
+      "speaker": "B",
+      "text": "回収制で決定します",
+      "ms": 40000,
+      "end_ms": 41000
+    },
+    {
+      "turn_id": "t8",
+      "speaker": "A",
+      "text": "",
+      "ms": 51000,
+      "end_ms": 52000
+    },
+    {
+      "turn_id": "t9",
+      "speaker": "C",
+      "text": "告知はどうするか？",
+      "ms": 52000,
+      "end_ms": 53000
+    },
+    {
+      "turn_id": "t10",
+      "speaker": "C",
+      "text": "告知について話しましょう",
+      "ms": 62000,
+      "end_ms": 63000
+    },
+    {
+      "turn_id": "t11",
+      "speaker": "A",
+      "text": "回収制の話に戻します",
+      "ms": 63000,
+      "end_ms": 64000
+    },
+    {
+      "turn_id": "t12",
+      "speaker": "A",
+      "text": "回収制について検討しよう",
+      "ms": 73000,
+      "end_ms": 74000
+    },
+    {
+      "turn_id": "t13",
+      "speaker": "A",
+      "text": "回収制で決定します",
+      "ms": 74000,
+      "end_ms": 75000
+    },
+    {
+      "turn_id": "t14",
+      "speaker": "A",
+      "text": "",
+      "ms": 85000,
+      "end_ms": 86000
+    }
+  ],
+  "judgements": {
+    "t1": {
+      "target": {
+        "probabilities": {
+          "new_issue": 1.0
+        }
+      },
+      "trigger": {
+        "probabilities": {
+          "explicit": 1.0
+        }
+      },
+      "parent": {
+        "probabilities": {
+          "root": 1.0
+        }
+      }
+    },
+    "t2": {
+      "target": {
+        "probabilities": {
+          "i1": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "support": 1.0
+        }
+      }
+    },
+    "t3": {
+      "target": {
+        "probabilities": {
+          "i1": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "decide": 1.0
+        }
+      }
+    },
+    "t5": {
+      "target": {
+        "probabilities": {
+          "new_issue": 1.0
+        }
+      },
+      "trigger": {
+        "probabilities": {
+          "explicit": 1.0
+        }
+      },
+      "parent": {
+        "probabilities": {
+          "root": 1.0
+        }
+      }
+    },
+    "t6": {
+      "target": {
+        "probabilities": {
+          "i2": 1.0
+        }
+      },
+      "stance": {
+        "probabilities": {
+          "support": 1.0
+        }
+      }
+    },
+    "t7": {
+      "target": {
+        "probabilities": {
+          "i2": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "decide": 1.0
+        }
+      }
+    },
+    "t9": {
+      "target": {
+        "probabilities": {
+          "new_issue": 1.0
+        }
+      },
+      "trigger": {
+        "probabilities": {
+          "explicit": 1.0
+        }
+      },
+      "parent": {
+        "probabilities": {
+          "root": 1.0
+        }
+      }
+    },
+    "t10": {
+      "target": {
+        "probabilities": {
+          "i3": 1.0
+        }
+      }
+    },
+    "t11": {
+      "target": {
+        "probabilities": {
+          "i2": 1.0
+        }
+      },
+      "shift": {
+        "probabilities": {
+          "yes": 1.0
+        }
+      }
+    },
+    "t12": {
+      "target": {
+        "probabilities": {
+          "i2": 1.0
+        }
+      }
+    },
+    "t13": {
+      "target": {
+        "probabilities": {
+          "i2": 1.0
+        }
+      },
+      "resolution": {
+        "probabilities": {
+          "decide": 1.0
+        }
+      }
+    }
+  },
+  "labels": {
+    "t1": {
+      "issue": {
+        "label": "紙を導入するか？",
+        "answer_type": "yes_no",
+        "original_position": "紙"
+      }
+    },
+    "t5": {
+      "issue": {
+        "label": "回収制を導入するか？",
+        "answer_type": "yes_no",
+        "original_position": "回収制"
+      }
+    },
+    "t9": {
+      "issue": {
+        "label": "告知はどうするか？",
+        "answer_type": "open"
+      }
+    }
+  },
+  "expected": {
+    "focus_id": "i2",
+    "nodes": [
+      {
+        "id": "root",
+        "kind": "issue",
+        "label": "学食の環境対策",
+        "parent_id": null,
+        "status": "open",
+        "answer_type": "open",
+        "decided_answer": null,
+        "stances": {}
+      },
+      {
+        "id": "i1",
+        "kind": "issue",
+        "label": "紙を導入するか？",
+        "parent_id": "root",
+        "status": "decided",
+        "answer_type": "yes_no",
+        "decided_answer": "yes",
+        "stances": {
+          "B": {
+            "value": "support",
+            "name": "B"
+          }
+        }
+      },
+      {
+        "id": "i2",
+        "kind": "issue",
+        "label": "回収制を導入するか？",
+        "parent_id": "root",
+        "status": "open",
+        "answer_type": "yes_no",
+        "decided_answer": null,
+        "stances": {
+          "B": {
+            "value": "support",
+            "name": "B"
+          }
+        }
+      },
+      {
+        "id": "i3",
+        "kind": "issue",
+        "label": "告知はどうするか？",
+        "parent_id": "root",
+        "status": "open",
+        "answer_type": "open",
+        "decided_answer": null,
+        "stances": {}
+      }
+    ]
+  },
+  "checkpoints": {
+    "t4": {
+      "focus_id": "i1",
+      "nodes": [
+        {
+          "id": "root",
+          "kind": "issue",
+          "label": "学食の環境対策",
+          "parent_id": null,
+          "status": "open",
+          "answer_type": "open",
+          "decided_answer": null,
+          "stances": {}
+        },
+        {
+          "id": "i1",
+          "kind": "issue",
+          "label": "紙を導入するか？",
+          "parent_id": "root",
+          "status": "decided",
+          "answer_type": "yes_no",
+          "decided_answer": "yes",
+          "stances": {
+            "B": {
+              "value": "support",
+              "name": "B"
+            }
+          }
+        }
+      ]
+    },
+    "t8": {
+      "focus_id": "i2",
+      "nodes": [
+        {
+          "id": "root",
+          "kind": "issue",
+          "label": "学食の環境対策",
+          "parent_id": null,
+          "status": "open",
+          "answer_type": "open",
+          "decided_answer": null,
+          "stances": {}
+        },
+        {
+          "id": "i1",
+          "kind": "issue",
+          "label": "紙を導入するか？",
+          "parent_id": "root",
+          "status": "decided",
+          "answer_type": "yes_no",
+          "decided_answer": "yes",
+          "stances": {
+            "B": {
+              "value": "support",
+              "name": "B"
+            }
+          }
+        },
+        {
+          "id": "i2",
+          "kind": "issue",
+          "label": "回収制を導入するか？",
+          "parent_id": "root",
+          "status": "open",
+          "answer_type": "yes_no",
+          "decided_answer": null,
+          "stances": {
+            "B": {
+              "value": "support",
+              "name": "B"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

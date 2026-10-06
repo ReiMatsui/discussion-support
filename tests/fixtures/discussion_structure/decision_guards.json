@@ -551,7 +551,7 @@
       },
       "stance": {
         "probabilities": {
-          "support": 1.0
+          "none": 1.0
         }
       },
       "alternative": {
@@ -600,6 +600,11 @@
         }
       },
       "decision_answer": {
+        "probabilities": {
+          "yes": 1.0
+        }
+      },
+      "agreement": {
         "probabilities": {
           "yes": 1.0
         }
