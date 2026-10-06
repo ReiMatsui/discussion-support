@@ -122,6 +122,7 @@ class ResolutionEvidence(Record):
     target_id: str
     decision_turn: Turn
     agreements: tuple[Turn, ...] = ()
+    explicit_agreements: tuple[Turn, ...] = ()
     summary_confirmation: tuple[Turn, ...] = ()
 
 
@@ -134,6 +135,8 @@ class Issue(Record):
     status: Literal["open", "decided", "held", "withdrawn"] = "open"
     decided_answer: Literal["yes", "no"] | None = None
     resolution_evidence: tuple[ResolutionEvidence, ...] = ()
+    needs_confirmation: bool = False
+    confirmation_reasons: tuple[str, ...] = ()
     stances: dict[str, Stance] = Field(default_factory=dict)
     source_turns: tuple[str, ...] = ()
     original_position: str = ""

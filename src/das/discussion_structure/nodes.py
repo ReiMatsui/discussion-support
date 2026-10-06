@@ -88,7 +88,18 @@ class Nodes:
             if candidate.kind == "concern":
                 node = self.tree.nodes[candidate.target_id]
                 group = grouped.setdefault(
-                    node.id, {"node_id": node.id, "label": node.label, "count": 0, "concerns": []}
+                    node.id,
+                    {
+                        "node_id": node.id,
+                        "label": node.label,
+                        "count": 0,
+                        "concerns": [],
+                        "during_discussion": self.tree.nodes[self.tree.issue_id(node.id)].status
+                        != "held",
+                        "summary_role": "take_home"
+                        if self.tree.nodes[self.tree.issue_id(node.id)].status == "held"
+                        else "unanswered_concern",
+                    },
                 )
                 group["count"] += 1
                 group["concerns"].append(
@@ -286,11 +297,20 @@ class Nodes:
                 self.emit("concern_resolved", candidate_id=response.id, node_id=response.target_id)
             if response.kind == "reopen":
                 issue_id = self.tree.issue_id(response.target_id)
-                self.tree.replace(issue_id, status="open", decided_answer=None)
+                previous_status = self.tree.nodes[issue_id].status
+                self.tree.replace(
+                    issue_id,
+                    status="open",
+                    decided_answer=None,
+                    needs_confirmation=False,
+                    confirmation_reasons=(),
+                )
                 for child in self.tree.children(issue_id):
                     if isinstance(child, Position):
                         self.tree.replace(child.id, status="proposed")
-                self.emit("status_transition", node_id=issue_id, previous="decided", current="open")
+                self.emit(
+                    "status_transition", node_id=issue_id, previous=previous_status, current="open"
+                )
                 target = response.target_id
                 if response.judgement.target.choice == "new_position":
                     target = (
@@ -346,7 +366,7 @@ class Nodes:
             if (
                 judgement.resolution.choice == "reopen"
                 and judgement.resolution.probability >= self.config.resolution_threshold
-                and self.tree.nodes[self.tree.issue_id(target)].status == "decided"
+                and self.tree.nodes[self.tree.issue_id(target)].status in {"decided", "held"}
             ):
                 self.add_pending("reopen", turn, judgement, parent_id, target)
             stances.apply(self.tree, target, turn, judgement, self.config, self.emit)

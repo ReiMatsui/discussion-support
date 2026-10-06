@@ -14,6 +14,7 @@ class Decision:
     answer: str
     flow: int
     agreements: dict[str, Turn] = field(default_factory=dict)
+    explicit_agreements: dict[str, Turn] = field(default_factory=dict)
     objected: bool = False
 
     @property
@@ -27,12 +28,64 @@ class Resolution:
         self.pending: dict[str, Decision] = {}
         self.candidates: dict[str, dict] = {}
         self.flow = 0
+        self.run_issue = None
         self.supports: dict[str, dict[str, Turn]] = {}
 
     def entered_focus(self):
-        # A new focus interval cannot reuse acceptances from an earlier visit.
+        # Pending decisions distinguish display focus visits; observe scopes acceptances.
         self.flow += 1
-        self.supports.clear()
+
+    def observe(self, target):
+        # Display hysteresis does not define the start of a conversation run.
+        issue_id = self.tree.issue_id(target) if target in self.tree.nodes else None
+        if issue_id != self.run_issue:
+            self.supports.clear()
+            self.run_issue = issue_id
+
+    def blockers(self, target_id, answer, since, explicit_agreements):
+        contrary = "concern" if answer == "yes" else "support"
+        consenting = {t.uid for t in explicit_agreements if t.end_ms > since}
+        return [
+            uid
+            for uid, stance in self.tree.nodes[target_id].stances.items()
+            if stance.value == contrary and uid not in consenting
+        ]
+
+    def revalidate(self, issue_ids):
+        for issue in list(self.tree.nodes.values()):
+            if (
+                issue.id not in issue_ids
+                or issue.status != "decided"
+                or not issue.resolution_evidence
+            ):
+                continue
+            evidence = issue.resolution_evidence[-1]
+            if evidence.status != "decided" or evidence.summary_confirmation:
+                continue
+            reasons = []
+            if not any(
+                t.different_person(evidence.decision_turn, self.config.name_threshold)
+                for t in evidence.agreements
+            ):
+                reasons.append("no_independent_agreement")
+            if self.blockers(
+                evidence.target_id,
+                evidence.answer or "yes",
+                evidence.decision_turn.end_ms,
+                evidence.explicit_agreements,
+            ):
+                reasons.append("contrary_stance_without_agreement")
+            if reasons and not issue.needs_confirmation:
+                self.emit("decision_needs_confirmation", issue_id=issue.id, reasons=reasons)
+            # A flag is sticky until a summary confirmation, even if later evidence recovers.
+            if reasons:
+                self.tree.replace(
+                    issue.id,
+                    needs_confirmation=True,
+                    confirmation_reasons=tuple(
+                        dict.fromkeys((*issue.confirmation_reasons, *reasons))
+                    ),
+                )
 
     def upgraded(self, issue_id, original_id):
         if issue_id in self.supports:
@@ -93,10 +146,6 @@ class Resolution:
                 self.pending[issue_id] = decision
                 self.emit("decision_waiting", node_id=issue_id, target_id=target)
         decision = self.pending.get(issue_id)
-        support = (
-            judgement.stance.choice == "support"
-            and judgement.stance.probability >= self.config.stance_threshold
-        )
         if decision:
             if clear and action == "object":
                 decision.objected = True
@@ -104,16 +153,18 @@ class Resolution:
                 self.emit("decision_objected", node_id=issue_id)
             explicit_agreement = (
                 judgement.agreement.choice == "yes"
-                and judgement.agreement.probability >= self.config.resolution_threshold
+                and judgement.agreement.probability >= self.config.stance_threshold
             )
+            if target == decision.target_id and turn.end_ms > decision.since and explicit_agreement:
+                decision.explicit_agreements[turn.uid] = turn
             if (
                 target == decision.target_id
                 and turn.end_ms > decision.since
-                and (explicit_agreement or (decision.answer == "yes" and support))
+                and explicit_agreement
                 and turn.different_person(decision.turn, self.config.name_threshold)
             ):
                 decision.agreements[turn.uid] = turn
-        if issue_id == self.tree.focus_id:
+        if issue_id == self.run_issue:
             # Includes automatic proposer support, but never guesses another person's stance.
             for node in [issue, *self.tree.children(issue_id)]:
                 stance = self.tree.nodes[node.id].stances.get(turn.uid)
@@ -129,20 +180,27 @@ class Resolution:
                 del self.pending[issue_id]
                 continue
             target = self.tree.nodes[decision.target_id]
-            concerns = decision.answer == "yes" and any(
-                s.value == "concern" for s in target.stances.values()
+            concerns = self.blockers(
+                target.id, decision.answer, decision.since, decision.explicit_agreements.values()
+            )
+            reason = (
+                "explicit_with_concern" if decision.answer == "yes" else "explicit_with_support"
             )
             if concerns and not decision.objected:
-                self.candidate(issue_id, decision.target_id, "explicit_with_concern")
+                self.candidate(issue_id, decision.target_id, reason)
             if ms < decision.since + self.config.decision_ms:
                 continue
             if decision.objected:
                 continue
-            if not decision.agreements or concerns:
+            independent = any(
+                t.different_person(decision.turn, self.config.name_threshold)
+                for t in decision.agreements.values()
+            )
+            if not independent or concerns:
                 self.candidate(
                     issue_id,
                     decision.target_id,
-                    "explicit_with_concern" if concerns else "explicit_without_agreement",
+                    reason if concerns else "explicit_without_agreement",
                 )
                 continue
             evidence = ResolutionEvidence(
@@ -151,6 +209,7 @@ class Resolution:
                 target_id=target.id,
                 decision_turn=decision.turn,
                 agreements=tuple(decision.agreements.values()),
+                explicit_agreements=tuple(decision.explicit_agreements.values()),
             )
             self.tree.replace(
                 issue_id,

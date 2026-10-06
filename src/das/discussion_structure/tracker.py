@@ -104,6 +104,7 @@ class Tracker:
                     )
                 )
             if judgement.relevance.choice != "off":
+                self.resolution.observe(target)
                 observation = self.nodes.observation(judgement, target)
                 old = self.focus.update(
                     self.tree, observation, turn, judgement.shift.choice == "yes"
@@ -132,6 +133,7 @@ class Tracker:
         """
         if not confirmed.identified(self.config.name_threshold):
             return
+        changed_issues = set()
         sources = {t.turn_id: t.end_ms for t in self.recent}
         for node in list(self.tree.nodes.values()):
             stances = dict(node.stances)
@@ -151,6 +153,7 @@ class Tracker:
                     updated = collision
                 stances[confirmed.uid] = updated
                 if stances != node.stances:
+                    changed_issues.add(self.tree.issue_id(node.id))
                     self.tree.replace(node.id, stances=stances)
                     self.emit(
                         "stance_identity",
@@ -180,6 +183,8 @@ class Tracker:
             self.nodes.pending[key] = replace(candidate, turn=corrected(candidate.turn))
         for decision in self.resolution.pending.values():
             decision.turn = corrected(decision.turn)
+            consent = [corrected(source) for source in decision.explicit_agreements.values()]
+            decision.explicit_agreements = {t.uid: t for t in consent}
             decision.agreements = {
                 t.uid: t
                 for source in decision.agreements.values()
@@ -195,6 +200,9 @@ class Tracker:
                         update={
                             "decision_turn": corrected(e.decision_turn),
                             "agreements": tuple(corrected(t) for t in e.agreements),
+                            "explicit_agreements": tuple(
+                                corrected(t) for t in e.explicit_agreements
+                            ),
                             "summary_confirmation": tuple(
                                 corrected(t) for t in e.summary_confirmation
                             ),
@@ -202,8 +210,12 @@ class Tracker:
                     )
                     for e in node.resolution_evidence
                 )
-                self.tree.replace(node.id, resolution_evidence=evidence)
+                if evidence != node.resolution_evidence:
+                    changed_issues.add(node.id)
+                    self.tree.replace(node.id, resolution_evidence=evidence)
 
+        if changed_issues:
+            self.resolution.revalidate(changed_issues)
         self.nodes.clean_concerns()
 
     def switch_agenda(self, agenda: str):
@@ -239,6 +251,11 @@ class Tracker:
                 "unanswered_concerns": self.nodes.unanswered_concerns(),
                 "focus_belief": self.focus.belief,
                 "decision_candidates": list(self.resolution.candidates.values()),
+                "decision_confirmations": [
+                    {"issue_id": n.id, "reasons": list(n.confirmation_reasons)}
+                    for n in self.tree.nodes.values()
+                    if isinstance(n, Issue) and n.status == "decided" and n.needs_confirmation
+                ],
                 "decision_pending": [
                     {
                         "issue_id": d.issue_id,
