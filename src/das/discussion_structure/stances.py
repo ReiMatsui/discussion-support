@@ -62,7 +62,7 @@ def apply(
     old = node.stances.get(turn.uid)
     stance = Stance(
         speaker_uid=turn.uid,
-        name="?" if turn.unsure else turn.speaker,
+        name=turn.speaker if turn.identified(config.name_threshold) else "?",
         speaker_confidence=turn.speaker_confidence,
         probability=probability,
         value=value,

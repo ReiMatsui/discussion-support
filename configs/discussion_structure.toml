@@ -6,6 +6,7 @@ stay_prior = 0.8
 shift_stay_prior = 0.45
 observation_chars = 20
 pending_ms = 60000
+name_threshold = 0.5
 stance_threshold = 0.8
 resolution_threshold = 0.8
 identity_margin = 0.05

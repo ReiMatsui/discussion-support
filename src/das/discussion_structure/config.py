@@ -16,6 +16,7 @@ class Config(Record):
     shift_stay_prior: float = Field(default=0.45, gt=0, lt=1)
     observation_chars: int = Field(default=20, gt=0)
     pending_ms: int = Field(default=60000, gt=0)
+    name_threshold: float = Field(default=0.5, ge=0, le=1)
     stance_threshold: float = Field(default=0.8, ge=0, le=1)
     resolution_threshold: float = Field(default=0.8, ge=0, le=1)
     identity_margin: float = Field(default=0.05, ge=0, le=1)

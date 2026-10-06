@@ -30,6 +30,7 @@ QUESTIONS = {
     "response_to": "他者の応答待ち候補/懸念/決定再開のどれに実質的に応答しているか。"
     "単に別案の理由として言及しただけならnone。",
     "switch": "複数案への賛成を残すbothか、明示的乗り換えreplaceか、それ以外defaultか。",
+    "agreement": "決定の内容への明示的な同意か。元の提案への立場とは別。相槌はno。",
     "decision_answer": "是非型の決定内容はyes(する)かno(しない)か。",
 }
 OPTIONS = {
@@ -41,6 +42,7 @@ OPTIONS = {
     "correction": ["self", "merge", "none"],
     "trigger": ["explicit", "proposal", "problem", "concern", "fact", "none"],
     "switch": ["default", "both", "replace"],
+    "agreement": ["yes", "no"],
     "decision_answer": ["yes", "no"],
 }
 

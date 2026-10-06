@@ -22,6 +22,7 @@ class Turn(Record):
     speaker_confidence: float | None = Field(default=None, ge=0, le=1)
     unsure: bool = False
     speaker_uid: str | None = None
+    speaker_key: str | None = None
     role: str = "human"
     backchannel: bool = False
 
@@ -33,7 +34,25 @@ class Turn(Record):
 
     @property
     def uid(self) -> str:
-        return self.speaker_uid or (f"unknown:{self.turn_id}" if self.unsure else self.speaker)
+        return self.speaker_uid or (
+            f"cluster:{self.speaker_key}"
+            if self.speaker_key is not None
+            else f"unknown:{self.turn_id}"
+            if self.unsure
+            else self.speaker
+        )
+
+    def identified(self, threshold: float) -> bool:
+        return not self.unsure and (
+            self.speaker_confidence is None or self.speaker_confidence >= threshold
+        )
+
+    def different_person(self, other: Turn, threshold: float) -> bool:
+        if self.uid == other.uid:
+            return False
+        if self.speaker_key is not None and other.speaker_key is not None:
+            return self.speaker_key != other.speaker_key
+        return self.identified(threshold) and other.identified(threshold)
 
     @property
     def substantive(self) -> bool:
@@ -83,6 +102,7 @@ class Judgement(Record):
     parent: Distribution = Field(default_factory=lambda: certain("focus"))
     response_to: Distribution = Field(default_factory=lambda: certain("none"))
     switch: Distribution = Field(default_factory=lambda: certain("default"))
+    agreement: Distribution = Field(default_factory=lambda: certain("no"))
     decision_answer: Distribution = Field(default_factory=lambda: certain("yes"))
 
 
@@ -96,6 +116,15 @@ class Stance(Record):
     reason: str = ""
 
 
+class ResolutionEvidence(Record):
+    status: Literal["decided", "held", "withdrawn"]
+    answer: Literal["yes", "no"] | None = None
+    target_id: str
+    decision_turn: Turn
+    agreements: tuple[Turn, ...] = ()
+    summary_confirmation: tuple[Turn, ...] = ()
+
+
 class Issue(Record):
     kind: Literal["issue"] = "issue"
     id: str
@@ -104,6 +133,7 @@ class Issue(Record):
     parent_id: str | None
     status: Literal["open", "decided", "held", "withdrawn"] = "open"
     decided_answer: Literal["yes", "no"] | None = None
+    resolution_evidence: tuple[ResolutionEvidence, ...] = ()
     stances: dict[str, Stance] = Field(default_factory=dict)
     source_turns: tuple[str, ...] = ()
     original_position: str = ""

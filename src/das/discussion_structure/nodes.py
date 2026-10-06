@@ -1,6 +1,6 @@
 """Creation, identity, pending responses and atomic yes/no upgrades."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from time import perf_counter
 
 from . import stances
@@ -42,14 +42,65 @@ class Nodes:
 
     def expire(self, ms):
         for key, p in list(self.pending.items()):
-            if p.kind == "implicit" and ms - p.turn.end_ms >= self.config.pending_ms:
+            if p.kind in {"implicit", "reopen"} and ms - p.turn.end_ms >= self.config.pending_ms:
                 del self.pending[key]
                 self.emit("candidate_expired", candidate_id=key)
 
     def add_pending(self, kind, turn, judgement, parent_id, target_id=None):
+        if kind == "concern":
+            for key, candidate in list(self.pending.items()):
+                if (
+                    candidate.kind == "concern"
+                    and candidate.target_id == target_id
+                    and candidate.turn.uid == turn.uid
+                ):
+                    del self.pending[key]
         key = f"pending:{turn.turn_id}"
         self.pending[key] = Pending(key, kind, turn, judgement, parent_id, target_id)
         self.emit("candidate_waiting", candidate_id=key, kind=kind, parent_id=parent_id)
+
+    def clean_concerns(self):
+        newest = {}
+        for candidate in self.pending.values():
+            if candidate.kind == "concern":
+                identity = (candidate.target_id, candidate.turn.uid)
+                previous = newest.get(identity)
+                if previous is None or candidate.turn.end_ms >= previous.turn.end_ms:
+                    newest[identity] = candidate
+        for key, candidate in list(self.pending.items()):
+            if candidate.kind != "concern":
+                continue
+            node = self.tree.nodes[candidate.target_id]
+            issue = self.tree.nodes[self.tree.issue_id(node.id)]
+            stance = node.stances.get(candidate.turn.uid)
+            if (
+                issue.status in {"decided", "withdrawn"}
+                or not stance
+                or stance.value != "concern"
+                or newest[(candidate.target_id, candidate.turn.uid)].id != candidate.id
+            ):
+                del self.pending[key]
+                self.emit("concern_resolved", candidate_id=key, node_id=node.id)
+
+    def unanswered_concerns(self):
+        grouped = {}
+        for candidate in self.pending.values():
+            if candidate.kind == "concern":
+                node = self.tree.nodes[candidate.target_id]
+                group = grouped.setdefault(
+                    node.id, {"node_id": node.id, "label": node.label, "count": 0, "concerns": []}
+                )
+                group["count"] += 1
+                group["concerns"].append(
+                    {
+                        "candidate_id": candidate.id,
+                        "speaker_uid": candidate.turn.uid,
+                        "name": node.stances[candidate.turn.uid].name,
+                        "turn_id": candidate.turn.turn_id,
+                        "text": candidate.turn.text,
+                    }
+                )
+        return list(grouped.values())
 
     def label(self, purpose, source, parent_id, recent):
         context = {
@@ -210,6 +261,9 @@ class Nodes:
                         reason="original proposal concern",
                     )
                 )
+        for key, candidate in list(self.pending.items()):
+            if candidate.kind == "concern" and candidate.target_id == issue_id:
+                self.pending[key] = replace(candidate, parent_id=original_id, target_id=original_id)
         self.emit(
             "issue_upgraded",
             node_id=issue_id,
@@ -226,8 +280,10 @@ class Nodes:
         parent_id = self.parent(judgement)
         target = self.target(judgement)
         response = self.pending.get(judgement.response_to.choice)
-        if response and response.turn.uid != turn.uid:
+        if response and turn.different_person(response.turn, self.config.name_threshold):
             del self.pending[response.id]
+            if response.kind == "concern":
+                self.emit("concern_resolved", candidate_id=response.id, node_id=response.target_id)
             if response.kind == "reopen":
                 issue_id = self.tree.issue_id(response.target_id)
                 self.tree.replace(issue_id, status="open", decided_answer=None)
