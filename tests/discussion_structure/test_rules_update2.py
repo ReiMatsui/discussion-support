@@ -24,8 +24,8 @@ def test_concern_owner_must_explicitly_consent_even_with_another_agreement(answe
     assert t.tree.nodes[target].stances["B"].value == "concern"
 
 
-@pytest.mark.parametrize("owner", ["A", "B"])
-def test_no_decision_requires_supporters_consent_including_decider(owner):
+def test_no_decision_requires_other_supporters_consent():
+    owner = "B"
     t = tracker()
     process(t, turn("support", speaker=owner), judge(stance="support"))
     process(t, turn("concern", ms=2000, speaker="D"), judge(stance="concern"))

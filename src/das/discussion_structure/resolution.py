@@ -42,9 +42,12 @@ class Resolution:
             self.supports.clear()
             self.run_issue = issue_id
 
-    def blockers(self, target_id, answer, since, explicit_agreements):
+    def blockers(self, target_id, answer, decision_turn, explicit_agreements):
         contrary = "concern" if answer == "yes" else "support"
-        consenting = {t.uid for t in explicit_agreements if t.end_ms > since}
+        # The decision itself consents for its speaker without changing their stance.
+        consenting = {decision_turn.uid} | {
+            t.uid for t in explicit_agreements if t.end_ms > decision_turn.end_ms
+        }
         return [
             uid
             for uid, stance in self.tree.nodes[target_id].stances.items()
@@ -71,7 +74,7 @@ class Resolution:
             if self.blockers(
                 evidence.target_id,
                 evidence.answer or "yes",
-                evidence.decision_turn.end_ms,
+                evidence.decision_turn,
                 evidence.explicit_agreements,
             ):
                 reasons.append("contrary_stance_without_agreement")
@@ -181,7 +184,7 @@ class Resolution:
                 continue
             target = self.tree.nodes[decision.target_id]
             concerns = self.blockers(
-                target.id, decision.answer, decision.since, decision.explicit_agreements.values()
+                target.id, decision.answer, decision.turn, decision.explicit_agreements.values()
             )
             reason = (
                 "explicit_with_concern" if decision.answer == "yes" else "explicit_with_support"
@@ -208,6 +211,7 @@ class Resolution:
                 answer=decision.answer if issue.answer_type == "yes_no" else None,
                 target_id=target.id,
                 decision_turn=decision.turn,
+                decision_as_agreement=True,
                 agreements=tuple(decision.agreements.values()),
                 explicit_agreements=tuple(decision.explicit_agreements.values()),
             )

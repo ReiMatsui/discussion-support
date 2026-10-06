@@ -852,9 +852,9 @@
         "kind": "issue",
         "label": "紙を導入するか？",
         "parent_id": "root",
-        "status": "open",
+        "status": "decided",
         "answer_type": "yes_no",
-        "decided_answer": null,
+        "decided_answer": "no",
         "stances": {
           "A": {
             "value": "support",
@@ -961,9 +961,9 @@
           "kind": "issue",
           "label": "紙を導入するか？",
           "parent_id": "root",
-          "status": "open",
+          "status": "decided",
           "answer_type": "yes_no",
-          "decided_answer": null,
+          "decided_answer": "no",
           "stances": {
             "A": {
               "value": "support",

@@ -121,6 +121,7 @@ class ResolutionEvidence(Record):
     answer: Literal["yes", "no"] | None = None
     target_id: str
     decision_turn: Turn
+    decision_as_agreement: bool = False
     agreements: tuple[Turn, ...] = ()
     explicit_agreements: tuple[Turn, ...] = ()
     summary_confirmation: tuple[Turn, ...] = ()
