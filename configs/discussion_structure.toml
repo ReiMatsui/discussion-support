@@ -1,0 +1,26 @@
+# Provisional values from spec/open_issues.md §4. Defaults also ship with the package.
+focus_threshold = 0.7
+focus_turns = 2
+focus_ms = 10000
+stay_prior = 0.8
+shift_stay_prior = 0.45
+observation_chars = 20
+pending_ms = 60000
+stance_threshold = 0.8
+resolution_threshold = 0.8
+identity_margin = 0.05
+decision_ms = 10000
+display_ms = 3000
+display_levels = 3
+display_nodes = 15
+issue_chars = 20
+position_chars = 16
+recent_turns = 6
+other_issues = 4
+openai_model = "gpt-4.1-mini"
+label_model = "gpt-4.1-mini"
+jev_model = "jev-1.13.0"
+budget_usd = 2.0
+# Verified 2026-10-06; update both rates when choosing another model.
+input_usd_per_million = 0.4
+output_usd_per_million = 1.6
