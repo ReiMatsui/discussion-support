@@ -6,7 +6,7 @@
 {"turn_id": "t6", "speaker": "C", "text": "耐久性は大丈夫です", "ms": 15000, "end_ms": 16000, "speaker_key": "c"}
 {"turn_id": "t7", "speaker": "C", "text": "やはり耐久性に懸念があります", "ms": 16000, "end_ms": 17000, "speaker_key": "c"}
 {"turn_id": "t8", "speaker": "A", "text": "紙を導入しないと決定しよう", "ms": 17000, "end_ms": 18000, "speaker_key": "a"}
-{"turn_id": "t9", "speaker": "A", "text": "", "ms": 28000, "end_ms": 29000}
+{"turn_id": "t9", "speaker": "A", "text": "やりたかったが、しない決定に同意します", "ms": 28000, "end_ms": 29000, "speaker_key": "a"}
 {"turn_id": "t10", "speaker": "D", "text": "しない決定に同意します", "ms": 29000, "end_ms": 30000, "speaker_key": "d"}
 {"turn_id": "t11", "speaker": "A", "text": "さっきの決定を再検討しよう", "ms": 30000, "end_ms": 31000, "speaker_key": "a"}
 {"turn_id": "t12", "speaker": "未確定", "text": "決定を再検討しましょう", "ms": 31000, "end_ms": 32000, "unsure": true}

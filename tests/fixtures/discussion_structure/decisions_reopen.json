@@ -352,6 +352,11 @@
         "probabilities": {
           "yes": 1.0
         }
+      },
+      "agreement": {
+        "probabilities": {
+          "yes": 1.0
+        }
       }
     },
     "t6": {

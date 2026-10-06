@@ -79,9 +79,10 @@
     {
       "turn_id": "t9",
       "speaker": "A",
-      "text": "",
+      "text": "やりたかったが、しない決定に同意します",
       "ms": 28000,
-      "end_ms": 29000
+      "end_ms": 29000,
+      "speaker_key": "a"
     },
     {
       "turn_id": "t10",
@@ -333,6 +334,18 @@
       "target": {
         "probabilities": {
           "i1": 1.0
+        }
+      }
+    },
+    "t9": {
+      "target": {
+        "probabilities": {
+          "i1": 1.0
+        }
+      },
+      "agreement": {
+        "probabilities": {
+          "yes": 1.0
         }
       }
     }

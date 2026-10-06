@@ -1,0 +1,34 @@
+{"turn_id": "t1", "speaker": "A", "text": "紙を導入するか？", "ms": 1000, "end_ms": 2000}
+{"turn_id": "t2", "speaker": "B", "text": "紙の導入に賛成です", "ms": 2000, "end_ms": 3000}
+{"turn_id": "t3", "speaker": "A", "text": "紙を導入しないと決定しよう", "ms": 12000, "end_ms": 13000}
+{"turn_id": "t4", "speaker": "C", "text": "しない決定に同意します", "ms": 13000, "end_ms": 14000}
+{"turn_id": "t5", "speaker": "A", "text": "", "ms": 23000, "end_ms": 24000}
+{"turn_id": "t6", "speaker": "B", "text": "やりたかったが、しない決定に同意します", "ms": 24000, "end_ms": 25000}
+{"turn_id": "t7", "speaker": "A", "text": "回収制を導入するか？", "ms": 25000, "end_ms": 26000}
+{"turn_id": "t8", "speaker": "B", "text": "回収費用が心配です", "ms": 26000, "end_ms": 27000}
+{"turn_id": "t9", "speaker": "A", "text": "回収制について検討しましょう", "ms": 36000, "end_ms": 37000}
+{"turn_id": "t10", "speaker": "A", "text": "回収制で決定しよう", "ms": 37000, "end_ms": 38000}
+{"turn_id": "t11", "speaker": "C", "text": "その決定に同意します", "ms": 38000, "end_ms": 39000}
+{"turn_id": "t12", "speaker": "A", "text": "", "ms": 47000, "end_ms": 48000}
+{"turn_id": "t13", "speaker": "B", "text": "費用の懸念はあるが決定に同意します", "ms": 48000, "end_ms": 49000}
+{"turn_id": "t14", "speaker": "A", "text": "告知するか？", "ms": 49000, "end_ms": 50000}
+{"turn_id": "t15", "speaker": "B", "text": "告知費用が心配です", "ms": 50000, "end_ms": 51000}
+{"turn_id": "t16", "speaker": "A", "text": "告知について検討しましょう", "ms": 60000, "end_ms": 61000}
+{"turn_id": "t17", "speaker": "A", "text": "告知は持ち帰りにしよう", "ms": 61000, "end_ms": 62000}
+{"turn_id": "t18", "speaker": "A", "text": "", "ms": 121000, "end_ms": 122000}
+{"turn_id": "t19", "speaker": "A", "text": "告知の検討を再開しよう", "ms": 122000, "end_ms": 123000}
+{"turn_id": "t20", "speaker": "C", "text": "告知を再検討しましょう", "ms": 123000, "end_ms": 124000}
+{"turn_id": "t21", "speaker": "B", "text": "告知費用は大丈夫なので賛成です", "ms": 124000, "end_ms": 125000}
+{"turn_id": "t22", "speaker": "A", "text": "告知することで決定します", "ms": 125000, "end_ms": 126000}
+{"turn_id": "t23", "speaker": "A", "text": "", "ms": 135000, "end_ms": 136000}
+{"turn_id": "t24", "speaker": "A", "text": "ポスターを作るか？", "ms": 136000, "end_ms": 137000}
+{"turn_id": "t25", "speaker": "B", "text": "ポスターを作ることに賛成です", "ms": 137000, "end_ms": 138000}
+{"turn_id": "t26", "speaker": "A", "text": "ポスターについて検討しましょう", "ms": 147000, "end_ms": 148000}
+{"turn_id": "t27", "speaker": "A", "text": "ポスターを作ることで決定します", "ms": 148000, "end_ms": 149000}
+{"turn_id": "t28", "speaker": "A", "text": "", "ms": 158000, "end_ms": 159000}
+{"turn_id": "t29", "speaker": "A", "text": "掲示板を使うか？", "ms": 159000, "end_ms": 160000}
+{"turn_id": "t30", "speaker": "A", "text": "掲示板について検討しましょう", "ms": 169000, "end_ms": 170000}
+{"turn_id": "t31", "speaker": "A", "text": "掲示板を使うことで決定します", "ms": 170000, "end_ms": 171000, "speaker_uid": "person:a", "speaker_key": "a"}
+{"turn_id": "t32", "speaker": "未確定", "text": "掲示板を使う決定に同意します", "ms": 171000, "end_ms": 172000, "speaker_key": "b", "unsure": true}
+{"turn_id": "t33", "speaker": "A", "text": "", "ms": 180000, "end_ms": 181000}
+{"turn_id": "t34", "speaker": "A", "text": "引き続き掲示板について話しましょう", "ms": 181000, "end_ms": 182000, "speaker_uid": "person:a", "speaker_key": "b"}
