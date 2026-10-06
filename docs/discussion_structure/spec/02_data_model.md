@@ -15,6 +15,7 @@
 | `parent_id` | 親（根の議題、別の Issue、または Position） |
 | `status` | 解決状態（§5） |
 | `decided_answer` | 是非型の決定内容（`yes` / `no`） |
+| `resolution_evidence` | 状態を変えた根拠（決定・保留・取り下げの発話、同意した人、まとめの段階の確認）。立場とは別に持つ |
 | `stances` | 是非型のときの話者の立場（§6） |
 | `source_turns` | 導入・言及した発話の ID |
 
