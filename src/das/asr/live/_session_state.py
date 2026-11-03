@@ -236,6 +236,7 @@ class SessionState:
         self.proactivity_name = _PROACTIVITY_DEFAULT
         self.proactivity: dict = dict(_PROACTIVITY_PROFILES[_PROACTIVITY_DEFAULT])
         self.intervention_enabled = True
+        self.study = None  # Set by bootstrap only for explicitly selected research sessions.
         self.intervention_events: list[dict] = []
         self._intervention_event_seq = 0
         self._last_intervention_event_id: str | None = None

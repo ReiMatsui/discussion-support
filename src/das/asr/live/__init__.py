@@ -52,6 +52,10 @@ def post_system(text: str) -> None:
 # ---------------------------------------------------------------------------
 
 @click.command()
+@click.option("--study-config", type=click.Path(exists=True, dir_okay=False), default=None,
+              help="実験用の課題設定JSON（既存の脱線・事実確認等の介入と分離）")
+@click.option("--study-condition", type=click.Choice(["none", "system"]), default=None,
+              help="実験条件。none=無支援、system=採否判断への理由検討支援")
 @click.option("--lang", default="ja", help="音声認識の言語")
 @click.option("--model", default="stt-rt-v5", help="STTモデル名")
 @click.option("--wav", default=None, type=click.Path(exists=False),

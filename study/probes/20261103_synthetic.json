@@ -1,0 +1,11 @@
+{
+  "data_kind": "synthetic",
+  "purpose": "One transport and schema probe, not accuracy or efficacy evidence",
+  "model": "gpt-5.4-mini",
+  "prompt_sha256": "5aac2d4760d2322bdf94a591546a39b94b1656ff91c58157296c34ece4e94826",
+  "status": "failed_authentication",
+  "error_type": "RuntimeError",
+  "elapsed_seconds": 0.467,
+  "http_status": 401,
+  "note": "HTTP status observed in the API error output; no participant data were used."
+}

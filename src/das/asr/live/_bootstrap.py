@@ -118,6 +118,8 @@ class LiveArgs:
     # 読んでいたが LiveArgs にこのフィールドが無く **常に None** だったため、
     # AFRuntime.ingest_documents が一度も走っていなかった（2026-07-25 監査）。
     docs: str | None = None
+    study_config: str | None = None
+    study_condition: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -348,7 +350,7 @@ def _next_effort(params: dict, detail: str) -> str | None:
 
 
 def _post_chat_json(params: dict, api_key: str, *, timeout: int, label: str,
-                    _retried: bool = False):
+                    _retried: bool = False, raise_auth_errors: bool = False):
     """Chat Completions を叩き、本文をJSONとして返す。失敗時はNone（理由をログ）."""
     import urllib.error
     import urllib.request
@@ -384,9 +386,14 @@ def _post_chat_json(params: dict, api_key: str, *, timeout: int, label: str,
                   f"{params.get('model')} で使えないため '{nxt}' で再試行します",
                   flush=True)
             return _post_chat_json({**params, "reasoning_effort": nxt}, api_key,
-                                   timeout=timeout, label=label, _retried=True)
-        print(f"# [{label}] APIエラー {e.code}: {detail or e.reason}"
+                                   timeout=timeout, label=label, _retried=True,
+                                   raise_auth_errors=raise_auth_errors)
+        # 認証エラーの本文にはキーの一部が返る場合があるため、端末・保存ログへ出さない。
+        log_detail = "認証またはアクセス権を確認してください" if e.code in (401, 403) else detail or e.reason
+        print(f"# [{label}] APIエラー {e.code}: {log_detail}"
               f"（model={params.get('model')}）", flush=True)
+        if raise_auth_errors and e.code in (401, 403):
+            raise
         return None
     except Exception as e:
         print(f"# [{label}] API/解析エラー: {type(e).__name__}: {e}", flush=True)
@@ -891,6 +898,11 @@ def _start_llm_workers(state, args, *, oai_key: str, oai_model: str,
     LLMのトークンを消費しないため（§49.9）。キーの有無より先に見るのは、
     キーが設定されていても「使わない」という明示の意思を優先するため。
     """
+    if getattr(state, "study", None) is not None:
+        from das.study.live import run_study_worker
+        threading.Thread(target=run_study_worker, args=(state,), daemon=True).start()
+        print(f"# 実験モード: {state.study.condition}（従来の介入ワーカーは停止）", flush=True)
+        return
     if getattr(args, "no_llm", False):
         print("# LLM補助: すべて無効（--no-llm。論点抽出・介入は動きません）",
               flush=True)
@@ -1233,6 +1245,22 @@ def run_session(args: LiveArgs) -> None:
     from das.asr.live import _SYS_HOOK_REF  # 遅延import（循環回避）
 
     load_env()
+    study_config = None
+    if args.study_config or args.study_condition:
+        if not args.study_config or not args.study_condition:
+            raise SystemExit("--study-config と --study-condition は両方指定してください")
+        if args.simulate or args.debate or args.af or args.docs:
+            raise SystemExit("実験モードは --simulate / --debate / --af / --docs と併用できません")
+        if args.study_condition == "system" and (args.no_llm or not args.agent):
+            raise SystemExit("支援条件は --no-llm / --no-agent と併用できません")
+        if args.study_condition == "system" and not os.environ.get("OPENAI_API_KEY"):
+            raise SystemExit("支援条件には OPENAI_API_KEY が必要です")
+        from das.study.engine import StudyConfig
+        try:
+            with open(args.study_config, encoding="utf-8") as f:
+                study_config = StudyConfig.model_validate(json.load(f))
+        except (OSError, ValueError) as exc:
+            raise SystemExit(f"実験設定を読めません: {exc}") from exc
     if args.wav and not os.path.exists(args.wav):
         raise SystemExit(f"音声ファイルがありません: {args.wav}\n"
                          "（テスト音声は scripts/make_overlap_testset.py 等で先に生成してください）")
@@ -1275,6 +1303,15 @@ def run_session(args: LiveArgs) -> None:
                              cluster_namer=cluster_namer,
                              seat_audio=seat_audio)
         state.stt_backend = backend
+        if study_config is not None:
+            from das.study.live import StudyRuntime
+            if study_config.session_id == "pilot-unassigned":
+                study_config = study_config.model_copy(update={
+                    "session_id": f"{args.study_condition}-{started.strftime('%Y%m%d-%H%M%S')}"})
+            state.study = StudyRuntime(study_config, args.study_condition,
+                                       os.path.splitext(out_path)[0] + ".study.jsonl")
+            state.study_api_key = os.environ.get("OPENAI_API_KEY", "")
+            state.study_model = os.environ.get("OPENAI_MODEL_FAST", "gpt-5.4-mini")
         state.waiting_to_start = bool(args.setup and _serve and not args.wav and not args.simulate)
         if args.diarization == "pyannote" and diarizer is None:
             # キー未設定の縮退（_build_diarizer が警告済み）。コンソールだけだと
@@ -1286,12 +1323,14 @@ def run_session(args: LiveArgs) -> None:
         # --- AIエージェント ---
         # --no-llm はエージェントも含めて止める（LLM補助の一括スイッチ。§49.9）
         _agent_oai_key = os.environ.get("OPENAI_API_KEY", "")
-        if args.agent and not getattr(args, "no_llm", False):
+        if (args.agent and not getattr(args, "no_llm", False)
+                and args.study_condition != "none"):
             if not _agent_oai_key:
                 print("# AI Agent: OPENAI_API_KEY が未設定です。--agent は無効になります。", flush=True)
             else:
                 state.agent = LiveAgent(api_key=_agent_oai_key, voice=args.agent_voice,
-                                        mode="facilitator", trigger_n=args.agent_trigger)
+                                        mode="facilitator", trigger_n=args.agent_trigger,
+                                        study_mode=study_config is not None)
                 if tracker is not None:
                     state.agent.set_tracker(tracker)
 

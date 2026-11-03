@@ -1,0 +1,138 @@
+{
+  "data_kind": "synthetic",
+  "config": {
+    "session_id": "synthetic-only",
+    "task_id": "fixture",
+    "title": "人工の接続確認",
+    "options": [
+      "A案",
+      "D案"
+    ]
+  },
+  "steps": [
+    {
+      "at": 100,
+      "new_turn_ids": [
+        "t1"
+      ],
+      "turns": [
+        {
+          "id": "t1",
+          "speaker": "C",
+          "text": "D案なら平日夜間に参加できます。",
+          "ms": 1000
+        }
+      ],
+      "review": {
+        "reasons": [
+          {
+            "option": "D案",
+            "source": {
+              "turn_id": "t1",
+              "quote": "平日夜間に参加できます"
+            },
+            "stance": "support",
+            "relevance": 0,
+            "handling": "unhandled",
+            "handled_by": null
+          }
+        ],
+        "proposal": null
+      }
+    },
+    {
+      "at": 200,
+      "new_turn_ids": [
+        "t2"
+      ],
+      "turns": [
+        {
+          "id": "t1",
+          "speaker": "C",
+          "text": "D案なら平日夜間に参加できます。",
+          "ms": 1000
+        },
+        {
+          "id": "t2",
+          "speaker": "B",
+          "text": "D案は費用が重いので除外しよう。",
+          "ms": 2000
+        }
+      ],
+      "review": {
+        "reasons": [
+          {
+            "option": "D案",
+            "source": {
+              "turn_id": "t1",
+              "quote": "平日夜間に参加できます"
+            },
+            "stance": "support",
+            "relevance": 1,
+            "handling": "unhandled",
+            "handled_by": null
+          }
+        ],
+        "proposal": {
+          "option": "D案",
+          "intent": "exclude",
+          "source": {
+            "turn_id": "t2",
+            "quote": "D案は費用が重いので除外しよう"
+          },
+          "current_reason": {
+            "turn_id": "t2",
+            "quote": "費用が重い"
+          },
+          "already_handled": null,
+          "discussion_in_progress": null
+        }
+      }
+    },
+    {
+      "at": 300,
+      "new_turn_ids": [
+        "t3"
+      ],
+      "turns": [
+        {
+          "id": "t1",
+          "speaker": "C",
+          "text": "D案なら平日夜間に参加できます。",
+          "ms": 1000
+        },
+        {
+          "id": "t2",
+          "speaker": "B",
+          "text": "D案は費用が重いので除外しよう。",
+          "ms": 2000
+        },
+        {
+          "id": "t3",
+          "speaker": "A",
+          "text": "その時間の事情を踏まえ、D案は候補に残します。",
+          "ms": 3000
+        }
+      ],
+      "review": {
+        "reasons": [
+          {
+            "option": "D案",
+            "source": {
+              "turn_id": "t1",
+              "quote": "平日夜間に参加できます"
+            },
+            "stance": "support",
+            "relevance": 1,
+            "handling": "qualified",
+            "handled_by": {
+              "turn_id": "t3",
+              "quote": "その時間の事情を踏まえ、D案は候補に残します"
+            }
+          }
+        ],
+        "proposal": null
+      }
+    }
+  ]
+}

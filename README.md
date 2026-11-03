@@ -61,3 +61,16 @@ uv run pytest -q        # 全テスト
 - 実験・挙動変更は測定とセットで（1変更=1コミット、回帰テストを付ける）
 - 再現と採点は `eval/_pipeline.py` だけを使う
 - しきい値は `src/das/asr/live/_constants.py` が正本（校正表つき）
+
+## 修論実験向けの採否判断支援
+
+通常の介入と分離した実験用モードを追加しています。起動と未検証事項は
+`docs/design/study_mode_2026-11-03.md` を参照してください。
+
+```sh
+uv run python -m das.asr.live --study-config study/facility.json --study-condition system
+uv run python -m das.asr.live --study-config study/facility.json --study-condition none
+```
+
+研究者用画面は `/`、参加者用の理由記録は `/study` です。課題・報酬・終了手順の
+妥当性や、人への支援効果はまだ確認していません。

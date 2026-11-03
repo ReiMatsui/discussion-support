@@ -74,6 +74,11 @@ PROMPT_FACILITATOR = """\
 参加者が話し始めたら、自分の発言の途中でもすぐにやめて聞きます。
 前置きや記号は付けず、本題だけを落ち着いた口調で話します。"""
 
+PROMPT_STUDY = """日本語の音声出力を担当する。話すのは[指示]が届いた場合だけ。
+指示された「読み上げ文」のみを読み、内容の追加、言い換え、参加者への回答はしない。
+会話内で呼ばれても自分で話し始めない。参加者が話し始めたら途中でも停止し、
+自動的に続きや同じ文を読み直さない。新しい指示を待つ。"""
+
 PROMPT_CONVERSATION = """\
 あなたは会議に参加しているAIの参加者です。日本語で話します。
 他の参加者と自然に議論してください。質問されたら答え、意見を求められたら
@@ -123,8 +128,9 @@ class LiveAgent(_VoiceAgentBase):
 
     def __init__(self, api_key: str, voice: str = LIVE_DEFAULT_VOICE,
                  mode: str = "facilitator", trigger_n: int = _AGENT_TRIGGER,
-                 model: str = LIVE_MODEL):
+                 model: str = LIVE_MODEL, study_mode: bool = False):
         self.api_key = api_key
+        self.study_mode = study_mode
         self.model = model
         self.voice = voice if voice in LIVE_VOICES else LIVE_DEFAULT_VOICE
         self.mode = mode
@@ -215,6 +221,8 @@ class LiveAgent(_VoiceAgentBase):
 
     @property
     def _prompt(self) -> str:
+        if getattr(self, "study_mode", False):
+            return PROMPT_STUDY
         return PROMPT_CONVERSATION if self.mode == "conversation" else PROMPT_FACILITATOR
 
     @property
@@ -494,13 +502,16 @@ class LiveAgent(_VoiceAgentBase):
     def trigger(self, *, topics=None, drift_reason=None, invite_target=None,
                 fact_correction=None, manual_request=None, summary_focus=None,
                 af_presentation=None, recent_agent_texts=None,
-                silence_sec=None) -> bool:
+                silence_sec=None, prepared_text: str | None = None,
+                prepared_deadline: float | None = None) -> bool:
         """採択済みの介入を GPT-Live に話させる.
 
         文脈（直近の発話）を thinking、介入の指示を instructions として送る。
         戻り値: 指示を送れたか。False のとき呼び出し側は候補を消費せず次の機会を待つ
         （接続前・開き直し中・話している最中・送信失敗）。
         """
+        if getattr(self, "study_mode", False) and not prepared_text:
+            return False
         if not self.ready or not self.enabled or self.ws is None:
             return False
         if self.mode == "conversation":
@@ -510,10 +521,11 @@ class LiveAgent(_VoiceAgentBase):
                 return False
             has_intent = any((drift_reason, invite_target, fact_correction,
                               manual_request, summary_focus, af_presentation,
-                              silence_sec))
+                              silence_sec, prepared_text))
             if not self._pending and not has_intent:
                 return False
             self._responding = True
+            self._study_audio_deadline = prepared_deadline
             snapshot = list(self._pending)
             self._discarding = False      # 止めた直後でも新しい指示の声は通す
         context_utts = snapshot[-_CONTEXT_MAX_UTTS:]
@@ -524,7 +536,12 @@ class LiveAgent(_VoiceAgentBase):
             summary_focus=summary_focus, af_presentation=af_presentation,
             recent_agent_texts=recent_agent_texts, silence_sec=silence_sec)
         directive, context = _notes.split_directive_and_context(conv)
-        directive = directive or "直近の議論を踏まえ、必要なら短く一言だけ述べてください。"
+        if prepared_text is not None:
+            directive = ("次のJSON文字列の内容だけを、そのまま読み上げる。追加や回答はしない。読み上げ文: "
+                         + json.dumps(prepared_text, ensure_ascii=False))
+            context = ""
+        else:
+            directive = directive or "直近の議論を踏まえ、必要なら短く一言だけ述べてください。"
         ok = True
         for chunk in _chunks(context, _APPEND_MAX_CHARS):
             ok = ok and self._send({"type": "session.thinking.append",
@@ -597,6 +614,13 @@ class LiveAgent(_VoiceAgentBase):
             self.last_unrequested_speech_at = time.monotonic()
 
     def _on_audio(self, ev: dict) -> None:
+        if getattr(self, "study_mode", False) and not self._responding:
+            return  # Never play unsolicited model audio in the experiment condition.
+        if (getattr(self, "study_mode", False)
+                and getattr(self, "_study_audio_deadline", None) is not None
+                and time.monotonic() > self._study_audio_deadline):
+            self.stop_playback()
+            return
         chunk = ev.get("delta", "") or ev.get("audio", "")
         if not chunk:
             return
@@ -621,6 +645,7 @@ class LiveAgent(_VoiceAgentBase):
         if not voiced and not in_speech:
             return                      # 話していない間の無音は捨てる
         if voiced:
+            self._study_audio_deadline = None
             if not self._responding:
                 # こちらが求めていない発話。前の発話の終端がまだ再生中でも新しい
                 # 発話として区切る。ただし直前の発話の終端からすぐの再開（文の間の
@@ -946,4 +971,3 @@ class LivePartner(LiveAgent):
         if self._connected and text.strip():
             self._send({"type": "session.thinking.append", "delegation_id": None,
                         "content": f"{speaker}: {text.strip()}"[:_APPEND_MAX_CHARS]})
-

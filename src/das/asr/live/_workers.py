@@ -1076,6 +1076,9 @@ def _on_agent_text_factory(state: SessionState):
             with contextlib.suppress(Exception):
                 ON_UTTERANCE("ファシリテーター", text)
         state.add_facilitator_delivery_event(text, timing=timing)
+        study = getattr(state, "study", None)
+        if study is not None:
+            study.log("voice_delivery", text=text, timing=timing)
         _print_line(f"\x1b[96m[ファシリテーター]\x1b[0m: {text}")
         state.save()
     return _on_agent_text
@@ -1136,8 +1139,8 @@ def _connect_agent(state: SessionState, on_text):
                      args=(state, on_text), daemon=True).start()
 
     agent.connect()
-    threading.Thread(target=_run_agent_worker, args=(state,),
-                     daemon=True).start()
+    if getattr(state, "study", None) is None:
+        threading.Thread(target=_run_agent_worker, args=(state,), daemon=True).start()
     print(f"# AI Agent: mode={agent.mode} voice={agent.voice}"
           f" trigger={agent.trigger_n}（ブラウザから変更可能）", flush=True)
 

@@ -76,7 +76,16 @@ class _UIRequestHandler(BaseHTTPRequestHandler):
     }
 
     def do_GET(self):
-        if self.path == "/api/state":
+        if self.path == "/api/study":
+            study = getattr(self._state, "study", None)
+            self._json(200 if study else 404, study.view() if study else {"error": "実験モードではありません"})
+        elif self.path == "/study":
+            from das.study.view import HTML
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(HTML.encode("utf-8"))
+        elif self.path == "/api/state":
             self._json(200, self._state.api_snapshot())
         elif self.path == "/api/stream":
             self._stream()
@@ -175,6 +184,12 @@ class _UIRequestHandler(BaseHTTPRequestHandler):
 
     def _dispatch_post(self):
         """POST を宛先表から該当の _post_* へ回す（未知のパスは404）."""
+        if getattr(self._state, "study", None) is not None and self.path in {
+            "/api/reset", "/api/mode", "/api/topic", "/api/intervention",
+            "/api/facilitator/call", "/agent",
+        }:
+            self._json(409, {"ok": False, "error": "実験中の条件変更はできません。終了して別セッションを開始してください"})
+            return
         method = self._POST_ROUTES.get(self.path)
         if method is None:
             self.send_error(404)
@@ -472,4 +487,3 @@ class _UIHandler:
     def create(state: SessionState) -> type:
         """state を束縛した BaseHTTPRequestHandler サブクラスを返す."""
         return type("Handler", (_UIRequestHandler,), {"_state": state})
-

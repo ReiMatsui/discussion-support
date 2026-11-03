@@ -1,0 +1,13 @@
+{
+  "session_id": "pilot-unassigned",
+  "task_id": "event",
+  "title": "合同公開イベントの運営計画",
+  "options": [
+    "P案",
+    "Q案",
+    "R案",
+    "S案",
+    "T案",
+    "U案"
+  ]
+}
