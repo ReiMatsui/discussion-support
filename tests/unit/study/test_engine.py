@@ -3,7 +3,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from das.study.engine import Review, StudyConfig, StudyEngine, Turn, revision_of
+from das.study.engine import StudyConfig, StudyEngine, Turn, revision_of
+from tests.support.study import review
 
 
 def turns():
@@ -13,29 +14,6 @@ def turns():
     ]
 
 
-def review():
-    return Review.model_validate(
-        {
-            "reasons": [
-                {
-                    "option": "D案",
-                    "source": {"turn_id": "t1", "quote": "平日夜間に参加できます"},
-                    "stance": "support",
-                    "relevance": 1,
-                    "handling": "unhandled",
-                    "handled_by": None,
-                }
-            ],
-            "proposal": {
-                "option": "D案",
-                "intent": "exclude",
-                "source": {"turn_id": "t2", "quote": "D案は費用が重いので除外しよう"},
-                "current_reason": {"turn_id": "t2", "quote": "費用が重い"},
-                "already_handled": None,
-                "discussion_in_progress": None,
-            },
-        }
-    )
 
 
 def engine(**kw):
