@@ -74,3 +74,7 @@ uv run python -m das.asr.live --study-config study/facility.json --study-conditi
 
 研究者用画面は `/`、参加者用の理由記録は `/study` です。課題・報酬・終了手順の
 妥当性や、人への支援効果はまだ確認していません。
+
+実験前の動作検査と現在の未確認事項は
+`docs/design/study_mode_verification_2026-11-05.md` を参照してください。
+人工入力による連続動作の検査は、実API・録音・再生なしで実行できます。

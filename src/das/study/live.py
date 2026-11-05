@@ -65,6 +65,7 @@ class StudyRuntime:
         self._status = "準備中"
         self._epoch = None
         self._observed_revision = ""
+        self._last_revision_at = float("-inf")
         self._known: dict[str, str] = {}
         self._last_request_epoch = None
         self._future: Future | None = None
@@ -126,7 +127,8 @@ class StudyRuntime:
         return turns, partial, changed
 
     def tick(self, state, executor, reviewer, *, now=None):
-        now = time.monotonic() if now is None else now
+        tick_started = time.monotonic()
+        now = tick_started if now is None else now
         turns, partial, partial_at = self.capture(state)
         revision = revision_of(turns)
         epoch = (revision, partial_at)
@@ -141,6 +143,7 @@ class StudyRuntime:
                     "transcript_snapshot", revision=revision, turns=[t.model_dump() for t in turns]
                 )
                 self._observed_revision = revision
+                self._last_revision_at = now
                 with self._lock:
                     self._public = []  # Do not keep displaying a corrected/withdrawn old quote.
                     self._status = "発言を確認中"
@@ -187,7 +190,9 @@ class StudyRuntime:
                     self.log("model_disabled", reason="authentication_failed")
                 with self._lock:
                     self._status = "記録の更新を待っています"
-        quiet = not partial and (now - partial_at >= self.config.pause_seconds)
+        quiet = not partial and (
+            now - max(partial_at, self._last_revision_at) >= self.config.pause_seconds
+        )
         if self.pending:
             p = self.pending
             if now - p.created_at > self.config.candidate_ttl_seconds:
@@ -214,7 +219,16 @@ class StudyRuntime:
                     prepared_text=p.text,
                     prepared_deadline=p.created_at + self.config.candidate_ttl_seconds,
                 ):
-                    committed = self.engine.commit(p, revision=revision, now=now)
+                    # Dispatch can block while ASR continues on another thread. Recheck
+                    # after sending, and count a request only against the current input.
+                    after, after_partial, after_partial_at = self.capture(state)
+                    input_changed = (revision_of(after), after_partial_at) != epoch or bool(
+                        after_partial
+                    )
+                    commit_now = now + (time.monotonic() - tick_started)
+                    committed = not input_changed and self.engine.commit(
+                        p, revision=revision_of(after), now=commit_now
+                    )
                     self.pending = None
                     self.log(
                         "voice_requested",
@@ -225,7 +239,11 @@ class StudyRuntime:
                     )
                     if not committed:
                         agent.stop_playback()
-                        self.log("audio_cancel_requested", reason="commit_rejected")
+                        self.log(
+                            "audio_cancel_requested",
+                            reason="input_changed_during_dispatch" if input_changed
+                            else "commit_rejected",
+                        )
         if (
             turns
             and not self._auth_failed

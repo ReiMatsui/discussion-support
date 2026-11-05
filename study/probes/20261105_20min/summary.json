@@ -1,0 +1,35 @@
+{
+  "data_kind": "synthetic",
+  "status": "passed",
+  "limits": "仮想時間・模擬意味判定・模擬音声送信。実機で20分動かした結果でも効果検証でもない。",
+  "wall_seconds": 5.903,
+  "runs": [
+    {
+      "condition": "system",
+      "virtual_seconds": 1200,
+      "ticks": 12001,
+      "human_turns": 240,
+      "scripted_review_calls": 120,
+      "voice_requests": 12,
+      "request_counts": {
+        "A案": 2,
+        "B案": 2,
+        "C案": 2,
+        "D案": 2,
+        "E案": 2,
+        "F案": 2
+      },
+      "log_bytes": 1625165
+    },
+    {
+      "condition": "none",
+      "virtual_seconds": 1200,
+      "ticks": 12001,
+      "human_turns": 240,
+      "scripted_review_calls": 0,
+      "voice_requests": 0,
+      "request_counts": {},
+      "log_bytes": 1469182
+    }
+  ]
+}

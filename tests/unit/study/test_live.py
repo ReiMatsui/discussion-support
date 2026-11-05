@@ -71,7 +71,8 @@ def model(*_args):
 
 def runtime(tmp_path, condition="system"):
     return StudyRuntime(
-        StudyConfig(session_id="synthetic", task_id="t", title="人工課題", options=["A案", "D案"]),
+        StudyConfig(session_id="synthetic", task_id="t", title="人工課題", options=["A案", "D案"],
+                    pause_seconds=0),
         condition,
         str(tmp_path / "run.study.jsonl"),
     )
@@ -313,3 +314,113 @@ def test_auth_failure_stops_subsequent_model_requests(tmp_path):
     assert executor.calls == 1
     assert not s.agent.spoken
     assert "authentication_failed" in r.log_path.read_text()
+
+
+def test_confirmed_input_without_partial_waits_before_review(tmp_path):
+    r = runtime(tmp_path)
+    r.config.pause_seconds = 1.2
+    s = state()
+    ex = Immediate()
+    r.tick(s, ex, model, now=100)
+    assert ex.calls == 0
+    r.tick(s, ex, model, now=101.19)
+    assert ex.calls == 0
+    r.tick(s, ex, model, now=101.21)
+    assert ex.calls == 1
+
+
+def test_input_arriving_during_voice_dispatch_cancels_and_does_not_commit(tmp_path):
+    r = runtime(tmp_path)
+    s = state()
+    ex = Immediate()
+    original = s.agent.trigger
+
+    def dispatch(**kw):
+        result = original(**kw)
+        s.records.append({"speaker": "人物3", "text": "除外は撤回します。", "end_ms": 3000})
+        return result
+
+    s.agent.trigger = dispatch
+    r.tick(s, ex, model, now=100)
+    r.tick(s, ex, model, now=101)
+    assert not r.engine.counts
+    assert s.agent.stops == 1
+    assert "input_changed_during_dispatch" in r.log_path.read_text()
+
+
+def test_expiry_during_voice_dispatch_does_not_commit(tmp_path, monkeypatch):
+    import das.study.live as live
+
+    clock = [100.0]
+    monkeypatch.setattr(live.time, "monotonic", lambda: clock[0])
+    r = runtime(tmp_path)
+    s = state()
+    ex = Immediate()
+
+    def dispatch(**_kw):
+        clock[0] += 20
+        return True
+
+    s.agent.trigger = dispatch
+    r.tick(s, ex, model, now=100)
+    r.tick(s, ex, model, now=101)
+    assert not r.engine.counts
+    assert s.agent.stops == 1
+
+
+@pytest.mark.parametrize("error", [TimeoutError("synthetic timeout"), ConnectionError("synthetic disconnect")])
+def test_transient_failure_can_recover_on_next_input(tmp_path, error):
+    r = runtime(tmp_path)
+    s = state()
+    ex = Immediate()
+
+    def fail(*_):
+        raise error
+
+    r.tick(s, ex, fail, now=100)
+    r.tick(s, ex, fail, now=101)
+    s.records[1]["text"] += "理由を確認しましょう。"
+    r.tick(s, ex, model, now=102)
+    r.tick(s, ex, model, now=103)
+    assert len(s.agent.spoken) == 1
+    assert ex.calls == 2
+
+
+def test_rejected_voice_dispatch_expires_without_consuming_count(tmp_path):
+    r = runtime(tmp_path)
+    s = state()
+    s.agent.trigger = lambda **_: False
+    ex = Immediate()
+    r.tick(s, ex, model, now=100)
+    r.tick(s, ex, model, now=101)
+    assert r.pending is not None
+    r.tick(s, ex, model, now=117)
+    assert r.pending is None and not r.engine.counts
+    assert '"reason": "expired"' in r.log_path.read_text()
+
+
+def test_speaker_correction_invalidates_inflight_result(tmp_path):
+    class Delayed:
+        def __init__(self):
+            self.future = Future()
+        def submit(self, *_):
+            return self.future
+
+    r = runtime(tmp_path)
+    s = state()
+    ex = Delayed()
+    r.tick(s, ex, model, now=100)
+    s.records[0]["speaker"] = "人物3"
+    ex.future.set_result(model())
+    r.tick(s, ex, model, now=101)
+    assert not s.agent.spoken and not r.view()["records"]
+    assert "stale_llm_result" in r.log_path.read_text()
+
+
+def test_twenty_minute_virtual_sessions(tmp_path):
+    from das.study.preflight import run_preflight
+
+    report = run_preflight(tmp_path / "load")
+    assert report["status"] == "passed"
+    assert [r["voice_requests"] for r in report["runs"]] == [12, 0]
+    assert all(r["human_turns"] == 240 for r in report["runs"])
