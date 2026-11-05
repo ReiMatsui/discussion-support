@@ -1,5 +1,20 @@
 # Discussion Support — コマンドガイド
 
+## 普段使う入口（2026年11月5日）
+
+```sh
+uv run das study                 # 現在の研究用モード（支援あり）
+uv run das study --condition none # 同じモードの無支援条件
+uv run das listen-soniox         # 従来の統合システム
+uv run das check                 # 普段の自動テスト
+uv run das check study           # 研究用モードをまとめて確認
+uv run das check all             # 実API向けを除く全自動テスト
+```
+
+`study` の既定課題は `study/facility.json`。`--config`、`--wav`、`--device` も指定できる。
+本体の起動は録音・外部APIを使用する。LLM接続確認用の回数・費用制限は本体には適用されない。
+テストの分類は [テストの入口](../tests/README.md)、コードの構成は [見取り図](development.md) を参照。
+
 ## 前提
 
 ```bash

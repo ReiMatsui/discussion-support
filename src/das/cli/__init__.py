@@ -138,6 +138,8 @@ async def _run_ingest_docs(directory: Path, output: Path) -> None:
 
 # サブモジュールを import して @app.command デコレータを登録する。
 # app が定義された後に import しないと循環参照になる。
+from das.cli import _checks as _checks  # noqa: E402
 from das.cli import _eval as _eval  # noqa: E402
 from das.cli import _listen as _listen  # noqa: E402
 from das.cli import _session as _session  # noqa: E402
+from das.cli import _study as _study  # noqa: E402

@@ -11,13 +11,23 @@ ReDimNet の声紋照合を重ねて「誰が何を言ったか」を特定し�
 uv sync --all-extras
 cp .env.example .env    # SONIOX_API_KEY / OPENAI_API_KEY /
                         # PYANNOTEAI_API_KEY（--hybrid 用）を設定
-uv run pytest -q        # 単体テスト（実APIは呼ばない）
+uv run das check       # 普段の基本確認（実API向けのテストを除外）
 ```
 
 ## 使い方
 
+現在の研究用モードを起動する基本コマンドは次です。
+
+```sh
+uv run das study
+```
+
+`uv run das study --condition none` で無支援条件を起動できます。
+本体はマイクと外部APIを使用します。接続確認スクリプトの累計3回・費用予算は本体には適用されません。
+従来の統合システムは次のコマンドで起動します。
+
 ```bash
-# 基本コマンド（既定で推奨構成: Soniox + pyannote + 声紋。人数指定は不要）
+# 従来の統合システム（既定で推奨構成: Soniox + pyannote + 声紋。人数指定は不要）
 uv run das listen-soniox
 
 # 書き起こし＋話者特定だけ（統合AF構築なし）
@@ -60,8 +70,12 @@ uv run python -m das.asr.live --diarization none
 
 ```bash
 uv run ruff check .     # lint（既存エラーを増やさない）
-uv run pytest -q        # 全テスト
+uv run das check        # 普段の基本確認
+uv run das check study  # 現在の研究用モード
+uv run das check all    # 実API向けを除く全自動テスト
 ```
+
+詳細は [テストの入口](tests/README.md) と [コードの見取り図](docs/development.md) を参照してください。
 
 - 実験・挙動変更は測定とセットで（1変更=1コミット、回帰テストを付ける）
 - 再現と採点は `eval/_pipeline.py` だけを使う
@@ -73,8 +87,8 @@ uv run pytest -q        # 全テスト
 `docs/design/study_mode_2026-11-03.md` を参照してください。
 
 ```sh
-uv run python -m das.asr.live --study-config study/facility.json --study-condition system
-uv run python -m das.asr.live --study-config study/facility.json --study-condition none
+uv run das study --config study/facility.json --condition system
+uv run das study --config study/facility.json --condition none
 ```
 
 研究者用画面は `/`、参加者用の理由記録は `/study` です。課題・報酬・終了手順の

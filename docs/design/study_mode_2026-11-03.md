@@ -10,6 +10,14 @@
 
 ## 起動
 
+2026年11月5日にDASからの起動入口を追加した。プロジェクト直下で次を実行できる。
+
+```sh
+uv run das study
+uv run das study --condition none
+```
+
+課題を変えるときは `--config study/event.json` を指定する。従来の下層への直接起動も利用できる。
 プロジェクト直下で、実験専用の設定を明示して起動する。
 
 ```sh
