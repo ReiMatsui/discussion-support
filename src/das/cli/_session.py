@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -14,7 +13,7 @@ from das.graph.store import NetworkXGraphStore
 from das.llm import OpenAIClient
 from das.runtime import Orchestrator
 from das.settings import get_settings
-from das.types import Utterance
+from das.transcripts import load_transcript
 
 
 @app.command(name="run-session")
@@ -67,16 +66,6 @@ def run_session(
 # --- 実体 --------------------------------------------------------------
 
 
-def _load_transcript(path: Path) -> list[Utterance]:
-    utterances: list[Utterance] = []
-    with path.open(encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            payload = json.loads(line)
-            utterances.append(Utterance.model_validate(payload))
-    return utterances
 
 
 async def _run_session_async(
@@ -113,7 +102,7 @@ async def _run_session_async(
         typer.echo("[run-session] ingesting documents...")
         await orch.ingest_documents(docs_dir)
 
-    utterances = _load_transcript(transcript)
+    utterances = load_transcript(transcript)
     typer.echo(f"[run-session] running {len(utterances)} utterances...")
     await orch.run_session(utterances)
 

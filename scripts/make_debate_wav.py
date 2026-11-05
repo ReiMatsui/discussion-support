@@ -18,7 +18,6 @@
 from __future__ import annotations
 
 import argparse
-import io
 import json
 import random
 import sys
@@ -34,19 +33,8 @@ def tts(client, text: str, voice: str) -> bytes:
     res = client.audio.speech.create(
         model="tts-1", voice=voice, input=text, response_format="wav"
     )
-    with wave.open(io.BytesIO(res.content)) as w:
-        sr = w.getframerate()
-        nch = w.getnchannels()
-        raw = w.readframes(w.getnframes())
-    import numpy as np
-
-    x = np.frombuffer(raw, dtype="<i2").astype(np.float32)
-    if nch > 1:
-        x = x.reshape(-1, nch).mean(axis=1)
-    if sr != SR:  # 簡易リサンプル
-        idx = (np.arange(int(len(x) * SR / sr)) * sr / SR).astype(int)
-        x = x[np.clip(idx, 0, len(x) - 1)]
-    return x.astype("<i2").tobytes()
+    from das.audio.pcm import tts_wav_to_pcm16
+    return tts_wav_to_pcm16(res.content)
 
 
 def main() -> None:

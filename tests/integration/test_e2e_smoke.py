@@ -11,7 +11,6 @@ OPENAI_INTEGRATION=1 が立っていない場合は自動的に skip。
 
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 
@@ -20,7 +19,7 @@ import pytest
 from das.graph.store import NetworkXGraphStore
 from das.llm import OpenAIClient
 from das.runtime import Orchestrator
-from das.types import Utterance
+from das.transcripts import load_transcript
 from das.viz import dump_snapshot, render_html
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -41,15 +40,6 @@ pytestmark = [
 ]
 
 
-def _load_transcript(path: Path) -> list[Utterance]:
-    utterances: list[Utterance] = []
-    with path.open(encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            utterances.append(Utterance.model_validate(json.loads(line)))
-    return utterances
 
 
 async def test_cafeteria_session_smoke(tmp_path: Path) -> None:
@@ -67,7 +57,7 @@ async def test_cafeteria_session_smoke(tmp_path: Path) -> None:
     assert DOCS_DIR.exists(), f"sample docs missing: {DOCS_DIR}"
     assert TRANSCRIPT.exists(), f"transcript fixture missing: {TRANSCRIPT}"
 
-    transcript = _load_transcript(TRANSCRIPT)
+    transcript = load_transcript(TRANSCRIPT)
     assert len(transcript) >= 3, "fixture が壊れている可能性"
 
     llm = OpenAIClient()

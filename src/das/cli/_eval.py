@@ -11,7 +11,7 @@ import typer
 from das.cli import app
 from das.llm import OpenAIClient
 from das.settings import get_settings
-from das.types import Utterance
+from das.transcripts import load_transcript
 
 
 @app.command(name="eval")
@@ -336,16 +336,6 @@ async def _run_eval_rescore(
 # --- 実体 --------------------------------------------------------------
 
 
-def _load_transcript(path: Path) -> list[Utterance]:
-    utterances: list[Utterance] = []
-    with path.open(encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            payload = json.loads(line)
-            utterances.append(Utterance.model_validate(payload))
-    return utterances
 
 
 async def _run_aqua_rescore(
@@ -410,7 +400,7 @@ async def _run_aqua_rescore(
             halted = True
             continue
         typer.echo(f"[aqua] ({i}/{len(run_paths)}) {condition}/{run_id}")
-        transcript = _load_transcript(tpath)
+        transcript = load_transcript(tpath)
         try:
             report = await agent.score_discussion(
                 transcript,

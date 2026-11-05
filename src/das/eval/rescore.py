@@ -33,6 +33,7 @@ from das.eval.run_eval import (
 from das.graph.store import GraphStore
 from das.llm import OpenAIClient
 from das.logging import get_logger
+from das.transcripts import load_transcript
 from das.types import Utterance
 
 _log = get_logger("das.eval.rescore")
@@ -86,15 +87,6 @@ def personas_from_meta(meta: dict[str, Any]) -> list[PersonaSpec]:
     return personas
 
 
-def load_transcript(path: Path) -> list[Utterance]:
-    utterances: list[Utterance] = []
-    with path.open(encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            utterances.append(Utterance.model_validate(json.loads(line)))
-    return utterances
 
 
 def load_intervention_log(path: Path) -> list[InterventionLogEntry]:

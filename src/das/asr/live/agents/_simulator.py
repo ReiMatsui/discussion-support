@@ -10,6 +10,8 @@ from typing import ClassVar
 
 import numpy as np
 
+from das.audio.pcm import tts_pcm24_to_16
+
 from .._constants import SR
 from ._live import LiveAgent
 
@@ -256,17 +258,7 @@ class DiscussionSimulator:
             print(f"# Simulator: TTS エラー: {e}", flush=True)
             return b""
 
-        # 24kHz → 16kHz リサンプル
-        samples_24k = np.frombuffer(pcm_24k, dtype="<i2").astype(np.float32)
-        n_out = int(len(samples_24k) * 16000 / 24000)
-        if n_out < 2:
-            return b""
-        indices = np.linspace(0, len(samples_24k) - 1, n_out)
-        idx_floor = indices.astype(int)
-        idx_ceil = np.minimum(idx_floor + 1, len(samples_24k) - 1)
-        frac = indices - idx_floor
-        samples_16k = samples_24k[idx_floor] * (1 - frac) + samples_24k[idx_ceil] * frac
-        return np.clip(samples_16k, -32768, 32767).astype("<i2").tobytes()
+        return tts_pcm24_to_16(pcm_24k)
 
     def _send_pcm(self, pcm: bytes):
         """PCMをチャンクに分割してaudio_qとスピーカーに送出（実時間のペースで）."""

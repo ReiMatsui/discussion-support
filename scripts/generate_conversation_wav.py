@@ -156,18 +156,8 @@ def _tts_to_pcm(text: str, voice: str) -> bytes:
     )
     pcm_24k = resp.content
 
-    # 24kHz → 16kHz リサンプル（線形補間）
-    import numpy as np
-    samples_24k = np.frombuffer(pcm_24k, dtype="<i2").astype(np.float32)
-    n_out = int(len(samples_24k) * 16000 / 24000)
-    if n_out < 2:
-        return b""
-    indices = np.linspace(0, len(samples_24k) - 1, n_out)
-    idx_floor = indices.astype(int)
-    idx_ceil = np.minimum(idx_floor + 1, len(samples_24k) - 1)
-    frac = indices - idx_floor
-    samples_16k = samples_24k[idx_floor] * (1 - frac) + samples_24k[idx_ceil] * frac
-    return np.clip(samples_16k, -32768, 32767).astype("<i2").tobytes()
+    from das.audio.pcm import tts_pcm24_to_16
+    return tts_pcm24_to_16(pcm_24k)
 
 
 def _silence_pcm(duration_sec: float) -> bytes:
