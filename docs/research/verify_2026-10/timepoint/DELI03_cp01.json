@@ -1,0 +1,45 @@
+{
+ "checkpoint": "DELI03_cp01",
+ "judge": "J-k01",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t4",
+   "speaker": "Tiger",
+   "supports": "1枚だけを選ぶ",
+   "summary_ja": "裏が偶数なら規則が証明される",
+   "quote": "if there is an even number on the other side it proves the rule"
+  },
+  {
+   "id": "R2",
+   "turn": "t5",
+   "speaker": "Llama",
+   "supports": "もう1枚も選ぶ",
+   "summary_ja": "裏が母音なら、それも規則を証明する",
+   "quote": "Mark <CARD> as well . If there''s a vowel on the other side , it also proves the rule ."
+  },
+  {
+   "id": "R3",
+   "turn": "t6",
+   "speaker": "Raven",
+   "supports": "1枚だけを選ぶ",
+   "summary_ja": "規則は母音のカードについてだけで、他のカードは規則に従う必要がない",
+   "quote": "the rule says all card with vowels which means the other cards don''t matter"
+  },
+  {
+   "id": "R4",
+   "turn": "t10",
+   "speaker": "Raven",
+   "supports": "1枚だけを選ぶ（Llama への反論）",
+   "summary_ja": "そのカードは子音が出てもおかしくないので、規則の証明には不要",
+   "quote": "Couldn''t the <CARD> just as easily have turned up a consonant ?"
+  }
+ ],
+ "pairs": [],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "T3・T4のみ",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "対立は「規則を確かめるとはどういうことか」という論理・評価基準（T3 相当）の違いで、T1・T2 の前提に依存する対ではない。しかもその違いは t8〜t10 で既に互いに問い合っている。"
+}

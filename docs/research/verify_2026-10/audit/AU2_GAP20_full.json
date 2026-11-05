@@ -1,0 +1,40 @@
+{"auditor": "AU2", "meeting": "GAP20",
+ "scenes": [
+  {"scene_id": "S1", "turns": "t52-t60, t97-t104", "choice_item": "衣類の順位（6位か最下位か）",
+   "reasons": [
+    {"speaker": "Pink", "turn": "t53, t55", "quote": "Uh I did the compass / Just because like they said were already dressed", "premise": "乗客は既に服を着ている（衣類の追加は重要でない）", "type": "T1", "level": "E1"},
+    {"speaker": "Blue", "turn": "t52", "quote": "Number six I did the extra shirt and pants", "premise": "（理由は述べられていない。寒さへの備えと推測）", "type": "T1", "level": "E3"}],
+   "explicit_turn": "なし（Blue は t56『Thats true』で受け入れ、自分の理由は述べない）",
+   "reconciled": "なし",
+   "stage2": ["起きない", "Blue 側の理由が出ない"],
+   "stage3": ["起きた（Blue が受け入れ）", "t56「Thats true」/ t101「Should we do the rope cause they already have clothes」"],
+   "stage4": ["起きた", "t104「shirt and pants fifteen」"],
+   "self_handled": "不明",
+   "impairment": ["不明", "Pink の事実認識（既に着ている）が検討なしに採用され、寒さの想定は述べられなかった。片側の理由がなく主分析の対ではない。別の解釈: Blue が単に同意しただけで、前提差自体がなかった"]},
+  {"scene_id": "S2", "turns": "t8, t76-t77", "choice_item": "チョコレートの順位",
+   "reasons": [
+    {"speaker": "Orange", "turn": "t8", "quote": "My second least important was the chocolate bar because they can probably hunt the food", "premise": "狩りで食料を得られるだろう", "type": "T2", "level": "E1"},
+    {"speaker": "Blue/Pink", "turn": "t76-t77", "quote": "Um I did the chocolate bar as number eight / I did the chocolate bar too for number eight", "premise": "（理由は述べられていない）", "type": "T2", "level": "E3"}],
+   "explicit_turn": "なし", "reconciled": "なし",
+   "stage2": ["起きない", ""], "stage3": ["起きない", ""], "stage4": ["起きた", "t78 8位で確定（Orange の t8 の理由は再び出ない）"],
+   "self_handled": "いいえ",
+   "impairment": ["不明", "Orange の想定（狩り）は応答されずに流れたが、Orange も異を唱えていない。相手側の理由がなく対ではない"]},
+  {"scene_id": "S3", "turns": "t16-t28", "choice_item": "1位（ライター）",
+   "reasons": [
+    {"speaker": "Pink", "turn": "t19", "quote": "I thought it should be like the cigarette lighter because to start a fire if they didnt know how", "premise": "火の起こし方を知らない場合に役立つ", "type": "T2", "level": "E1"},
+    {"speaker": "Orange", "turn": "t23", "quote": "And then they could have used um fluid for it For with what uh maybe the whiskey", "premise": "ウイスキーを燃料にできるかもしれない", "type": "T1", "level": "E1"}],
+   "explicit_turn": "なし", "reconciled": "なし",
+   "stage2": ["起きた（補強）", "t23"], "stage3": ["起きた（採用）", "t20, t24-t28"], "stage4": ["起きた", "t26「So have that as number one」"],
+   "self_handled": "不明",
+   "impairment": ["なかった", "両方ともライターを推し、対立はない。燃料なしという条件は論点にされていない"]},
+  {"scene_id": "S4", "turns": "t66-t75, t99-t100", "choice_item": "航空地図の順位",
+   "reasons": [
+    {"speaker": "Orange", "turn": "t71, t73", "quote": "Cause the air map um I dont know what could have been used for Maybe like a tarp / But if its sectional like how big do you think it could be", "premise": "地図の用途が分からない（大きさ次第で覆いに使える）", "type": "T1", "level": "E1"},
+    {"speaker": "Blue", "turn": "t66", "quote": "And then number seven I did the air map", "premise": "（理由は述べられていない）", "type": "T2", "level": "E3"}],
+   "explicit_turn": "なし", "reconciled": "なし",
+   "stage2": ["起きた（Orange 単独）", "t73"], "stage3": ["不明", "t72「Yeah I guess but」"], "stage4": ["起きた", "t100 13-14位"],
+   "self_handled": "不明",
+   "impairment": ["なかった", "Blue の理由がなく対ではない"]}
+ ],
+ "no_premise_sections": "t29-t51（救急キット・ナイフ・コンパス・懐中電灯。救急キットは Pink の『what if someone got injured』に全員同意）、t76-t96（チョコレート・新聞・ショートニング・スチールウール・拳銃・ストック。理由はほぼ述べられないか一方のみ）",
+ "notes": "全体として各自の順位の照合と単純な調整で進み、異なる話者がそれぞれ前提付きの理由を述べて別の順位を推す場面はなかった。主分析の対は見つからない。"}

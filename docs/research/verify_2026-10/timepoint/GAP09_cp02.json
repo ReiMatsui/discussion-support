@@ -1,0 +1,121 @@
+{
+ "checkpoint": "GAP09_cp02",
+ "judge": "J-k02",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t30",
+   "speaker": "Pink",
+   "supports": "ライターを5位",
+   "summary_ja": "燃料がなくても火花を起こせるので上位に置いた",
+   "quote": "I put a cigarette lighter without the fluid cause then maybe you can get the sparks going"
+  },
+  {
+   "id": "R2",
+   "turn": "t93",
+   "speaker": "Green",
+   "supports": "ライターを14位",
+   "summary_ja": "燃料なしでは何にも使えないと考えて下位に置いた",
+   "quote": "Fourteen was cigarette lighter without the fluid Cause I figured you couldnt use it for nothing"
+  },
+  {
+   "id": "R3",
+   "turn": "t41",
+   "speaker": "Green",
+   "supports": "ウイスキーを6位",
+   "summary_ja": "消毒にも飲用にも使える",
+   "quote": "Cause you can use it to disinfect And you can drink it"
+  },
+  {
+   "id": "R4",
+   "turn": "t70",
+   "speaker": "Green",
+   "supports": "コンパス1位への疑問",
+   "summary_ja": "墜落現場を離れたいかを考えるとコンパスの重要度に疑問",
+   "quote": "would you actually want to leave the crash site"
+  },
+  {
+   "id": "R5",
+   "turn": "t113",
+   "speaker": "Green",
+   "supports": "救急用品を3位",
+   "summary_ja": "今は負傷者がいなくても今後けがをしないとは限らない",
+   "quote": "I wouldnt count on people not staying uninjured"
+  },
+  {
+   "id": "R6",
+   "turn": "t118",
+   "speaker": "Green",
+   "supports": "懐中電灯を4位",
+   "summary_ja": "暗闇で誰かがつまずく場合に備える",
+   "quote": "just in case someone trips in the dark"
+  }
+ ],
+ "pairs": [
+  {
+   "pair_id": "P1",
+   "reason_ids": [
+    "R1",
+    "R2"
+   ],
+   "choice_item": "ライター（燃料なし）の順位",
+   "premises": [
+    {
+     "reason_id": "R1",
+     "type": "T1",
+     "premise_ja": "燃料がなくても内蔵の火打石で火花を起こせる",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t30",
+       "quote": "maybe you can get the sparks going"
+      },
+      {
+       "turn": "t34",
+       "quote": "With the flint"
+      }
+     ]
+    },
+    {
+     "reason_id": "R2",
+     "type": "T1",
+     "premise_ja": "燃料がないライターでは火花を起こせず使い道がない",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t31",
+       "quote": "I wasnt sure if you could actually make a spark off that"
+      },
+      {
+       "turn": "t93",
+       "quote": "Cause I figured you couldnt use it for nothing"
+      }
+     ]
+    }
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [
+    {
+     "turn": "t31",
+     "quote": "I wasnt sure if you could actually make a spark off that"
+    },
+    {
+     "turn": "t34",
+     "quote": "With the flint"
+    },
+    {
+     "turn": "t35",
+     "quote": "Yep Oh cause it does have an internal flint"
+    }
+   ],
+   "compatible_or_reconciled": false,
+   "during_presentation": false
+  }
+ ],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "既に扱われた",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "ライターの順位で火花が出せるかという事実認識の違いがあるが、t31〜t35で疑問が出されてPinkが応答し、既に扱われている。コンパスについてGreen(t70)が現場を離れるかに触れたが、対立する理由を述べた別の話者はいない。"
+}

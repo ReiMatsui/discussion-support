@@ -1,0 +1,23 @@
+{"checkpoint": "IS1000c_cp06", "judge": "J-k06",
+ "reasons": [
+  {"id": "R1", "turn": "t57", "speaker": "A", "supports": "交換可能なカバー（changeable covers）の採用", "summary_ja": "携帯電話にならい、色や触感を利用者が選べる交換カバーにすれば目立ち、好みや部屋に合わせられるとする。", "quote": "they've all got those a lot of them have the changeable covers, so they can choose what colour the outside is"},
+  {"id": "R2", "turn": "t80", "speaker": "B", "supports": "交換可能なカバーに慎重（不採用寄り）", "summary_ja": "新しい供給ラインを丸ごと導入する必要があり組織的に複雑なので、上層部が喜ばないかもしれないとする。", "quote": "because you have to introduce a complete uh uh new l line of uh of supplies uh it would be uh very complicated uh organisational"},
+  {"id": "R3", "turn": "t81", "speaker": "A", "supports": "交換可能なカバーの採用", "summary_ja": "大量販売の製品なので、少なくとも2〜3種類のデザインは持てるとする。", "quote": "Well we're selling so many units of this. This is gonna be a mass marketed product,"},
+  {"id": "R4", "turn": "t61", "speaker": "A", "supports": "LCD 画面・音声認識を採らない", "summary_ja": "追加の費用と手間に見合わないと個人的に考える。", "quote": "in my personal opinion, gonna be worth the extra expense and the extra effort that will go into them"}
+ ],
+ "pairs": [
+  {"pair_id": "P1", "reason_ids": ["R2", "R3"], "choice_item": "交換可能なカバーを採用するか",
+   "premises": [
+    {"reason_id": "R2", "type": "T1", "premise_ja": "交換カバーには新しい供給ラインの導入が必要で、組織的に非常に複雑になる。", "evidence_level": "E1", "evidence": [{"turn": "t80", "quote": "you have to introduce a complete uh uh new l line of uh of supplies uh it would be uh very complicated uh organisational"}]},
+    {"reason_id": "R3", "type": "T2", "premise_ja": "大量に売れる量産品なので、複数デザインを持つ余裕がある。", "evidence_level": "E1", "evidence": [{"turn": "t81", "quote": "we're selling so many units of this. This is gonna be a mass marketed product,"}, {"turn": "t83", "quote": "we can afford to have two or three different designs at least."}]}
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [{"turn": "t81", "quote": "Well we're selling so many units of this."}, {"turn": "t91", "quote": "those covers could go for for three, five Euro."}, {"turn": "t94", "quote": "That's a very good idea"}],
+   "compatible_or_reconciled": true, "during_presentation": false}
+ ],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "既に扱われた",
+ "target_pair": "P1",
+ "presentation_ja": null,
+ "note": "交換カバーについて、B の供給・組織の複雑さという懸念に A が販売量の前提を直接返し、B も応答して同意しているため、前提の違いは既に扱われている。他に主分析の対はない。"}

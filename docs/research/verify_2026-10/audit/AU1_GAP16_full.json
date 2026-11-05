@@ -1,0 +1,30 @@
+{"auditor": "AU1", "meeting": "GAP16",
+ "scenes": [
+  {"scene_id": "S1", "turns": "t75-t90（関連 t95-t107）", "choice_item": "拳銃をチョコレートの次（7位付近）に置くか、ナイフ等を先にするか",
+   "reasons": [
+     {"speaker": "Pink", "turn": "t77/t81", "quote": "Cause its in the wilderness right / chocolate bar and then the pistol", "premise": "荒野にいる（野生動物などからの身の守りがすぐ必要という含意）", "type": "T1", "level": "E3"},
+     {"speaker": "Blue", "turn": "t83/t89", "quote": "Or you have the knife to cut the rope / Like I think the gun is if youve been there like an extended period of time and you need to like start hunting", "premise": "拳銃が要るのは長期間とどまり狩猟が必要になった場合", "type": "T2", "level": "E1"}],
+   "explicit_turn": "t89（Blueが「〜なら」の形で拳銃の適用条件を述べ、t90 Yellowが応答）", "reconciled": "なし",
+   "stage2": ["起きた", "t89 Blue「the gun is if youve been there like an extended period of time」、t103「What if somebody doesnt know how to use gun」"],
+   "stage3": ["起きた", "t79 Pink「But I dont know if thats should be next」と自ら留保。Blueの条件に反論なし"],
+   "stage4": ["起きた", "t90 Yellow「So after the knife」でナイフを先に、t98-t107でショートニングの後に拳銃"],
+   "self_handled": "はい", "impairment": ["なかった", "Pink自身が留保し、Blueの条件提示で順位が決まった。別解釈: Pinkの「wilderness」の含意（危険）は確かめられないまま下げられたが、Pinkは異論を述べていない"]},
+  {"scene_id": "S2", "turns": "t65-t73, t114", "choice_item": "救急用品（compress kit）の順位",
+   "reasons": [
+     {"speaker": "Blue", "turn": "t71/t73", "quote": "Since no one else is seriously injured / What if people get injured", "premise": "今は重傷者がいない／今後けがをするかもしれない", "type": "T1", "level": "E1"}],
+   "explicit_turn": "t73（同一話者の条件の言い換え）", "reconciled": "なし",
+   "stage2": ["起きた", "t73 Blue「What if people get injured」"],
+   "stage3": ["不明", "t74 Yellow「Mhm」のみで、t75 Pinkが拳銃の話に移る"],
+   "stage4": ["起きた", "t114 Yellow「Im going to put the compress kit after the ski poles」で下位に"],
+   "self_handled": "不明", "impairment": ["不明", "同一話者の内部の両論で、他話者との前提差の対ではない。救急用品の中身が分からない（t65-t70）まま下位になった点は判断の質に関わり得る。別解釈: 重傷者なしという課題文の記述を素直に反映した"]},
+  {"scene_id": "S3", "turns": "t44-t53, t108-t113", "choice_item": "区分航空図の順位（スキーストックより上か）",
+   "reasons": [
+     {"speaker": "Pink", "turn": "t48", "quote": "Its probably like a map of the region or something", "premise": "地域の地図である", "type": "T1", "level": "E1"},
+     {"speaker": "Blue", "turn": "t111", "quote": "Someone decides just to go try and find the town", "premise": "誰かが町を探しに行く場合", "type": "T2", "level": "E1"}],
+   "explicit_turn": "なし（対立する理由なし）", "reconciled": "なし",
+   "stage2": ["起きた", "t111 Blueが移動の場合を条件として述べる"],
+   "stage3": ["起きた", "t112-t113 Yellow・Pink「Yeah」"],
+   "stage4": ["起きた", "航空図をスキーストックより上に"],
+   "self_handled": "はい", "impairment": ["なかった", "異なる推しの理由がなく、対ではない"]}],
+ "no_premise_sections": "t1-t43（1-4位の個人順位共有と衣類・コンパス・新聞の合意。Blueの「cold」「make a fire」、ライター無用論はいずれも反対理由なし）、t54-t64（ロープ・チョコレートの合意）、t91-t102、t114-t120（下位の整理）は前提差なし。",
+ "notes": "主分析の対（両前提E1/E2）は見当たらない。S1はPink側の前提が推測（E3）で、Blueがt89で条件を自ら述べている。"}

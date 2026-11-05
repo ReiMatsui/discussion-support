@@ -1,0 +1,34 @@
+{"checkpoint": "IS1000c_cp09", "judge": "J-k09",
+ "reasons": [
+  {"id": "R1", "turn": "t81", "speaker": "A", "supports": "交換式カバーを採用する", "summary_ja": "大量販売品なので複数デザインを用意できる", "quote": "This is gonna be a mass marketed product,"},
+  {"id": "R2", "turn": "t80", "speaker": "B", "supports": "交換式カバーに慎重", "summary_ja": "新しい供給ラインが必要で組織的に複雑", "quote": "because you have to introduce a complete uh uh new l line of uh of supplies uh it would be uh very complicated uh organisational"},
+  {"id": "R3", "turn": "t61", "speaker": "A", "supports": "LCD・音声認識を入れない", "summary_ja": "追加の費用と労力に見合わない", "quote": "There are other aspects like L_C_D_ screens and speech recognition which weren't I don't think, in my personal opinion, gonna be worth the extra expense and the extra effort that will go into them."},
+  {"id": "R4", "turn": "t120", "speaker": "C", "supports": "音声認識でチャンネルを呼び出す", "summary_ja": "チャンネルが増えると番号を覚えるのが難しくなる", "quote": "as more and more channels come then you have more and more problems to remember the v v exact channel numbers"},
+  {"id": "R5", "turn": "t163", "speaker": "C", "supports": "利用者がキーをプログラムできるようにする", "summary_ja": "利用者にキーの設定を任せてよい", "quote": "Yeah you can let them to do that."},
+  {"id": "R6", "turn": "t164", "speaker": "D", "supports": "キーのプログラム機能に慎重", "summary_ja": "使いやすさを保ちたいので難しすぎるのでは", "quote": "And uh isn't that too difficult for the we want w I don't know if we still want the um R_C_ to be easy to use,"},
+  {"id": "R7", "turn": "t184", "speaker": "B", "supports": "機能追加に慎重", "summary_ja": "12.50ユーロで実装できるか不明", "quote": "I'm not sure whether that that we can implement that for twelve Euro and fifty cents."}
+ ],
+ "pairs": [
+  {"pair_id": "P1", "reason_ids": ["R5", "R6"], "choice_item": "利用者によるキーのプログラム機能を入れるか",
+   "premises": [
+    {"reason_id": "R5", "type": "T2", "premise_ja": "利用者がどれだけ手間をかけるかによる（手間をかける利用者もいる）", "evidence_level": "E1", "evidence": [{"turn": "t167", "quote": "depends on the easiness like the user how much effort he can put"}]},
+    {"reason_id": "R6", "type": "T2", "premise_ja": "利用者にとってキーの設定は難しすぎる", "evidence_level": "E2", "evidence": [{"turn": "t164", "quote": "isn't that too difficult"}]}
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [{"turn": "t167", "quote": "N no but the if you give it d depends on the easiness like the user how much effort he can put."}, {"turn": "t176", "quote": "I think you can do it both ways."}, {"turn": "t178", "quote": "You can have it so it's easy they can pick it up and use it straight away without doing anythi without customizing it,"}],
+   "compatible_or_reconciled": true, "during_presentation": false},
+  {"pair_id": "P2", "reason_ids": ["R1", "R2"], "choice_item": "交換式カバーを採用するか",
+   "premises": [
+    {"reason_id": "R1", "type": "T2", "premise_ja": "大量に販売される製品である", "evidence_level": "E1", "evidence": [{"turn": "t81", "quote": "Well we're selling so many units of this."}]},
+    {"reason_id": "R2", "type": "T1", "premise_ja": "新しい供給ラインの導入が必要で組織的に複雑", "evidence_level": "E1", "evidence": [{"turn": "t80", "quote": "you have to introduce a complete uh uh new l line of uh of supplies"}]}
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [{"turn": "t83", "quote": "we can afford to have two or three different designs at least."}, {"turn": "t94", "quote": "That's a very good idea"}],
+   "compatible_or_reconciled": true, "during_presentation": false}
+ ],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "両立済み",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "キーのプログラム機能をめぐる対（P1）は、Cが利用者の手間しだいと条件として述べ、Aが両方に対応する案（T6）を出しており両立済み。交換式カバーの対（P2）もBが同意して解消している。"}

@@ -1,0 +1,121 @@
+{
+ "checkpoint": "DELI04_cp02",
+ "judge": "J-k02",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t4",
+   "speaker": "Guinea p",
+   "supports": "母音のカードを選ぶ",
+   "summary_ja": "それが唯一の解だと考えた",
+   "quote": "The card with the vowel"
+  },
+  {
+   "id": "R2",
+   "turn": "t7",
+   "speaker": "Chipmunk",
+   "supports": "偶数のカードも選ぶ",
+   "summary_ja": "偶数のカードでも検証できる",
+   "quote": "we verify with the even number too though"
+  },
+  {
+   "id": "R3",
+   "turn": "t8",
+   "speaker": "Guinea p",
+   "supports": "偶数のカードも選ぶ",
+   "summary_ja": "それも規則を証明しうる",
+   "quote": "it could prove the rule as well"
+  },
+  {
+   "id": "R4",
+   "turn": "t12",
+   "speaker": "Chipmunk",
+   "supports": "他のカードを検証",
+   "summary_ja": "当てはまらないことを確かめるため他のカードを調べる",
+   "quote": "We should test one of the other"
+  },
+  {
+   "id": "R5",
+   "turn": "t20",
+   "speaker": "Tiger",
+   "supports": "偶数のカードは不要",
+   "summary_ja": "6の裏が母音である必要はない",
+   "quote": "The six does not have need to have a vowel"
+  },
+  {
+   "id": "R6",
+   "turn": "t22",
+   "speaker": "Tiger",
+   "supports": "偶数のカードは不要",
+   "summary_ja": "母音の裏は偶数でなければならないが偶数の裏は母音でなくてよい",
+   "quote": "the even number does not need a vowel"
+  },
+  {
+   "id": "R7",
+   "turn": "t21",
+   "speaker": "Guinea p",
+   "supports": "そのカードは不要",
+   "summary_ja": "偶数を確かめることも母音を確かめることもできない",
+   "quote": "Cannot verify Even numbers behind vowels"
+  }
+ ],
+ "pairs": [
+  {
+   "pair_id": "P1",
+   "reason_ids": [
+    "R2",
+    "R6"
+   ],
+   "choice_item": "偶数のカードを選ぶか",
+   "premises": [
+    {
+     "reason_id": "R2",
+     "type": "T1",
+     "premise_ja": "偶数のカードの裏を見れば規則を検証できる",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t7",
+       "quote": "we verify with the even number too though"
+      }
+     ]
+    },
+    {
+     "reason_id": "R6",
+     "type": "T1",
+     "premise_ja": "規則は偶数のカードの裏に母音を求めていない",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t22",
+       "quote": "The card with vowels have to have an even number but the even number does not need a vowel"
+      }
+     ]
+    }
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [
+    {
+     "turn": "t20",
+     "quote": "The six does not have need to have a vowel"
+    },
+    {
+     "turn": "t22",
+     "quote": "the even number does not need a vowel"
+    },
+    {
+     "turn": "t23",
+     "quote": "I think <CARD> is out"
+    }
+   ],
+   "compatible_or_reconciled": false,
+   "during_presentation": false
+  }
+ ],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "既に扱われた",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "偶数のカードを選ぶかで規則の読み方が分かれるが、Tigerがt20・t22で違いを明示し、Guinea pが応答している。参加者が既に扱っているので控える。"
+}

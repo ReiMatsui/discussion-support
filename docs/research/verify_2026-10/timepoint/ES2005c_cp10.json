@@ -1,0 +1,33 @@
+{"checkpoint": "ES2005c_cp10", "judge": "J-k10",
+ "reasons": [
+  {"id": "R1", "turn": "t159", "speaker": "B", "supports": "LCD・音声認識など費用のかかる新機能を入れる", "summary_ja": "市場調査では人々は品質・凝った外観・新しさのためにより多く払うので、費用が少し上がってもよい。", "quote": "people are willing to pay more, but they want the quality, they want f fancy look"},
+  {"id": "R2", "turn": "t164", "speaker": "C", "supports": "費用のかかる機能に慎重（製造費の上限内に収める）", "summary_ja": "製造費12.50ユーロの範囲に収める必要がある。", "quote": "It's still it's still got to get within our twelve fifty, you know."},
+  {"id": "R3", "turn": "t184", "speaker": "B", "supports": "LCD画面を入れる", "summary_ja": "LCD画面にアイコンが出てクリックするだけなので使いやすい。", "quote": "it will be easy because there will be, on L_C_D_ s screen, there will be different frent icons, they can just click"},
+  {"id": "R4", "turn": "t187", "speaker": "A", "supports": "LCD画面を入れない", "summary_ja": "リモコンを使うときは手元を見ずにテレビを見ているので、LCDは不要に思える。", "quote": "when you use a remote control, you never look at it, right?"},
+  {"id": "R5", "turn": "t197", "speaker": "D", "supports": "LCD画面を入れない", "summary_ja": "予算と使いやすさの目標から、LCDは選ぶべきでない。", "quote": "for our budget and for the thing we're trying to go for eas easy to use, it's not the thing we should go for, I think"},
+  {"id": "R6", "turn": "t154", "speaker": "D", "supports": "LCD画面を入れない", "summary_ja": "LCDは見た目はよいが予算に対して高すぎるかもしれない。", "quote": "the L_C_D_, it does look smart, but I think maybe for our budget, do you think that would be a bit too expensive"}
+ ],
+ "pairs": [
+  {"pair_id": "P1", "reason_ids": ["R3", "R4"], "choice_item": "LCD画面を入れるか",
+   "premises": [
+    {"reason_id": "R3", "type": "T2", "premise_ja": "利用者はLCD画面のアイコンを見てクリックして操作する", "evidence_level": "E2", "evidence": [{"turn": "t184", "quote": "there will be different frent icons, they can just click"}]},
+    {"reason_id": "R4", "type": "T2", "premise_ja": "利用者はリモコンを使うとき手元を見ず、テレビを見ている", "evidence_level": "E1", "evidence": [{"turn": "t187", "quote": "when you use a remote control, you never look at it, right?"}, {"turn": "t189", "quote": "You're looking at the T_V_"}]}
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [{"turn": "t187", "quote": "when you use a remote control, you never look at it, right?"}, {"turn": "t193", "quote": "That's true, yeah."}],
+   "compatible_or_reconciled": false, "during_presentation": false},
+  {"pair_id": "P2", "reason_ids": ["R1", "R2"], "choice_item": "費用のかかる新機能（LCD・音声認識）を入れるか",
+   "premises": [
+    {"reason_id": "R1", "type": "T1", "premise_ja": "市場調査では人々は品質・外観・新しさにより多く払う意思がある", "evidence_level": "E1", "evidence": [{"turn": "t159", "quote": "people are willing to pay more, but they want the quality, they want f fancy look"}]},
+    {"reason_id": "R2", "type": "T1", "premise_ja": "製造費は12.50ユーロ以内でなければならない", "evidence_level": "E1", "evidence": [{"turn": "t164", "quote": "It's still it's still got to get within our twelve fifty, you know."}]}
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [{"turn": "t167", "quote": "So even if we increase our cost little bit, within uh some limits"}, {"turn": "t168", "quote": "I'm not sure if the if for twenty five Euros uh per uh twelve Euros fifty m manufacturing cost"}],
+   "compatible_or_reconciled": false, "during_presentation": false}
+ ],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "既に扱われた",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "LCDをめぐる利用状況の想定（画面を見て操作するか）はAが問いの形で述べ、C・Dが応答しており、費用上限と支払意思の違いもBが「within some limits」と応じて扱われている。現在の話題（ケース素材・色）には前提差の対がない。"}

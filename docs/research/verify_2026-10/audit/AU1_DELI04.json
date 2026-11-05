@@ -1,0 +1,42 @@
+{
+ "auditor": "AU1",
+ "meeting": "DELI04",
+ "pairs_eval": [
+  {
+   "pair_uid": "DELI04-U05",
+   "B1": [
+    "不確か",
+    "R6（t22 Tiger）はE1。R2の根拠t7は疑問形の提案（couldn't we verify with the even number too though ?）で、Chipmunkはt12・t25・t42で逆の立場に移っている。偶数カードを推す理由としてはt8 Guinea pの方が適切で、R2をE1とするのは過大"
+   ],
+   "B2": [
+    "不確か",
+    "t7（Chipmunk）とt22（Tiger）は時点がずれ、t22の時点ではChipmunk自身が偶数カードを推していない。対立する理由の組として成り立つかが不確か"
+   ],
+   "B3": [
+    "不確か",
+    "規則の読み（一方向か）としてT1に当たりうるが、確証/反証という論理理解の差と読む余地がある"
+   ],
+   "B6": [
+    "満たさない",
+    "t7の疑問形が『検証できる』という断定的な前提に変わっている"
+   ],
+   "explicit_judgement": [
+    "正しい",
+    "t20・t22でTigerが『偶数は母音を必要としない』と違いを指摘し、t25 Chipmunk「good point」が応答（cp02はt23までのため応答はcp03で入るが、t23 Guinea p「I think <CARD> is out」も応答として読める）"
+   ],
+   "first_explicit_turn": "t20",
+   "full_analysis_scene": "S2"
+  }
+ ],
+ "support_eval": [],
+ "misses": [
+  {
+   "scene_id": "S1",
+   "turns": "t4-t17",
+   "nearest_checkpoint": "DELI04_cp01",
+   "support_condition_met": "不確か",
+   "reason": "cp01（t12まで）でTiger t5（母音のカードを確かめることを求めている、E1）とGuinea p t8（偶数カードも規則を立証しうる、E2）の違いがあり、未明示・発表中でない・両立なし。ただし前提差（T1）か論理推論の差かが境界的で、t13-t15で参加者が自力で修正した"
+  }
+ ],
+ "notes": "支援と判定した時点はない。S2（偶数カードを含めるか）でGuinea p（t28・t37、すべて確かめる必要）とTiger・Chipmunk（一方向の読み）の違いは最後まで残ったが、t20-t22で既に明示されている。U05はS2の選択事項に当たるが、片側の理由にS1のChipmunk t7を使っている。"
+}

@@ -1,0 +1,12 @@
+{
+ "checkpoint": "TS3003c_cp03",
+ "judge": "J-k03",
+ "reasons": [],
+ "pairs": [],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "対がない",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "履歴はPMの議題説明と前回の要件確認までで、選択肢を支持する理由がまだ出ていない。"
+}

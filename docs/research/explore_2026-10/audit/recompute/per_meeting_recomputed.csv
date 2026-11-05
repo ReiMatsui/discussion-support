@@ -1,0 +1,9 @@
+﻿split,meeting,turns,minutes,judgments,episodes_opened,episodes_with_candidate,candidate_records,cand_present_ok,ep_generatable,ep_present_ok,B_checkpoints,B_gen_yes,ok_preempt_S1,ok_update_S2S3,ok_update_substantive,stage2_items,events
+dev,GAP01,271,9.7,206,15,9,9,5,9,5,3,1,0,2,2,10,"{'open': 15, 'update': 54, 'resolved': 14, 'human_comparing': 18, 'switch': 3}"
+dev,ES2002c,583,40.1,371,18,13,15,9,13,9,13,12,2,7,7,27,"{'open': 18, 'update': 77, 'deferred': 3, 'human_comparing': 26, 'switch': 6, 'resolved': 14}"
+test,GAP07,251,12.0,197,23,18,20,12,18,12,4,3,3,4,3,23,"{'open': 23, 'update': 51, 'switch': 17, 'human_comparing': 9, 'resolved': 15}"
+test,GAP08,297,8.9,220,14,11,12,9,11,9,2,2,1,7,5,14,"{'open': 14, 'resolved': 14, 'update': 34, 'human_comparing': 16, 'deferred': 1, 'switch': 1}"
+test,GAP18,280,15.3,218,17,13,15,9,11,9,5,5,2,7,4,20,"{'open': 17, 'update': 83, 'resolved': 15, 'human_comparing': 7, 'deferred': 2, 'switch': 3}"
+test,GAP24,393,13.7,289,15,12,12,6,12,6,4,4,0,1,0,16,"{'open': 15, 'update': 76, 'resolved': 15, 'human_comparing': 21, 'switch': 1}"
+test,ES2003c,298,37.3,204,13,10,11,0,9,0,12,11,0,0,0,22,"{'open': 13, 'switch': 9, 'update': 19, 'human_comparing': 23, 'resolved': 7, 'deferred': 1}"
+test,ES2004c,570,38.9,394,16,15,16,1,13,1,12,11,0,1,0,27,"{'open': 16, 'switch': 4, 'human_comparing': 19, 'update': 52, 'deferred': 3, 'resolved': 12}"

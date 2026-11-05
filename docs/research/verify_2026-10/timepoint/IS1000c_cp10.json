@@ -1,0 +1,44 @@
+{"checkpoint": "IS1000c_cp10", "judge": "J-k10",
+ "reasons": [
+  {"id": "R1", "turn": "t61", "speaker": "A", "supports": "LCD・音声認識を入れない", "summary_ja": "LCDや音声認識は余分な費用と手間に見合わない。", "quote": "There are other aspects like L_C_D_ screens and speech recognition which weren't I don't think, in my personal opinion, gonna be worth the extra expense and the extra effort that will go into them."},
+  {"id": "R2", "turn": "t120", "speaker": "C", "supports": "音声認識を入れる", "summary_ja": "チャンネルが増えると番号を覚えにくくなるので、音声でチャンネル名を使えるとよい。", "quote": "as more and more channels come then you have more and more problems to remember the v v exact channel numbers"},
+  {"id": "R3", "turn": "t128", "speaker": "C", "supports": "音声認識を入れる", "summary_ja": "80〜100語程度の音声認識なら実装は難しくない。", "quote": "which shouldn't be th that difficult to implement, like eighty to hundred word"},
+  {"id": "R4", "turn": "t184", "speaker": "B", "supports": "音声認識などに慎重", "summary_ja": "12.50ユーロで実装できるか分からない。", "quote": "I'm not sure whether that that we can implement that for twelve Euro and fifty cents"},
+  {"id": "R5", "turn": "t198", "speaker": "D", "supports": "音声認識に慎重（キーのプログラムは可）", "summary_ja": "キーのプログラムは予算内だが、音声認識は実現可能か分からない。", "quote": "but for the A_S_R_ system, uh I'm not sure if it's feasible to have this"},
+  {"id": "R6", "turn": "t164", "speaker": "D", "supports": "利用者によるキーのプログラムに慎重", "summary_ja": "使いやすさを保ちたいなら、キーのプログラムは難しすぎるかもしれない。", "quote": "I don't know if we still want the um R_C_ to be easy to use,"},
+  {"id": "R7", "turn": "t167", "speaker": "C", "supports": "利用者によるキーのプログラムを入れる", "summary_ja": "使いやすさは利用者がどれだけ手間をかけるかによる。", "quote": "depends on the easiness like the user how much effort he can put"},
+  {"id": "R8", "turn": "t80", "speaker": "B", "supports": "交換カバーに慎重", "summary_ja": "新しい供給ラインが必要になり組織的に複雑。", "quote": "you have to introduce a complete uh uh new l line of uh of supplies"},
+  {"id": "R9", "turn": "t83", "speaker": "A", "supports": "交換カバーを入れる", "summary_ja": "大量販売の製品なので2〜3種類のデザインは賄える。", "quote": "we can afford to have two or three different designs at least."}
+ ],
+ "pairs": [
+  {"pair_id": "P1", "reason_ids": ["R3", "R4"], "choice_item": "音声認識を入れるか",
+   "premises": [
+    {"reason_id": "R3", "type": "T1", "premise_ja": "語彙が80〜100語程度の音声認識なら実装は難しくない", "evidence_level": "E1", "evidence": [{"turn": "t128", "quote": "which shouldn't be th that difficult to implement, like eighty to hundred word"}]},
+    {"reason_id": "R4", "type": "T1", "premise_ja": "12.50ユーロで実装できるかは分からない", "evidence_level": "E1", "evidence": [{"turn": "t184", "quote": "I'm not sure whether that that we can implement that for twelve Euro and fifty cents"}]}
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [{"turn": "t202", "quote": "if it's a low vocabulary it's already implemented,"}, {"turn": "t206", "quote": "and w how much it's cost, maybe with a f cheap chip."}, {"turn": "t201", "quote": "we can talk with the coffee unit and you can uh check how much how much they"}],
+   "compatible_or_reconciled": false, "during_presentation": false},
+  {"pair_id": "P2", "reason_ids": ["R6", "R7"], "choice_item": "利用者がキーをプログラムできるようにするか",
+   "premises": [
+    {"reason_id": "R6", "type": "T2", "premise_ja": "利用者は手間なく簡単に使いたい", "evidence_level": "E2", "evidence": [{"turn": "t164", "quote": "I don't know if we still want the um R_C_ to be easy to use,"}]},
+    {"reason_id": "R7", "type": "T2", "premise_ja": "使いやすさは利用者がかけられる手間による", "evidence_level": "E1", "evidence": [{"turn": "t167", "quote": "depends on the easiness like the user how much effort he can put"}]}
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [{"turn": "t167", "quote": "depends on the easiness like the user how much effort he can put"}, {"turn": "t176", "quote": "I think you can do it both ways."}],
+   "compatible_or_reconciled": true, "during_presentation": false},
+  {"pair_id": "P3", "reason_ids": ["R8", "R9"], "choice_item": "交換カバーを用意するか",
+   "premises": [
+    {"reason_id": "R8", "type": "T1", "premise_ja": "交換カバーには新しい供給ラインが必要で組織的に複雑", "evidence_level": "E1", "evidence": [{"turn": "t80", "quote": "you have to introduce a complete uh uh new l line of uh of supplies"}]},
+    {"reason_id": "R9", "type": "T1", "premise_ja": "大量販売の製品なので複数デザインを賄える", "evidence_level": "E1", "evidence": [{"turn": "t81", "quote": "This is gonna be a mass marketed product,"}]}
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [{"turn": "t83", "quote": "we can afford to have two or three different designs at least."}],
+   "compatible_or_reconciled": true, "during_presentation": false}
+ ],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "既に扱われた",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "音声認識の費用については、Dが低語彙なら既存で安価なチップがあり得ると条件として述べ、Cが費用を確認すると応じており扱われている。キーのプログラムはAが両方に対応する案（T6）を述べ、交換カバーもBが受け入れており、未扱いの主分析の対がない。"}

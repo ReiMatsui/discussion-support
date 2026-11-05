@@ -1,0 +1,49 @@
+{"checkpoint": "ES2005c_cp18", "judge": "J-k18",
+ "reasons": [
+  {"id": "R1", "turn": "t184", "speaker": "B", "supports": "L_C_D_画面を入れる", "summary_ja": "L_C_D_画面にアイコンがあればクリックするだけなので使いやすい。", "quote": "it will be easy because there will be, on L_C_D_ s screen, there will be different frent icons"},
+  {"id": "R2", "turn": "t187", "speaker": "A", "supports": "L_C_D_画面を入れない", "summary_ja": "リモコン使用中は手元を見ずテレビを見ているので、画面は不要に思える。", "quote": "when you use a remote control, you never look at it, right?"},
+  {"id": "R3", "turn": "t159", "speaker": "B", "supports": "費用を多少上げても新技術・新デザインを入れる", "summary_ja": "市場調査では、人々は品質や新しさのためなら多く払うとしている。", "quote": "people are willing to pay more, but they want the quality"},
+  {"id": "R4", "turn": "t164", "speaker": "C", "supports": "製造費12.50ユーロ以内に抑える（高価な機能を控える）", "summary_ja": "それでも12.50ユーロ以内に収める必要がある。", "quote": "It's still it's still got to get within our twelve fifty, you know."},
+  {"id": "R5", "turn": "t197", "speaker": "D", "supports": "L_C_D_画面を入れない", "summary_ja": "予算と使いやすさの目標から、L_C_D_は選ぶべきでない。", "quote": "for our budget and for the thing we're trying to go for eas easy to use, it's not the thing we should go for"},
+  {"id": "R6", "turn": "t550", "speaker": "A", "supports": "電源に手回し発電（ダイナモ）を使う", "summary_ja": "動かないとき人は自然に振るので、振って発電する方式は合う。", "quote": "people's natural reaction anyway is to just shake the thing"},
+  {"id": "R7", "turn": "t559", "speaker": "C", "supports": "ダイナモを使わない", "summary_ja": "音声操作で置いたまま使うなら、振る義務が負担になる。", "quote": "Especially if they want to use it uh uh sp uh specifically as um voice activated."},
+  {"id": "R8", "turn": "t571", "speaker": "B", "supports": "太陽電池を使わない（充電池を使う）", "summary_ja": "太陽電池だと日光に当てておく必要があり、日が出ない日に困る。", "quote": "solar power will w also not be a good idea, because then they have to keep m their mobiles outside in solar energy"},
+  {"id": "R9", "turn": "t322", "speaker": "B", "supports": "果物（バナナ等）の形にする", "summary_ja": "果物の形なら広告にも使え、果物・野菜の流行と結びつけられる。", "quote": "this will help us in our advertisement also and we can relate with fruits and vegetables"},
+  {"id": "R10", "turn": "t519", "speaker": "D", "supports": "果物そのものの形にはせず、果物から着想した有機的な形にとどめる", "summary_ja": "25〜35歳は洗練された見た目を求めており、果物そのものはやり過ぎの仕掛けになりうる。", "quote": "maybe fruit could be a bit of a too much of a gimmick"}
+ ],
+ "pairs": [
+  {"pair_id": "P1", "reason_ids": ["R1", "R2"], "choice_item": "L_C_D_画面を入れるか",
+   "premises": [
+    {"reason_id": "R1", "type": "T2", "premise_ja": "利用者はリモコンの画面のアイコンを見て操作する", "evidence_level": "E2", "evidence": [{"turn": "t184", "quote": "there will be different frent icons, they can just click"}]},
+    {"reason_id": "R2", "type": "T2", "premise_ja": "利用者はリモコンを見ずにテレビを見ている", "evidence_level": "E1", "evidence": [{"turn": "t187", "quote": "when you use a remote control, you never look at it, right?"}, {"turn": "t189", "quote": "You're looking at the T_V_"}]}],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [{"turn": "t187", "quote": "But but the thing is when you use a remote control, you never look at it, right?"}, {"turn": "t193", "quote": "That's true, yeah."}],
+   "compatible_or_reconciled": false, "during_presentation": false},
+  {"pair_id": "P2", "reason_ids": ["R3", "R4"], "choice_item": "費用を上げて新技術・新デザイン（L_C_D_など）を入れるか",
+   "premises": [
+    {"reason_id": "R3", "type": "T1", "premise_ja": "市場調査では、人々は品質や新しさにより多く払う", "evidence_level": "E1", "evidence": [{"turn": "t159", "quote": "in our market survey we have seen that people are willing to pay more"}]},
+    {"reason_id": "R4", "type": "T1", "premise_ja": "製造費は12.50ユーロ以内という制約がある", "evidence_level": "E1", "evidence": [{"turn": "t164", "quote": "It's still it's still got to get within our twelve fifty, you know."}]}],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [{"turn": "t164", "quote": "It's still it's still got to get within our twelve fifty, you know."}, {"turn": "t167", "quote": "So even if we increase our cost little bit, within uh some limits"}],
+   "compatible_or_reconciled": false, "during_presentation": false},
+  {"pair_id": "P3", "reason_ids": ["R6", "R7"], "choice_item": "電源にダイナモを使うか",
+   "premises": [
+    {"reason_id": "R6", "type": "T2", "premise_ja": "利用者はリモコンを手に持って使い、電池切れなら振る", "evidence_level": "E1", "evidence": [{"turn": "t544", "quote": "this might be an idea for something that people really wanna grab, you can shake it if it's out of power."}]},
+    {"reason_id": "R7", "type": "T2", "premise_ja": "音声操作で、リモコンを置いたまま使う", "evidence_level": "E1", "evidence": [{"turn": "t559", "quote": "Especially if they want to use it uh uh sp uh specifically as um voice activated."}, {"turn": "t561", "quote": "Then if it's just sitting on the"}]}],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [{"turn": "t559", "quote": "Especially if they want to use it uh uh sp uh specifically as um voice activated."}, {"turn": "t564", "quote": "Yeah, then they have to pick it up and then activate it and then Yeah."}],
+   "compatible_or_reconciled": false, "during_presentation": false}
+ ],
+ "inferred_pairs": [
+  {"pair_id": "I1", "reason_ids": ["R9", "R10"], "choice_item": "ケースを果物そのものの形にするか",
+   "premises": [
+    {"reason_id": "R9", "type": "T1", "premise_ja": "流行調査では果物・野菜が人々の好みと結びついている", "evidence_level": "E1", "evidence": [{"turn": "t322", "quote": "That what our data shows that,"}]},
+    {"reason_id": "R10", "type": "T1", "premise_ja": "対象の25〜35歳は果物そのものの形を仕掛けとして受け取る", "evidence_level": "E3", "evidence": [{"turn": "t519", "quote": "They wanted something that looks fancy and I think maybe fruit could be a bit of a too much of a gimmick"}]}],
+   "already_explicit_by_participants": false, "explicit_evidence": [],
+   "compatible_or_reconciled": true, "during_presentation": false}
+ ],
+ "decision": "withhold",
+ "withhold_reason": "既に扱われた",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "主分析の対（L_C_D_の利用状況、費用上限、ダイナモの使い方）はいずれも参加者が条件や違いとして言葉にし、応答されている（L_C_D_は t624 で除外済み）。果物の形の対はDの理由が評価寄りで推測に依存し、Bの公開調査案（t372）や交換式ケース案（t463）で両立も図られている。"}

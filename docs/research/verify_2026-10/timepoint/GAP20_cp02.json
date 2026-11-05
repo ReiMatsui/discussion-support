@@ -1,0 +1,61 @@
+{
+ "checkpoint": "GAP20_cp02",
+ "judge": "J-k02",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t8",
+   "speaker": "Orange",
+   "supports": "チョコレートを下位",
+   "summary_ja": "食料は狩りで得られるだろう",
+   "quote": "because they can probably hunt the food"
+  },
+  {
+   "id": "R2",
+   "turn": "t13",
+   "speaker": "Orange",
+   "supports": "ショートニングの用途",
+   "summary_ja": "火の燃料に使える",
+   "quote": "used for like fuel for fire"
+  },
+  {
+   "id": "R3",
+   "turn": "t19",
+   "speaker": "Pink",
+   "supports": "ライターを1位",
+   "summary_ja": "火の起こし方を知らない場合に火をつけるため",
+   "quote": "because to start a fire if they didnt know how"
+  },
+  {
+   "id": "R4",
+   "turn": "t30",
+   "speaker": "Pink",
+   "supports": "救急用品を2位",
+   "summary_ja": "誰かがけがをした場合",
+   "quote": "cause like what if someone got injured"
+  },
+  {
+   "id": "R5",
+   "turn": "t55",
+   "speaker": "Pink",
+   "supports": "衣類よりコンパス",
+   "summary_ja": "既に服を着ていると書かれている",
+   "quote": "Just because like they said were already dressed"
+  },
+  {
+   "id": "R6",
+   "turn": "t71",
+   "speaker": "Orange",
+   "supports": "地図を後に",
+   "summary_ja": "地図が何に使えるか分からない",
+   "quote": "Cause the air map um I dont know what could have been used for"
+  }
+ ],
+ "pairs": [],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "対がない",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "Blueは順位を挙げるだけで理由を述べておらず、異なる話者が前提に依存する理由で別の選択肢を推す対はない。"
+}

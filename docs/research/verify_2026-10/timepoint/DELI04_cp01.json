@@ -1,0 +1,37 @@
+{
+ "checkpoint": "DELI04_cp01",
+ "judge": "J-k01",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t4",
+   "speaker": "Guinea p",
+   "supports": "母音のカードを選ぶ",
+   "summary_ja": "選べる唯一の解",
+   "quote": "I picked the only solution that I could : The card with the vowel ."
+  },
+  {
+   "id": "R2",
+   "turn": "t8",
+   "speaker": "Guinea p",
+   "supports": "もう1枚（偶数側と思われる）も選ぶ",
+   "summary_ja": "それも規則を証明しうる",
+   "quote": "it could prove the rule as well"
+  },
+  {
+   "id": "R3",
+   "turn": "t12",
+   "speaker": "Chipmunk",
+   "supports": "その2枚ではなく、他のカードのどちらかを調べる",
+   "summary_ja": "それらが規則に合わないことを確かめるため",
+   "quote": "We should test one of the other , either <CARD> or <CARD> to verify that those don''t fit I think"
+  }
+ ],
+ "pairs": [],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "T3・T4のみ",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "Guinea p（証明できるカード）と Chipmunk（合わないことを確かめるカード）の違いは、規則の検証とは何かという論理・評価基準（T3 相当）の違いで、T1・T2 の前提に依存しない。よって主分析の対はない。"
+}

@@ -1,0 +1,42 @@
+{
+ "auditor": "AU1",
+ "meeting": "DELI01",
+ "pairs_eval": [
+  {
+   "pair_uid": "DELI01-U01",
+   "B1": [
+    "不確か",
+    "R3（t18 Cat）はE1で支えられる。R2の『規則は両方向』はt12「Under <CARD> it must be even number same with <CARD>」から読むが、カードが伏字で何の『same』か決まらず、E2は過大でE3相当"
+   ],
+   "B2": [
+    "満たす",
+    "同じ選択事項（どのカードを裏返すか）について、規則の読みの違いで推すカードが違う"
+   ],
+   "B3": [
+    "不確か",
+    "規則の読みはT1として扱えるが、論理推論の差（反証の理解）と読む余地があり、事実・想定の前提差と言い切れない"
+   ],
+   "B6": [
+    "満たす",
+    "t18の否定（does not say ONLY）は保たれている。t12に留保はない"
+   ],
+   "explicit_judgement": [
+    "正しい",
+    "cp02（t21まで）でCatがt17-t18で規則の読みの違いを指摘し、t19-t21でKiwiが応じている"
+   ],
+   "first_explicit_turn": "t18",
+   "full_analysis_scene": "S1"
+  }
+ ],
+ "support_eval": [],
+ "misses": [
+  {
+   "scene_id": "S2",
+   "turns": "t29-t34",
+   "nearest_checkpoint": "DELI01_cp03",
+   "support_condition_met": "いいえ",
+   "reason": "理由が述べられず、前提は推測（E3）のみで主分析の対にならない"
+  }
+ ],
+ "notes": "支援と判定した時点はない。主分析の対はU01のみで、cp02時点で既に参加者が明示しており控えるは妥当。Wason課題の相違は前提差より論理推論の差に近く、R2の証拠水準は過大評価の可能性がある。"
+}

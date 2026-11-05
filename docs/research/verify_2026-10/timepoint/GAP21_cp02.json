@@ -1,0 +1,77 @@
+{
+ "checkpoint": "GAP21_cp02",
+ "judge": "J-k02",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t8",
+   "speaker": "Blue",
+   "supports": "地図を1位",
+   "summary_ja": "現在地が分かり安全な場所を早く見つけられる",
+   "quote": "youll know where you are and you can find where the safety faster"
+  },
+  {
+   "id": "R2",
+   "turn": "t6",
+   "speaker": "Orange",
+   "supports": "救急用品を1位",
+   "summary_ja": "中に色々入った緊急用キットだと思った",
+   "quote": "an emergency kind of kit that has stuff in it"
+  },
+  {
+   "id": "R3",
+   "turn": "t13",
+   "speaker": "Orange",
+   "supports": "新聞を2位",
+   "summary_ja": "火を起こすため",
+   "quote": "just so I can like start the fire or something"
+  },
+  {
+   "id": "R4",
+   "turn": "t16",
+   "speaker": "Orange",
+   "supports": "コンパスを3位",
+   "summary_ja": "どの方向へ行くかを見るため",
+   "quote": "This is uh see what area to go to"
+  },
+  {
+   "id": "R5",
+   "turn": "t37",
+   "speaker": "Blue",
+   "supports": "スチールウールを14位",
+   "summary_ja": "ガーゼや新聞など火を起こす物が他にもある",
+   "quote": "But theres also the gauze the newspaper all that that you could start the fire with"
+  },
+  {
+   "id": "R6",
+   "turn": "t50",
+   "speaker": "Blue",
+   "supports": "ショートニングを下位",
+   "summary_ja": "食べられるかもしれない以外は役に立たない",
+   "quote": "I dont think it would be very useful unless you could like sort of maybe eat it"
+  },
+  {
+   "id": "R7",
+   "turn": "t66",
+   "speaker": "Pink",
+   "supports": "スキーのストックを下位",
+   "summary_ja": "移動には大事だが生存には必要ない",
+   "quote": "But um for actual survival I didnt think they were"
+  },
+  {
+   "id": "R8",
+   "turn": "t67",
+   "speaker": "Blue",
+   "supports": "スキーのストックを下位",
+   "summary_ja": "必要のない地域にいる",
+   "quote": "And theyre in an area that dont quite need it"
+  }
+ ],
+ "pairs": [],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "対がない",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "1位はそれぞれ別の品目を挙げたが、Pinkは理由を述べておらず、Orangeの理由は移動か残留かなどの前提に依存していない。下位からの順位付けは同意で進んでおり、主分析の対はない。"
+}

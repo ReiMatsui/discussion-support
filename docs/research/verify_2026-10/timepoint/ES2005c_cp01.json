@@ -1,0 +1,12 @@
+{
+ "checkpoint": "ES2005c_cp01",
+ "judge": "J-k01",
+ "reasons": [],
+ "pairs": [],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "対がない",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "開会と前回の確認だけで、選択肢を支持する理由の発言がない。"
+}

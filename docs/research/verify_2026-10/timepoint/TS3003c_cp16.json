@@ -1,0 +1,35 @@
+{"checkpoint": "TS3003c_cp16", "judge": "J-k16",
+ "reasons": [
+  {"id": "R1", "turn": "t16", "speaker": "B", "supports": "音声認識を入れる", "summary_ja": "安価な音声認識システムが作れる", "quote": "It's uh possible to uh uh to make um quite cheap uh system for uh speech uh recognition."},
+  {"id": "R2", "turn": "t77", "speaker": "D", "supports": "音声認識を入れない", "summary_ja": "対象層は音声認識に追加で払わない", "quote": "if people would pay more for speech recognition in a remote control. Well you can see here, our target group would not do that."},
+  {"id": "R3", "turn": "t55", "speaker": "B", "supports": "充電台（docking station）は不要", "summary_ja": "電力消費が小さく電池1本で半年以上もつ", "quote": "So I believe one battery uh is just enough."},
+  {"id": "R4", "turn": "t58", "speaker": "A", "supports": "充電台を採る", "summary_ja": "高齢者は物の置き場所が決まっているのを好む", "quote": "Uh well I think uh elderly people just like to have everything in place."},
+  {"id": "R5", "turn": "t198", "speaker": "D", "supports": "左右両側にチャンネルボタンを付ける", "summary_ja": "左利きの利用者のため", "quote": "I thought maybe we could just make one of those buttons on both the left and the right side."},
+  {"id": "R6", "turn": "t238", "speaker": "A", "supports": "通常の形のままにする", "summary_ja": "機能が基本的なので左利きでも困らない", "quote": "I think the functions are that basic that nobody should have any problems with uh choosing a channel"}
+ ],
+ "pairs": [
+  {"pair_id": "P1", "reason_ids": ["R1", "R2"], "choice_item": "音声認識を入れるか",
+   "premises": [
+    {"reason_id": "R1", "type": "T1", "premise_ja": "音声認識は安く作れる", "evidence_level": "E1", "evidence": [{"turn": "t16", "quote": "It's uh possible to uh uh to make um quite cheap uh system for uh speech uh recognition."}]},
+    {"reason_id": "R2", "type": "T1", "premise_ja": "音声認識は販売価格を上げ、対象層はその分を払わない", "evidence_level": "E1", "evidence": [{"turn": "t79", "quote": "So if that would increase the price for which we're selling our remote control"}]}],
+   "already_explicit_by_participants": true, "explicit_evidence": [{"turn": "t71", "quote": "I'm wondering um what will the voice recognition mean for the production price?"}, {"turn": "t79", "quote": "So if that would increase the price for which we're selling our remote control"}, {"turn": "t104", "quote": "Maybe we have to uh discard the voice recognition. Because it will increase cost uh signifi uh significantly."}],
+   "compatible_or_reconciled": false, "during_presentation": false},
+  {"pair_id": "P2", "reason_ids": ["R3", "R4"], "choice_item": "充電台を採るか（電源）",
+   "premises": [
+    {"reason_id": "R3", "type": "T1", "premise_ja": "消費電力が小さく電池1本で半年以上もつ", "evidence_level": "E1", "evidence": [{"turn": "t55", "quote": "I believe uh it will run on one battery for um six months or f or or more"}]},
+    {"reason_id": "R4", "type": "T2", "premise_ja": "高齢者は物の置き場所が決まっているのを好む", "evidence_level": "E1", "evidence": [{"turn": "t60", "quote": "And I don't think they they like uh remotes just laying everywhere in their rooms."}]}],
+   "already_explicit_by_participants": true, "explicit_evidence": [{"turn": "t62", "quote": "So maybe a docking station will help them give the remote a place."}, {"turn": "t63", "quote": "Yeah. That's true. Yeah."}],
+   "compatible_or_reconciled": true, "during_presentation": false},
+  {"pair_id": "P3", "reason_ids": ["R5", "R6"], "choice_item": "ボタン配置（左右両側か通常の形か）",
+   "premises": [
+    {"reason_id": "R5", "type": "T2", "premise_ja": "左利きの利用者は片側のボタンでは使いにくい", "evidence_level": "E2", "evidence": [{"turn": "t200", "quote": "For left-handed users also."}]},
+    {"reason_id": "R6", "type": "T1", "premise_ja": "機能が基本的なので左利きでも問題ない", "evidence_level": "E1", "evidence": [{"turn": "t238", "quote": "But is it a problem that left-handed persons use a different hand?"}]}],
+   "already_explicit_by_participants": true, "explicit_evidence": [{"turn": "t238", "quote": "But is it a problem that left-handed persons use a different hand?"}, {"turn": "t239", "quote": "Yeah. That is true."}],
+   "compatible_or_reconciled": false, "during_presentation": false}
+ ],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "既に扱われた",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "音声認識（価格の想定）、充電台、左利き用ボタンの対はいずれも参加者が想定の違いを問い・条件として述べ、応答・決定済みである。直近はケース形状の検討に入ったばかりで、未扱いの主分析の対はない。"}

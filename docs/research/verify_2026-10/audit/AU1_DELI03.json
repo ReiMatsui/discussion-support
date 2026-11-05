@@ -1,0 +1,59 @@
+{
+ "auditor": "AU1",
+ "meeting": "DELI03",
+ "pairs_eval": [
+  {
+   "pair_uid": "DELI03-U03",
+   "B1": [
+    "満たす",
+    "R3はt6、R2はt8で明示されている"
+   ],
+   "B2": [
+    "満たす",
+    "同じ選択（もう1枚裏返すか）について推すものが違う"
+   ],
+   "B3": [
+    "不確か",
+    "Llamaの側は『テストとは確認例を集めることも含む』という、よいテストの基準（T3）と読む余地があり、T1の前提差と言い切れない"
+   ],
+   "B6": [
+    "不確か",
+    "t8は疑問形（Would it not prove ...?）だが『確認になる』と断定形で書かれている"
+   ],
+   "explicit_judgement": [
+    "正しい",
+    "t9 Tiger「the test is all cards with a vowel」で違いを指摘し、t10 Ravenの条件付き反論にt11 Llamaが「Good point」と応答。cp02時点で明示済み"
+   ],
+   "first_explicit_turn": "t9",
+   "full_analysis_scene": "S1"
+  },
+  {
+   "pair_uid": "DELI03-U04",
+   "B1": [
+    "満たす",
+    "t21とt22の明示発言で支えられる"
+   ],
+   "B2": [
+    "満たす",
+    "同じ選択（1枚か複数か）について、課題文の読みと出題意図の想定で推す枚数が違う"
+   ],
+   "B3": [
+    "満たす",
+    "課題の要求についての認識・想定で、価値観ではない。ただしLlama側は本人が『assumption』と言っておりT2が適切（T1分類は軽微なずれ）"
+   ],
+   "B6": [
+    "不確か",
+    "cp03は『The assumption then would be』を引用に含むが、cp02の前提記述『課題は見た目より複雑』は想定であることを落として断定している"
+   ],
+   "explicit_judgement": [
+    "正しい",
+    "t22でLlamaが「While it does」と応じ、自分の想定を『assumption』と明言している"
+   ],
+   "first_explicit_turn": "t22",
+   "full_analysis_scene": "S2"
+  }
+ ],
+ "support_eval": [],
+ "misses": [],
+ "notes": "支援と判定した時点はない。全体分析の2場面はどちらも時点判定の対として出ており、どちらも初出時点で既に参加者が明示していた。S1はcp01（t10まで）でも成立していたがt9で既に指摘されており、支援の条件は満たさない。"
+}

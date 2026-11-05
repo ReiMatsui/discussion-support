@@ -1,0 +1,45 @@
+{
+ "checkpoint": "DELI02_cp02",
+ "judge": "J-k02",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t3",
+   "speaker": "Cat",
+   "supports": "2枚を選ぶ",
+   "summary_ja": "一方は規則を証明し、もう一方は反証しうる",
+   "quote": "because the <CARD> can prove the rule and then the <CARD> could disprove it"
+  },
+  {
+   "id": "R2",
+   "turn": "t15",
+   "speaker": "Bee",
+   "supports": "別の2枚",
+   "summary_ja": "その2枚なら規則を証明する",
+   "quote": "<CARD> and <CARD> would prove the rule"
+  },
+  {
+   "id": "R3",
+   "turn": "t16",
+   "speaker": "Cat",
+   "supports": "その2枚は不採用",
+   "summary_ja": "明らかすぎる",
+   "quote": "too obvious"
+  },
+  {
+   "id": "R4",
+   "turn": "t17",
+   "speaker": "Bee",
+   "supports": "他のカードも裏返す",
+   "summary_ja": "他を裏返さないのはおかしい",
+   "quote": "but not turning the others seems off"
+  }
+ ],
+ "pairs": [],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "対がない",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "カード名が伏せられており推す選択肢の違いが確かめにくく、出ている理由も事実認識や想定の違いに依存する形になっていない。"
+}

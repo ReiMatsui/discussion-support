@@ -1,0 +1,81 @@
+{"auditor": "AU2", "meeting": "IS1000c",
+ "scenes": [
+  {"scene_id": "S1", "turns": "t76-t94", "choice_item": "交換可能なカバー（changeable covers）を採用するか",
+   "reasons": [
+     {"speaker": "B", "turn": "t80", "quote": "but on the other hand I I don't know whether my superiors would be so glad with it because you have to introduce a complete uh uh new l line of uh of supplies uh it would be uh very complicated uh organisational", "premise": "カバーの導入には新しい供給ラインが要り、組織的に複雑になる（コスト・手間が大きい）", "type": "T1", "level": "E1"},
+     {"speaker": "A", "turn": "t81-t83", "quote": "Well we're selling so many units of this. This is gonna be a mass marketed product, ... we can afford to have two or three different designs at least.", "premise": "大量販売の製品なので、2〜3種類のデザインを持つ余裕がある", "type": "T2", "level": "E1"}
+   ],
+   "explicit_turn": "t81",
+   "reconciled": "なし（B が A の前提を受け入れ、t89-t91 で after-sales の利点を自ら加えて採用側へ移った。両立ではなく反駁・採用）",
+   "stage2": ["起きた", "t81 A「Well we're selling so many units of this. This is gonna be a mass marketed product」（B の供給・組織コストの前提に対し、販売規模という条件を示す）"],
+   "stage3": ["起きた", "t85 B「Yes.」、t89-t91 B「if it works we can get uh after-sales ... those covers could go for for three, five Euro.」（B が懸念を限定し、採用側の理由を追加）"],
+   "stage4": ["起きた", "t94 B「That's a very good idea」、t363-t368 B「we go for the for the uh basic plastic case which can be later uh fancied up with ... you can put a cover over it.」"],
+   "self_handled": "はい",
+   "impairment": ["なかった", "A がすぐに B の前提（供給の複雑さ）に販売規模で応答し、B が同意して後の決定（基本ケース＋カバー）に接続した。別の解釈: B の組織コストの懸念は量的に検討されず、t368「that can be done later」で先送りされたとも読めるが、選択判断が妨げられた形跡はない"]},
+  {"scene_id": "S2", "turns": "t160-t180", "choice_item": "利用者がキーをプログラムできるようにするか（使いやすさとの兼ね合い）",
+   "reasons": [
+     {"speaker": "D", "turn": "t164-t166", "quote": "And uh isn't that too difficult for the we want w I don't know if we still want the um R_C_ to be easy to use, ... that's the compromise.", "premise": "キーのプログラムは利用者にとって難しく、使いやすさを損なう", "type": "T2", "level": "E1"},
+     {"speaker": "C", "turn": "t163, t167", "quote": "Yeah you can let them to do that. ... N no but the if you give it d depends on the easiness like the user how much effort he can put.", "premise": "使いやすさは利用者がどれだけ労力をかけるか次第で、プログラムは任意にできる", "type": "T2", "level": "E1"}
+   ],
+   "explicit_turn": "t167",
+   "reconciled": "t176-t180 A「I think you can do it both ways. You can have it so it's easy they can pick it up and use it straight away without ... customizing it, or if they want to they have the option of using these extra features.」（D t179「A standard. Yeah.」が応答）",
+   "stage2": ["起きた", "t167 C「depends on the easiness like the user how much effort he can put」、t170-t172 C「if you want to give the full freedom to the user or you want to keep some constraints」"],
+   "stage3": ["起きた", "t176-t180 A が両方の想定に対応する形で限定（標準のまま使える＋任意の追加機能）"],
+   "stage4": ["不明", "t194 D「for programming uh keys ... it could be uh easily uh done within the the package of twel twelve Euros」、t292-t298 で programmable device の話が続くが、明示の決定はない（t358 の二案に吸収）"],
+   "self_handled": "はい",
+   "impairment": ["なかった", "C が条件（利用者の労力次第）を述べ、A が両立案を出し D が受けた。別の解釈: 両立案は細部（どのキーを、どこまで）を決めないまま流れたが、この会議の段階では詳細決定は求められていない"]},
+  {"scene_id": "S3", "turns": "t61-t63, t116-t210 (中心は t184-t210)", "choice_item": "音声認識（speech recognition / ASR）を入れるか",
+   "reasons": [
+     {"speaker": "C", "turn": "t126-t128, t146-t152", "quote": "In the present market I saw it that says something like they are looking for eighty word thing, eighty word, ... which shouldn't be th that difficult to implement, like eighty to hundred word.", "premise": "語彙が少ない（80〜100語）なら実装はそれほど難しくない。コーヒーマシン部門が既に組み込んでいる", "type": "T1", "level": "E1"},
+     {"speaker": "B", "turn": "t184, t192", "quote": "I'm not sure whether that that we can implement that for twelve Euro and fifty cents. ... my uh sp speech recognition, I mean maybe it's possible for for twelve Euro but then then it will be at cost of other functionality we might implement like the uh uh the the the furry uh uh case", "premise": "12.5ユーロの予算内で実装できるか不確かで、できても他の機能を削ることになる", "type": "T1", "level": "E1"},
+     {"speaker": "D", "turn": "t198", "quote": "but for the A_S_R_ system, uh I'm not sure if it's feasible to have this", "premise": "ASR は予算内で実現可能か不確か", "type": "T1", "level": "E1"},
+     {"speaker": "A", "turn": "t61", "quote": "There are other aspects like L_C_D_ screens and speech recognition which weren't I don't think, in my personal opinion, gonna be worth the extra expense and the extra effort that will go into them.", "premise": "音声認識は追加費用・労力に見合わない（ただし A は t117 で「I like the idea though of having speech recognition for like the n the name of a channel」と立場を変えている）", "type": "T1", "level": "E1"}
+   ],
+   "explicit_turn": "t192",
+   "reconciled": "なし（両立ではなく、t199-t207 で費用を確認する方向に留保）",
+   "stage2": ["起きた", "t202-t206 D「Exactly yeah i if if it's a low vocabulary it's already implemented, ... and w how much it's cost, maybe with a f cheap chip.」（C の低語彙という条件を受けて費用条件を検討）"],
+   "stage3": ["起きた", "留保: t199-t207 C「we can talk with the coffee unit and you can uh check how much how much they ... Maybe we can come we we can talk to them」"],
+   "stage4": ["起きた", "t444 C「Maybe it would be interesting if you could look um for the cost inventories of other devices, if you're using speech recognition」、t358 B「you produce two designs, one one one less advanced and one more advanced and with the cost price」（決定を費用確認後へ先送り）"],
+   "self_handled": "はい",
+   "impairment": ["なかった", "予算内に収まるかという事実認識の違いを、B・D が条件付きで述べ、C が確認方法を提案し、確認後に決める流れになった。別の解釈: 費用は最後まで確認されず、会議内では ASR の採否が決まらなかった。ただしこれは情報不足（未確認情報）による留保で、前提の違いを扱えなかったためとは読みにくい"]},
+  {"scene_id": "S4", "turns": "t275-t329（関連: t61, t136）", "choice_item": "LCD・スクロールホイールのための高価なチップ（FPGA）を採用するか",
+   "reasons": [
+     {"speaker": "D", "turn": "t277-t279", "quote": "I think we might be able to integrate L_C_D_ into our R_C_. ... the display requires an advanced chip, which in turns is more expensive than the regular chip, but I think uh with twelve Euros um and if it's uh uh made for mm four million uh items, then I think w we could be able to handle that.", "premise": "400万台生産なら、12ユーロの予算でも高価なチップを扱える", "type": "T1", "level": "E1"},
+     {"speaker": "B", "turn": "t305-t312", "quote": "So when the more expensive chip you mentioned there is is possible in the in the given budget, uh maybe we should go for for the more expensive chip", "premise": "高価なチップが予算内で可能なら（条件付き）、それ一つで複数の機能を実装できる", "type": "T1", "level": "E1"},
+     {"speaker": "C", "turn": "t316", "quote": "Well I don't know if it'll fit into our cost of twelve point five Euro you know.", "premise": "高価なチップが12.5ユーロに収まるか疑わしい", "type": "T1", "level": "E1"},
+     {"speaker": "A", "turn": "t61", "quote": "There are other aspects like L_C_D_ screens and speech recognition which weren't I don't think, in my personal opinion, gonna be worth the extra expense", "premise": "LCD は追加費用に見合わない", "type": "T1", "level": "E1"}
+   ],
+   "explicit_turn": "t312",
+   "reconciled": "t323 A「Actually do maybe two designs and then cost them out and see which one is gonna fit in our budget better.」→ t358 B「you produce two designs, one one one less advanced and one more advanced and with the cost price」（両方の想定に備える形で両立）",
+   "stage2": ["起きた", "t312 B「when the more expensive chip ... is possible in the in the given budget」、t316 C「I don't know if it'll fit into our cost of twelve point five Euro」、t319 D「if we had a budget of twenty twenty uh Euros, it will be okay, but uh.」"],
+   "stage3": ["起きた", "留保・限定: t323 A「maybe we need specific costings then」、t329 D「right now I don't have price in in head but for next meeting I'm sure yeah be able to do that」（D は自分の t279 の見込みを限定）"],
+   "stage4": ["起きた", "t358 B「Let let's say next meeting w you produce two designs, one one one less advanced and one more advanced and with the cost price.」、t460 C「One for like cost and the one with like higher-end」"],
+   "self_handled": "はい",
+   "impairment": ["なかった", "予算内に収まるかの事実認識の違いを、B が条件として述べ、C が疑問を出し、A が二案の見積もりで両立させ、決定（二案）に接続した。別の解釈: D の t279 の見込み（400万台なら可能）と t319（20ユーロならよい）の食い違いは誰にも指摘されなかったが、見積もりを次回に回したため判断への支障は小さい"]},
+  {"scene_id": "S5", "turns": "t263-t347", "choice_item": "ケース（カバー）の素材に木を使うか（プラスチック・ゴムか）",
+   "reasons": [
+     {"speaker": "B", "turn": "t263-t266, t339-t343", "quote": "So like a normal cheap plastic case which can be covered up in, for instance, a wooden case. ... I think we can just use more cheap plastic for a kind of basic edition, and then people can fancy it up with with more expensive materials which which come with a with another price.", "premise": "木などの高価な素材は別売りのカバーとして、購入者が別の価格で買う（製品本体の費用にはならない）", "type": "T2", "level": "E1"},
+     {"speaker": "C", "turn": "t333-t338", "quote": "For example if f if you want to put wood I wouldn't suggest for wood uh'cause it's I think it's m much easier to use a plastic or a rubber rather than wood. ... It will be much ch much expensive th though it's the most natural thing", "premise": "木は扱いにくく、ずっと高価になる", "type": "T1", "level": "E1"}
+   ],
+   "explicit_turn": "t339",
+   "reconciled": "t339-t343 B の「基本はプラスチック、高価な素材は別価格のカバー」は、C の費用の懸念と木の選択肢を両立させる形。C t344「we can give a preference to them, but with plastic or the rubber ... it's much better」、D t346「it's a detailed uh yeah yeah uh plastic versus uh wood」で詳細として先送り",
+   "stage2": ["起きた", "t339 B「and then people can fancy it up with with more expensive materials which which come with a with another price」（費用を誰が負担するかという条件を示す）"],
+   "stage3": ["起きた", "限定: t344 C「we can give a preference to them, but with plastic or the rubber or whatever it is it's much better」、t346 D「it's a detailed uh yeah yeah uh plastic versus uh wood」"],
+   "stage4": ["起きた", "t363-t368 B「we go for the for the uh basic plastic case which can be later uh fancied up ... But that that that that can be done later.」"],
+   "self_handled": "はい",
+   "impairment": ["なかった", "本体はプラスチックで一致し、木は別売りカバーの話として先送りされた。別の解釈: C は木のカバー自体にも反対していたとも読め（t344 は完全には同意していない）、この違いは解消されないまま残ったが、本会議の決定（基本ケース）には影響しない"]},
+  {"scene_id": "S6", "turns": "t397-t416", "choice_item": "あまり使わないキーを隠す方式（スライドするカバーか、本のように開く形か）",
+   "reasons": [
+     {"speaker": "A", "turn": "t397-t399", "quote": "a r r remote control we have at home is one that's actually got a cover on the bottom so the bottom bit is just, covers half the keys most of the time, and then you can slide the cover back to get to the the more advanced keys.", "premise": "自宅の経験から、スライド式のカバーで高度なキーを隠せる", "type": "T1", "level": "E3"},
+     {"speaker": "B", "turn": "t401-t403", "quote": "Mm w but then you have still have uh when you don't use it you have such a a an extent of your remote control which you don't use. So maybe it's possible uh ... that you can elsewhere open your remote control and on the inside are uh buttons you don't use that much.", "premise": "スライド式は使わない部分の大きさが残る（形・大きさの評価）", "type": "T1", "level": "E3"}
+   ],
+   "explicit_turn": "なし",
+   "reconciled": "なし（A t405-t407 が「I've seen that before too ... it flips up」と B の案に同調）",
+   "stage2": ["起きない", "前提（事実認識・想定）の違いではなく、形の好み・評価の違いとして話が進んだ"],
+   "stage3": ["起きた", "t405 A「Mm. Yeah. Um yeah I've seen that before too.」（A が B の案を受け入れる）"],
+   "stage4": ["不明", "t428-t435 で次回の二案に先送り"],
+   "self_handled": "不明",
+   "impairment": ["なかった", "前提差の対とは言いにくい（推す選択肢の違いはあるが、依存する前提は T3/T4 寄りで E3）。参考として記録。別の解釈: B の「使わない部分の大きさ」を事実認識とみれば T1 だが、A の理由はその前提に依存しない"]}
+ ],
+ "no_premise_sections": "t1-t39（開始・待機・ファイル送付）、t40-t75（A の発表。ほぼ一人の説明）、t95-t159（C の発表。A が t117-t124 で音声認識に同調するのみで対立はない）、t211-t247（C の電池表示・暗所での発見の説明。A t222 は同調）、t248-t302（D の部品の発表と C の質問。対立なし）、t349-t396（次回の分担・大きいキーへの同意）、t417-t481（形の好み、次回の二案と分担の確認、閉会）",
+ "notes": "全文を読んだ事後分析で、時点での検出可能性とは区別する。主分析相当（E1/E2 の対）とみなせるのは S1〜S5。いずれも参加者が条件付きの発言・反論・両立案で自力で扱い、決定（基本プラスチックケース＋後付けカバー、二案の見積もり）に接続した。会議全体の大きな傾向として、費用（12.5ユーロ）に関わる事実認識の違いは、毎回『見積もってから決める』形で留保された。S6 は前提差の対としては弱く参考扱い。A の t61（LCD・音声認識は費用に見合わない）は A 自身が t117 で音声認識に好意的に転じており、A を一方の当事者とする対は不安定。"}

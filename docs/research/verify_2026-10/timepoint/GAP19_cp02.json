@@ -1,0 +1,172 @@
+{
+ "checkpoint": "GAP19_cp02",
+ "judge": "J-k02",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t1",
+   "speaker": "Blue",
+   "supports": "懐中電灯を1位",
+   "summary_ja": "墜落後暗くなると周りを見るのに必要",
+   "quote": "So I think flashlight would be the most important to see around"
+  },
+  {
+   "id": "R2",
+   "turn": "t4",
+   "speaker": "Orange",
+   "supports": "救急用品を1位",
+   "summary_ja": "けが人が出た場合に備える",
+   "quote": "in case if theres any injuries we want to work on keeping everyones safe"
+  },
+  {
+   "id": "R3",
+   "turn": "t6",
+   "speaker": "Pink",
+   "supports": "衣類を1位",
+   "summary_ja": "マニトバで零下40度まで下がるので暖かくする",
+   "quote": "it says it gets down to like negative forty"
+  },
+  {
+   "id": "R4",
+   "turn": "t9",
+   "speaker": "Orange",
+   "supports": "衣類を先に",
+   "summary_ja": "墜落は午前11時32分でしばらく暗くならない",
+   "quote": "its not gonna get dark for a while"
+  },
+  {
+   "id": "R5",
+   "turn": "t32",
+   "speaker": "Pink",
+   "supports": "拳銃を次に",
+   "summary_ja": "獲物を仕留めて食べるため",
+   "quote": "So that we can like kill stuff to eat"
+  },
+  {
+   "id": "R6",
+   "turn": "t46",
+   "speaker": "Pink",
+   "supports": "チョコレートを次に",
+   "summary_ja": "当面のあいだ食べるため",
+   "quote": "do we want like a chocolate bar so that we can like eat in the meantime"
+  },
+  {
+   "id": "R7",
+   "turn": "t48",
+   "speaker": "Orange",
+   "supports": "ロープ（火と避難所）を次に",
+   "summary_ja": "食料を得る銃がもうあるなら火と避難所が先",
+   "quote": "if they already have like a caliber to get food they should probably like start with fire and shelter stuff right"
+  },
+  {
+   "id": "R8",
+   "turn": "t70",
+   "speaker": "Blue",
+   "supports": "ウイスキーを上位",
+   "summary_ja": "寒いときに体を温める",
+   "quote": "when its really cold if you have whiskey it keeps your body warm"
+  }
+ ],
+ "pairs": [
+  {
+   "pair_id": "P1",
+   "reason_ids": [
+    "R1",
+    "R4"
+   ],
+   "choice_item": "1位の品目（懐中電灯か衣類か）",
+   "premises": [
+    {
+     "reason_id": "R1",
+     "type": "T1",
+     "premise_ja": "墜落後すぐ暗く（夜に）なる",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t1",
+       "quote": "Because once you crash land and its night"
+      }
+     ]
+    },
+    {
+     "reason_id": "R4",
+     "type": "T1",
+     "premise_ja": "墜落は午前中なのでしばらく暗くならない",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t9",
+       "quote": "cause they crash at 11:32 in the morning so its not gonna get dark for a while"
+      }
+     ]
+    }
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [
+    {
+     "turn": "t9",
+     "quote": "so its not gonna get dark for a while"
+    },
+    {
+     "turn": "t11",
+     "quote": "Okay yeah Yeah lets do"
+    }
+   ],
+   "compatible_or_reconciled": false,
+   "during_presentation": false
+  },
+  {
+   "pair_id": "P2",
+   "reason_ids": [
+    "R6",
+    "R7"
+   ],
+   "choice_item": "次の品目（チョコレートかロープか）",
+   "premises": [
+    {
+     "reason_id": "R6",
+     "type": "T2",
+     "premise_ja": "当面の間に食べるものが必要になる",
+     "evidence_level": "E2",
+     "evidence": [
+      {
+       "turn": "t46",
+       "quote": "so that we can like eat in the meantime"
+      }
+     ]
+    },
+    {
+     "reason_id": "R7",
+     "type": "T1",
+     "premise_ja": "食料を得る手段（銃）が既にある",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t48",
+       "quote": "if they already have like a caliber to get food"
+      }
+     ]
+    }
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [
+    {
+     "turn": "t48",
+     "quote": "if they already have like a caliber to get food they should probably like start with fire and shelter stuff right"
+    },
+    {
+     "turn": "t51",
+     "quote": "Okay so the rope next"
+    }
+   ],
+   "compatible_or_reconciled": false,
+   "during_presentation": false
+  }
+ ],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "既に扱われた",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "懐中電灯か衣類かの対では、Orangeがt9で暗くなる時刻の違いを指摘しBlueが応答している。チョコレートかロープかの対もOrangeが条件として述べ、Pinkが受け入れているため控える。"
+}

@@ -1,0 +1,9 @@
+﻿split,meeting,source,speakers,minutes,turns,source_units,episodes_opened,episodes_with_candidate,candidate_records,duplicate_records,ep_generatable,ep_present_ok,ep_present_uncertain_only,ep_withheld_human_comparing,ep_withheld_resolved_deferred,okcand_preempted_S1,okcand_preempt_dturns,okcand_preempt_dsec,okcand_update_info_S2S3,update_substantive,update_rephrase,B_checkpoints,B_generatable,B_generatable_while_human_comparing,present_ok_times_s
+dev,GAP01,GAP,3,9.7,271,349,15,9,9,0,9,5,0,4,0,0,,,2,2,0,3,1,0,182;289;380;440;565
+dev,ES2002c,AMI,4,40.1,583,996,18,13,15,2,13,9,2,3,1,2,1;3,-0.1;12.4,7,7,0,13,12,5,357;582;787;836;1091;1207;1283;1753;2026
+test,GAP07,GAP,3,12.0,251,365,23,18,20,2,18,12,3,3,0,3,2;2;1,5.7;5.5;0.4,4,3,1,4,3,1,30;55;148;195;249;260;325;354;402;529;564;592
+test,GAP08,GAP,3,8.9,297,384,14,11,12,1,11,9,1,1,0,1,5,5.2,7,5,2,2,2,0,60;98;200;224;290;320;392;466;518
+test,GAP18,GAP,3,15.3,280,397,17,13,15,2,11,9,0,3,0,2,5;19,16.2;62.1,7,4,3,5,5,4,58;152;222;290;354;447;633;665;677
+test,GAP24,GAP,3,13.7,393,533,15,12,12,0,12,6,1,4,1,0,,,1,0,1,4,4,3,31;125;405;436;720;743
+test,ES2003c,AMI,4,37.3,298,776,13,10,11,1,9,0,1,9,1,0,,,0,0,0,12,11,1,
+test,ES2004c,AMI,4,38.9,570,944,16,15,16,1,13,1,0,12,1,0,,,1,0,1,12,11,3,1824

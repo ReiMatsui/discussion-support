@@ -108,3 +108,7 @@ docs/abstract/*.toc
 # Cowork scratch
 _to_delete/
 Claude outputs/
+
+# 研究用モードの実行ログ・API試行・使用回数記録はローカルに保持する。
+# 既に追跡した検証サマリーは継続して履歴に残る。
+/study/probes/

@@ -1,0 +1,108 @@
+{
+ "auditor": "AU1",
+ "meeting": "DELI02",
+ "scenes": [
+  {
+   "scene_id": "S1",
+   "turns": "t4-t55",
+   "choice_item": "2枚にするか、3枚目のカードも加えるか",
+   "reasons": [
+    {
+     "speaker": "Kiwi",
+     "turn": "t22/t35",
+     "quote": "Maybe they're wanting to see in the smallest amount possible",
+     "premise": "課題は最小枚数を求めていると想定（「Maybe」の留保付き）",
+     "type": "T2",
+     "level": "E1"
+    },
+    {
+     "speaker": "Bee",
+     "turn": "t23-t24",
+     "quote": "it doesn't specify / theoretically it could be however many you want",
+     "premise": "課題文は枚数を指定していない（何枚でもよい）",
+     "type": "T1",
+     "level": "E1"
+    },
+    {
+     "speaker": "Cat",
+     "turn": "t8/t36",
+     "quote": "it says must",
+     "premise": "課題文は「must」（必要なカード）を問うので、必須でないカードは含めない",
+     "type": "T1",
+     "level": "E1"
+    },
+    {
+     "speaker": "Kiwi",
+     "turn": "t19-t21",
+     "quote": "We could also turn over <CARD> / to try and also prove the rule again",
+     "premise": "確認例を増やすと規則をより立証できる（3枚目を推す理由）",
+     "type": "T1",
+     "level": "E2"
+    }
+   ],
+   "explicit_turn": "t8（Cat「as many as you like」→「but it says must」）。A/Bを問う形は t22 Kiwi「or do you thin it's asking for 2 ?」、t23 Bee が応答",
+   "reconciled": "なし（t42 Cat「<CARD> you just could」で3枚目を「してもよいが必須ではない」と限定し、2枚に収束）",
+   "stage2": [
+    "起きた",
+    "t11-t12 Cat「you could turn <CARD> i guess but do you have to / for the rule」、t22"
+   ],
+   "stage3": [
+    "起きた",
+    "t36 Cat「it says must」、t38「so is <CARD> a must then」、t42「i feel like <CARD> you just could」（3枚目の理由を限定）"
+   ],
+   "stage4": [
+    "起きた",
+    "t37 Kiwi「just <CARD> and <CARD>」、t43-t47、t51-t55「just the 2」で提出"
+   ],
+   "self_handled": "はい",
+   "impairment": [
+    "なかった",
+    "参加者が課題の要求（must/最小/指定なし）を自分で言葉にし、2枚に収束した。別の解釈: 一度3枚で合意（t25-t28）しかけたので、より早い段階での明示が役立った可能性はあるが、結果的に自力で修正"
+   ]
+  },
+  {
+   "scene_id": "S2",
+   "turns": "t13-t18",
+   "choice_item": "<CARD>と<CARD>の組か",
+   "reasons": [
+    {
+     "speaker": "Kiwi",
+     "turn": "t13-t14",
+     "quote": "Wait it could be <CARD> and <CARD> / or is that too obvious",
+     "premise": "（推測）課題は見た目より難しいはず",
+     "type": "T2",
+     "level": "E3"
+    },
+    {
+     "speaker": "Bee",
+     "turn": "t15/t17",
+     "quote": "<CARD> and <CARD> would prove the rule / but not turning the others seems off",
+     "premise": "（推測）その2枚で規則を立証できる",
+     "type": "T1",
+     "level": "E3"
+    }
+   ],
+   "explicit_turn": "なし",
+   "reconciled": "なし",
+   "stage2": [
+    "起きない",
+    "条件は検討されない"
+   ],
+   "stage3": [
+    "不明",
+    "t16 Cat「too obvious」、t18 Kiwi「Yeah I agree」"
+   ],
+   "stage4": [
+    "不明",
+    "t19以降3枚案へ移る"
+   ],
+   "self_handled": "不明",
+   "impairment": [
+    "不明",
+    "伏字のため推す選択肢の違いが特定できず、「too obvious」は選好・メタ推測に近い（T4/T5）"
+   ]
+  }
+ ],
+ "no_premise_sections": "t1-t3 最初の案と理由の提示（全員同意）、t25-t32 3枚案での合意確認",
+ "notes": "S1は課題文の読み（T1）・出題意図の想定（T2）の違いとして最も前提差の対に近い。ただし参加者自身が早くから（t4-t8、t22）言葉にしている。"
+}

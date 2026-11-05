@@ -1,0 +1,156 @@
+{
+ "checkpoint": "DELI03_cp02",
+ "judge": "J-k02",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t4",
+   "speaker": "Tiger",
+   "supports": "1枚だけ選ぶ",
+   "summary_ja": "裏が偶数なら規則が証明される",
+   "quote": "if there is an even number on the other side it proves the rule"
+  },
+  {
+   "id": "R2",
+   "turn": "t5",
+   "speaker": "Llama",
+   "supports": "もう1枚も選ぶ",
+   "summary_ja": "裏が母音でも規則を証明する",
+   "quote": "it also proves the rule"
+  },
+  {
+   "id": "R3",
+   "turn": "t6",
+   "speaker": "Raven",
+   "supports": "1枚だけ選ぶ",
+   "summary_ja": "規則は母音のカードについてだけで他は関係ない",
+   "quote": "the rule says all card with vowels which means the other cards"
+  },
+  {
+   "id": "R4",
+   "turn": "t10",
+   "speaker": "Raven",
+   "supports": "もう1枚は不要",
+   "summary_ja": "子音が出ても規則の証明には関係しない",
+   "quote": "just as easily have turned up a consonant"
+  },
+  {
+   "id": "R5",
+   "turn": "t21",
+   "speaker": "Raven",
+   "supports": "1枚だけ",
+   "summary_ja": "問いの文は1枚で足りると示唆している",
+   "quote": "The question in the task implies that you only need one card to prove the rule"
+  },
+  {
+   "id": "R6",
+   "turn": "t22",
+   "speaker": "Llama",
+   "supports": "より複雑な答え",
+   "summary_ja": "多くの人が間違えるとあるので課題はもっと複雑なはず",
+   "quote": "The assumption then would be that the task is more complex than that"
+  }
+ ],
+ "pairs": [
+  {
+   "pair_id": "P1",
+   "reason_ids": [
+    "R2",
+    "R3"
+   ],
+   "choice_item": "もう1枚を裏返すか",
+   "premises": [
+    {
+     "reason_id": "R2",
+     "type": "T1",
+     "premise_ja": "そのカードの裏に母音が出れば規則の確認になる",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t8",
+       "quote": "Would it not prove that the rule is tested if the <CARD> turns up a vowel ?"
+      }
+     ]
+    },
+    {
+     "reason_id": "R3",
+     "type": "T1",
+     "premise_ja": "規則は母音のカードだけに関するもので、他のカードは従う必要がない",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t6",
+       "quote": "which means the other cards"
+      }
+     ]
+    }
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [
+    {
+     "turn": "t10",
+     "quote": "just as easily have turned up a consonant"
+    },
+    {
+     "turn": "t11",
+     "quote": "Good point ."
+    }
+   ],
+   "compatible_or_reconciled": false,
+   "during_presentation": false
+  },
+  {
+   "pair_id": "P2",
+   "reason_ids": [
+    "R5",
+    "R6"
+   ],
+   "choice_item": "選ぶ枚数（1枚か、より多いか）",
+   "premises": [
+    {
+     "reason_id": "R5",
+     "type": "T1",
+     "premise_ja": "問いの文が1枚で足りることを示している",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t21",
+       "quote": "implies that you only need one card to prove the rule"
+      }
+     ]
+    },
+    {
+     "reason_id": "R6",
+     "type": "T1",
+     "premise_ja": "多くの人が間違えると書かれているので課題は見た目より複雑",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t22",
+       "quote": "it says most players get it wrong"
+      }
+     ]
+    }
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [
+    {
+     "turn": "t21",
+     "quote": "The question in the task implies that you only need one card to prove the rule ."
+    },
+    {
+     "turn": "t22",
+     "quote": "While it does , it says most players get it wrong"
+    }
+   ],
+   "compatible_or_reconciled": false,
+   "during_presentation": false
+  }
+ ],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "既に扱われた",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "規則の読み方と課題文の読み方の違いは、RavenとLlamaが互いに直接指摘し応答し合っている。参加者が既に前提の違いを扱っているので控える。"
+}

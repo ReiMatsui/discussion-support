@@ -1,0 +1,45 @@
+{
+ "checkpoint": "DELI04_cp03",
+ "judge": "J-k03",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t8",
+   "speaker": "Guinea p",
+   "supports": "偶数カードも選ぶ",
+   "summary_ja": "偶数のカードも規則を証明できる",
+   "quote": "it could prove the rule as well"
+  },
+  {
+   "id": "R2",
+   "turn": "t12",
+   "speaker": "Chipmunk",
+   "supports": "他のカードを検証",
+   "summary_ja": "当てはまらないことを確かめるため、別のカードを検証すべき",
+   "quote": "We should test one of the other , either <CARD> or <CARD> to verify that those don"
+  },
+  {
+   "id": "R3",
+   "turn": "t22",
+   "speaker": "Tiger",
+   "supports": "偶数カードは不要",
+   "summary_ja": "偶数の裏が母音である必要はない",
+   "quote": "the even number does not need a vowel"
+  },
+  {
+   "id": "R4",
+   "turn": "t29",
+   "speaker": "Tiger",
+   "supports": "奇数カードを選ぶ",
+   "summary_ja": "9の裏に母音があれば規則が破れる",
+   "quote": "yes the nine may have a vowel , breaking the rule"
+  }
+ ],
+ "pairs": [],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "対がない",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "違いは規則の論理的な検証の仕方に関するもので、事実認識や状況の想定（T1・T2）に依存する理由の対ではない。また参加者は互いの理由に応答し、考えを修正している。"
+}

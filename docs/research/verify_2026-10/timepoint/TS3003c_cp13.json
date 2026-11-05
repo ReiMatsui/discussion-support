@@ -1,0 +1,35 @@
+{"checkpoint": "TS3003c_cp13", "judge": "J-k13",
+ "reasons": [
+  {"id": "R1", "turn": "t16", "speaker": "B", "supports": "音声認識を入れる", "summary_ja": "音声認識はかなり安く作れると述べる。", "quote": "It's uh possible to uh uh to make um quite cheap uh system for uh speech uh recognition."},
+  {"id": "R2", "turn": "t79", "speaker": "D", "supports": "音声認識を入れない", "summary_ja": "対象層は音声認識に追加で払わないので、価格が上がるなら入れないよう勧めると述べる。", "quote": "So if that would increase the price for which we're selling our remote control"},
+  {"id": "R3", "turn": "t104", "speaker": "A", "supports": "音声認識を入れない", "summary_ja": "費用が大きく増え、使いやすさもあまり上がらないと述べる。", "quote": "Because it will increase cost uh signifi uh significantly."},
+  {"id": "R4", "turn": "t43", "speaker": "D", "supports": "キネティック電源に反対", "summary_ja": "高齢者は使う前にリモコンを振りたがらないと述べる。", "quote": "Well personally I don't think that older people like to shake their remote control before they use it."},
+  {"id": "R5", "turn": "t55", "speaker": "B", "supports": "電池一本で十分（ドック不要寄り）", "summary_ja": "小さな表示なので電池一本で半年以上もつと述べる。", "quote": "it will run on one battery for um six months or f or or more. So I believe one battery uh is just enough."},
+  {"id": "R6", "turn": "t60", "speaker": "A", "supports": "ドッキングステーションを入れる", "summary_ja": "高齢者は物の置き場所を決めたがるので、ドックがリモコンの置き場所になると述べる。", "quote": "And I don't think they they like uh remotes just laying everywhere in their rooms."},
+  {"id": "R7", "turn": "t86", "speaker": "C", "supports": "LCD にも慎重", "summary_ja": "支払い意欲の調査結果は LCD にも当てはまると述べる。", "quote": "But that would also go for the L_C_D_ screen then I guess."},
+  {"id": "R8", "turn": "t89", "speaker": "D", "supports": "LCD を入れる", "summary_ja": "調査は好みを聞いたもので追加で払わないとは限らず、LCD は使いやすくすると述べる。", "quote": "the question was, would you prefer it. So that doesn't really mean they wouldn't pay extra for it."}
+ ],
+ "pairs": [
+  {"pair_id": "P1", "reason_ids": ["R1", "R2"], "choice_item": "音声認識を入れるか",
+   "premises": [
+    {"reason_id": "R1", "type": "T1", "premise_ja": "音声認識はかなり安く作れる", "evidence_level": "E1", "evidence": [{"turn": "t16", "quote": "possible to uh uh to make um quite cheap uh system for uh speech uh recognition"}]},
+    {"reason_id": "R2", "type": "T1", "premise_ja": "音声認識が販売価格を上げる（場合）", "evidence_level": "E1", "evidence": [{"turn": "t79", "quote": "So if that would increase the price for which we're selling our remote control"}]}
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [{"turn": "t71", "quote": "I'm wondering um what will the voice recognition mean for the production price?"}, {"turn": "t72", "quote": "Yeah. That's a good point."}, {"turn": "t79", "quote": "So if that would increase the price for which we're selling our remote control"}],
+   "compatible_or_reconciled": false, "during_presentation": false},
+  {"pair_id": "P2", "reason_ids": ["R7", "R8"], "choice_item": "LCD 画面を入れるか",
+   "premises": [
+    {"reason_id": "R7", "type": "T1", "premise_ja": "対象層は LCD にも追加で払わない（調査結果が当てはまる）", "evidence_level": "E2", "evidence": [{"turn": "t86", "quote": "But that would also go for the L_C_D_ screen then I guess."}]},
+    {"reason_id": "R8", "type": "T1", "premise_ja": "調査は好みを聞いたもので、追加で払わないとは限らない", "evidence_level": "E1", "evidence": [{"turn": "t89", "quote": "the question was, would you prefer it. So that doesn't really mean they wouldn't pay extra for it."}]}
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [{"turn": "t89", "quote": "the question was, would you prefer it. So that doesn't really mean they wouldn't pay extra for it."}],
+   "compatible_or_reconciled": false, "during_presentation": false}
+ ],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "既に扱われた",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "音声認識の費用の想定は D が価格への影響を問い条件付きで述べ A が応答しており、LCD の支払い意欲の解釈も D が C の指摘に直接応じて違いを述べているため、どちらも既に扱われた。ケース素材は交換カバーで両立済み、電源とドックの論点も B が A の理由を受け入れて決着している。"}

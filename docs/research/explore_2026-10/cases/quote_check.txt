@@ -1,0 +1,12 @@
+{('分析者（', False): 2, ('分析者（', True): 102, ('サブエー', True): 664, ('サブエー', False): 9}
+GAP01-X01 t3: 'okay well do knife t'
+GAP01-X01 t6: 'that and the cigaret'
+GAP08-X01 t12: 'look at us'
+GAP08-X18 t56: 'as always that alcoh'
+GAP08-X20 t269: 'we have a steel stee'
+GAP08-X23 t292: 'sounds good'
+GAP24-X06 t78: 'i put that down as n'
+GAP24-X10 t191: 'it could be just dry'
+ES2002c-X01 t34: 'the final objective '
+ES2002c-X09 t287: 'not a fruit shape bu'
+ES2002c-X09 t319: 'shock resistant mobi'

@@ -1,0 +1,32 @@
+{"checkpoint": "TS3003c_cp10", "judge": "J-k10",
+ "reasons": [
+  {"id": "R1", "turn": "t16", "speaker": "B", "supports": "音声認識を入れる", "summary_ja": "音声認識は魅力的な新機能で、かなり安く作れる。", "quote": "It's uh possible to uh uh to make um quite cheap uh system for uh speech uh recognition."},
+  {"id": "R2", "turn": "t79", "speaker": "D", "supports": "音声認識を入れない", "summary_ja": "対象層は音声認識に追加で払わないので、販売価格が上がるなら入れないよう強く勧める。", "quote": "So if that would increase the price for which we're selling our remote control"},
+  {"id": "R3", "turn": "t47", "speaker": "D", "supports": "ドッキングステーションを残す（キネティック電源にしない）", "summary_ja": "ドッキングステーションは人気を得る販売上の要素になり、電池の充電もできる。", "quote": "I think our docking station could be one of the marketing issues with which we can um get great popularity for our product."},
+  {"id": "R4", "turn": "t55", "speaker": "B", "supports": "ドッキングステーションの必要性に疑問（電池1本で足りる）", "summary_ja": "小さな表示なので電力消費は少なく、電池1本で半年以上もつ。", "quote": "it won't use uh much e energy uh I I believe"},
+  {"id": "R5", "turn": "t58", "speaker": "A", "supports": "ドッキングステーションを残す", "summary_ja": "高齢者は物を決まった場所に置きたがるので、ドッキングステーションがリモコンの置き場になる。", "quote": "elderly people just like to have everything in place."}
+ ],
+ "pairs": [
+  {"pair_id": "P1", "reason_ids": ["R1", "R2"], "choice_item": "音声認識を入れるか",
+   "premises": [
+    {"reason_id": "R1", "type": "T1", "premise_ja": "音声認識はかなり安く作れる", "evidence_level": "E1", "evidence": [{"turn": "t16", "quote": "It's uh possible to uh uh to make um quite cheap uh system for uh speech uh recognition."}]},
+    {"reason_id": "R2", "type": "T1", "premise_ja": "音声認識を入れると販売価格が上がる（条件として述べられている）", "evidence_level": "E1", "evidence": [{"turn": "t79", "quote": "So if that would increase the price for which we're selling our remote control"}, {"turn": "t77", "quote": "if people would pay more for speech recognition in a remote control. Well you can see here, our target group would not do that."}]}
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [{"turn": "t71", "quote": "I'm wondering um what will the voice recognition mean for the production price?"}, {"turn": "t72", "quote": "Yeah. That's a good point."}, {"turn": "t73", "quote": "Mm I don't have any information on pricing. So I'll have to ask the manufacturing department."}],
+   "compatible_or_reconciled": false, "during_presentation": false},
+  {"pair_id": "P2", "reason_ids": ["R3", "R4"], "choice_item": "ドッキングステーションを残すか",
+   "premises": [
+    {"reason_id": "R3", "type": "T1", "premise_ja": "ドッキングステーションで電池を充電する必要がある", "evidence_level": "E2", "evidence": [{"turn": "t52", "quote": "Yeah you could load up the batteries,"}]},
+    {"reason_id": "R4", "type": "T1", "premise_ja": "小さな表示なので電力消費が少なく、電池1本で足りる", "evidence_level": "E1", "evidence": [{"turn": "t55", "quote": "So I believe one battery uh is just enough."}]}
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [{"turn": "t55", "quote": "it won't use uh much e energy uh I I believe"}, {"turn": "t58", "quote": "elderly people just like to have everything in place."}, {"turn": "t63", "quote": "Yeah. That's true. Yeah."}],
+   "compatible_or_reconciled": true, "during_presentation": false}
+ ],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "既に扱われた",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "音声認識の費用の前提差は、Dが製造価格への影響を問い、A・Cが応答し、Dも「if that would increase the price」と条件として述べているため既に扱われている。ドッキングステーションの電力の前提差もBが直接指摘し、Aの別の理由にBが同意して収まっている。"}

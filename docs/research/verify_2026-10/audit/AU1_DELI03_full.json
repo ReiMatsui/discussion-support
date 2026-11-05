@@ -1,0 +1,100 @@
+{
+ "auditor": "AU1",
+ "meeting": "DELI03",
+ "scenes": [
+  {
+   "scene_id": "S1",
+   "turns": "t4-t20",
+   "choice_item": "<CARD>だけか、2枚目（母音が出れば規則を支持するとLlamaが言うカード）も裏返すか",
+   "reasons": [
+    {
+     "speaker": "Raven",
+     "turn": "t6",
+     "quote": "the rule says all card with vowels which means the other cards don't matter - - they don't have to follow the rule .",
+     "premise": "規則は母音のカードについてだけ述べる（他のカードは規則に従う必要がない）",
+     "type": "T1",
+     "level": "E1"
+    },
+    {
+     "speaker": "Tiger",
+     "turn": "t9",
+     "quote": "the test is all cards with a vowel",
+     "premise": "同上",
+     "type": "T1",
+     "level": "E1"
+    },
+    {
+     "speaker": "Llama",
+     "turn": "t8/t14/t19",
+     "quote": "It's asking you to test the rule . Would it not prove that the rule is tested if the <CARD> turns up a vowel ? / But would it not strengthen the correlation if we did find a vowel ?",
+     "premise": "規則の「テスト」には、確認例（相関の強化）を集めることも含まれる",
+     "type": "T1",
+     "level": "E2"
+    }
+   ],
+   "explicit_turn": "t9（Tiger「the test is all cards with a vowel」でテストの範囲の違いを指摘）、t10 Raven が条件付きの反論",
+   "reconciled": "なし",
+   "stage2": [
+    "起きた",
+    "t10 Raven「Couldn't the <CARD> just as easily have turned up a consonant ? In which case , the <CARD> is not necessary」"
+   ],
+   "stage3": [
+    "起きた",
+    "t11 Llama「Good point .」（一時受容）、t18 Raven「It might help , but if we didn't find a vowel it would hurt the rule .」（限定）"
+   ],
+   "stage4": [
+    "不明",
+    "t13・t20 Llamaが提出（内容不明）"
+   ],
+   "self_handled": "はい",
+   "impairment": [
+    "不明",
+    "違いは参加者が言葉にしたが、Llamaは最後まで納得していない。別の解釈: 前提差ではなく、確証と反証の論理理解の差（T3的な『よいテスト』の基準）で、T1/T2の対に当たらない可能性"
+   ]
+  },
+  {
+   "scene_id": "S2",
+   "turns": "t21-t33",
+   "choice_item": "1枚か2枚か",
+   "reasons": [
+    {
+     "speaker": "Raven",
+     "turn": "t21",
+     "quote": "The question in the task implies that you only need one card to prove the rule .",
+     "premise": "課題文は1枚で足りることを含意している",
+     "type": "T1",
+     "level": "E1"
+    },
+    {
+     "speaker": "Llama",
+     "turn": "t22",
+     "quote": "While it does , it says most players get it wrong . The assumption then would be that the task is more complex than that .",
+     "premise": "多くの人が間違えると書かれているので、課題はもっと複雑だと想定する",
+     "type": "T2",
+     "level": "E1"
+    }
+   ],
+   "explicit_turn": "t22（Llamaが「While it does」と応じ、自分の想定を『assumption』と明言）",
+   "reconciled": "なし",
+   "stage2": [
+    "起きた",
+    "t23 Tiger「if you want to turn a second card - turn <CARD>」、t26 Llama「Does <CARD> coming up even really prove it if other cards could show something different ?」"
+   ],
+   "stage3": [
+    "起きた",
+    "t24 Tiger「you turn ONLY the cards needed」、t25 Raven「You don't \" need \" to turn over the <CARD>」、t28「no it's a logical exclusion」"
+   ],
+   "stage4": [
+    "起きた",
+    "t30 Raven「I vote \" <CARD> \" only .」、t33 Tiger「I vote <CARD> only」、t31 Llama「I guess what you do if it must be done」"
+   ],
+   "self_handled": "はい",
+   "impairment": [
+    "不明",
+    "時間切れ（t31）でLlamaの納得は不明。別の解釈: 違いは十分に言葉にされ、多数の判断に接続しており支障はない"
+   ]
+  }
+ ],
+ "no_premise_sections": "t1-t3 Llamaの読み違いと自己訂正",
+ "notes": "S2は出題意図についての想定の違いで、参加者自身が『assumption』と明言している。S1は規則の読みと『テスト』の意味の違いで、T1かT3か境界的。"
+}

@@ -1,0 +1,499 @@
+{
+ "meeting": "ES2003c",
+ "items": [
+  {
+   "id": "ES2003c-C1",
+   "kind": "A",
+   "labels": {
+    "S1": 33,
+    "S2": 35,
+    "S3": 36,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 37
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 33
+   },
+   "update_type": "substantive",
+   "update_example_ja": "デザイナーはキネティック式では電力が足りないとみており、通常の電池なら既製品を使えるという案も出ました。発電式をやめて通常の電池にするかを先に決めますか。",
+   "note": "t33でキネティック・太陽電池の電力を人間が比較、t35で比較案にない通常電池が提案され選択肢の前提が変わった。t37で形の話へ移行。"
+  },
+  {
+   "id": "ES2003c-C2",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 47,
+    "S4": null,
+    "S5": 53,
+    "S6": {
+     "type": "switched",
+     "turn": 55
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "rephrase",
+   "update_example_ja": null,
+   "note": "t47で手のひらに収まる・親指で操作しやすいという曲面の新しい根拠、t53は既出の見た目とチタン不可の繰り返し。形と素材の順序への答えはなく、問いはそのまま使える。"
+  },
+  {
+   "id": "ES2003c-C3",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 41,
+    "S4": null,
+    "S5": 53,
+    "S6": {
+     "type": "switched",
+     "turn": 55
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "rephrase",
+   "update_example_ja": null,
+   "note": "t41でチタンは軽いという新しい利点と高価への同意が出たが、費用と形の自由度のどちらを重く見るかの問いは変わらない。t53はチタン不可の繰り返し。"
+  },
+  {
+   "id": "ES2003c-B360",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 55,
+    "S4": null,
+    "S5": 53,
+    "S6": {
+     "type": "switched",
+     "turn": 55
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "rephrase",
+   "update_example_ja": null,
+   "note": "t55で二重曲面はゴムなら作れる（ゴムボタン）と分かり、形が作れる素材の情報が増えたが、形を条件にするかの問いはそのまま。t72の予算は素材に限った話ではない。"
+  },
+  {
+   "id": "ES2003c-C4",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "deferred",
+     "turn": 56
+    },
+    "S7": true
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "PMは「後で話せる」と保留しチップの話へ。窓内（〜t85）で最小限のデザインと数字キーの関係は出ていない（数字キー不要論はt100で窓外）。"
+  },
+  {
+   "id": "ES2003c-C5",
+   "kind": "A",
+   "labels": {
+    "S1": 82,
+    "S2": null,
+    "S3": 72,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 85
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "yes",
+    "turn": 82
+   },
+   "update_type": "rephrase",
+   "update_example_ja": null,
+   "note": "t72で予算12.5ユーロが判明、t82でデザイナーが通常電池・単曲面にすればLCDと高いチップを載せられると、LCDと他部品への配分を自ら比べた。PMはt83で同意し、t85で素材の話へ。問いの枠組みは変わらない。"
+  },
+  {
+   "id": "ES2003c-B540",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": 100,
+    "S3": null,
+    "S4": 100,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 106
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 100
+   },
+   "update_type": "substantive",
+   "update_example_ja": "UI担当から、地上波は4〜5チャンネルしかなく、ジョイスティックとLCDメニューでチャンネルを送れるので数字キーは不要との案が出ました。ホイールではなくジョイスティックを使う前提で、数字キーを省くかを決めますか。",
+   "note": "t100/t103でチャンネル数が多いという前提が否定され、ホイールの代わりにジョイスティックとLCDメニューを使う構成が示された。最小限を重視する発言（t100）。t106で形の話へ。"
+  },
+  {
+   "id": "ES2003c-C6",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 82,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 85
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 100
+   },
+   "update_type": "substantive",
+   "update_example_ja": "デザイナーは、通常の電池と単曲面のケースにすればLCDと強力なチップを入れられるとの見方です。LCDを残すためにほかの部品を簡素にする組み合わせで進めますか。",
+   "note": "t82でLCDを外すかではなく他部品を削ってLCDを残す条件が示され、比べ方が変わった。t100でUI担当がLCDメニューを操作の前提にしており、LCDなしでは成り立たないことが間接的に分かる。"
+  },
+  {
+   "id": "ES2003c-B720",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 103,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 106
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 103
+   },
+   "update_type": "rephrase",
+   "update_example_ja": null,
+   "note": "t103で地上波は4〜5チャンネルしかないという条件が出た。番号で選ぶ場面の多さに近い情報で、問いはそのまま使える。t106で形の話へ。"
+  },
+  {
+   "id": "ES2003c-B900",
+   "kind": "B",
+   "labels": {
+    "S1": 141,
+    "S2": null,
+    "S3": 133,
+    "S4": 133,
+    "S5": null,
+    "S6": null,
+    "S7": false
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "substantive",
+   "update_example_ja": "スポンジ状のゴムは今年の流行で落としても壊れにくく、プラスチックは丈夫さから使われてきたとの調査です。流行に合わせるか、LEDなどを収める実用性を優先するか、どちらを重く見ますか。",
+   "note": "t133で見た目重視の優先順位とスポンジ素材が流行という新しい根拠、t134でゴムはストレスボール素材と補足、t141でゴムとプラスチックを丈夫さ・実用性で比べた。比べる観点が手触り・費用から流行・丈夫さ・実用性へ入れ替わる。費用の情報は出ていない。"
+  },
+  {
+   "id": "ES2003c-C7",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 130
+    },
+    "S7": true
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "A の発表後すぐにマーケティングの発表へ移り、窓内でPC接続や費用の話は出ていない（t148の費用発言は部品全般）。"
+  },
+  {
+   "id": "ES2003c-B1080",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 130
+    },
+    "S7": true
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "C7と同じ後続。PC接続の話は窓内に再び出ていない。"
+  },
+  {
+   "id": "ES2003c-C8",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 143,
+    "S4": null,
+    "S5": 141,
+    "S6": {
+     "type": "switched",
+     "turn": 148
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "rephrase",
+   "update_example_ja": null,
+   "note": "t141は取り入れるか避けるかの繰り返し、t143で流行は毎年変わるという新しい根拠、t146でPMが1年先行できればよいと応じた。リモコンへの当てはまりへの答えはなく、問いはそのまま使える。"
+  },
+  {
+   "id": "ES2003c-B1260",
+   "kind": "B",
+   "labels": {
+    "S1": 141,
+    "S2": null,
+    "S3": 141,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "decided",
+     "turn": 162
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "yes",
+    "turn": 141
+   },
+   "update_type": "rephrase",
+   "update_example_ja": null,
+   "note": "t141でマーケティングがプラスチックは丈夫さのため、スポンジは落としても壊れないと理由を比べ、問いに答えた。LEDの収め方という新条件も出た。t162でPMがゴムでほぼ決まり、内部フレームが要るかもとまとめた。"
+  },
+  {
+   "id": "ES2003c-B1440",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": 162,
+    "S6": {
+     "type": "decided",
+     "turn": 162
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 162
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "t162でPMが二重曲面で進むようだとまとめ、費用は未確認と繰り返した。両手対応と予算の優先を明言した発言はない。"
+  },
+  {
+   "id": "ES2003c-C9",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 170,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 173
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "yes",
+    "turn": 166
+   },
+   "update_type": "substantive",
+   "update_example_ja": "可動部をなくしたい理由は強度で、硬い内部構造に柔らかいゴムをかぶせれば弱点にならないとの反論が出ました。内部構造を加える費用を許容して可動部を残しますか。",
+   "note": "t166でPMが理由は構造上の弱点と答え、t170でUI担当が硬い内部構造で対処できると反論。費用か強度かという問いは不要になり、内部構造の費用が論点になる。t173で色の話へ。"
+  },
+  {
+   "id": "ES2003c-C10",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 182
+    },
+    "S7": true
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "比較案なし（提案と同時に合意）。t178で見失いにくいという補強の根拠が出たが、比較案がないため分類の対象外。t182で調査の話へ。"
+  },
+  {
+   "id": "ES2003c-B1620",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 187
+    },
+    "S7": true
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "後続はリモコンの設定方法の話で、可動部や内部構造の費用には触れていない。"
+  },
+  {
+   "id": "ES2003c-C11",
+   "kind": "A",
+   "labels": {
+    "S1": 203,
+    "S2": 190,
+    "S3": 203,
+    "S4": 214,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 218
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 203
+   },
+   "update_type": "substantive",
+   "update_example_ja": "周波数を探すだけでは足りず、メーカーごとのコードを合わせる必要があるとの指摘がありました。PC接続はオプションとし、PCがない人はLCDでメーカー名から選ぶ方式にするかを決めますか。",
+   "note": "t190/t192で周波数の自動検出という前提が否定された。t202〜203でPC接続はオプション、PCのない人にはLCDでメーカー名を選ぶ案が出てPCなしの手順を比べた。t214で購入直後の手間が重要との発言。t218で次段階の話へ。"
+  },
+  {
+   "id": "ES2003c-B1800",
+   "kind": "B",
+   "labels": {
+    "S1": 241,
+    "S2": null,
+    "S3": 241,
+    "S4": 247,
+    "S5": null,
+    "S6": null,
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 241
+   },
+   "update_type": "rephrase",
+   "update_example_ja": null,
+   "note": "t241でPMがUSBは安いが通信用チップも要り費用次第と、費用の観点で比べた。t247で最小限のデザインだからPCで設定という理由。費用をかけるかの問いはそのまま使える。"
+  },
+  {
+   "id": "ES2003c-B1980",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": null,
+    "S6": null,
+    "S7": true
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "後続は対象利用者とUSBの話で、果物・野菜のテーマや形には触れていない（避ける発言はt282で窓外）。"
+  },
+  {
+   "id": "ES2003c-B2160",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": null,
+    "S6": null,
+    "S7": true
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "後続は次回の準備とスポンジ素材・色の確認で会議が終わり、USBとLCD方式の話は出ていない。"
+  }
+ ]
+}

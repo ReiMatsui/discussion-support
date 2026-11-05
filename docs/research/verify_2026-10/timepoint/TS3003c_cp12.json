@@ -1,0 +1,44 @@
+{"checkpoint": "TS3003c_cp12", "judge": "J-k12",
+ "reasons": [
+  {"id": "R1", "turn": "t43", "speaker": "D", "supports": "キネティック電源を採用しない", "summary_ja": "高齢者は使う前にリモコンを振りたがらないと思う。", "quote": "Well personally I don't think that older people like to shake their remote control before they use it."},
+  {"id": "R2", "turn": "t47", "speaker": "D", "supports": "ドッキングステーションを残す（キネティック電源を採用しない）", "summary_ja": "ドッキングステーションは製品の人気を得るマーケティング上の要素になる。", "quote": "I think our docking station could be one of the marketing issues with which we can um get great popularity for our product."},
+  {"id": "R3", "turn": "t55", "speaker": "B", "supports": "電池1本で足りる（充電用ドッキングステーションは不要）", "summary_ja": "小さな表示しか使わないので電池1本で6か月以上持つ。", "quote": "I believe uh it will run on one battery for um six months or f or or more. So I believe one battery uh is just enough."},
+  {"id": "R4", "turn": "t58", "speaker": "A", "supports": "ドッキングステーションを残す", "summary_ja": "高齢者は物を決まった場所に置きたがるので、ドッキングステーションがリモコンの置き場になる。", "quote": "I think uh elderly people just like to have everything in place."},
+  {"id": "R5", "turn": "t16", "speaker": "B", "supports": "音声認識を採用", "summary_ja": "音声認識はかなり安く作れ、人を惹きつける新機能になる。", "quote": "It's uh possible to uh uh to make um quite cheap uh system for uh speech uh recognition."},
+  {"id": "R6", "turn": "t77", "speaker": "D", "supports": "音声認識を採用しない", "summary_ja": "調査では対象層は音声認識に追加で払わないので、価格が上がるなら入れない方がよい。", "quote": "if people would pay more for speech recognition in a remote control. Well you can see here, our target group would not do that."},
+  {"id": "R7", "turn": "t120", "speaker": "A", "supports": "木製ケースを採用", "summary_ja": "高価でも、孫に見せびらかせる特別なものを求める高齢者を惹きつける。", "quote": "I think it will attract elderly people who wanna have something exclusive, which they can show off to their grandkids."},
+  {"id": "R8", "turn": "t20", "speaker": "C", "supports": "木製ケースに慎重", "summary_ja": "木は価格を上げ、製品ラインを2つにしない限りイメージに合わない。", "quote": "people like wood, but it raises the price and it doesn't really fit the image, unless we would start two product lines."},
+  {"id": "R9", "turn": "t125", "speaker": "D", "supports": "本物の木でなく木目調でよい", "summary_ja": "重要なのは木の色なので、本物の木である必要はない。", "quote": "And I think most important factor there is the wooden colour. So it wouldn't actually have to be wood,"}
+ ],
+ "pairs": [
+  {"pair_id": "P1", "reason_ids": ["R5", "R6"], "choice_item": "音声認識を採用するか",
+   "premises": [
+    {"reason_id": "R5", "type": "T1", "premise_ja": "音声認識はかなり安く作れる", "evidence_level": "E1", "evidence": [{"turn": "t16", "quote": "It's uh possible to uh uh to make um quite cheap uh system for uh speech uh recognition."}]},
+    {"reason_id": "R6", "type": "T1", "premise_ja": "音声認識で販売価格が上がり、対象層はそれに追加で払わない", "evidence_level": "E1", "evidence": [{"turn": "t79", "quote": "So if that would increase the price for which we're selling our remote control"}, {"turn": "t77", "quote": "our target group would not do that."}]}
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [{"turn": "t71", "quote": "I'm wondering um what will the voice recognition mean for the production price?"}, {"turn": "t72", "quote": "Yeah. That's a good point."}, {"turn": "t79", "quote": "So if that would increase the price for which we're selling our remote control"}],
+   "compatible_or_reconciled": false, "during_presentation": false},
+  {"pair_id": "P2", "reason_ids": ["R3", "R4"], "choice_item": "ドッキングステーションを残すか（電源の選択）",
+   "premises": [
+    {"reason_id": "R3", "type": "T1", "premise_ja": "消費電力が小さく、電池1本で6か月以上持つ", "evidence_level": "E1", "evidence": [{"turn": "t55", "quote": "it will run on one battery for um six months or f or or more."}]},
+    {"reason_id": "R4", "type": "T2", "premise_ja": "高齢者はリモコンを決まった場所に置きたがる", "evidence_level": "E1", "evidence": [{"turn": "t58", "quote": "I think uh elderly people just like to have everything in place."}, {"turn": "t60", "quote": "And I don't think they they like uh remotes just laying everywhere in their rooms."}]}
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [{"turn": "t62", "quote": "So maybe a docking station will help them give the remote a place."}, {"turn": "t63", "quote": "Yeah. That's true. Yeah."}],
+   "compatible_or_reconciled": true, "during_presentation": false},
+  {"pair_id": "P3", "reason_ids": ["R7", "R8"], "choice_item": "木製ケースを採用するか",
+   "premises": [
+    {"reason_id": "R7", "type": "T2", "premise_ja": "高齢者の一部は孫に見せられる特別なものを求める", "evidence_level": "E1", "evidence": [{"turn": "t120", "quote": "elderly people who wanna have something exclusive"}]},
+    {"reason_id": "R8", "type": "T1", "premise_ja": "製品ラインは1つで、木は価格を上げる", "evidence_level": "E1", "evidence": [{"turn": "t20", "quote": "it raises the price and it doesn't really fit the image, unless we would start two product lines."}]}
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [{"turn": "t20", "quote": "unless we would start two product lines."}, {"turn": "t118", "quote": "Uh if we wanna choose for wood or the black and grey. Or both?"}],
+   "compatible_or_reconciled": false, "during_presentation": false}
+ ],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "既に扱われた",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "音声認識（安く作れるか、価格が上がり対象層が払わないか）と木製ケース（特別なものを求める層か、価格とイメージか）の主分析の対はあるが、Dが「if that would increase the price」と条件として述べ、Cが製品ラインを条件とし、Aが「Or both?」と問うているため既に扱われた。電源とドッキングステーションの対もAの想定にBが同意して両立している。"}

@@ -1,0 +1,49 @@
+{
+ "auditor": "AU2",
+ "meeting": "DELI04",
+ "pairs_eval": [
+  {
+   "pair_uid": "DELI04-U05",
+   "B1": [
+    "満たす",
+    "R6 は t22 で明示。R2 は t7 が疑問形（'couldn''t we verify with the even number too though ?'）で E1 より E2 が妥当だが、t8 Guinea p も同趣旨を述べており前提は支えられる"
+   ],
+   "B2": [
+    "満たす",
+    "偶数カードを含めるかで推す選択が違い、規則の向きの読みが理由の強さを左右する"
+   ],
+   "B3": [
+    "満たす",
+    "規則の論理の読みであり、価値・選好ではない"
+   ],
+   "B6": [
+    "不確か",
+    "t7 の疑問形・'though' の控えめさが、前提記述『検証できる』では断定になっている。引用には 'though' が残る"
+   ],
+   "explicit_judgement": [
+    "正しい",
+    "t20・t22 で Tiger が規則の向きを指摘し、t23 Guinea p '<CARD> is out' と応答している。cp02（t23まで）で既に扱われた"
+   ],
+   "first_explicit_turn": "t20",
+   "full_analysis_scene": "S2"
+  }
+ ],
+ "support_eval": [],
+ "misses": [
+  {
+   "scene_id": "S1",
+   "turns": "t8-t13",
+   "nearest_checkpoint": "DELI04_cp01",
+   "support_condition_met": "不確か",
+   "reason": "Guinea p t8（偶数カードも規則を証明しうる）と Chipmunk t12（合わない側のカードを調べて反例がないことを確かめる）の対は両方 E1。cp01 の最後のターンが t12 で、対はこの時点で初めて揃うが、t12 自体が 'I don''t think it is both of those actually' と違いを指摘しており、応答（t13）は時点後。明示の目安の『違いを指摘する』に当たるとみれば未明示の条件を満たさず、選択への反対にとどまり前提の違いの指摘ではないとみれば満たす。cp02 では t13・t15 で扱われ終えている"
+  },
+  {
+   "scene_id": "S3",
+   "turns": "t36-t44",
+   "nearest_checkpoint": "DELI04_cp03",
+   "support_condition_met": "いいえ",
+   "reason": "Guinea p t37（すべて確かめないと規則は確定しない）と Chipmunk t42-t43（そのカードの裏はどちらでもよい）の対。最後の判定時点 cp03 は t36 までで、t37・t42 の理由はまだ履歴にない。cp03 時点では理由が揃っておらず、以後の判定時点もないため、支援の条件は満たさない（判定の見落としではない）"
+  }
+ ],
+ "notes": "支援と判定した時点はない。S3 は違いを残したまま各自が別の答えを提出した場面で、前提差（または論理の誤り）が判断に影響した可能性があるが、判定時点の設計上、時点判定では捉えられない位置にある。伏字のため、t41 の問いのカードと t42 の答えのカードが同じかは不確か。"
+}

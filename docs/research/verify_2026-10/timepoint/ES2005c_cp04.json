@@ -1,0 +1,37 @@
+{
+ "checkpoint": "ES2005c_cp04",
+ "judge": "J-k04",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t10",
+   "speaker": "B",
+   "supports": "見た目の良い（fancy）デザインを最重要にする",
+   "summary_ja": "市場調査で機能的な見た目より見た目・触感の良いリモコンが好まれたため、デザインを最重要要素とすべきと述べる。",
+   "quote": "people do have preference for tho fancy mobi uh f remote controls which look and feel very good"
+  },
+  {
+   "id": "R2",
+   "turn": "t38",
+   "speaker": "B",
+   "supports": "スポンジ状の素材感",
+   "summary_ja": "流行調査から、素材はプラスチックの硬い感じよりスポンジ状が期待されると述べる。",
+   "quote": "the f feel of the material is expected to be spongy rather than just having a plastic look, hard look"
+  },
+  {
+   "id": "R3",
+   "turn": "t56",
+   "speaker": "B",
+   "supports": "健康に良く環境に害のないゴム素材",
+   "summary_ja": "会社が環境への配慮を重視しているため、環境に害のない素材にすべきと述べる。",
+   "quote": "It shouldn't be have any harm to the environment also"
+  }
+ ],
+ "pairs": [],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "対がない",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "この時点までの履歴は B の流行調査の発表と D の発表の冒頭が中心で、選択事項について理由を述べているのは B だけである。D の質問（t51 のゴムかジェルか）は理由を伴わず、異なる話者の対立する理由の対がない。"
+}

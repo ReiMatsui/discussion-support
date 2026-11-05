@@ -1,0 +1,45 @@
+{
+ "checkpoint": "GAP20_cp01",
+ "judge": "J-k01",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t8",
+   "speaker": "Orange",
+   "supports": "チョコレートを下位",
+   "summary_ja": "食料は狩りで得られるだろう",
+   "quote": "because they can probably hunt the food"
+  },
+  {
+   "id": "R2",
+   "turn": "t19",
+   "speaker": "Pink",
+   "supports": "ライターを1位",
+   "summary_ja": "火の起こし方を知らなくても火をつけられる",
+   "quote": "because to start a fire if they didnt know how"
+  },
+  {
+   "id": "R3",
+   "turn": "t23",
+   "speaker": "Orange",
+   "supports": "ライター1位に賛同（ウイスキーを燃料に）",
+   "summary_ja": "ウイスキーを燃料に使えるかもしれない",
+   "quote": "maybe the whiskey"
+  },
+  {
+   "id": "R4",
+   "turn": "t30",
+   "speaker": "Pink",
+   "supports": "救急用品を2位",
+   "summary_ja": "誰かがけがをしたら",
+   "quote": "I did the compress kit cause like what if someone got injured"
+  }
+ ],
+ "pairs": [],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "対がない",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "理由はあるが、同じ選択事項で異なる選択肢を推す理由の組がない（Blue のロープ2位などには理由がなく、すぐ合意している）。前提差の対はない。"
+}

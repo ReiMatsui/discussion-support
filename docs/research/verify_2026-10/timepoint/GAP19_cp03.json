@@ -1,0 +1,157 @@
+{
+ "checkpoint": "GAP19_cp03",
+ "judge": "J-k03",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t1",
+   "speaker": "Blue",
+   "supports": "1位に懐中電灯",
+   "summary_ja": "暗くなると周囲が見えないので懐中電灯が最重要",
+   "quote": "So I think flashlight would be the most important to see around"
+  },
+  {
+   "id": "R2",
+   "turn": "t6",
+   "speaker": "Pink",
+   "supports": "1位に衣類",
+   "summary_ja": "マイナス40度になるので暖かくするため",
+   "quote": "it says it gets down to like negative forty so I was like you probably want to stay as warm as possible"
+  },
+  {
+   "id": "R3",
+   "turn": "t9",
+   "speaker": "Orange",
+   "supports": "1位に衣類",
+   "summary_ja": "11時32分の墜落でしばらく暗くならないので、まず衣類",
+   "quote": "its not gonna get dark for a while too so I figured"
+  },
+  {
+   "id": "R4",
+   "turn": "t46",
+   "speaker": "Pink",
+   "supports": "ロープよりチョコレート",
+   "summary_ja": "その間に食べられるようにチョコレート",
+   "quote": "do we want like a chocolate bar so that we can like eat in the meantime"
+  },
+  {
+   "id": "R5",
+   "turn": "t48",
+   "speaker": "Orange",
+   "supports": "ロープ（火と避難所）を先に",
+   "summary_ja": "拳銃で食料が取れるなら火と避難所を先に",
+   "quote": "if they already have like a caliber to get food they should probably like start with fire and shelter stuff right"
+  },
+  {
+   "id": "R6",
+   "turn": "t83",
+   "speaker": "Blue",
+   "supports": "スキーストックを中位に",
+   "summary_ja": "斜面があるかもしれず移動が楽になる",
+   "quote": "I would put that there for the ease of travel"
+  }
+ ],
+ "pairs": [
+  {
+   "pair_id": "P1",
+   "reason_ids": [
+    "R1",
+    "R3"
+   ],
+   "choice_item": "1位（懐中電灯か衣類か）",
+   "premises": [
+    {
+     "reason_id": "R1",
+     "type": "T1",
+     "premise_ja": "墜落後まもなく暗くなる",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t1",
+       "quote": "but still when its dark"
+      }
+     ]
+    },
+    {
+     "reason_id": "R3",
+     "type": "T1",
+     "premise_ja": "午前11時32分の墜落でしばらく暗くならない",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t9",
+       "quote": "cause they crash at 11:32 in the morning so its not gonna get dark for a while too"
+      }
+     ]
+    }
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [
+    {
+     "turn": "t9",
+     "quote": "cause they crash at 11:32 in the morning so its not gonna get dark for a while too"
+    },
+    {
+     "turn": "t11",
+     "quote": "Okay yeah Yeah lets do"
+    }
+   ],
+   "compatible_or_reconciled": true,
+   "during_presentation": false
+  }
+ ],
+ "inferred_pairs": [
+  {
+   "pair_id": "IP1",
+   "reason_ids": [
+    "R4",
+    "R5"
+   ],
+   "choice_item": "ロープかチョコレートか",
+   "premises": [
+    {
+     "reason_id": "R4",
+     "type": "T2",
+     "premise_ja": "狩りで食料が得られるまで食べ物が必要",
+     "evidence_level": "E3",
+     "evidence": [
+      {
+       "turn": "t46",
+       "quote": "so that we can like eat in the meantime"
+      }
+     ]
+    },
+    {
+     "reason_id": "R5",
+     "type": "T2",
+     "premise_ja": "拳銃で食料が得られる",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t48",
+       "quote": "if they already have like a caliber to get food"
+      }
+     ]
+    }
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [
+    {
+     "turn": "t48",
+     "quote": "if they already have like a caliber to get food"
+    },
+    {
+     "turn": "t51",
+     "quote": "Okay so the rope next"
+    }
+   ],
+   "compatible_or_reconciled": true,
+   "during_presentation": false
+  }
+ ],
+ "decision": "withhold",
+ "withhold_reason": "既に扱われた",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "懐中電灯と衣類の対は、Orangeが墜落時刻からまだ暗くならないと違いを指摘し、Blueが応答して衣類1位で合意済み。ロープとチョコレートの対はPink側の前提が推測で、Orangeが条件として述べ合意済み。"
+}

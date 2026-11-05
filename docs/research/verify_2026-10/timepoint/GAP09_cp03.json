@@ -1,0 +1,101 @@
+{
+ "checkpoint": "GAP09_cp03",
+ "judge": "J-k03",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t130",
+   "speaker": "Green",
+   "supports": "6位にウイスキー",
+   "summary_ja": "ウイスキーは消毒に使えるので6位に推す",
+   "quote": "whiskey disinfectant shortening you can eat it Im going to say disinfectant because"
+  },
+  {
+   "id": "R2",
+   "turn": "t132",
+   "speaker": "Blue",
+   "supports": "6位にショートニング（ウイスキーへの反論）",
+   "summary_ja": "救急キットに消毒薬が入っているならウイスキーの消毒の役割は不要ではと問う",
+   "quote": "But would there be a disinfectant in the compress kit"
+  },
+  {
+   "id": "R3",
+   "turn": "t41",
+   "speaker": "Green",
+   "supports": "ウイスキーを上位に",
+   "summary_ja": "消毒にも飲用にも使える",
+   "quote": "Cause you can use it to disinfect And you can drink it"
+  },
+  {
+   "id": "R4",
+   "turn": "t159",
+   "speaker": "Green",
+   "supports": "ロープ",
+   "summary_ja": "現場を離れないならシェルターに使える",
+   "quote": "You could use it for shelter"
+  },
+  {
+   "id": "R5",
+   "turn": "t70",
+   "speaker": "Green",
+   "supports": "コンパスの価値に疑問",
+   "summary_ja": "墜落現場を離れたいかを考えるとコンパスは疑問",
+   "quote": "in hindsight would you actually want to leave the crash site"
+  }
+ ],
+ "pairs": [
+  {
+   "pair_id": "P1",
+   "reason_ids": [
+    "R1",
+    "R2"
+   ],
+   "choice_item": "6位（ウイスキーかショートニングか）",
+   "premises": [
+    {
+     "reason_id": "R1",
+     "type": "T1",
+     "premise_ja": "救急キットに消毒薬が入っているか分からない（入っていない可能性）",
+     "evidence_level": "E2",
+     "evidence": [
+      {
+       "turn": "t135",
+       "quote": "Im not actually sure if there is disinfectant so"
+      }
+     ]
+    },
+    {
+     "reason_id": "R2",
+     "type": "T1",
+     "premise_ja": "救急キットに消毒薬が入っている",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t132",
+       "quote": "But would there be a disinfectant in the compress kit"
+      }
+     ]
+    }
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [
+    {
+     "turn": "t132",
+     "quote": "But would there be a disinfectant in the compress kit"
+    },
+    {
+     "turn": "t134",
+     "quote": "I dont know"
+    }
+   ],
+   "compatible_or_reconciled": true,
+   "during_presentation": false
+  }
+ ],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "既に扱われた",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "唯一の対（救急キットに消毒薬があるか）はBlueが問いとして明示し、他の参加者が応答済みでウイスキーに決着している。コンパス・ロープの「現場を離れるか」はGreenのみの言及で対立する理由がない。"
+}

@@ -1,0 +1,12 @@
+{
+ "checkpoint": "IS1000c_cp01",
+ "judge": "J-k01",
+ "reasons": [],
+ "pairs": [],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "対がない",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "メンバーを待っている開始前のやり取りだけで、理由の発言がない。"
+}

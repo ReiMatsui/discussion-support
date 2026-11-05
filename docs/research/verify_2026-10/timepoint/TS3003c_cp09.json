@@ -1,0 +1,34 @@
+{"checkpoint": "TS3003c_cp09", "judge": "J-k09",
+ "reasons": [
+  {"id": "R1", "turn": "t47", "speaker": "D", "supports": "ドッキングステーションを残す（キネティック電源に反対）", "summary_ja": "ドッキングステーションは製品の売りになる", "quote": "I think our docking station could be one of the marketing issues with which we can um get great popularity for our product."},
+  {"id": "R2", "turn": "t52", "speaker": "D", "supports": "ドッキングステーションを残す", "summary_ja": "電池の充電や紛失時の探索機能を入れられる", "quote": "Yeah you could load up the batteries,"},
+  {"id": "R3", "turn": "t55", "speaker": "B", "supports": "普通の電池一本で足りる（充電用ドックは不要）", "summary_ja": "消費電力が少なく、電池一本で半年以上もつ", "quote": "it will run on one battery for um six months or f or or more. So I believe one battery uh is just enough."},
+  {"id": "R4", "turn": "t43", "speaker": "D", "supports": "キネティック電源を採用しない", "summary_ja": "高齢者は使う前にリモコンを振りたがらない", "quote": "Well personally I don't think that older people like to shake their remote control before they use it."},
+  {"id": "R5", "turn": "t20", "speaker": "C", "supports": "キネティック電源も選択肢として検討する", "summary_ja": "キネティック電源は目新しいが、議論が必要", "quote": "Um well the kinetic energy source is rather fancy. But depends on what we want."},
+  {"id": "R6", "turn": "t10", "speaker": "D", "supports": "木目調と灰黒の二種類を出す", "summary_ja": "高齢者は木の素材を好む", "quote": "our surveys have indicated that especially wood is pretty much the material for older people."},
+  {"id": "R7", "turn": "t20", "speaker": "C", "supports": "木材に慎重", "summary_ja": "木は価格を上げイメージにも合わない（二製品ラインなら別）", "quote": "people like wood, but it raises the price and it doesn't really fit the image, unless we would start two product lines."}
+ ],
+ "pairs": [
+  {"pair_id": "P1", "reason_ids": ["R2", "R3"], "choice_item": "電源方式とドッキングステーションの要否",
+   "premises": [
+    {"reason_id": "R2", "type": "T2", "premise_ja": "電池をドックで充電する必要がある", "evidence_level": "E2", "evidence": [{"turn": "t52", "quote": "Yeah you could load up the batteries,"}]},
+    {"reason_id": "R3", "type": "T1", "premise_ja": "小さな表示なので消費電力が少なく電池一本で半年以上もつ", "evidence_level": "E1", "evidence": [{"turn": "t55", "quote": "it won't use uh much e energy uh I I believe"}]}
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [{"turn": "t55", "quote": "Okay but uh it won't use uh much e energy uh I I believe."}, {"turn": "t59", "quote": "That's true."}],
+   "compatible_or_reconciled": false, "during_presentation": false},
+  {"pair_id": "P2", "reason_ids": ["R6", "R7"], "choice_item": "ケースに木（木目調）を使うか",
+   "premises": [
+    {"reason_id": "R6", "type": "T1", "premise_ja": "調査で高齢者は木の素材を好む", "evidence_level": "E1", "evidence": [{"turn": "t10", "quote": "especially wood is pretty much the material for older people"}]},
+    {"reason_id": "R7", "type": "T1", "premise_ja": "木は価格を上げる（二製品ラインにしない限り）", "evidence_level": "E1", "evidence": [{"turn": "t20", "quote": "it raises the price and it doesn't really fit the image, unless we would start two product lines."}]}
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [{"turn": "t20", "quote": "unless we would start two product lines."}, {"turn": "t10", "quote": "we would advise um to bring two editions, one with a wood-like colour and maybe feel, and one with a grey-black colour."}],
+   "compatible_or_reconciled": true, "during_presentation": false}
+ ],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "既に扱われた",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "ドッキングステーションの充電機能をめぐる対（P1）は、Bが消費電力の想定を直接指摘しDが「That's true」と応答しているため既に扱われた。キネティック電源はCが同意して決着しており、木材の対はCが二製品ラインという条件付きで述べ、Dの二種類案と両立している。"}

@@ -1,0 +1,26 @@
+{"checkpoint": "IS1000c_cp13", "judge": "J-k13",
+ "reasons": [
+  {"id": "R1", "turn": "t61", "speaker": "A", "supports": "LCD・音声認識を入れない", "summary_ja": "LCD や音声認識は追加の費用と手間に見合わないと述べる。", "quote": "L_C_D_ screens and speech recognition which weren't I don't think, in my personal opinion, gonna be worth the extra expense"},
+  {"id": "R2", "turn": "t279", "speaker": "D", "supports": "LCD を入れる", "summary_ja": "表示には高価なチップが要るが、12ユーロで400万台作るなら扱えると述べる。", "quote": "if it's uh uh made for mm four million uh items, then I think w we could be able to handle that"},
+  {"id": "R3", "turn": "t136", "speaker": "C", "supports": "LCD 表示を入れる", "summary_ja": "多機能の汎用リモコンでは今どのモードかを表示で確認でき、キーを減らせると述べる。", "quote": "I can use a simple toggle switch, and a display, so I press it so the display says, okay, I'm in T_V_ or D_V_D_ or whatever it is"},
+  {"id": "R4", "turn": "t80", "speaker": "B", "supports": "交換カバーに慎重", "summary_ja": "新しい供給ラインが必要で組織的に複雑になると述べる。", "quote": "you have to introduce a complete uh uh new l line of uh of supplies uh it would be uh very complicated uh organisational"},
+  {"id": "R5", "turn": "t81", "speaker": "A", "supports": "交換カバーを採用", "summary_ja": "大量販売の製品なので2〜3種のデザインは賄えると述べる。", "quote": "This is gonna be a mass marketed product,"},
+  {"id": "R6", "turn": "t164", "speaker": "D", "supports": "キーのプログラムに慎重", "summary_ja": "使いやすさを損なうのではと述べる。", "quote": "isn't that too difficult for the we want w I don't know if we still want the um R_C_ to be easy to use,"},
+  {"id": "R7", "turn": "t198", "speaker": "D", "supports": "音声認識に慎重", "summary_ja": "12ユーロ内で音声認識が可能か分からないと述べる。", "quote": "but for the A_S_R_ system, uh I'm not sure if it's feasible to have this"}
+ ],
+ "pairs": [
+  {"pair_id": "P1", "reason_ids": ["R1", "R2"], "choice_item": "LCD 画面を入れるか",
+   "premises": [
+    {"reason_id": "R1", "type": "T1", "premise_ja": "LCD を入れると追加の費用がかかる", "evidence_level": "E1", "evidence": [{"turn": "t61", "quote": "gonna be worth the extra expense and the extra effort that will go into them"}]},
+    {"reason_id": "R2", "type": "T1", "premise_ja": "安い LCD があり、400万台作るなら12ユーロ内で扱える", "evidence_level": "E1", "evidence": [{"turn": "t275", "quote": "very cheap L_C_D_s"}, {"turn": "t279", "quote": "if it's uh uh made for mm four million uh items, then I think w we could be able to handle that"}]}
+   ],
+   "already_explicit_by_participants": false,
+   "explicit_evidence": [],
+   "compatible_or_reconciled": false, "during_presentation": false}
+ ],
+ "inferred_pairs": [],
+ "decision": "support",
+ "withhold_reason": "なし",
+ "target_pair": "P1",
+ "presentation_ja": "Aさんは「L_C_D_ screens and speech recognition which weren't I don't think, in my personal opinion, gonna be worth the extra expense」（LCD や音声認識は追加費用に見合わないと思う）と、LCD に追加の費用がかかる想定で見送りを挙げ、Dさんは「if it's uh uh made for mm four million uh items, then I think w we could be able to handle that」（400万台作るなら扱えると思う）と、その生産量なら12ユーロで扱える想定で LCD の組み込みを挙げています。この想定の違いを、LCD を入れるか選ぶときにどう扱いますか（どちらかを想定する、両方に備える、違いを残すなど）。",
+ "note": "LCD の採否で、A は追加費用を、D は400万台なら12ユーロ内で扱えることを前提に逆の方向を推しており、D の前提の下では A の理由が弱まる。両者の前提の違いはまだ誰も言葉にしておらず、D の発表は終わり C が LCD について問い始めた検討段階のため支援とした。"}

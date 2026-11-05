@@ -1,0 +1,134 @@
+{
+ "auditor": "AU2",
+ "meeting": "DELI04",
+ "scenes": [
+  {
+   "scene_id": "S1",
+   "turns": "t4-t17",
+   "choice_item": "母音カードに偶数カードを加えるか、規則に合わないカードを調べるか",
+   "reasons": [
+    {
+     "speaker": "Guinea p",
+     "turn": "t8",
+     "quote": "Although the <CARD> was a good option too , it could prove the rule as well .",
+     "premise": "偶数カードも規則の証明になりうる（確証例で検証）",
+     "type": "T1",
+     "level": "E1"
+    },
+    {
+     "speaker": "Chipmunk",
+     "turn": "t12",
+     "quote": "We should test one of the other , either <CARD> or <CARD> to verify that those don''t fit I think",
+     "premise": "規則に合わない側のカードを調べて、反例がないことを確かめる必要がある",
+     "type": "T1",
+     "level": "E1"
+    }
+   ],
+   "explicit_turn": "t12（Chipmunk 'I don''t think it is both of those actually' と違いを指摘、t13 Guinea p 'that is a good point'）",
+   "reconciled": "なし",
+   "stage2": [
+    "起きた",
+    "t12"
+   ],
+   "stage3": [
+    "起きた",
+    "t13/t15 Guinea p 'I will revise my solution'（採用）"
+   ],
+   "stage4": [
+    "起きた",
+    "t15-t16 修正して提出"
+   ],
+   "self_handled": "はい",
+   "impairment": [
+    "なかった",
+    "自力で扱い、選択を修正した"
+   ]
+  },
+  {
+   "scene_id": "S2",
+   "turns": "t18-t30",
+   "choice_item": "偶数（six）カードを含めるか",
+   "reasons": [
+    {
+     "speaker": "Chipmunk",
+     "turn": "t7/t18",
+     "quote": "'couldn''t we verify with the even number too though ?' / I went with <CARD> and <CARD> I beleive",
+     "premise": "偶数カードでも規則を確かめられる",
+     "type": "T1",
+     "level": "E2"
+    },
+    {
+     "speaker": "Tiger",
+     "turn": "t20/t22",
+     "quote": "The card with vowels have to have an even number but the even number does not need a vowel .",
+     "premise": "規則は一方向で、偶数カードの裏は規則と無関係",
+     "type": "T1",
+     "level": "E1"
+    }
+   ],
+   "explicit_turn": "t20-t22（Tiger が規則の向きを指摘、t23 Guinea p・t25 Chipmunk 'good point' と応答）",
+   "reconciled": "なし",
+   "stage2": [
+    "起きた",
+    "t22"
+   ],
+   "stage3": [
+    "起きた",
+    "t23 '<CARD> is out'、t25 Chipmunk 'good point'"
+   ],
+   "stage4": [
+    "起きた",
+    "t26-t29 奇数カード（nine）の検討へ移り、t33 Tiger が2枚を選ぶ"
+   ],
+   "self_handled": "はい",
+   "impairment": [
+    "なかった",
+    "自力で扱った。ただし t18 の Chipmunk の2枚が何かは伏字で不確か"
+   ]
+  },
+  {
+   "scene_id": "S3",
+   "turns": "t31-t47",
+   "choice_item": "3枚（母音・子音・奇数と推定）か2枚（母音・奇数）か",
+   "reasons": [
+    {
+     "speaker": "Guinea p",
+     "turn": "t36-t37",
+     "quote": "All must be verified for the rule to be confirmed",
+     "premise": "規則を確定するには（偶数以外の）すべてを確かめる必要がある",
+     "type": "T1",
+     "level": "E1"
+    },
+    {
+     "speaker": "Chipmunk",
+     "turn": "t42-t43",
+     "quote": "'like <MENTION> said , <CARD> doesn''t have to have a vowel' / it could be either",
+     "premise": "そのカードの裏は規則に縛られず、どちらでも規則に反しない",
+     "type": "T1",
+     "level": "E2"
+    }
+   ],
+   "explicit_turn": "なし（t41 Guinea p 'Why not <CARD> ?' と理由を問い、t42-t43 で応答があるが、前提の違いを条件・二択・指摘の形では述べていない。不確か）",
+   "reconciled": "なし",
+   "stage2": [
+    "起きた",
+    "t41-t43 理由の問いと、カードの裏の条件の説明"
+   ],
+   "stage3": [
+    "起きない",
+    "t44 Guinea p 'I will stick with all 3 except <CARD> .'（理由への応答なし）"
+   ],
+   "stage4": [
+    "起きた",
+    "各自が別の答えを提出（t45-t47）。違いを残した選択"
+   ],
+   "self_handled": "不明",
+   "impairment": [
+    "不明",
+    "答えは分かれたまま終わり、t48 'how do we go beyond this ?' と停滞。Chipmunk の t42 は伏字のため t41 の問いのカードに対応しているか不確か（子音カードの話なのに 'doesn''t have to have a vowel' と述べている）。別の解釈: 前提差ではなく、各自の論理の誤りと時間の問題"
+   ]
+  }
+ ],
+ "no_premise_sections": "t1-t3 挨拶。t48-t56 提出の繰り返し。",
+ "notes": "前提はすべて規則の論理の読み（T1）。課題の想定（T2）の差はない。カード名の伏字のため、どのカードを指すかは推定を含む。"
+}

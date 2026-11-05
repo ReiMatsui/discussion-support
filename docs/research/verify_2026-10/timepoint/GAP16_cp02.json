@@ -1,0 +1,116 @@
+{
+ "checkpoint": "GAP16_cp02",
+ "judge": "J-k02",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t8",
+   "speaker": "Blue",
+   "supports": "衣類を1位",
+   "summary_ja": "とても寒くなるはずだから",
+   "quote": "Cause I figure its gonna be really cold"
+  },
+  {
+   "id": "R2",
+   "turn": "t24",
+   "speaker": "Blue",
+   "supports": "ウイスキーと新聞を上位",
+   "summary_ja": "二つを使って火を起こせる",
+   "quote": "I figured you could use the two to make a fire"
+  },
+  {
+   "id": "R3",
+   "turn": "t28",
+   "speaker": "Blue",
+   "supports": "ライターを15位",
+   "summary_ja": "燃料がないので役に立たない",
+   "quote": "Because theres a cigarette lighter but it has no fluid"
+  },
+  {
+   "id": "R4",
+   "turn": "t56",
+   "speaker": "Blue",
+   "supports": "ロープを5位",
+   "summary_ja": "機体が骨組み以外壊れているので避難所づくりに必要",
+   "quote": "it says the plane has been completely destroyed except for the frame"
+  },
+  {
+   "id": "R5",
+   "turn": "t62",
+   "speaker": "Pink",
+   "supports": "チョコレートを6位",
+   "summary_ja": "エネルギー源として重要",
+   "quote": "The chocolate bars probably important right for like energy"
+  },
+  {
+   "id": "R6",
+   "turn": "t77",
+   "speaker": "Pink",
+   "supports": "拳銃を次（7位）に",
+   "summary_ja": "荒野の中にいるから",
+   "quote": "Cause its in the wilderness right"
+  },
+  {
+   "id": "R7",
+   "turn": "t83",
+   "speaker": "Blue",
+   "supports": "ナイフを次に",
+   "summary_ja": "ロープを切るのにナイフがある",
+   "quote": "Or you have the knife to cut the rope"
+  },
+  {
+   "id": "R8",
+   "turn": "t89",
+   "speaker": "Blue",
+   "supports": "拳銃は後",
+   "summary_ja": "拳銃は長期間そこにいて狩りが必要になる場合のもの",
+   "quote": "I think the gun is if youve been there like an extended period of time and you need to like start hunting"
+  }
+ ],
+ "pairs": [],
+ "inferred_pairs": [
+  {
+   "pair_id": "P1",
+   "reason_ids": [
+    "R6",
+    "R8"
+   ],
+   "choice_item": "拳銃を7位に置くか後に回すか",
+   "premises": [
+    {
+     "reason_id": "R6",
+     "type": "T1",
+     "premise_ja": "荒野なので（動物などの）危険にすぐ備える必要がある（危険の内容は推測）",
+     "evidence_level": "E3",
+     "evidence": [
+      {
+       "turn": "t77",
+       "quote": "Cause its in the wilderness right"
+      }
+     ]
+    },
+    {
+     "reason_id": "R8",
+     "type": "T2",
+     "premise_ja": "拳銃が要るのは長期間とどまり狩りを始める場合",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t89",
+       "quote": "if youve been there like an extended period of time and you need to like start hunting"
+      }
+     ]
+    }
+   ],
+   "already_explicit_by_participants": false,
+   "explicit_evidence": [],
+   "compatible_or_reconciled": false,
+   "during_presentation": false
+  }
+ ],
+ "decision": "withhold",
+ "withhold_reason": "推測のみ",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "拳銃の位置でPinkとBlueの理由が分かれるが、Pinkの前提（荒野で何に備えるか）は発言から一つに決まらずE3にとどまる。主分析の対はないので控える。"
+}

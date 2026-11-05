@@ -1,0 +1,13 @@
+{"checkpoint": "TS3003c_cp06", "judge": "J-k06",
+ "reasons": [
+  {"id": "R1", "turn": "t10", "speaker": "D", "supports": "目立たず部屋に溶け込むデザイン", "summary_ja": "60〜80歳の対象層向けに、リモコンとドッキングステーションは部屋に溶け込み、目を引くデザインにしないとする。", "quote": "the remote control and the docking station should uh blend in in the in the room. Um so this would mean no uh eye-catching designs."},
+  {"id": "R2", "turn": "t10", "speaker": "D", "supports": "平置きの電話型ドッキング", "summary_ja": "立てる形は高齢者には新しすぎるので、平らに置く電話型を好むとする。", "quote": "they would prefer uh a design where the remote control just lies flat in the docking station"},
+  {"id": "R3", "turn": "t10", "speaker": "D", "supports": "木目調と灰黒の2種類の版", "summary_ja": "裕福な層向けに木目調、そうでない層向けに灰黒の2版を出すことを勧める。", "quote": "we would advise um to bring two editions, one with a wood-like colour and maybe feel, and one with a grey-black colour"}
+ ],
+ "pairs": [],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "対がない",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "この時点までの理由はマーケティング担当 D の発表のみで、他の参加者は質問もしていないため、理由が一人分しかない。"}

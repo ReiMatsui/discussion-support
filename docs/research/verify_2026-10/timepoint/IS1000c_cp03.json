@@ -1,0 +1,12 @@
+{
+ "checkpoint": "IS1000c_cp03",
+ "judge": "J-k03",
+ "reasons": [],
+ "pairs": [],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "対がない",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "履歴は会議の開始と発表準備の段階までで、選択肢を支持する理由がまだ出ていない。"
+}

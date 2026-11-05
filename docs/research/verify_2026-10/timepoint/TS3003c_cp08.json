@@ -1,0 +1,37 @@
+{
+ "checkpoint": "TS3003c_cp08",
+ "judge": "J-k08",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t10",
+   "speaker": "D",
+   "supports": "木目調と灰黒の2エディションを出す",
+   "summary_ja": "調査で高齢者は木を好むとされるので、木目調版を富裕層向けに出す",
+   "quote": "we would advise um to bring two editions, one with a wood-like colour and maybe feel, and one with a grey-black colour"
+  },
+  {
+   "id": "R2",
+   "turn": "t20",
+   "speaker": "C",
+   "supports": "木材を使わない（2製品ラインにしない限り）",
+   "summary_ja": "木は価格を上げ、イメージに合わない",
+   "quote": "people like wood, but it raises the price and it doesn't really fit the image, unless we would start two product lines"
+  },
+  {
+   "id": "R3",
+   "turn": "t20",
+   "speaker": "C",
+   "supports": "キネティック電源を採用しない",
+   "summary_ja": "キネティック電源ではドッキングステーションが不要になる",
+   "quote": "if we choose for that option, the docking station would c become obsolete"
+  }
+ ],
+ "pairs": [],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "対がない",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "木材についてCは「2製品ラインにしない限り」と条件付きで述べ、Dの2エディション案と両立しうるうえ、両者の前提（高齢者の嗜好、価格上昇）は互いの理由の強さを変えないため対にならない。判定時点は各担当の発表が続いた直後で、討議はまだ始まっていない。"
+}

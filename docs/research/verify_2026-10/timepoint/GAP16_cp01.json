@@ -1,0 +1,37 @@
+{
+ "checkpoint": "GAP16_cp01",
+ "judge": "J-k01",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t8",
+   "speaker": "Blue",
+   "supports": "衣類を1位",
+   "summary_ja": "とても寒くなるはず",
+   "quote": "Cause I figure its gonna be really cold"
+  },
+  {
+   "id": "R2",
+   "turn": "t24",
+   "speaker": "Blue",
+   "supports": "新聞を4位（ウイスキーと合わせて）",
+   "summary_ja": "ウイスキーと新聞で火を起こせる",
+   "quote": "for number four I put newspaper cause I figured you could use the two to make a fire"
+  },
+  {
+   "id": "R3",
+   "turn": "t28",
+   "speaker": "Blue",
+   "supports": "ライターを15位",
+   "summary_ja": "燃料がないので役に立たない",
+   "quote": "Because theres a cigarette lighter but it has no fluid"
+  }
+ ],
+ "pairs": [],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "対がない",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "理由を述べているのはほぼ Blue だけで、Yellow のナイフ・拳銃などには理由がない。ライターが無用という点でも Yellow は同意しており、前提差の対はない。"
+}

@@ -1,0 +1,51 @@
+{"checkpoint": "TS3003c_cp17", "judge": "J-k17",
+ "reasons": [
+  {"id": "R1", "turn": "t16", "speaker": "B", "supports": "音声認識を入れる", "summary_ja": "人を引きつける新しい機能で、安く作れるという理由。", "quote": "It's uh possible to uh uh to make um quite cheap uh system for uh speech uh recognition."},
+  {"id": "R2", "turn": "t77", "speaker": "D", "supports": "音声認識を入れない", "summary_ja": "市場調査では対象層は音声認識に追加で払わないので、価格が上がるなら勧めないという理由。", "quote": "if people would pay more for speech recognition in a remote control. Well you can see here, our target group would not do that."},
+  {"id": "R3", "turn": "t55", "speaker": "B", "supports": "充電用ドッキングステーションは不要（電池一本で足りる）", "summary_ja": "小さい表示ならあまり電力を使わず、電池一本で半年以上もつという理由。", "quote": "it will run on one battery for um six months or f or or more. So I believe one battery uh is just enough."},
+  {"id": "R4", "turn": "t58", "speaker": "A", "supports": "ドッキングステーションを置く", "summary_ja": "高齢者は物を決まった場所に置きたいので、置き場所になるという理由。", "quote": "Uh well I think uh elderly people just like to have everything in place."},
+  {"id": "R5", "turn": "t20", "speaker": "C", "supports": "キネティック（振動）電源は選択肢になりうる", "summary_ja": "振るだけで発電する、目を引く電源だという理由。", "quote": "Um well the kinetic energy source is rather fancy."},
+  {"id": "R6", "turn": "t43", "speaker": "D", "supports": "キネティック電源を使わない", "summary_ja": "高齢者は使う前にリモコンを振りたがらないという理由。", "quote": "Well personally I don't think that older people like to shake their remote control before they use it."},
+  {"id": "R7", "turn": "t213", "speaker": "D", "supports": "チャンネル・音量ボタンを左右両側に置く", "summary_ja": "左利きにも対応でき、左右対称の設計ができるという理由。", "quote": "if we would make um a changing channels and changing volume button on both sides, that would certainly yield great options for the design of the remote."},
+  {"id": "R8", "turn": "t217", "speaker": "A", "supports": "ボタンを両側に置かない", "summary_ja": "ボタンが増えると人が混乱するという理由。", "quote": "But you have extra buttons."}
+ ],
+ "pairs": [
+  {"pair_id": "P1", "reason_ids": ["R1", "R2"], "choice_item": "音声認識を入れるか",
+   "premises": [
+    {"reason_id": "R1", "type": "T1", "premise_ja": "音声認識はかなり安く作れる", "evidence_level": "E1", "evidence": [{"turn": "t16", "quote": "It's uh possible to uh uh to make um quite cheap uh system for uh speech uh recognition."}]},
+    {"reason_id": "R2", "type": "T1", "premise_ja": "音声認識で販売価格が上がる", "evidence_level": "E1", "evidence": [{"turn": "t79", "quote": "So if that would increase the price for which we're selling our remote control"}]}
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [{"turn": "t71", "quote": "I'm wondering um what will the voice recognition mean for the production price?"}, {"turn": "t72", "quote": "Yeah. That's a good point."}, {"turn": "t79", "quote": "So if that would increase the price for which we're selling our remote control"}],
+   "compatible_or_reconciled": false, "during_presentation": false},
+  {"pair_id": "P2", "reason_ids": ["R3", "R4"], "choice_item": "ドッキングステーションを置くか",
+   "premises": [
+    {"reason_id": "R3", "type": "T1", "premise_ja": "小さい表示なら電池一本で半年以上もつ", "evidence_level": "E1", "evidence": [{"turn": "t55", "quote": "it will run on one battery for um six months or f or or more."}]},
+    {"reason_id": "R4", "type": "T2", "premise_ja": "高齢者は物を決まった場所に置きたい", "evidence_level": "E1", "evidence": [{"turn": "t58", "quote": "elderly people just like to have everything in place."}]}
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [{"turn": "t62", "quote": "So maybe a docking station will help them give the remote a place."}, {"turn": "t63", "quote": "Yeah. That's true. Yeah."}],
+   "compatible_or_reconciled": true, "during_presentation": false},
+  {"pair_id": "P3", "reason_ids": ["R5", "R6"], "choice_item": "キネティック電源を使うか",
+   "premises": [
+    {"reason_id": "R5", "type": "T2", "premise_ja": "利用者はリモコンを振って発電させる", "evidence_level": "E2", "evidence": [{"turn": "t37", "quote": "y you basically shake your remote, and then it powers up."}]},
+    {"reason_id": "R6", "type": "T2", "premise_ja": "高齢者は使う前にリモコンを振りたがらない", "evidence_level": "E1", "evidence": [{"turn": "t43", "quote": "I don't think that older people like to shake their remote control before they use it."}]}
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [{"turn": "t43", "quote": "Well personally I don't think that older people like to shake their remote control before they use it."}, {"turn": "t44", "quote": "Yeah. That's true."}],
+   "compatible_or_reconciled": false, "during_presentation": false},
+  {"pair_id": "P4", "reason_ids": ["R7", "R8"], "choice_item": "ボタンを左右両側に置くか",
+   "premises": [
+    {"reason_id": "R7", "type": "T2", "premise_ja": "左利きの利用者が片側のボタンでは使いにくい", "evidence_level": "E1", "evidence": [{"turn": "t200", "quote": "For left-handed users also."}]},
+    {"reason_id": "R8", "type": "T2", "premise_ja": "ボタンが増えると利用者が混乱する", "evidence_level": "E1", "evidence": [{"turn": "t219", "quote": "So people can get confused."}]}
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [{"turn": "t238", "quote": "But is it a problem that left-handed persons use a different hand?"}, {"turn": "t239", "quote": "Yeah. That is true."}],
+   "compatible_or_reconciled": false, "during_presentation": false}
+ ],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "既に扱われた",
+ "target_pair": "P1",
+ "presentation_ja": null,
+ "note": "音声認識（価格が上がるか）、ドッキングステーション、キネティック電源、両側ボタン（左利きが問題か）の対は、いずれも参加者が条件・問い・指摘として述べ、他の参加者が応答して方向が決まっている。まだ言葉にされていない主分析の対は見当たらない。"}

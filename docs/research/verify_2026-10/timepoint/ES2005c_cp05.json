@@ -1,0 +1,45 @@
+{
+ "checkpoint": "ES2005c_cp05",
+ "judge": "J-k05",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t10",
+   "speaker": "B",
+   "supports": "見た目・デザインを最重視（fancy design）",
+   "summary_ja": "市場調査で、機能的な外見より見た目と触感の良いリモコンが好まれたので、デザインを最重要にすべき。",
+   "quote": "people do have preference for tho fancy mobi uh f remote controls which look and feel very good"
+  },
+  {
+   "id": "R2",
+   "turn": "t38",
+   "speaker": "B",
+   "supports": "スポンジ状の素材",
+   "summary_ja": "流行として、素材の感触はプラスチックの硬さよりスポンジ状が期待されている。",
+   "quote": "the f feel of the material is expected to be spongy rather than just having a plastic look, hard look"
+  },
+  {
+   "id": "R3",
+   "turn": "t109",
+   "speaker": "D",
+   "supports": "LCD を使わない",
+   "summary_ja": "LCD は分かりにくく、費用もかかりそう。",
+   "quote": "I thought could get a bit confusing and a bit expensive as well for us"
+  },
+  {
+   "id": "R4",
+   "turn": "t133",
+   "speaker": "D",
+   "supports": "有機的な形・使いやすいデザイン",
+   "summary_ja": "示した例は使いやすく明るく、自分たちの設計に良い。",
+   "quote": "And that's really easy to use, bright, so I like this one lot for our design."
+  }
+ ],
+ "pairs": [],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "対がない",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "B と D の理由は互いに対立する選択肢を推しておらず、前提差の対がない。加えて、時点では D の発表が続いており、発表中にも当たる。"
+}

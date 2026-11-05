@@ -1,0 +1,623 @@
+{
+ "meeting": "ES2002c",
+ "items": [
+  {
+   "id": "ES2002c-C1",
+   "kind": "A",
+   "labels": {
+    "S1": 64,
+    "S2": null,
+    "S3": 64,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 74
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "yes",
+    "turn": 64
+   },
+   "update_type": "substantive",
+   "update_example_ja": "Dさんは、この製品はインテリアとコンピュータの中間なのでテーマは取り入れつつリンゴ型のような形は行き過ぎで、柔らかい素材や鮮やかな自然色で表すという線を出しています。テーマを色や素材でどこまで出すか、形にはどの程度反映させるかを決める段階です。",
+   "note": "t64でD自身が一部取り入れ（形は避ける）と製品の位置づけを述べ、問いに答えた"
+  },
+  {
+   "id": "ES2002c-B360",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 68,
+    "S4": 68,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 74
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 68
+   },
+   "update_type": "substantive",
+   "update_example_ja": "Dさんは iPod のような先進性を持たせつつ硬く光沢のある質感は避けて柔らかく鮮やかにし、レモン・ライムのような統一テーマを質感・形・色に通す案を出しています。統一テーマを何にし、形にはどこまで反映させますか？",
+   "note": "t68でインテリア/先進感の両立と統一テーマ案が出て、比べ方が度合いからテーマ選びに移った"
+  },
+  {
+   "id": "ES2002c-B540",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 99,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 74
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "substantive",
+   "update_example_ja": "コーポレートカラーが黄色らしい（t99）ので、レモン系は見慣れて伝わりやすいだけでなく会社の色とも合う案になります。Cさんは明るい色とレモン・ライム案の組み合わせは安っぽくならないよう注意と言っていますが、レモン系で統一する前提で、どう新しさを出しますか？",
+   "note": "t99のコーポレートカラー黄色が新しい根拠。なじみ対目新しさの問いへの回答はない"
+  },
+  {
+   "id": "ES2002c-C2",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 79
+    },
+    "S7": true
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "Dの発表終了後すぐ次の発表者に移り、ライトとカバーの比較は出ない"
+  },
+  {
+   "id": "ES2002c-B720",
+   "kind": "B",
+   "labels": {
+    "S1": 97,
+    "S2": null,
+    "S3": 99,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "deferred",
+     "turn": 106
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 99
+   },
+   "update_type": "substantive",
+   "update_example_ja": "コーポレートカラーは黄色らしく（t99）、明るい色の方向とは合っています。残る点はCさんが言うように黄色以外の色をどこまで使えるか（t120）ですが、ボタンなどに別の色を使う余地はありますか？",
+   "note": "t99で色は黄色と分かったが、使う範囲の柔軟さはt120で不明のまま"
+  },
+  {
+   "id": "ES2002c-C3",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 99,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "deferred",
+     "turn": 106
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 99
+   },
+   "update_type": "substantive",
+   "update_example_ja": "コーポレートカラーは黄色らしく（t99）、明るい色の方針と矛盾しないので『明るくない場合』の心配は小さくなりました。本体全体を黄色にするか、黄色以外の色も使えるか（t120で不明）が残る点ですが、どう扱いますか？",
+   "note": "t99で前提の条件分岐がほぼ不要に。許容範囲はt120で未確認"
+  },
+  {
+   "id": "ES2002c-C4",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 114,
+    "S4": 117,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 118
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 117
+   },
+   "update_type": "substantive",
+   "update_example_ja": "研究部門から音声機能が話し返して操作を確認できるという情報が出て（t114）、Bさんも良い案としています。確認応答という利点が、ボタン代替も含めて部品が増えることに見合う革新性かどうかで判断しますか？",
+   "note": "t114で話し返し確認という新しい利点が出て、Bが肯定"
+  },
+  {
+   "id": "ES2002c-B900",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": 149,
+    "S3": null,
+    "S4": 147,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 152
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "substantive",
+   "update_example_ja": "Aさんの受け取った情報では、音声機能は話すことはできても聞き取れるかははっきりしていません（t149）。音声操作を入れるかを比べる前に、まず聞き取りができるかを確かめる必要がありますが、確認が取れるまで判断を保留しますか？",
+   "note": "t149で音声操作（聞き取り）が可能かが不明と分かり、前提が揺らいだ"
+  },
+  {
+   "id": "ES2002c-C5",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 170,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 178
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "substantive",
+   "update_example_ja": "チタンは形に制約がある（t170）ので、曲面にするなら素材はチタン以外になり、形と素材の選択が連動します。持ちやすさを優先して曲面にし、素材はプラスチックやゴムから選ぶ形で考えますか？",
+   "note": "平らと曲面の費用差は出ないが、チタンの形制約が新条件として出た"
+  },
+  {
+   "id": "ES2002c-B1080",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 170,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 178
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "substantive",
+   "update_example_ja": "チタンは形に制約がある（t170）ので、曲面にするなら素材はチタン以外になり、形と素材の選択が連動します。持ちやすさを優先して曲面にし、素材はプラスチックやゴムから選ぶ形で考えますか？",
+   "note": "C5と同じ。費用差は出ず、チタンの形制約が新条件"
+  },
+  {
+   "id": "ES2002c-C6",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 170,
+    "S4": 174,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 178
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 174
+   },
+   "update_type": "substantive",
+   "update_example_ja": "ゴムは使える電源に制約があり（t170）、Aさんは費用と複雑さの面では素材を一つにする方が楽としています（t174）。ゴムの組み合わせは流行に合いますが、電源との相性と単一素材の費用面の利点のどちらを重く見ますか？",
+   "note": "t170でゴムの電源制約、t174で単一素材の方が費用面で有利という観点が出た"
+  },
+  {
+   "id": "ES2002c-C7",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 203,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 182
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "substantive",
+   "update_example_ja": "Aさんはキネティック発電をゴムと組み合わせた売り方を挙げていて（t203）、ゴムの電源制約が少なくともキネティックとは矛盾しない可能性が出ました。持ちやすさを素材で出すか形で出すかは、この組み合わせを前提に考えますか？",
+   "note": "t203でゴム＋キネティックの組み合わせ案が出た。素材か形かの問いへの回答はない"
+  },
+  {
+   "id": "ES2002c-C8",
+   "kind": "A",
+   "labels": {
+    "S1": 185,
+    "S2": null,
+    "S3": 185,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 188
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "比較案なし。t185でAが手回しは小手先で電池は結局必要と比べたが、更新対象の案がない"
+  },
+  {
+   "id": "ES2002c-C9",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 220,
+    "S4": 214,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 218
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 214
+   },
+   "update_type": "substantive",
+   "update_example_ja": "Aさんは部品は少なく単純なほど費用・開発期間で有利と生産面の優先を示し（t214）、ゴムのケースでは太陽電池が使えないだけ（t220）と分かりました。補助電源を足すならキネティックが候補に残りますが、その売りが部品増に見合うと見ますか？",
+   "note": "t214で生産面の優先、t220でゴムの制約が太陽電池だけと判明"
+  },
+  {
+   "id": "ES2002c-B1260",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 243,
+    "S4": 245,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 238
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 245
+   },
+   "update_type": "substantive",
+   "update_example_ja": "Dさんはボタンを光らせるために強い電池が必要と言っていて（t243）、補助電源の比較は売りと費用だけでなく、照明に足りる電力を確保できるかという観点も入ります。キネティックの補助は照明の電力確保に役立つと見ますか、それとも強い電池だけで足りると見ますか？",
+   "note": "t243-247でDが照明のための電池容量と高技術感を重視"
+  },
+  {
+   "id": "ES2002c-C10",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": 245,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 220
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 249
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "Dが革新性をボタンを光らせる見た目側で出したいと示した（t245-249）が操作部の単純化までは言っていない"
+  },
+  {
+   "id": "ES2002c-B1440",
+   "kind": "B",
+   "labels": {
+    "S1": 287,
+    "S2": null,
+    "S3": 312,
+    "S4": 300,
+    "S5": null,
+    "S6": null,
+    "S7": false
+   },
+   "answers_question": {
+    "value": "yes",
+    "turn": 287
+   },
+   "update_type": "rephrase",
+   "update_example_ja": null,
+   "note": "t287でCが果物の形ではなく曲線的な形と果物の質感・色で表すと答えた。t312で形が素材選びを絞るという観点が出たが言い換え程度"
+  },
+  {
+   "id": "ES2002c-B1620",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 323
+    },
+    "S7": true
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "形や色の話に移り、素材と電源の順番は出ない"
+  },
+  {
+   "id": "ES2002c-C11",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 350,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "decided",
+     "turn": 378
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "yes",
+    "turn": 378
+   },
+   "update_type": "substantive",
+   "update_example_ja": "Cさんは起動時に話すリモコンは怖いと言い（t350）、話し返す機能自体が不要と決まった（t378）ので、スローガンは音声ではなく本体に書く方向になります。本体のどこに入れますか？",
+   "note": "t350で使い手が怖がるという新根拠、t378で話し返し不要と決定"
+  },
+  {
+   "id": "ES2002c-B1800",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": 368,
+    "S5": 368,
+    "S6": {
+     "type": "switched",
+     "turn": 369
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "LCDは複雑で不要寄りになったが、ジョグダイヤルの扱いはこの範囲で出ない"
+  },
+  {
+   "id": "ES2002c-B1980",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 417
+    },
+    "S7": true
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "締めくくりで他の項目に移り、電源と素材の両立は出ない"
+  },
+  {
+   "id": "ES2002c-C12",
+   "kind": "A",
+   "labels": {
+    "S1": 429,
+    "S2": null,
+    "S3": 431,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "decided",
+     "turn": 455
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "yes",
+    "turn": 429
+   },
+   "update_type": "substantive",
+   "update_example_ja": "ボタンのバックライトに加え、Aさんから黄色の半透明ケースの中に少数のライトを入れて柔らかく光らせる案（t431, t448）が出て、マウス程度の電力で足りるとされています。革新性は操作部ではなく光るケースとボタンで出す方向で考えますか？",
+   "note": "t429-454でバックライトと半透明の光るケースという技術要素が出て、問いに答えた"
+  },
+  {
+   "id": "ES2002c-B2160",
+   "kind": "B",
+   "labels": {
+    "S1": 503,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": 509,
+    "S6": {
+     "type": "decided",
+     "turn": 511
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 509
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "ジョグダイヤルの方がボタンより楽という比較で採用が決まったが、チップ費用は比べられていない"
+  },
+  {
+   "id": "ES2002c-C13",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 546,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 551
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 546
+   },
+   "update_type": "substantive",
+   "update_example_ja": "Dさんの『平らにして回す』案やAさんのスライド案（t546-549）が出て、誤操作や利き手の問題はダイヤルの位置だけでなく形でも避けられる可能性があります。中央に置く場合、平らな回転式やスライド式にすることで誤操作を防げると見ますか？",
+   "note": "t546で平らな回転式という新しい形が出て、位置の比較が形の比較に広がった"
+  },
+  {
+   "id": "ES2002c-C14",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 546,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 551
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "substantive",
+   "update_example_ja": "Dさんの『平らにして回す』案やAさんのスライド案（t546-549）が出て、誤操作の問題は位置だけでなくダイヤルの形でも避けられる可能性があります。次回の粘土試作では、中央配置に加えて平らな回転式やスライド式も試しますか？",
+   "note": "t546で形の新案。試作で確かめるかへの回答はない"
+  },
+  {
+   "id": "ES2002c-C15",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 567,
+    "S4": null,
+    "S5": 563,
+    "S6": {
+     "type": "deferred",
+     "turn": 576
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "rephrase",
+   "update_example_ja": null,
+   "note": "t567で柔らかい手触りの加工プラスチック案が出たが、押しやすさとの比較は出ないまま会議終了"
+  },
+  {
+   "id": "ES2002c-B2340",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "deferred",
+     "turn": 578
+    },
+    "S7": true
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "会議終了直前で音声認識の話は出ない"
+  }
+ ]
+}

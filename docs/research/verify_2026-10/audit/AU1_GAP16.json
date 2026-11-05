@@ -1,0 +1,13 @@
+{"auditor": "AU1", "meeting": "GAP16",
+ "pairs_eval": [
+  {"pair_uid": "GAP16-U14",
+   "B1": ["不確か", "R8はt89に直接支えられる（E1）。R6はt77「Cause its in the wilderness right」だけで、危険への即時の備えという前提は推測（E3）。判定者も推測の対として控えており扱いは妥当"],
+   "B2": ["満たす", "拳銃の順位という同じ選択事項で、Pinkは7位付近（t81）、Blueはナイフを先に（t83）と推しが違う"],
+   "B3": ["満たす", "滞在期間の想定（T2）と環境の危険の認識（T1）で、価値観ではない"],
+   "B6": ["満たす", "R6に「危険の内容は推測」と付記し、R8はt89の「if」の条件形を保っている。Pinkのt77の「right」（確認の問い）の調子はやや落ちている"],
+   "explicit_judgement": ["誤り", "t89でBlueが「the gun is if youve been there like an extended period of time」と拳銃の適用条件を「〜なら」の形で述べ、t90 Yellowが「Yeah」と応答している。基準の明示の目安（条件として述べる＋応答）に当たる。Pink側の想定を名指しした比較ではない点で不確かさは残る"],
+   "first_explicit_turn": "t89",
+   "full_analysis_scene": "S1"}],
+ "support_eval": [],
+ "misses": [],
+ "notes": "支援と判定した時点はない。全体分析でも主分析の対（両前提E1/E2）は見つからず、見落としはない。唯一の候補（拳銃）は片方が推測で、もう片方の話者が自ら条件を述べて順位が決まっている。"}

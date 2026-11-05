@@ -1,0 +1,150 @@
+{
+ "auditor": "AU2",
+ "meeting": "DELI03",
+ "scenes": [
+  {
+   "scene_id": "S1",
+   "turns": "t4-t13",
+   "choice_item": "母音カードのみか、偶数カードも加えるか",
+   "reasons": [
+    {
+     "speaker": "Llama",
+     "turn": "t5/t8",
+     "quote": "Mark <CARD> as well . If there''s a vowel on the other side , it also proves the rule .",
+     "premise": "偶数カードの裏に母音があれば規則の証明になる（確証例で検証できる）",
+     "type": "T1",
+     "level": "E1"
+    },
+    {
+     "speaker": "Raven",
+     "turn": "t6",
+     "quote": "the rule says all card with vowels which means the other cards don''t matter - - they don''t have to follow the rule",
+     "premise": "規則は母音のカードにだけ適用され、他のカードは無関係",
+     "type": "T1",
+     "level": "E1"
+    }
+   ],
+   "explicit_turn": "t10（Raven 'Couldn''t the <CARD> just as easily have turned up a consonant ? In which case ...' と条件で述べ、t11 Llama 'Good point.' と応答）。t6 で既に違いの指摘あり",
+   "reconciled": "なし",
+   "stage2": [
+    "起きた",
+    "t10 Raven の条件提示"
+   ],
+   "stage3": [
+    "起きた",
+    "t11 Llama 'Good point .'（一旦受け入れ）"
+   ],
+   "stage4": [
+    "起きた",
+    "t13 Llama 提出"
+   ],
+   "self_handled": "はい",
+   "impairment": [
+    "なかった",
+    "参加者が条件として扱った"
+   ]
+  },
+  {
+   "scene_id": "S2",
+   "turns": "t14-t25",
+   "choice_item": "2枚目を裏返すか（1枚で足りるか）",
+   "reasons": [
+    {
+     "speaker": "Llama",
+     "turn": "t14/t19",
+     "quote": "But would it not strengthen the correlation if we did find a vowel ? / it does seem like that would be necessary for a proper test",
+     "premise": "確証例を増やすことが『適切な検証』",
+     "type": "T1",
+     "level": "E1"
+    },
+    {
+     "speaker": "Raven",
+     "turn": "t21",
+     "quote": "The question in the task implies that you only need one card to prove the rule .",
+     "premise": "課題文は1枚で足りることを示唆している",
+     "type": "T2",
+     "level": "E1"
+    },
+    {
+     "speaker": "Llama",
+     "turn": "t22",
+     "quote": "While it does , it says most players get it wrong . The assumption then would be that the task is more complex than that .",
+     "premise": "多くが間違えるとあるので、課題は見た目より複雑",
+     "type": "T2",
+     "level": "E1"
+    },
+    {
+     "speaker": "Tiger",
+     "turn": "t24",
+     "quote": "you turn ONLY the cards needed",
+     "premise": "必要なカードだけを裏返す課題",
+     "type": "T2",
+     "level": "E1"
+    }
+   ],
+   "explicit_turn": "t22（Llama が Raven の想定に応じ 'The assumption then would be ...' と想定の違いを指摘。t23-t25 で応答）",
+   "reconciled": "なし",
+   "stage2": [
+    "起きた",
+    "t18 Raven 'It might help , but if we didn''t find a vowel it would hurt the rule .'、t22"
+   ],
+   "stage3": [
+    "起きた",
+    "t25 Raven 'You don''t \" need \" to turn over the <CARD>'（Llama の理由を反駁）"
+   ],
+   "stage4": [
+    "起きた",
+    "t30 Raven 'I vote \" <CARD> \" only .'、t33 Tiger"
+   ],
+   "self_handled": "はい",
+   "impairment": [
+    "なかった",
+    "想定の違いが言葉にされ、反駁された。別の解釈: 課題文の読みを巡る応酬で、Llama は納得していない（t26 以降）"
+   ]
+  },
+  {
+   "scene_id": "S3",
+   "turns": "t26-t35",
+   "choice_item": "母音カードのみか、他のカードも必要か",
+   "reasons": [
+    {
+     "speaker": "Llama",
+     "turn": "t26",
+     "quote": "Does <CARD> coming up even really prove it if other cards could show something different ?",
+     "premise": "他のカードが規則に反する例を示しうる（反証の可能性）",
+     "type": "T1",
+     "level": "E2"
+    },
+    {
+     "speaker": "Tiger",
+     "turn": "t27-t28",
+     "quote": "ONLY is key / 'no it''s a logical exclusion'",
+     "premise": "規則の論理上、他のカードは除外される",
+     "type": "T1",
+     "level": "E2"
+    }
+   ],
+   "explicit_turn": "t26（Llama が条件の形で問い、t27-t28 Tiger が応答）",
+   "reconciled": "なし",
+   "stage2": [
+    "起きた",
+    "t26 Llama の問い"
+   ],
+   "stage3": [
+    "起きた",
+    "t28 Tiger 'no it''s a logical exclusion'（反駁。根拠の説明はない）"
+   ],
+   "stage4": [
+    "起きた",
+    "t30/t33 投票、t32-t35 提出"
+   ],
+   "self_handled": "はい",
+   "impairment": [
+    "不明",
+    "Llama の指摘（他のカードによる反証）は具体化されないまま退けられ、多数は母音のみを選んだ。Wason 課題の正答（母音＋奇数）から見ると検討不足だが、前提差ではなく論理の誤りとも読める。t31 で時間切れの言及あり"
+   ]
+  }
+ ],
+ "no_premise_sections": "t1-t3 Llama の自己訂正。t29-t35 投票と提出。",
+ "notes": "前提は規則の論理（T1）と課題文の解釈（T2）。いずれも参加者が言葉にして応答している。"
+}

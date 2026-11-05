@@ -1,0 +1,373 @@
+{
+ "meeting": "GAP24",
+ "items": [
+  {
+   "id": "GAP24-C1",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": 20,
+    "S6": {
+     "type": "decided",
+     "turn": 38
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 38
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "t20-21は暖の重要性の言い直し（-25度で補強）。ナイフ側の理由は語られず、Orangeがt38でライター1位に乗り換えたため問いには間接的にのみ答えた。"
+  },
+  {
+   "id": "GAP24-C2",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": 52,
+    "S6": {
+     "type": "decided",
+     "turn": 50
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "t50で懐中電灯に即決。t52-59は夜・暗さの根拠の言い直し。救助までの日数は窓内で出ない。"
+  },
+  {
+   "id": "GAP24-C3",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": 68,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 71
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "yes",
+    "turn": 68
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "t68でBlueが重傷者なしを理由に救急用品を後ろにすると発言し問いに答えた。t71以降は食料・ショートニングへ移り3位はショートニング案に。"
+  },
+  {
+   "id": "GAP24-B180",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 101,
+    "S4": 104,
+    "S5": null,
+    "S6": {
+     "type": "decided",
+     "turn": 122
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 104
+   },
+   "update_type": "substantive",
+   "update_example_ja": "観測された情報を入力した場合のオフライン動作例：ショートニングは燃料にも食料にもなり、ウイスキーは助けを呼ぶ火に使えます。救助までしのぐ前提なら、食料を兼ねる点をどれだけ重く見ますか？",
+   "note": "t101・t119でショートニングを食料としても使う観点が出て、比較案の観点（長く燃える対救助の合図）から食料兼用へ比べ方が変わった。t104で生き延びる方針を優先、t122で折衷して決定。"
+  },
+  {
+   "id": "GAP24-C4",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": 110,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 113
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 112
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "t110-112でまずしばらく生き延び翌日以降に移動という見通しが出たが、救助の時期そのものは答えていない。t113で3位の議論へ移った。"
+  },
+  {
+   "id": "GAP24-C5",
+   "kind": "A",
+   "labels": {
+    "S1": 163,
+    "S2": null,
+    "S3": 163,
+    "S4": 161,
+    "S5": null,
+    "S6": {
+     "type": "decided",
+     "turn": 179
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "yes",
+    "turn": 176
+   },
+   "update_type": "rephrase",
+   "update_example_ja": null,
+   "note": "t161（移動すべき）とt163（煙で合図、到着しないので捜索される）で待つか歩くかを人間が比べた。t176でコンパスは火が駄目な時の最終手段と答えが出た。問い自体はそのまま使える。"
+  },
+  {
+   "id": "GAP24-B360",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "decided",
+     "turn": 186
+    },
+    "S7": true
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "t186でナイフ4位に決定し5位へ移った。移動に切り替える時期への言及はない。t190の濡れた木は5位の文脈。"
+  },
+  {
+   "id": "GAP24-C6",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": 204,
+    "S5": 208,
+    "S6": {
+     "type": "decided",
+     "turn": 206
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "yes",
+    "turn": 204
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "t204で寒さを重く見る発言があり替えの服に決定。t208は寒さの言い直し。"
+  },
+  {
+   "id": "GAP24-C7",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "decided",
+     "turn": 220
+    },
+    "S7": true
+   },
+   "answers_question": {
+    "value": "yes",
+    "turn": 220
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "t220で地図は最後の方と即決し、問い（コンパスの近くに置くか）に答えた。"
+  },
+  {
+   "id": "GAP24-B540",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": 275,
+    "S5": 263,
+    "S6": {
+     "type": "decided",
+     "turn": 274
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 275
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "t263-265はロープで避難所の言い直し。t275でチョコはまだそれほど重要でないと優先順位が出て6位はロープに決定。見通しの立ち方そのものは答えていない。"
+  },
+  {
+   "id": "GAP24-C8",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": 288,
+    "S6": {
+     "type": "decided",
+     "turn": 296
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "t288は状況次第の言い直し。時間に押されてt296でストック7位に決定、チョコや拳銃を先にするかは比べられなかった。"
+  },
+  {
+   "id": "GAP24-C9",
+   "kind": "A",
+   "labels": {
+    "S1": 319,
+    "S2": null,
+    "S3": 312,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "decided",
+     "turn": 316
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "yes",
+    "turn": 319
+   },
+   "update_type": "rephrase",
+   "update_example_ja": null,
+   "note": "t312で懐中電灯の電池と組み合わせて火花を起こせるという条件が出た。t317-319で濡れたりライターが使えない時の予備と結びつけて9位に。問いはそのまま使える。"
+  },
+  {
+   "id": "GAP24-C10",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 356,
+    "S4": 362,
+    "S5": null,
+    "S6": {
+     "type": "decided",
+     "turn": 363
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 362
+   },
+   "update_type": "rephrase",
+   "update_example_ja": null,
+   "note": "t356-358で飲酒の危険というウイスキーの新たな欠点が出た。t362でコンパスは地図に必須と重く見てt363で12位に決定。移動対救助待ちの問いは明示されないがコンパス優先で部分的に答えた。"
+  },
+  {
+   "id": "GAP24-B720",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 356,
+    "S4": 362,
+    "S5": null,
+    "S6": {
+     "type": "decided",
+     "turn": 363
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 362
+   },
+   "update_type": "rephrase",
+   "update_example_ja": null,
+   "note": "C10とほぼ同じ時点・選択肢。t356の飲酒の危険でウイスキーの評価が下がり、t362-363でコンパスを先に置いた。合図用途は再び話題にならなかった。"
+  },
+  {
+   "id": "GAP24-C11",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": 372,
+    "S5": 371,
+    "S6": {
+     "type": "decided",
+     "turn": 369
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 372
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "t371の火は足りているは既出根拠の言い直し。t372でもう移動中という想定が出て移動の備え（地図）を新聞より先にする並びになった（t389で確認）。"
+  },
+  {
+   "id": "GAP24-C12",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "decided",
+     "turn": 381
+    },
+    "S7": true
+   },
+   "answers_question": {
+    "value": "yes",
+    "turn": 381
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "t377-381で冗談の後にPinkが了承し、ウイスキー最下位で確定（t389で全順位を読み上げ）。"
+  }
+ ]
+}

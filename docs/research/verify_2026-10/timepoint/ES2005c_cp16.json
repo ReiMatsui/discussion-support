@@ -1,0 +1,37 @@
+{"checkpoint": "ES2005c_cp16", "judge": "J-k16",
+ "reasons": [
+  {"id": "R1", "turn": "t544", "speaker": "A", "supports": "電源に手回し・振り発電（dynamo）を使う", "summary_ja": "人が手に取りたくなるもので、電池切れなら振ればよい", "quote": "So, this might be an idea for something that people really wanna grab, you can shake it if it's out of power."},
+  {"id": "R2", "turn": "t559", "speaker": "C", "supports": "dynamo に否定的", "summary_ja": "音声操作で置いたまま使うなら、振る手間が利用者の負担になる", "quote": "Especially if they want to use it uh uh sp uh specifically as um voice activated."},
+  {"id": "R3", "turn": "t571", "speaker": "B", "supports": "太陽電池に否定的", "summary_ja": "日光に当てておく必要があり、日が出ない日に困る", "quote": "Uh, solar power will w also not be a good idea, because then they have to keep m their mobiles outside in solar energy,"},
+  {"id": "R4", "turn": "t581", "speaker": "D", "supports": "太陽電池の否定への疑問", "summary_ja": "日光でなく普通の室内光でもよいのではと問う", "quote": "But w like just normal light?"},
+  {"id": "R5", "turn": "t184", "speaker": "B", "supports": "LCD 画面を載せる", "summary_ja": "画面上のアイコンをクリックするだけなので使いやすい", "quote": "it will be easy because there will be, on L_C_D_ s screen, there will be different frent icons"},
+  {"id": "R6", "turn": "t187", "speaker": "A", "supports": "LCD 画面に否定的", "summary_ja": "リモコン使用時は画面でなくテレビを見ているので不要", "quote": "But but the thing is when you use a remote control, you never look at it, right?"},
+  {"id": "R7", "turn": "t159", "speaker": "B", "supports": "費用をかけて LCD・新技術を載せる", "summary_ja": "市場調査では人々は品質や新しさに高く払う", "quote": "But in our market survey we have seen that people are willing to pay more"},
+  {"id": "R8", "turn": "t164", "speaker": "C", "supports": "費用の制約（LCD に慎重）", "summary_ja": "製造原価12.50ユーロ以内に収める必要がある", "quote": "It's still it's still got to get within our twelve fifty, you know."}
+ ],
+ "pairs": [
+  {"pair_id": "P1", "reason_ids": ["R1", "R2"], "choice_item": "電源（dynamo を使うか）",
+   "premises": [
+    {"reason_id": "R1", "type": "T2", "premise_ja": "利用者はリモコンを手に取って使う（つかむ・振る）", "evidence_level": "E1", "evidence": [{"turn": "t544", "quote": "something that people really wanna grab, you can shake it if it's out of power"}]},
+    {"reason_id": "R2", "type": "T2", "premise_ja": "音声操作で、置いたまま使う", "evidence_level": "E1", "evidence": [{"turn": "t559", "quote": "specifically as um voice activated"}, {"turn": "t561", "quote": "Then if it's just sitting on the"}]}],
+   "already_explicit_by_participants": true, "explicit_evidence": [{"turn": "t559", "quote": "Especially if they want to use it uh uh sp uh specifically as um voice activated."}, {"turn": "t564", "quote": "Yeah, then they have to pick it up and then activate it and then Yeah."}],
+   "compatible_or_reconciled": false, "during_presentation": false},
+  {"pair_id": "P2", "reason_ids": ["R5", "R6"], "choice_item": "LCD 画面を載せるか",
+   "premises": [
+    {"reason_id": "R5", "type": "T2", "premise_ja": "利用者は LCD のアイコンを見て操作する", "evidence_level": "E2", "evidence": [{"turn": "t184", "quote": "there will be different frent icons, they can just click ok okay"}]},
+    {"reason_id": "R6", "type": "T2", "premise_ja": "利用者はリモコンを見ずにテレビを見ている", "evidence_level": "E1", "evidence": [{"turn": "t187", "quote": "when you use a remote control, you never look at it, right?"}, {"turn": "t189", "quote": "You're looking at the T_V_"}]}],
+   "already_explicit_by_participants": true, "explicit_evidence": [{"turn": "t187", "quote": "But but the thing is when you use a remote control, you never look at it, right?"}, {"turn": "t193", "quote": "That's true, yeah."}],
+   "compatible_or_reconciled": false, "during_presentation": false},
+  {"pair_id": "P3", "reason_ids": ["R3", "R4"], "choice_item": "電源（太陽電池を使うか）",
+   "premises": [
+    {"reason_id": "R3", "type": "T1", "premise_ja": "太陽電池には屋外の日光が必要", "evidence_level": "E1", "evidence": [{"turn": "t571", "quote": "they have to keep m their mobiles outside in solar energy"}]},
+    {"reason_id": "R4", "type": "T1", "premise_ja": "普通の室内光でも足りるかもしれない", "evidence_level": "E1", "evidence": [{"turn": "t581", "quote": "But w like just normal light?"}]}],
+   "already_explicit_by_participants": true, "explicit_evidence": [{"turn": "t581", "quote": "But w like just normal light?"}, {"turn": "t583", "quote": "Oh that's true."}],
+   "compatible_or_reconciled": false, "during_presentation": false}
+ ],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "既に扱われた",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "電源（dynamo・太陽電池）と LCD の対はいずれも、参加者自身が条件（voice activated なら）や想定の違い（never look at it、normal light?）を述べ、他の参加者が応答している。直近は充電式電池・充電台の話に移っており、未扱いの主分析の対は見当たらない。"}

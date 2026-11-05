@@ -1,0 +1,32 @@
+{"checkpoint": "TS3003c_cp14", "judge": "J-k14",
+ "reasons": [
+  {"id": "R1", "turn": "t43", "speaker": "D", "supports": "運動エネルギー電源にしない", "summary_ja": "高齢者は使う前にリモコンを振りたくないと思う。", "quote": "Well personally I don't think that older people like to shake their remote control before they use it."},
+  {"id": "R2", "turn": "t55", "speaker": "B", "supports": "電池だけでよい（充電用ドッキングステーション不要）", "summary_ja": "小さな画面なので電池1本で半年以上もつ。", "quote": "I believe uh it will run on one battery for um six months or f or or more."},
+  {"id": "R3", "turn": "t60", "speaker": "A", "supports": "ドッキングステーションを置く", "summary_ja": "高齢者はリモコンが部屋に散らばるのを好まないので置き場所になる。", "quote": "And I don't think they they like uh remotes just laying everywhere in their rooms."},
+  {"id": "R4", "turn": "t77", "speaker": "D", "supports": "音声認識を入れない", "summary_ja": "対象層は音声認識に追加料金を払わないので、価格が上がるなら勧めない。", "quote": "Well you can see here, our target group would not do that."},
+  {"id": "R5", "turn": "t120", "speaker": "A", "supports": "木製ケース", "summary_ja": "高価でも、独自のものを持ちたい高齢者を引きつける。", "quote": "Um but I think it will attract elderly people who wanna have something exclusive"},
+  {"id": "R6", "turn": "t198", "speaker": "D", "supports": "チャンネル切替ボタンを左右両方に置く", "summary_ja": "左利きの利用者のため。", "quote": "I thought maybe we could just make one of those buttons on both the left and the right side."},
+  {"id": "R7", "turn": "t203", "speaker": "B", "supports": "片側にチャンネル、反対側に音量ボタンを置く", "summary_ja": "片側をチャンネル切替、もう片側を音量にできないかと提案（理由は述べていない）。", "quote": "you got on the left side uh or on the right side uh buttons for for shifting u up and shifting up?"}
+ ],
+ "pairs": [
+  {"pair_id": "P1", "reason_ids": ["R2", "R3"], "choice_item": "ドッキングステーションを置くか",
+   "premises": [
+    {"reason_id": "R2", "type": "T1", "premise_ja": "電池1本で半年以上もつ", "evidence_level": "E1", "evidence": [{"turn": "t55", "quote": "I believe uh it will run on one battery for um six months or f or or more."}]},
+    {"reason_id": "R3", "type": "T2", "premise_ja": "高齢者は物を決まった場所に置きたい", "evidence_level": "E1", "evidence": [{"turn": "t58", "quote": "Uh well I think uh elderly people just like to have everything in place."}]}],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [{"turn": "t62", "quote": "So maybe a docking station will help them give the remote a place."}, {"turn": "t63", "quote": "Yeah. That's true. Yeah."}],
+   "compatible_or_reconciled": true, "during_presentation": false}
+ ],
+ "inferred_pairs": [
+  {"pair_id": "IP1", "reason_ids": ["R6", "R7"], "choice_item": "左右のボタン配置",
+   "premises": [
+    {"reason_id": "R6", "type": "T2", "premise_ja": "左利きの利用者もいる", "evidence_level": "E1", "evidence": [{"turn": "t200", "quote": "For left-handed users also."}]},
+    {"reason_id": "R7", "type": "T2", "premise_ja": "片手の親指でチャンネルと音量の両方を使う（推測）", "evidence_level": "E3", "evidence": [{"turn": "t203", "quote": "And on the uh other uh uh o other side uh buttons for uh shifting, uh for for the sound?"}]}],
+   "already_explicit_by_participants": false, "explicit_evidence": [],
+   "compatible_or_reconciled": false, "during_presentation": false}
+ ],
+ "decision": "withhold",
+ "withhold_reason": "推測のみ",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "電源・音声認識・ケース素材の論点は条件付きの発言や合意（交換式カバー、電池＋ドッキング）で既に扱われている。進行中のボタン配置では、Bの提案の理由が述べられておらず前提が推測（E3）にとどまるため、主分析の対がない。"}

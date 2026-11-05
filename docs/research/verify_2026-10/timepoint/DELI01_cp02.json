@@ -1,0 +1,93 @@
+{
+ "checkpoint": "DELI01_cp02",
+ "judge": "J-k02",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t7",
+   "speaker": "Cat",
+   "supports": "もう1枚のカードも確認する",
+   "summary_ja": "下に母音がないことを確かめるため",
+   "quote": "to make sure there is no vowel under it"
+  },
+  {
+   "id": "R2",
+   "turn": "t12",
+   "speaker": "Dolphin",
+   "supports": "2枚を確認する",
+   "summary_ja": "その下は偶数でなければならず、もう一方も同じ",
+   "quote": "Under <CARD> it must be even number same with <CARD>"
+  },
+  {
+   "id": "R3",
+   "turn": "t18",
+   "speaker": "Cat",
+   "supports": "偶数側は確認不要",
+   "summary_ja": "規則は母音なら偶数と言うだけで、母音だけが偶数とは言っていない",
+   "quote": "The rule says vowels have 2s . it does not say ONLY voewls have 2s"
+  },
+  {
+   "id": "R4",
+   "turn": "t20",
+   "speaker": "Cat",
+   "supports": "そのカードを確認する",
+   "summary_ja": "母音なら規則に反するから",
+   "quote": "becuase if it is <CARD> vowel it disproves the rule"
+  }
+ ],
+ "pairs": [
+  {
+   "pair_id": "P1",
+   "reason_ids": [
+    "R2",
+    "R3"
+   ],
+   "choice_item": "どのカードを裏返すか",
+   "premises": [
+    {
+     "reason_id": "R2",
+     "type": "T1",
+     "premise_ja": "規則は両方向に成り立つ（どちらのカードも裏が決まっている）",
+     "evidence_level": "E2",
+     "evidence": [
+      {
+       "turn": "t12",
+       "quote": "it must be even number same with <CARD>"
+      }
+     ]
+    },
+    {
+     "reason_id": "R3",
+     "type": "T1",
+     "premise_ja": "規則は一方向（母音なら偶数）で、逆は求めていない",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t18",
+       "quote": "it does not say ONLY voewls have 2s"
+      }
+     ]
+    }
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [
+    {
+     "turn": "t18",
+     "quote": "The rule says vowels have 2s . it does not say ONLY voewls have 2s"
+    },
+    {
+     "turn": "t21",
+     "quote": "Ok You carry on"
+    }
+   ],
+   "compatible_or_reconciled": false,
+   "during_presentation": false
+  }
+ ],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "既に扱われた",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "規則の読み方の違いはCatがt18で明示的に指摘し、Kiwiが応答しているため扱われている。"
+}

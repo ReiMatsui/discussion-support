@@ -1,0 +1,210 @@
+{
+ "checkpoint": "ES2005c_cp15",
+ "judge": "J-k15",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t322",
+   "speaker": "B",
+   "supports": "果物の形（バナナ形など）のリモコン",
+   "summary_ja": "果物・野菜と結びつけることで広告にも使え、人々の好みに合うとして果物の形を支持",
+   "quote": "this will help us in our advertisement also and we can relate with fruits and vegetables, the people's choices"
+  },
+  {
+   "id": "R2",
+   "turn": "t463",
+   "speaker": "B",
+   "supports": "果物形の交換ケース",
+   "summary_ja": "本体は共通にし、果物形のケースを選べるようにすれば望む形にできる",
+   "quote": "we can just have a remote control and casings of different different shapes, different fruit shapes"
+  },
+  {
+   "id": "R3",
+   "turn": "t519",
+   "speaker": "D",
+   "supports": "果物そのものではなく果物から着想を得た人間工学的な形",
+   "summary_ja": "25〜35歳の対象層は流行・高級感を求めており、果物そのものはギミックすぎるかもしれない",
+   "quote": "They wanted something that looks fancy and I think maybe fruit could be a bit of a too much of a gimmick"
+  },
+  {
+   "id": "R4",
+   "turn": "t333",
+   "speaker": "C",
+   "supports": "バナナ形に慎重",
+   "summary_ja": "バナナ形は子どもっぽいかもしれない",
+   "quote": "does it does seem a bit uh again childish maybe."
+  },
+  {
+   "id": "R5",
+   "turn": "t159",
+   "speaker": "B",
+   "supports": "LCD・新技術の採用",
+   "summary_ja": "市場調査では人々は質と新しさのためなら高く払う",
+   "quote": "in our market survey we have seen that people are willing to pay more"
+  },
+  {
+   "id": "R6",
+   "turn": "t187",
+   "speaker": "A",
+   "supports": "LCD 不採用",
+   "summary_ja": "リモコン使用時は手元を見ずテレビを見ているので LCD は不要",
+   "quote": "when you use a remote control, you never look at it, right?"
+  },
+  {
+   "id": "R7",
+   "turn": "t164",
+   "speaker": "C",
+   "supports": "予算内（12.50）に収める",
+   "summary_ja": "製造原価12.50ユーロ以内に収める必要がある",
+   "quote": "It's still it's still got to get within our twelve fifty, you know."
+  }
+ ],
+ "pairs": [
+  {
+   "pair_id": "P1",
+   "reason_ids": [
+    "R1",
+    "R3"
+   ],
+   "choice_item": "ケースの形（果物そのものの形か、果物から着想を得た形か）",
+   "premises": [
+    {
+     "reason_id": "R1",
+     "type": "T1",
+     "premise_ja": "流行調査で、人々は服や靴などを果物・野菜と結びつけており、果物の形は人々の好みに合う",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t26",
+       "quote": "you can see how people have related their clothes, shoes, and everything with fruits and vegetables"
+      },
+      {
+       "turn": "t337",
+       "quote": "Uh the fashion trend shows that fruits and vegetables,"
+      }
+     ]
+    },
+    {
+     "reason_id": "R3",
+     "type": "T1",
+     "premise_ja": "対象の25〜35歳は流行・高級感を求めており、果物そのものの形はギミックに見えるかもしれない",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t519",
+       "quote": "we're trying to get to twenty five, thirty five year olds who want it quite trendy as well they said"
+      },
+      {
+       "turn": "t519",
+       "quote": "I think maybe fruit could be a bit of a too much of a gimmick"
+      }
+     ]
+    }
+   ],
+   "already_explicit_by_participants": false,
+   "explicit_evidence": [],
+   "compatible_or_reconciled": false,
+   "during_presentation": false
+  },
+  {
+   "pair_id": "P2",
+   "reason_ids": [
+    "R5",
+    "R7"
+   ],
+   "choice_item": "LCD 等の高価な機能の採否",
+   "premises": [
+    {
+     "reason_id": "R5",
+     "type": "T1",
+     "premise_ja": "人々は質と新しさのためなら高く払う",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t159",
+       "quote": "people are willing to pay more, but they want the quality"
+      }
+     ]
+    },
+    {
+     "reason_id": "R7",
+     "type": "T1",
+     "premise_ja": "製造原価は12.50ユーロ以内に収める必要がある",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t164",
+       "quote": "It's still it's still got to get within our twelve fifty, you know."
+      }
+     ]
+    }
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [
+    {
+     "turn": "t164",
+     "quote": "It's still it's still got to get within our twelve fifty, you know."
+    },
+    {
+     "turn": "t167",
+     "quote": "So even if we increase our cost little bit, within uh some limits"
+    }
+   ],
+   "compatible_or_reconciled": false,
+   "during_presentation": false
+  },
+  {
+   "pair_id": "P3",
+   "reason_ids": [
+    "R6",
+    "R5"
+   ],
+   "choice_item": "LCD の採否",
+   "premises": [
+    {
+     "reason_id": "R6",
+     "type": "T2",
+     "premise_ja": "使用中はリモコンを見ずにテレビを見ている",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t189",
+       "quote": "You're looking at the T_V_"
+      }
+     ]
+    },
+    {
+     "reason_id": "R5",
+     "type": "T2",
+     "premise_ja": "利用者は LCD 上のアイコンを見てクリックする",
+     "evidence_level": "E2",
+     "evidence": [
+      {
+       "turn": "t184",
+       "quote": "on L_C_D_ s screen, there will be different frent icons, they can just click"
+      }
+     ]
+    }
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [
+    {
+     "turn": "t187",
+     "quote": "But but the thing is when you use a remote control, you never look at it, right?"
+    },
+    {
+     "turn": "t193",
+     "quote": "That's true, yeah."
+    }
+   ],
+   "compatible_or_reconciled": false,
+   "during_presentation": false
+  }
+ ],
+ "inferred_pairs": [],
+ "decision": "support",
+ "withhold_reason": "なし",
+ "target_pair": "P1",
+ "presentation_ja": "Bさんは「the fashion trend shows that fruits and vegetables」と、流行が果物・野菜に向かっているという調査を前提に果物の形を挙げ、Dさんは「They wanted something that looks fancy and I think maybe fruit could be a bit of a too much of a gimmick」と、25〜35歳の対象層には果物そのものの形はギミックに見えるかもしれないという想定から、果物から着想を得る程度の形を挙げています。この違いを、形を選ぶときにどう扱いますか（どちらかを想定する、両方に備える、違いを残すなど）。",
+ "note": "LCD をめぐる対（P2・P3）は参加者が既に違いを指摘し応答済みだが、果物の形をめぐる B と D の対（対象層が果物を流行と受け取るかギミックと受け取るか）はまだ言葉にされていない。B の公開調査案（t372）やケース交換案は形の選択肢を広げるものの、この前提の違い自体には触れていないため支援とした（境界例）。"
+}

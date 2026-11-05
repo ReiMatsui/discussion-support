@@ -1,0 +1,33 @@
+{"checkpoint": "TS3003c_cp19", "judge": "J-k19",
+ "reasons": [
+  {"id": "R1", "turn": "t16", "speaker": "B", "supports": "音声認識を採用する", "summary_ja": "音声認識は安価なシステムで作れるので、紛失時の呼び出しや音量操作に使える。", "quote": "It's uh possible to uh uh to make um quite cheap uh system for uh speech uh recognition."},
+  {"id": "R2", "turn": "t79", "speaker": "D", "supports": "音声認識を採用しない", "summary_ja": "対象層は音声認識に追加料金を払わないと調査で出ているので、価格が上がるなら入れないよう勧める。", "quote": "So if that would increase the price for which we're selling our remote control"},
+  {"id": "R3", "turn": "t104", "speaker": "A", "supports": "音声認識を採用しない", "summary_ja": "コストが大きく上がり、使いやすさもあまり上がらないので音声認識はやめる。", "quote": "Because it will increase cost uh signifi uh significantly."},
+  {"id": "R4", "turn": "t198", "speaker": "D", "supports": "チャンネルボタンを左右両側に付ける", "summary_ja": "左利きの利用者のために、チャンネルボタンを左右両側に付ける。", "quote": "I thought maybe we could just make one of those buttons on both the left and the right side."},
+  {"id": "R5", "turn": "t217", "speaker": "A", "supports": "ボタンを両側に付けない（通常の形）", "summary_ja": "ボタンが増えると利用者が混乱する。機能は基本的なので左利きでも困らない。", "quote": "But you have extra buttons."},
+  {"id": "R6", "turn": "t238", "speaker": "A", "supports": "ボタンを両側に付けない（通常の形）", "summary_ja": "機能は基本的なので、左利きの人もチャンネル選択に困らない。", "quote": "I think the functions are that basic that nobody should have any problems with uh choosing a channel"}
+ ],
+ "pairs": [
+  {"pair_id": "P1", "reason_ids": ["R1", "R2"], "choice_item": "音声認識を採用するか",
+   "premises": [
+    {"reason_id": "R1", "type": "T1", "premise_ja": "音声認識は安価に作れる", "evidence_level": "E1", "evidence": [{"turn": "t16", "quote": "It's uh possible to uh uh to make um quite cheap uh system for uh speech uh recognition."}]},
+    {"reason_id": "R2", "type": "T1", "premise_ja": "音声認識を入れると販売価格が上がる（条件として）", "evidence_level": "E1", "evidence": [{"turn": "t79", "quote": "So if that would increase the price for which we're selling our remote control"}, {"turn": "t77", "quote": "Well you can see here, our target group would not do that."}]}
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [{"turn": "t71", "quote": "I'm wondering um what will the voice recognition mean for the production price?"}, {"turn": "t73", "quote": "Mm I don't have any information on pricing."}, {"turn": "t79", "quote": "So if that would increase the price for which we're selling our remote control"}, {"turn": "t104", "quote": "Because it will increase cost uh signifi uh significantly."}],
+   "compatible_or_reconciled": false, "during_presentation": false},
+  {"pair_id": "P2", "reason_ids": ["R4", "R6"], "choice_item": "チャンネル（音量）ボタンを左右両側に付けるか",
+   "premises": [
+    {"reason_id": "R4", "type": "T2", "premise_ja": "左利きの利用者は右側だけのボタンでは使いにくい", "evidence_level": "E2", "evidence": [{"turn": "t200", "quote": "For left-handed users also."}]},
+    {"reason_id": "R6", "type": "T2", "premise_ja": "機能が基本的なので左利きの人も困らない", "evidence_level": "E1", "evidence": [{"turn": "t238", "quote": "I think the functions are that basic that nobody should have any problems with uh choosing a channel"}]}
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [{"turn": "t238", "quote": "But is it a problem that left-handed persons use a different hand?"}, {"turn": "t239", "quote": "Yeah. That is true."}],
+   "compatible_or_reconciled": true, "during_presentation": false}
+ ],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "既に扱われた",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "主分析の対は音声認識の価格（P1）と左利き対応（P2）だが、P1はDが「if that would increase the price」と条件として述べAやCが応答しており、P2はAが左利きの問題を問いDが同意したうえ両側配置で両立済みである。木材ケースは交換式カバーで両立済み、会議も締めに入っているため控える。"}

@@ -1,0 +1,97 @@
+{
+ "checkpoint": "DELI02_cp05",
+ "judge": "J-k05",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t3",
+   "speaker": "Cat",
+   "supports": "2枚",
+   "summary_ja": "一方のカードは規則を確かめ、もう一方は反証しうる。",
+   "quote": "because the <CARD> can prove the rule and then the <CARD> could disprove it"
+  },
+  {
+   "id": "R2",
+   "turn": "t24",
+   "speaker": "Bee",
+   "supports": "3枚（他のカードも裏返す）",
+   "summary_ja": "枚数は指定されておらず、何枚選んでもよいので、他を裏返さないのは不自然。",
+   "quote": "theoretically it could be however many you want"
+  },
+  {
+   "id": "R3",
+   "turn": "t35",
+   "speaker": "Kiwi",
+   "supports": "2枚",
+   "summary_ja": "出題者は最小の枚数で確かめることを求めているかもしれないので2枚が理想。",
+   "quote": "the smallest amount possible"
+  },
+  {
+   "id": "R4",
+   "turn": "t36",
+   "speaker": "Cat",
+   "supports": "必要なカードだけ（3枚目は任意）",
+   "summary_ja": "問題文は「must」と言っているので、必ず必要なカードを選ぶべき。",
+   "quote": "it says must"
+  }
+ ],
+ "pairs": [
+  {
+   "pair_id": "P1",
+   "reason_ids": [
+    "R3",
+    "R2"
+   ],
+   "choice_item": "裏返すカードの枚数（2枚か3枚か）",
+   "premises": [
+    {
+     "reason_id": "R3",
+     "type": "T2",
+     "premise_ja": "課題は最小の枚数で確かめることを求めている（かもしれない）という想定",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t35",
+       "quote": "the smallest amount possible"
+      }
+     ]
+    },
+    {
+     "reason_id": "R2",
+     "type": "T1",
+     "premise_ja": "課題文は枚数を指定しておらず、何枚でもよいという認識",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t24",
+       "quote": "theoretically it could be however many you want"
+      }
+     ]
+    }
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [
+    {
+     "turn": "t22",
+     "quote": "doing the smallest amount of cards"
+    },
+    {
+     "turn": "t23",
+     "quote": "specify"
+    },
+    {
+     "turn": "t36",
+     "quote": "it says must"
+    }
+   ],
+   "compatible_or_reconciled": false,
+   "during_presentation": false
+  }
+ ],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "既に扱われた",
+ "target_pair": "P1",
+ "presentation_ja": null,
+ "note": "枚数をめぐる Kiwi（最小枚数を求めているかもしれない）と Bee（指定がない）の前提差は主分析の対になる。ただし Kiwi が t22 で最小枚数を求める課題かを問い Bee が t23 で応答しており、既に扱われている。"
+}

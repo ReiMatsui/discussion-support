@@ -43,6 +43,11 @@ uv run python -m das.asr.live --diarization none
 ゼロから自動学習され、名前はUIから後付けできる。詳しい操作とオプションは
 `docs/COMMANDS.md` を参照。
 
+## 進捗と資料
+
+現在の実装・未検証事項は [進捗一覧](docs/progress/STATUS_2026-11-05.md)、
+研究記録と発表資料の入口は [資料の索引](docs/README.md) を参照してください。
+
 ## 精度と検証
 
 話者帰属の成績・採用済みの仕組み・却下済みの案は `docs/design/STATUS.md` が

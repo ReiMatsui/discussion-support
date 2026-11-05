@@ -1,0 +1,37 @@
+{
+ "checkpoint": "TS3003c_cp04",
+ "judge": "J-k04",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t10",
+   "speaker": "D",
+   "supports": "木材（木目調）と暗い色、目立たないデザイン",
+   "summary_ja": "対象の60〜80歳は暗い色・見慣れた形・なじみのある素材を好み、特に木材が好まれるという調査結果を挙げる。",
+   "quote": "especially wood is pretty much the material for older people"
+  },
+  {
+   "id": "R2",
+   "turn": "t10",
+   "speaker": "D",
+   "supports": "ドッキングステーションと小型画面を必ず入れる",
+   "summary_ja": "これらが革新性にあたるので、少なくとも含めることが重要と述べる。",
+   "quote": "the docking station and small screen would be our main points of interest"
+  },
+  {
+   "id": "R3",
+   "turn": "t10",
+   "speaker": "D",
+   "supports": "平置き型（立てない）のドッキング形状",
+   "summary_ja": "立てる形は高齢者には新しすぎるので、平らに置く形を好むだろうと述べる。",
+   "quote": "they would prefer uh a design where the remote control just lies flat in the docking station"
+  }
+ ],
+ "pairs": [],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "対がない",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "履歴は PM の導入と D の流行調査の発表のみで、他の参加者は質問なしと答えている。理由を述べているのは D だけで、対がない。"
+}

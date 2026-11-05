@@ -1,0 +1,42 @@
+{
+ "auditor": "AU1",
+ "meeting": "DELI02",
+ "pairs_eval": [
+  {
+   "pair_uid": "DELI02-U02",
+   "B1": [
+    "満たす",
+    "Kiwiの最小枚数の想定（t22・t35）とBeeの『指定なし』（t23-t24）はいずれも明示発言で支えられる。ただしcp03のt23の引用「it doesn」は途中で切れている（t24で支えは足りる）"
+   ],
+   "B2": [
+    "満たす",
+    "同じ選択（2枚か3枚か）について、課題文の読みの違いで推す枚数が違う"
+   ],
+   "B3": [
+    "満たす",
+    "課題が何を求めているかの認識・想定で、価値観や選好ではない。cp03/cp04はT1、cp05はKiwi側をT2としており、『Maybe』を踏まえるとT2が適切"
+   ],
+   "B6": [
+    "不確か",
+    "cp04・cp05は『かもしれない』を保つが、cp03はKiwiの疑問形（t22「or do you thin it's asking for 2 ?」）を『課題は最小の枚数を求めている』と断定形にしており留保が落ちている"
+   ],
+   "explicit_judgement": [
+    "正しい",
+    "t22でKiwiが『2枚を求めているのか』と問い、t23-t24でBeeが応答。cp03以降のすべての時点で既に明示済み"
+   ],
+   "first_explicit_turn": "t22（前段としてt7-t8 Cat「as many as you like」「but it says must」で枚数の要求が話題化）",
+   "full_analysis_scene": "S1"
+  }
+ ],
+ "support_eval": [],
+ "misses": [
+  {
+   "scene_id": "S2",
+   "turns": "t13-t18",
+   "nearest_checkpoint": "DELI02_cp02",
+   "support_condition_met": "いいえ",
+   "reason": "伏字で推す選択肢の違いが特定できず、前提は推測（E3）か『too obvious』という選好・メタ推測（T4/T5）のみ"
+  }
+ ],
+ "notes": "支援と判定した時点はない。U02は参加者が自力で明示し、t36-t42で理由を限定して2枚に収束しており、控えるは妥当。"
+}

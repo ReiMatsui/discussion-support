@@ -1,0 +1,97 @@
+{
+ "checkpoint": "DELI02_cp03",
+ "judge": "J-k03",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t3",
+   "speaker": "Cat",
+   "supports": "2枚",
+   "summary_ja": "一方は規則を証明でき、もう一方は反証できる",
+   "quote": "because the <CARD> can prove the rule and then the <CARD> could disprove it"
+  },
+  {
+   "id": "R2",
+   "turn": "t22",
+   "speaker": "Kiwi",
+   "supports": "2枚（最小枚数）",
+   "summary_ja": "課題は最小の枚数で2枚を求めているのでは",
+   "quote": "asking for 2 ? doing the smallest amount of cards"
+  },
+  {
+   "id": "R3",
+   "turn": "t24",
+   "speaker": "Bee",
+   "supports": "3枚",
+   "summary_ja": "枚数の指定はないので何枚でもよい",
+   "quote": "theoretically it could be however many you want"
+  },
+  {
+   "id": "R4",
+   "turn": "t17",
+   "speaker": "Bee",
+   "supports": "3枚",
+   "summary_ja": "他を裏返さないのはおかしい",
+   "quote": "but not turning the others seems off"
+  }
+ ],
+ "pairs": [
+  {
+   "pair_id": "P1",
+   "reason_ids": [
+    "R2",
+    "R3"
+   ],
+   "choice_item": "裏返すカードの枚数（2枚か3枚か）",
+   "premises": [
+    {
+     "reason_id": "R2",
+     "type": "T1",
+     "premise_ja": "課題は最小の枚数（2枚）を求めている",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t22",
+       "quote": "asking for 2 ? doing the smallest amount of cards"
+      }
+     ]
+    },
+    {
+     "reason_id": "R3",
+     "type": "T1",
+     "premise_ja": "課題は枚数を指定していない",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t23",
+       "quote": "it doesn"
+      },
+      {
+       "turn": "t24",
+       "quote": "theoretically it could be however many you want"
+      }
+     ]
+    }
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [
+    {
+     "turn": "t22",
+     "quote": "asking for 2 ? doing the smallest amount of cards"
+    },
+    {
+     "turn": "t24",
+     "quote": "theoretically it could be however many you want"
+    }
+   ],
+   "compatible_or_reconciled": false,
+   "during_presentation": false
+  }
+ ],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "既に扱われた",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "課題が最小枚数を求めているかという前提の違いを、Kiwiが問いとして明示し、Beeが応答している。そのため既に扱われたとして控える。"
+}

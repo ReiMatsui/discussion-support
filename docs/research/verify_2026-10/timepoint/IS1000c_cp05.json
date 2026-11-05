@@ -1,0 +1,45 @@
+{
+ "checkpoint": "IS1000c_cp05",
+ "judge": "J-k05",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t51",
+   "speaker": "A",
+   "supports": "触感のある（柔らかい）素材",
+   "summary_ja": "現状のリモコンはどれも素のプラスチックなので、柔らかい触感にすれば差別化できる。",
+   "quote": "there are no reports no remotes at the moment which are spongy or tactile at all"
+  },
+  {
+   "id": "R2",
+   "turn": "t59",
+   "speaker": "A",
+   "supports": "交換可能なカバー",
+   "summary_ja": "カバーを交換できれば、利用者が部屋の内装や好みに合わせて選べる。",
+   "quote": "So they can choose it li as they want to to maybe to fit in with their decor in their living room"
+  },
+  {
+   "id": "R3",
+   "turn": "t61",
+   "speaker": "A",
+   "supports": "LCD・音声認識を採用せず、紛失時の探索機能",
+   "summary_ja": "LCD や音声認識は追加の費用と手間に見合わないと個人的に考える。",
+   "quote": "in my personal opinion, gonna be worth the extra expense and the extra effort that will go into them"
+  },
+  {
+   "id": "R4",
+   "turn": "t80",
+   "speaker": "B",
+   "supports": "交換可能なカバーに慎重",
+   "summary_ja": "交換カバーは新しい供給ラインが必要になり、組織的に複雑になるので上層部が喜ばないかもしれない。",
+   "quote": "you have to introduce a complete uh uh new l line of uh of supplies"
+  }
+ ],
+ "pairs": [],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "対がない",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "交換カバーについて A（利用者が選べる利点）と B（供給の複雑さ）が異なる側を推すが、両者は別の考慮点の重み付け（T3）で、一方の前提の下で他方の理由の強さが変わる関係ではない。B の発言も途中で切れており、前提差の対は認めない。"
+}

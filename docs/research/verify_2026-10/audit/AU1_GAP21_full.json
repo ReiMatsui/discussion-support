@@ -1,0 +1,32 @@
+{"auditor": "AU1", "meeting": "GAP21",
+ "scenes": [
+  {"scene_id": "S1", "turns": "t79-t84（関連 t119-t121）", "choice_item": "拳銃の順位（Pink 9位付近 対 Blue 4位）",
+   "reasons": [
+     {"speaker": "Pink", "turn": "t82", "quote": "Yeah Im assuming you can use that to hunt but um", "premise": "拳銃は狩猟用（と想定、留保付き）", "type": "T2", "level": "E1"},
+     {"speaker": "Blue", "turn": "t83", "quote": "I had that sorta up there with four because it is in the woods And its gonna dark soon so theres like bears and stuff", "premise": "森で暗くなるとクマなどの危険がある（身を守る用途）", "type": "T1", "level": "E1"}],
+   "explicit_turn": "なし（用途の違いは指摘されず、t84 Pink「well leave that one」で保留）", "reconciled": "なし",
+   "stage2": ["起きない", "t84で保留され、用途の違いは検討されない"],
+   "stage3": ["起きた", "t121 Pink「For okay for protection」でBlueの用途を受け入れ"],
+   "stage4": ["起きた", "t120-t121 Blue「I think the pistol cause you do have a map」→拳銃をコンパスより先（5位付近）に"],
+   "self_handled": "はい", "impairment": ["なかった", "最終的にBlueの『身を守る』用途を採用して順位を決めた。別解釈: 狩猟と防衛は両立する用途で、同じ品目を支持する理由が違うだけ。順位（緊急度）の差には効くが、片方の前提の下で他方の理由が弱まる関係とは言いにくく、前提差の対としては弱い"]},
+  {"scene_id": "S2", "turns": "t1-t20, t87-t97", "choice_item": "1位（衣類・救急用品・航空図）",
+   "reasons": [
+     {"speaker": "Blue", "turn": "t8", "quote": "thats like youll know where you are and you can find where the safety faster", "premise": "自分たちで安全な場所へ移動する", "type": "T2", "level": "E1"},
+     {"speaker": "Blue", "turn": "t91", "quote": "And it is like really theres lots of lakes and rivers so they might get like wet", "premise": "湖や川が多く濡れるかもしれない", "type": "T1", "level": "E1"},
+     {"speaker": "Pink", "turn": "t88", "quote": "Um Im torn between food and like warmth", "premise": "（前提ではなく優先の迷い）", "type": "T3", "level": "E1"}],
+   "explicit_turn": "なし（対立する前提の対なし）", "reconciled": "なし",
+   "stage2": ["起きた", "t91 Blueが濡れる可能性を挙げる"],
+   "stage3": ["起きた", "t93 Pink「Thats true」"],
+   "stage4": ["起きた", "t95-t97 衣類1位"],
+   "self_handled": "はい", "impairment": ["なかった", "Blueは自分の航空図1位を主張し続けず、衣類で合意。移動の想定に反対する理由は出ていない"]},
+  {"scene_id": "S3", "turns": "t114-t121", "choice_item": "懐中電灯・コンパス・拳銃の順序",
+   "reasons": [
+     {"speaker": "Orange", "turn": "t116/t118", "quote": "maybe flashlight just because its kind of winter and it gets dark pretty early maybe / Considering its winter I mean I dont know", "premise": "冬で早く暗くなる（留保付き）", "type": "T1", "level": "E1"},
+     {"speaker": "Blue", "turn": "t120", "quote": "I think the pistol cause you do have a map", "premise": "地図があるのでコンパスの必要性は下がる", "type": "T1", "level": "E1"}],
+   "explicit_turn": "なし（推す選択肢が衝突しない）", "reconciled": "なし",
+   "stage2": ["不明", "検討の発話なし"],
+   "stage3": ["起きた", "t117 Pink「Okay」、t121「for protection」"],
+   "stage4": ["起きた", "懐中電灯→拳銃→コンパスの順で決定"],
+   "self_handled": "はい", "impairment": ["なかった", "Orangeは懐中電灯、Blueは拳銃をコンパスより先に、と推す対象が別々で、前提差の対ではない"]}],
+ "no_premise_sections": "t21-t78（後ろから順に決める区間。ライター、スチールウール、ウイスキー、ショートニング、新聞、スキーストック、ナイフは理由が述べられても反対なし）、t98-t113（救急用品2位、航空図3位）、t122-t127（チョコレートとロープ。Blueの「unless youre like really good at gathering」は条件付きで異論なし）は前提差なし。",
+ "notes": "主分析の対として成立する可能性があるのはS1のみで、それも狩猟と防衛という両立しうる用途の違いで、対として弱い。全体として、理由に反対する理由がほとんど述べられず、提案→同意で進んでいる。"}

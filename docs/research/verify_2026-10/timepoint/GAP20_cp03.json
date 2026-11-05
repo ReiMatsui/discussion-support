@@ -1,0 +1,53 @@
+{
+ "checkpoint": "GAP20_cp03",
+ "judge": "J-k03",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t8",
+   "speaker": "Orange",
+   "supports": "チョコレートを下位に",
+   "summary_ja": "狩りで食料が取れるだろうからチョコレートは重要でない",
+   "quote": "because they can probably hunt the food"
+  },
+  {
+   "id": "R2",
+   "turn": "t19",
+   "speaker": "Pink",
+   "supports": "1位にライター",
+   "summary_ja": "火のおこし方を知らない場合に火をつけるため",
+   "quote": "because to start a fire if they didnt know how"
+  },
+  {
+   "id": "R3",
+   "turn": "t30",
+   "speaker": "Pink",
+   "supports": "2位に救急キット",
+   "summary_ja": "誰かが怪我をしたら",
+   "quote": "cause like what if someone got injured"
+  },
+  {
+   "id": "R4",
+   "turn": "t55",
+   "speaker": "Pink",
+   "supports": "衣類を下位に（6位はコンパス）",
+   "summary_ja": "既に服を着ているから",
+   "quote": "Just because like they said were already dressed"
+  },
+  {
+   "id": "R5",
+   "turn": "t81",
+   "speaker": "Pink",
+   "supports": "新聞",
+   "summary_ja": "薪が濡れていたら火をおこすのに使える",
+   "quote": "to like start a fire if the wood was wet"
+  }
+ ],
+ "pairs": [],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "対がない",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "理由はOrangeとPinkの一方的なものだけで、同じ選択事項で別の選択肢を前提つきの理由で推す相手がいない。Blueは衣類などを挙げたが理由を述べていない。"
+}

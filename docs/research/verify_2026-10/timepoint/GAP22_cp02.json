@@ -1,0 +1,133 @@
+{
+ "checkpoint": "GAP22_cp02",
+ "judge": "J-k02",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t5",
+   "speaker": "Blue",
+   "supports": "食料を1位",
+   "summary_ja": "マズローの考えで食料と住まいが先",
+   "quote": "Cause Im thinking of the Maslow thing it was like food and shelter"
+  },
+  {
+   "id": "R2",
+   "turn": "t33",
+   "speaker": "Pink",
+   "supports": "ロープを上位",
+   "summary_ja": "避難所を作り物を結ぶのに使える",
+   "quote": "Or make up a shelter You could use it to tie things together"
+  },
+  {
+   "id": "R3",
+   "turn": "t38",
+   "speaker": "Blue",
+   "supports": "食料を上位に",
+   "summary_ja": "食料はどうするのか",
+   "quote": "So what about food I mean what happens if you"
+  },
+  {
+   "id": "R4",
+   "turn": "t44",
+   "speaker": "Pink",
+   "supports": "食料は後",
+   "summary_ja": "最初はアドレナリンで動けるので脱出か避難所作りが先",
+   "quote": "you have the energy in the moment youre high on adrenaline youre ready to either try and get out"
+  },
+  {
+   "id": "R5",
+   "turn": "t39",
+   "speaker": "Orange",
+   "supports": "食料は後",
+   "summary_ja": "チョコレートやショートニングは最善の選択肢ではない",
+   "quote": "I felt like chocolate bar and the shortening werent the best options"
+  },
+  {
+   "id": "R6",
+   "turn": "t52",
+   "speaker": "Pink",
+   "supports": "救急用品を5位",
+   "summary_ja": "けががあった場合に備える",
+   "quote": "Just in case there was any injuries"
+  },
+  {
+   "id": "R7",
+   "turn": "t71",
+   "speaker": "Pink",
+   "supports": "ショートニングを6位",
+   "summary_ja": "暖かさには脂肪が要る",
+   "quote": "If you need warmth you need fat dont you"
+  },
+  {
+   "id": "R8",
+   "turn": "t72",
+   "speaker": "Blue",
+   "supports": "ショートニングの用途",
+   "summary_ja": "火に使えると思った",
+   "quote": "See and I thought it would be for fire"
+  }
+ ],
+ "pairs": [
+  {
+   "pair_id": "P1",
+   "reason_ids": [
+    "R3",
+    "R4"
+   ],
+   "choice_item": "食料の順位（ロープより上か後か）",
+   "premises": [
+    {
+     "reason_id": "R3",
+     "type": "T2",
+     "premise_ja": "すぐには脱出できない（食料が必要になるまでとどまる）",
+     "evidence_level": "E2",
+     "evidence": [
+      {
+       "turn": "t38",
+       "quote": "So what about food I mean what happens if you"
+      },
+      {
+       "turn": "t40",
+       "quote": "Youre gonna get outta there right away"
+      }
+     ]
+    },
+    {
+     "reason_id": "R4",
+     "type": "T2",
+     "premise_ja": "最初はエネルギーがあり、すぐ脱出を試みるか避難所を作る",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t44",
+       "quote": "youre ready to either try and get out thats why I have the compass or to start building something to protect you"
+      }
+     ]
+    }
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [
+    {
+     "turn": "t40",
+     "quote": "Youre gonna get outta there right away"
+    },
+    {
+     "turn": "t44",
+     "quote": "Yeah you have the energy in the moment"
+    },
+    {
+     "turn": "t46",
+     "quote": "Food is gonna have to come later"
+    }
+   ],
+   "compatible_or_reconciled": false,
+   "during_presentation": false
+  }
+ ],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "既に扱われた",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "食料の順位でBlueとPinkの前提（すぐ脱出するか）が分かれるが、Blueがt40で脱出の想定を問い、Pinkがt44〜t46で応答しているため扱われている。ショートニングの用途の違いは同じ順位を支持しており対立ではない。"
+}

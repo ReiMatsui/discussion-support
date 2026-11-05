@@ -1,0 +1,58 @@
+[
+ {
+  "meeting": "GAP09",
+  "rule": "GAP: 3人・5分以上・未使用・番号順6件"
+ },
+ {
+  "meeting": "GAP16",
+  "rule": "GAP: 3人・5分以上・未使用・番号順6件"
+ },
+ {
+  "meeting": "GAP19",
+  "rule": "GAP: 3人・5分以上・未使用・番号順6件"
+ },
+ {
+  "meeting": "GAP20",
+  "rule": "GAP: 3人・5分以上・未使用・番号順6件"
+ },
+ {
+  "meeting": "GAP21",
+  "rule": "GAP: 3人・5分以上・未使用・番号順6件"
+ },
+ {
+  "meeting": "GAP22",
+  "rule": "GAP: 3人・5分以上・未使用・番号順6件"
+ },
+ {
+  "meeting": "ES2005c",
+  "rule": "AMI: c回、未使用、ES2005c と各収録地点の最初"
+ },
+ {
+  "meeting": "IS1000c",
+  "rule": "AMI: c回、未使用、ES2005c と各収録地点の最初"
+ },
+ {
+  "meeting": "TS3003c",
+  "rule": "AMI: c回、未使用、ES2005c と各収録地点の最初"
+ },
+ {
+  "meeting": "DELI01",
+  "source_conversation_id": "00639b9b-3a45-4c59-90f6-a4738de92fd4",
+  "rule": "DeliData: 3人・発言30件以上・会話ID辞書順4件"
+ },
+ {
+  "meeting": "DELI02",
+  "source_conversation_id": "02972b77-c909-499e-8d4b-8920a25707f0",
+  "rule": "DeliData: 3人・発言30件以上・会話ID辞書順4件"
+ },
+ {
+  "meeting": "DELI03",
+  "source_conversation_id": "04edccd6-25d7-47dc-b73f-5bce9d77025b",
+  "rule": "DeliData: 3人・発言30件以上・会話ID辞書順4件"
+ },
+ {
+  "meeting": "DELI04",
+  "source_conversation_id": "0cac5462-55f1-4a16-954c-0e7351652e53",
+  "rule": "DeliData: 3人・発言30件以上・会話ID辞書順4件"
+ }
+]

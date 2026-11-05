@@ -1,0 +1,21 @@
+{
+ "checkpoint": "ES2005c_cp02",
+ "judge": "J-k02",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t10",
+   "speaker": "B",
+   "supports": "デザイン（見た目）を最重要の要素に",
+   "summary_ja": "市場調査で機能的な見た目より凝ったデザインが好まれた",
+   "quote": "people do have preference for tho fancy mobi uh f remote controls which look and feel very good"
+  }
+ ],
+ "pairs": [],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "対がない",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "マーケティング担当Bの発表が続いている途中で、理由は一人分しかない。他の参加者はまだ検討に入っていない。"
+}

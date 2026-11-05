@@ -1,0 +1,22 @@
+{"auditor": "AU2", "meeting": "GAP19",
+ "pairs_eval": [
+  {"pair_uid": "GAP19-U15",
+   "B1": ["満たす", "t1『but still when its dark』『once you crash land and its night』と t9『its not gonna get dark for a while』で両前提が支えられる"],
+   "B2": ["不確か", "Blue は t1 で『it landed like in the morning』と朝の墜落を認めたうえで『いずれ暗くなる』を想定しており、Orange の『しばらく暗くならない』とは時間幅が違うだけで両立しうる。事実認識の対立か、何を先に備えるかの時間幅の違いかは決めきれない"],
+   "B3": ["満たす", "時刻・暗さの事実認識として扱っている"],
+   "B6": ["不確か", "cp01 の『暗い時間がある』は原文に近い。cp02『墜落後すぐ暗く（夜に）なる』、cp03『まもなく暗くなる』は、t1 の『landed like in the morning』の限定を落とし、Blue の想定を強めている"],
+   "explicit_judgement": ["正しい", "t9 で Orange が時刻を挙げて違いを指摘し、t10 Pink・t11 Blue が応答している。なお compatible_or_reconciled が時点ごとに true/false/true と揺れており、T6 の両立は起きていない（Blue が受け入れた形）"],
+   "first_explicit_turn": "t9",
+   "full_analysis_scene": "S1"},
+  {"pair_uid": "GAP19-U16",
+   "B1": ["満たす", "cp02 の R6（t46『eat in the meantime』、E2）と R7（t48、E1）は証拠に支えられる。cp03 で同じ t46 を E3 とし推測依存に回しているのは cp02 と不整合（『狩りで食料が得られるまで』の部分を推測とみたためと読める）"],
+   "B2": ["満たす", "同じ枠（次の順位）でチョコレートとロープを推し、食料の手当ての想定が理由の強さを左右する関係を捉えている"],
+   "B3": ["満たす", "想定・事実として扱っている"],
+   "B6": ["不確か", "cp02 R7『食料を得る手段（銃）が既にある』は t48 の『if』を落として断定している。ただし拳銃は直前に順位に入っており、『if』は『～なのだから』の意味とも読める。cp03 の『拳銃で食料が得られる』も同様"],
+   "explicit_judgement": ["正しい", "t48 で Orange が条件として述べ、t49 Pink『Fire and shelter』、t51『Okay so the rope next』と応答されている"],
+   "first_explicit_turn": "t48",
+   "full_analysis_scene": "S2"}
+ ],
+ "support_eval": [],
+ "misses": [],
+ "notes": "支援と判定した時点はない（手順3は該当なし）。全体分析の主分析の対（S1, S2）は、どちらも時点判定で対として挙がり、参加者が既に言葉にしていたため控えは妥当。同じ対について、時点によって証拠水準（U16: E2→E3）や両立の判断（U15）が揺れている。"}

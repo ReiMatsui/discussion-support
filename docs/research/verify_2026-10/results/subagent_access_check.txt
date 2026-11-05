@@ -1,0 +1,30 @@
+AU2 agent-ac13576007663a488.jsonl   | 指摘: なし
+AU2 agent-ab8c60e1ada408f6e.jsonl   | 指摘: なし
+J-k09 agent-a2220e46d0f0a97c7.jsonl 担当時点数 3 | 指摘: なし
+J-k17 agent-ab5aca19d249fb310.jsonl 担当時点数 3 | 指摘: ['tool-results 参照: bx9g11xe5', 'tool-results 参照: bo1w0kb6f']
+J-k04 agent-a76b5c81930db3ab8.jsonl 担当時点数 4 | 指摘: なし
+J-k11 agent-a501bc20bba3d820b.jsonl 担当時点数 3 | 指摘: ['担当外の暗号化ファイル 1_cp11']
+AU1 agent-a5c181858410015a9.jsonl   | 指摘: なし
+J-k02 agent-aabdec61f68794ab7.jsonl 担当時点数 13 | 指摘: ['担当外の暗号化ファイル 1_cp02']
+J-k08 agent-aa93e3780ebf1f993.jsonl 担当時点数 3 | 指摘: なし
+J-k15 agent-a297d49aa93244d29.jsonl 担当時点数 3 | 指摘: ['tool-results 参照: butyeyad8']
+AU1 agent-adb2142d5de66257d.jsonl   | 指摘: なし
+J-k19 agent-afea8b69b367240c3.jsonl 担当時点数 1 | 指摘: なし
+J-k01 agent-adf814003a7063a18.jsonl 担当時点数 13 | 指摘: なし
+J-k07 agent-a04881e8ec1529aca.jsonl 担当時点数 3 | 指摘: なし
+J-k18 agent-a5f2290e099db89c3.jsonl 担当時点数 2 | 指摘: ['tool-results 参照: ba6ofuogk']
+J-k16 agent-a00c872194de41155.jsonl 担当時点数 3 | 指摘: ['tool-results 参照: bmszz0sqc', 'tool-results 参照: bnh987223']
+J-k13 agent-a06103f0184b41252.jsonl 担当時点数 3 | 指摘: なし
+AU1 agent-a55a5be9bab06c7f1.jsonl   | 指摘: なし
+J-k03 agent-adebeee186e37254c.jsonl 担当時点数 11 | 指摘: ['担当外の暗号化ファイル 2_cp03', '担当外の暗号化ファイル 2_cp03']
+J-k14 agent-a31ac9f7f7896ae96.jsonl 担当時点数 3 | 指摘: ['担当外の暗号化ファイル 1_cp14']
+AU2 agent-a5d5f19b52a3f8329.jsonl   | 指摘: なし
+AU1 agent-a4d57a7c8ccbe4be0.jsonl   | 指摘: なし
+AU2 agent-a21aeaf0930b1297d.jsonl   | 指摘: なし
+J-k10 agent-a3d3d1b0aae592541.jsonl 担当時点数 3 | 指摘: なし
+J-k05 agent-a025f0f63879ee525.jsonl 担当時点数 4 | 指摘: なし
+J-k06 agent-abd07d12b3dd36fba.jsonl 担当時点数 3 | 指摘: なし
+J-k12 agent-a07be050e2cb57de2.jsonl 担当時点数 3 | 指摘: ['担当外の暗号化ファイル 1_cp12']
+AU1 agent-ae2d3e98c8ce2fee5.jsonl   | 指摘: なし
+AU2 agent-a813d33c53326d324.jsonl   | 指摘: なし
+注: 『担当外の暗号化ファイル 1_cp11』などは、判定者がシェルの変数（$1_cp11.enc）でファイル名を組み立てた記述を検査が誤って拾ったもの。実際の対象は担当の時点だった（操作記録で確認）。tool-results の参照は、どれも判定者自身の復号結果が自動保存されたファイルだった（ファイル先頭の議論名と時点番号で確認: ES2005c_cp14〜18、IS1000c_cp16〜17）。

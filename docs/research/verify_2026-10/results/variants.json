@@ -1,0 +1,20 @@
+[
+ {
+  "checkpoint": "ES2005c_cp15",
+  "static": "理由によっては、どんな状況を想定しているかで重みが変わることがあります。それぞれの理由がどんな想定に立っているか、確かめてから決めても構いません。",
+  "quote_only": "Bさん（t26）「you can see how people have related their clothes, shoes, and everything with fruits and vegetables」。Bさん（t337）「Uh the fashion trend shows that fruits and vegetables,」。Dさん（t519）「we're trying to get to twenty five, thirty five year olds who want it quite trendy as well they said」。Dさん（t519）「I think maybe fruit could be a bit of a too much of a gimmick」。",
+  "proposed": "Bさんは「the fashion trend shows that fruits and vegetables」と、流行が果物・野菜に向かっているという調査を前提に果物の形を挙げ、Dさんは「They wanted something that looks fancy and I think maybe fruit could be a bit of a too much of a gimmick」と、25〜35歳の対象層には果物そのものの形はギミックに見えるかもしれないという想定から、果物から着想を得る程度の形を挙げています。この違いを、形を選ぶときにどう扱いますか（どちらかを想定する、両方に備える、違いを残すなど）。",
+  "len_static": 73,
+  "len_quote_only": 361,
+  "len_proposed": 313
+ },
+ {
+  "checkpoint": "IS1000c_cp13",
+  "static": "理由によっては、どんな状況を想定しているかで重みが変わることがあります。それぞれの理由がどんな想定に立っているか、確かめてから決めても構いません。",
+  "quote_only": "Aさん（t61）「gonna be worth the extra expense and the extra effort that will go into them」。Dさん（t275）「very cheap L_C_D_s」。Dさん（t279）「if it's uh uh made for mm four million uh items, then I think w we could be able to handle that」。",
+  "proposed": "Aさんは「L_C_D_ screens and speech recognition which weren't I don't think, in my personal opinion, gonna be worth the extra expense」（LCD や音声認識は追加費用に見合わないと思う）と、LCD に追加の費用がかかる想定で見送りを挙げ、Dさんは「if it's uh uh made for mm four million uh items, then I think w we could be able to handle that」（400万台作るなら扱えると思う）と、その生産量なら12ユーロで扱える想定で LCD の組み込みを挙げています。この想定の違いを、LCD を入れるか選ぶときにどう扱いますか（どちらかを想定する、両方に備える、違いを残すなど）。",
+  "len_static": 73,
+  "len_quote_only": 224,
+  "len_proposed": 394
+ }
+]

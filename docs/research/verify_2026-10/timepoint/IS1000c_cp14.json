@@ -1,0 +1,31 @@
+{"checkpoint": "IS1000c_cp14", "judge": "J-k14",
+ "reasons": [
+  {"id": "R1", "turn": "t80", "speaker": "B", "supports": "交換式カバーに慎重", "summary_ja": "新しい供給ラインが必要で組織的に複雑になる。", "quote": "you have to introduce a complete uh uh new l line of uh of supplies uh it would be uh very complicated"},
+  {"id": "R2", "turn": "t81", "speaker": "A", "supports": "交換式カバーを採用", "summary_ja": "大量販売の製品なので2〜3種のデザインは賄える。", "quote": "This is gonna be a mass marketed product,"},
+  {"id": "R3", "turn": "t164", "speaker": "D", "supports": "キーのプログラム機能に慎重", "summary_ja": "使いやすさを保ちたいならプログラム機能は難しすぎるかもしれない。", "quote": "I don't know if we still want the um R_C_ to be easy to use,"},
+  {"id": "R4", "turn": "t167", "speaker": "C", "supports": "キーのプログラム機能を入れる", "summary_ja": "使いやすさは利用者がどれだけ手間をかけるか次第。", "quote": "depends on the easiness like the user how much effort he can put."},
+  {"id": "R5", "turn": "t279", "speaker": "D", "supports": "高性能チップ（LCD・スクロールホイール）を予算内で採用", "summary_ja": "400万台作るなら12ユーロでも高性能チップを扱えると思う。", "quote": "but I think uh with twelve Euros um and if it's uh uh made for mm four million uh items, then I think w we could be able to handle that."},
+  {"id": "R6", "turn": "t316", "speaker": "C", "supports": "高性能チップの採用に慎重", "summary_ja": "12.5ユーロのコストに収まるか分からない。", "quote": "Well I don't know if it'll fit into our cost of twelve point five Euro you know."}
+ ],
+ "pairs": [
+  {"pair_id": "P1", "reason_ids": ["R5", "R6"], "choice_item": "高性能チップ（LCD・スクロールホイール）を採用するか",
+   "premises": [
+    {"reason_id": "R5", "type": "T1", "premise_ja": "400万台規模で作れば高性能チップでも12ユーロに収まる", "evidence_level": "E1", "evidence": [{"turn": "t279", "quote": "if it's uh uh made for mm four million uh items, then I think w we could be able to handle that."}]},
+    {"reason_id": "R6", "type": "T1", "premise_ja": "高性能チップは12.5ユーロに収まらないかもしれない", "evidence_level": "E1", "evidence": [{"turn": "t316", "quote": "Well I don't know if it'll fit into our cost of twelve point five Euro you know."}]}],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [{"turn": "t312", "quote": "So when the more expensive chip you mentioned there is is possible in the in the given budget"}, {"turn": "t318", "quote": "Is it possible to fit in to that?"}, {"turn": "t319", "quote": "if we had a budget of twenty twenty uh Euros, it will be okay,"}],
+   "compatible_or_reconciled": false, "during_presentation": false},
+  {"pair_id": "P2", "reason_ids": ["R1", "R2"], "choice_item": "交換式カバーを採用するか",
+   "premises": [
+    {"reason_id": "R1", "type": "T1", "premise_ja": "交換式カバーには新しい供給ラインが必要で組織的に複雑", "evidence_level": "E1", "evidence": [{"turn": "t80", "quote": "you have to introduce a complete uh uh new l line of uh of supplies"}]},
+    {"reason_id": "R2", "type": "T2", "premise_ja": "大量販売されるので複数デザインを賄える", "evidence_level": "E1", "evidence": [{"turn": "t83", "quote": "we can afford to have two or three different designs at least."}]}],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [{"turn": "t81", "quote": "Well we're selling so many units of this."}, {"turn": "t94", "quote": "That's a very good idea"}],
+   "compatible_or_reconciled": true, "during_presentation": false}
+ ],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "既に扱われた",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "高性能チップの予算をめぐる違いは、B・Cが「予算内に収まるか」を問い、Dが「予算20ユーロなら」と条件で答えているので既に扱われている。交換式カバーはBが納得済み、キーのプログラム機能はAが両立案（t176〜t180）を述べている。"}

@@ -1,0 +1,43 @@
+{"checkpoint": "TS3003c_cp18", "judge": "J-k18",
+ "reasons": [
+  {"id": "R1", "turn": "t16", "speaker": "B", "supports": "音声認識を入れる", "summary_ja": "音声認識は比較的安い仕組みで作れ、魅力的な新機能になる。", "quote": "It's uh possible to uh uh to make um quite cheap uh system for uh speech uh recognition."},
+  {"id": "R2", "turn": "t79", "speaker": "D", "supports": "音声認識を入れない", "summary_ja": "対象層は音声認識に追加で払わないと調査に出ており、価格が上がるなら入れないよう勧める。", "quote": "So if that would increase the price for which we're selling our remote control"},
+  {"id": "R3", "turn": "t104", "speaker": "A", "supports": "音声認識を入れない", "summary_ja": "費用が大きく上がり、使いやすさもあまり増さない。", "quote": "Because it will increase cost uh signifi uh significantly."},
+  {"id": "R4", "turn": "t55", "speaker": "B", "supports": "充電用のドッキングステーションは不要（電池1本で足りる）", "summary_ja": "小さな表示だけなら電力をあまり使わず、電池1本で半年以上もつ。", "quote": "it's uh just a small display so I believe uh it will run on one battery for um six months"},
+  {"id": "R5", "turn": "t47", "speaker": "D", "supports": "ドッキングステーションを入れる", "summary_ja": "ドッキングステーションは売りになり、電池の充電や紛失時の呼び出しにも使える。", "quote": "I think our docking station could be one of the marketing issues"},
+  {"id": "R6", "turn": "t62", "speaker": "A", "supports": "ドッキングステーションを入れる", "summary_ja": "高齢者は物の置き場所を決めたいので、リモコンの定位置になる。", "quote": "So maybe a docking station will help them give the remote a place."},
+  {"id": "R7", "turn": "t43", "speaker": "D", "supports": "キネティック電源を使わない", "summary_ja": "高齢者は使う前にリモコンを振りたがらない。", "quote": "I don't think that older people like to shake their remote control before they use it."},
+  {"id": "R8", "turn": "t120", "speaker": "A", "supports": "木製のケースにする", "summary_ja": "高価でも、孫に見せびらかしたい高齢者を引きつける。", "quote": "I think it will attract elderly people who wanna have something exclusive"},
+  {"id": "R9", "turn": "t20", "speaker": "C", "supports": "木製にしない（製品ラインを分けない限り）", "summary_ja": "木は価格を上げ、製品のイメージにも合わない。", "quote": "people like wood, but it raises the price and it doesn't really fit the image, unless we would start two product lines"},
+  {"id": "R10", "turn": "t198", "speaker": "D", "supports": "チャンネル・音量ボタンを左右両側に付ける", "summary_ja": "左利きの利用者のために両側に付けるとよい。", "quote": "I thought maybe we could just make one of those buttons on both the left and the right side."},
+  {"id": "R11", "turn": "t219", "speaker": "A", "supports": "ボタンを左右両側に付けない", "summary_ja": "ボタンが増えると利用者が混乱する。", "quote": "So people can get confused."}
+ ],
+ "pairs": [
+  {"pair_id": "P1", "reason_ids": ["R1", "R2"], "choice_item": "音声認識を入れるか",
+   "premises": [
+    {"reason_id": "R1", "type": "T1", "premise_ja": "音声認識は安く作れる", "evidence_level": "E1", "evidence": [{"turn": "t16", "quote": "It's uh possible to uh uh to make um quite cheap uh system for uh speech uh recognition."}]},
+    {"reason_id": "R2", "type": "T1", "premise_ja": "音声認識で販売価格が上がり、対象層はそれに払わない", "evidence_level": "E1", "evidence": [{"turn": "t77", "quote": "Well you can see here, our target group would not do that."}, {"turn": "t79", "quote": "So if that would increase the price for which we're selling our remote control"}]}],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [{"turn": "t71", "quote": "I'm wondering um what will the voice recognition mean for the production price?"}, {"turn": "t73", "quote": "I don't have any information on pricing. So I'll have to ask the manufacturing department."}, {"turn": "t79", "quote": "So if that would increase the price for which we're selling our remote control"}],
+   "compatible_or_reconciled": false, "during_presentation": false},
+  {"pair_id": "P2", "reason_ids": ["R4", "R5"], "choice_item": "充電用ドッキングステーションを入れるか（電源の方式）",
+   "premises": [
+    {"reason_id": "R4", "type": "T1", "premise_ja": "小さな表示だけなら電力消費が少なく、電池1本で半年以上もつ", "evidence_level": "E1", "evidence": [{"turn": "t55", "quote": "it won't use uh much e energy uh I I believe"}]},
+    {"reason_id": "R5", "type": "T1", "premise_ja": "電池を充電する必要がある", "evidence_level": "E2", "evidence": [{"turn": "t52", "quote": "Yeah you could load up the batteries,"}]}],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [{"turn": "t106", "quote": "If we don't have the voice recognition, it will it won't use a lot of energy to use."}, {"turn": "t108", "quote": "So in that case we could use kinetic uh energy, but I think just a simple battery which you can reload on a docking station is just as good."}],
+   "compatible_or_reconciled": false, "during_presentation": false},
+  {"pair_id": "P3", "reason_ids": ["R10", "R11"], "choice_item": "チャンネル・音量ボタンを左右両側に付けるか",
+   "premises": [
+    {"reason_id": "R10", "type": "T2", "premise_ja": "左利きの利用者には左側にもボタンが必要", "evidence_level": "E1", "evidence": [{"turn": "t200", "quote": "For left-handed users also."}]},
+    {"reason_id": "R11", "type": "T2", "premise_ja": "機能が基本的なので、左利きでも問題なく使える", "evidence_level": "E1", "evidence": [{"turn": "t238", "quote": "I think the functions are that basic that nobody should have any problems with uh choosing a channel"}]}],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [{"turn": "t238", "quote": "But is it a problem that left-handed persons use a different hand?"}, {"turn": "t239", "quote": "Yeah. That is true."}],
+   "compatible_or_reconciled": false, "during_presentation": false}
+ ],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "既に扱われた",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "主分析の対（音声認識の費用、電力消費とドッキングの要否、左利き対応）はいずれも参加者が条件・問いとして言葉にし応答されており、音声認識と電源は t104・t112 で決定済み。木製ケースの是非は交換式ケース（t137〜t163）で両立済みで、直近3ターンは発表中でもない。"}

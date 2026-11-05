@@ -1,0 +1,456 @@
+{
+ "meeting": "GAP18",
+ "items": [
+  {
+   "id": "GAP18-C1",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 10,
+    "S4": 11,
+    "S5": null,
+    "S6": {
+     "type": "decided",
+     "turn": 13
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "rephrase",
+   "update_example_ja": null,
+   "note": "t10でマイナス25度という条件、t11でPinkの服の理由（寒さ）が出てOrangeが同意しt13で服1位に決定。待つか移動するかの問いには触れず、問いはそのまま使える"
+  },
+  {
+   "id": "GAP18-C2",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 28,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "decided",
+     "turn": 50
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "substantive",
+   "update_example_ja": "チョコは体を温めエネルギーになる、ライターは燃やす物がなければ役立たないかもという話が出ました。ナイフも含め、2位は何を先に確保したいですか。",
+   "note": "t28でライターは燃やす物がないと役に立たない可能性、t31でチョコが新たな選択肢として出て、ナイフ対ライターの比べ方が変わった。ナイフの用途は出ず。t50でチョコを置く方向でまとまる（順位の発話はあいまい）"
+  },
+  {
+   "id": "GAP18-C3",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 63,
+    "S4": 67,
+    "S5": 55,
+    "S6": {
+     "type": "deferred",
+     "turn": 77
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "substantive",
+   "update_example_ja": "コンパスは方向を知るため、ロープは風よけのシェルター作りのためという理由が出ています。3位では移動とその場で身を守ることのどちらを先にしますか。",
+   "note": "3位の候補がロープ・ライターに移り、t63でシェルター用途、t67でOrangeが『コンパス先か、シェルター先か』と優先順位を述べた。チョコ対コンパスの比較ではなくなった。t77で保留"
+  },
+  {
+   "id": "GAP18-B180",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 87,
+    "S4": null,
+    "S5": 72,
+    "S6": {
+     "type": "deferred",
+     "turn": 77
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "substantive",
+   "update_example_ja": "ナイフはロープを切るのにも森を進むのにも使う、ロープは風よけ用という理由が出ました。ロープを使うにもナイフが要るなら、3位はナイフを先にしますか。",
+   "note": "t77で保留後、t84でナイフが3位候補に入り、t87でロープを切るのに要る、t89で森が深いという根拠が出てt90でナイフ3位・ロープ4位に決定。燃やす物の有無には触れず"
+  },
+  {
+   "id": "GAP18-C4",
+   "kind": "A",
+   "labels": {
+    "S1": 87,
+    "S2": null,
+    "S3": 89,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "decided",
+     "turn": 90
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "yes",
+    "turn": 87
+   },
+   "update_type": "rephrase",
+   "update_example_ja": null,
+   "note": "t87でOrangeが『ロープを切るのにナイフが要る』とナイフとロープを結びつけて比べ、ナイフの用途（t89 森を進む）も出た。比較案の問いへの答えが自然に出てt90で決定"
+  },
+  {
+   "id": "GAP18-C5",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 107,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "decided",
+     "turn": 119
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "rephrase",
+   "update_example_ja": null,
+   "note": "t107で対抗品目として新聞（火おこし）が出た。狩りが必要なほど長く過ごすかには触れず、t119で拳銃6位・新聞7位に決定"
+  },
+  {
+   "id": "GAP18-C6",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 112,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "decided",
+     "turn": 119
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 119
+   },
+   "update_type": "rephrase",
+   "update_example_ja": null,
+   "note": "t112で新聞は保温にも使えるという根拠が追加。食べ物と火のどちらを重く見るかの理由は述べられないまま、t119で拳銃6位・新聞7位と順序だけが決まった"
+  },
+  {
+   "id": "GAP18-C7",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": 140,
+    "S6": {
+     "type": "switched",
+     "turn": 131
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "救急キット8位は候補時点でほぼ決まり、t131でスチールウールに話題が移る。t140以降は地図が何か分からないという既出の話の繰り返しで、コンパスとの組み合わせは出ない"
+  },
+  {
+   "id": "GAP18-C8",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 133,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "decided",
+     "turn": 137
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 133
+   },
+   "update_type": "rephrase",
+   "update_example_ja": null,
+   "note": "t133でOrangeが『ウールは暖かい』という用途を挙げた（火おこしではない）。t136で飛行機にある理由を疑問視し、t137で9位に決定"
+  },
+  {
+   "id": "GAP18-B360",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": null,
+    "S6": null,
+    "S7": true
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "following では保留中の2位（ライター対チョコ）に一度も触れず、8〜10位の話が続いた"
+  },
+  {
+   "id": "GAP18-C9",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 157,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "decided",
+     "turn": 163
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 160
+   },
+   "update_type": "substantive",
+   "update_example_ja": "ストックは助けを呼びに行く案のほか、山道を歩く杖にする案も出ました。ショートニングは脂肪という話だけですが、歩いて移動する前提なら10位はどちらにしますか。",
+   "note": "t157でストックを全員の歩行用の杖に使う案、t160で一人一本という使い方が出て、助けを呼びに分かれる前提とは別の観点になった。t163でストック10位に決定。ショートニングはt175で『適当に置いた』のみ"
+  },
+  {
+   "id": "GAP18-C10",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 186,
+    "S4": 189,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 190
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "yes",
+    "turn": 186
+   },
+   "update_type": "substantive",
+   "update_example_ja": "ウイスキーは火おこしに使えるという案が出ました。ライターに燃料がない中で、ウイスキーに火をつける手段はあると考えますか。",
+   "note": "t186でBlueがウイスキーの用途（火おこし）を挙げ、比較案の前提（用途が未発話）が変わった。t189『火はいまいち』。t190でライターに話題が移り、ウイスキー11位はt205-206で決定"
+  },
+  {
+   "id": "GAP18-B540",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": 191,
+    "S3": 199,
+    "S4": 189,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 190
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 189
+   },
+   "update_type": "substantive",
+   "update_example_ja": "ウイスキーは火おこしに使える案ですが、ライターは燃料がないと分かりました。火をつける手段がないなら、火の品目を上位に置く理由は残りますか。",
+   "note": "t189で『火はいまいち』と優先度の発言。t191-192でライターに燃料がないと分かり、ライターを火の品目に数える前提が崩れた。t199で服を棒に巻いて火をつける案。ライターはt194で15位"
+  },
+  {
+   "id": "GAP18-C11",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 199,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "decided",
+     "turn": 194
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "yes",
+    "turn": 194
+   },
+   "update_type": "rephrase",
+   "update_example_ja": null,
+   "note": "t192-194でPinkが燃料なしでは使えないと認め15位に決定（問いへの答え）。t199でOrangeが服を棒に巻いて火をつける案を出し上位にした理由を説明したが、燃料の問題は解消せず"
+  },
+  {
+   "id": "GAP18-C12",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "decided",
+     "turn": 206
+    },
+    "S7": true
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "t206でウイスキー11位をそのまま了承し、10位と地図・コンパスの話に移った。救急キットとの比較や着火手段には触れず"
+  },
+  {
+   "id": "GAP18-C13",
+   "kind": "A",
+   "labels": {
+    "S1": 230,
+    "S2": null,
+    "S3": 224,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "decided",
+     "turn": 223
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "yes",
+    "turn": 230
+   },
+   "update_type": "rephrase",
+   "update_example_ja": null,
+   "note": "t224で地図は周辺の地図で重要かもという根拠、t230でOrangeが『コンパスと航空地図を一緒に置こう』と比較案と同じ結びつけを自力で行った。t222-223で地図を懐中電灯と入れ替える方向で合意"
+  },
+  {
+   "id": "GAP18-C14",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": 219,
+    "S3": 239,
+    "S4": null,
+    "S5": null,
+    "S6": null,
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 239
+   },
+   "update_type": "substantive",
+   "update_example_ja": "2位はチョコで埋まっていて、コンパスは拳銃や懐中電灯と入れ替える案が出ています。町まで80マイル歩く前提なら、コンパスをどれと入れ替えますか。",
+   "note": "t219で2位はチョコで埋まっていると分かり『空いている2位』という前提が崩れた。t239で80マイルの移動にかかる時間が話題になり、歩いて向かう前提で話が進んだ。範囲内でコンパスの順位は決まらず"
+  },
+  {
+   "id": "GAP18-B720",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 239,
+    "S4": 256,
+    "S5": null,
+    "S6": null,
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 239
+   },
+   "update_type": "rephrase",
+   "update_example_ja": null,
+   "note": "t239で80マイル移動の所要時間、t244で懐中電灯は必要と移動前提の情報が出た。t256でBlueが地図とコンパスはチョコより重要と優先順位を述べた。範囲内でコンパスの順位は決まらず（t270で7位）"
+  },
+  {
+   "id": "GAP18-B900",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "decided",
+     "turn": 279
+    },
+    "S7": true
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "following は5ターンのみで、スチールウールを13位に下げることで合意しただけ。新聞・救急キット・チョコの比較や移動前提には触れず"
+  },
+  {
+   "id": "GAP18-C15",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "decided",
+     "turn": 279
+    },
+    "S7": true
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "following は3ターンのみで、スチールウールを13位にすることで合意。用途の話は出ず"
+  }
+ ]
+}

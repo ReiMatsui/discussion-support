@@ -1,0 +1,53 @@
+{
+ "checkpoint": "DELI01_cp03",
+ "judge": "J-k03",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t7",
+   "speaker": "Cat",
+   "supports": "もう1枚のカードも裏返す",
+   "summary_ja": "母音がないことを確かめるため",
+   "quote": "we need to check <CARD> to make sure there is no vowel under it"
+  },
+  {
+   "id": "R2",
+   "turn": "t12",
+   "speaker": "Dolphin",
+   "supports": "選んだカード",
+   "summary_ja": "その下は偶数でなければならない",
+   "quote": "Under <CARD> it must be even number same with <CARD>"
+  },
+  {
+   "id": "R3",
+   "turn": "t18",
+   "speaker": "Cat",
+   "supports": "偶数カードは不要",
+   "summary_ja": "規則は母音なら2と言うだけで、母音だけが2とは言っていない",
+   "quote": "The rule says vowels have 2s . it does not say ONLY voewls have 2s"
+  },
+  {
+   "id": "R4",
+   "turn": "t31",
+   "speaker": "Dolphin",
+   "supports": "1枚では不足",
+   "summary_ja": "そのカードだけでは確かめるのに不十分",
+   "quote": "<CARD> not enough to verify"
+  },
+  {
+   "id": "R5",
+   "turn": "t32",
+   "speaker": "Kiwi",
+   "supports": "1枚で十分",
+   "summary_ja": "そのカードで十分",
+   "quote": "<CARD> is enough"
+  }
+ ],
+ "pairs": [],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "対がない",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "意見の違いは規則の論理的な読み方に関するもので、状況についての事実認識（T1）や想定（T2）に依存する理由の対ではない。カード名が伏せられており、理由の対応も確かめにくい。"
+}

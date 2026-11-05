@@ -1,0 +1,17 @@
+{"checkpoint": "ES2005c_cp06", "judge": "J-k06",
+ "reasons": [
+  {"id": "R1", "turn": "t10", "speaker": "B", "supports": "見た目重視の fancy なデザイン", "summary_ja": "市場調査で、機能的な見た目より fancy な見た目が好まれ、最も重要な要素だとする。", "quote": "people do have preference for tho fancy mobi uh f remote controls which look and feel very good, rather than having a functional look and feel uh good"},
+  {"id": "R2", "turn": "t38", "speaker": "B", "supports": "spongy な素材感", "summary_ja": "流行調査から、硬いプラスチックではなく spongy な触感が期待されているとする。", "quote": "the f feel of the material is expected to be spongy rather than just having a plastic look, hard look"},
+  {"id": "R3", "turn": "t99", "speaker": "D", "supports": "標準的なボタン配置", "summary_ja": "既存リモコンの配置の不統一は混乱を招くので、電源を右上にするなど標準的な配置が使いやすいとする。", "quote": "buttons like the the top right for on and off or something, I think, people find that important,'cause then it's easy to use"},
+  {"id": "R4", "turn": "t133", "speaker": "D", "supports": "子ども向けのプログラム機能付き・有機的な形の既存例のようなデザイン", "summary_ja": "使いやすく明るいので、この例のようなデザインが良いとする。", "quote": "And that's really easy to use, bright, so I like this one lot for our design."},
+  {"id": "R5", "turn": "t137", "speaker": "C", "supports": "カバーをクリップではなくヒンジ式にする", "summary_ja": "カバー付きの区画はカバーが失われがちなので、ヒンジで留めるべきとする。", "quote": "So like have it hinge rather than sort of clip on or whatever."},
+  {"id": "R6", "turn": "t138", "speaker": "D", "supports": "大型（over-sized）リモコンを採らない", "summary_ja": "大型のものは gimmicky で売れないと思うとする。", "quote": "I think it's a bit too gimmicky. I don't think that will sell very well."},
+  {"id": "R7", "turn": "t152", "speaker": "D", "supports": "音声認識の採用", "summary_ja": "技術部門が新しい音声認識ソフトを開発したので、設計に組み込むと良いとする。", "quote": "so I think maybe incorporating that in our design would be good"}
+ ],
+ "pairs": [],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "対がない",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "B と D の発表が続いており、同じ選択事項で推すものが異なる理由の対は見当たらない（大型リモコンの用途についての C・A のやり取りは選択を推す理由になっていない）。直近のターンも D の準備された説明の途中である。"}

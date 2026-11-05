@@ -1,0 +1,92 @@
+{
+ "auditor": "AU2",
+ "meeting": "DELI01",
+ "scenes": [
+  {
+   "scene_id": "S1",
+   "turns": "t6-t22",
+   "choice_item": "どのカードを裏返すか（母音カードに加える2枚目）",
+   "reasons": [
+    {
+     "speaker": "Cat",
+     "turn": "t7/t14/t18",
+     "quote": "The rule says vowels have 2s . it does not say ONLY voewls have 2s",
+     "premise": "規則は一方向（母音→偶数）で、偶数側の裏は規則と無関係。母音が出れば反証できるカード（奇数側と推定）を確かめるべき",
+     "type": "T1",
+     "level": "E1"
+    },
+    {
+     "speaker": "Dolphin",
+     "turn": "t12/t22",
+     "quote": "Under <CARD> it must be even number same with <CARD> / every vowel has even number so If we check <CARD> we can approve the rule",
+     "premise": "規則に合う例を確かめれば規則を確認（approve）できる、という規則と検証の捉え方",
+     "type": "T1",
+     "level": "E2"
+    }
+   ],
+   "explicit_turn": "t17-t18（Cat が『ONLY とは言っていない』と規則の向きの違いを指摘。t19 Kiwi、t22 Dolphin が応答）",
+   "reconciled": "なし",
+   "stage2": [
+    "起きた",
+    "t14 Cat 'And if <CARD> has <CARD> voewel it can disprove the rule' / t18 規則の向きの条件"
+   ],
+   "stage3": [
+    "不明",
+    "t21 Kiwi 'Ok You carry on'、t22 Dolphin は自説を再述。採用・反駁は明示されない"
+   ],
+   "stage4": [
+    "起きた",
+    "t24 Dolphin 'vote only one now we go with majority' と多数決で選択に接続。根拠の整理ではなく手続きで決着"
+   ],
+   "self_handled": "はい",
+   "impairment": [
+    "不明",
+    "前提の違いは Cat が言葉にしたが、他の2人は採否を述べず多数決に移った。提出内容（nan）が分からず、最終判断に影響したかは読めない。別の解釈: 単なる論理の誤りで、前提差の問題ではない"
+   ]
+  },
+  {
+   "scene_id": "S2",
+   "turns": "t29-t34",
+   "choice_item": "1枚で足りるか",
+   "reasons": [
+    {
+     "speaker": "Dolphin",
+     "turn": "t31",
+     "quote": "@ <MENTION> <CARD> not enough to verify",
+     "premise": "（不明）検証には複数枚が必要という捉え方",
+     "type": "T1",
+     "level": "E3"
+    },
+    {
+     "speaker": "Kiwi",
+     "turn": "t32",
+     "quote": "<CARD> is enough",
+     "premise": "（不明）",
+     "type": "T1",
+     "level": "E3"
+    }
+   ],
+   "explicit_turn": "なし",
+   "reconciled": "なし",
+   "stage2": [
+    "起きない",
+    "理由の検討なし"
+   ],
+   "stage3": [
+    "起きない",
+    "t33 Dolphin 'Yes' で同意のみ"
+   ],
+   "stage4": [
+    "起きた",
+    "t34 'shall we go with <CARD>' から提出"
+   ],
+   "self_handled": "不明",
+   "impairment": [
+    "不明",
+    "理由が書かれず前提は推測しかない"
+   ]
+  }
+ ],
+ "no_premise_sections": "t1-t5 挨拶。t23-t28 多数決の手続きとカード名の列挙。t35-t36 提出のみ。",
+ "notes": "カード名が <CARD> で伏せられており、どのカードを指すかは文脈からの推定。前提は規則の論理的な読み（T1）に関するもので、課題の想定（T2）の差は見られない。"
+}

@@ -1,0 +1,14 @@
+{"checkpoint": "TS3003c_cp07", "judge": "J-k07",
+ "reasons": [
+  {"id": "R1", "turn": "t10", "speaker": "D", "supports": "ドッキングステーションと小型画面を必ず入れる", "summary_ja": "これらが革新性になるので必ず含めるべき", "quote": "So this would be very important that we at least include these features."},
+  {"id": "R2", "turn": "t10", "speaker": "D", "supports": "寝かせて置く電話型のドッキングステーション", "summary_ja": "立てる形は高齢者には新しすぎる", "quote": "This is pretty much a new shape to uh older people."},
+  {"id": "R3", "turn": "t16", "speaker": "B", "supports": "音声認識を入れる", "summary_ja": "安価に音声認識の仕組みを作れる", "quote": "It's uh possible to uh uh to make um quite cheap uh system for uh speech uh recognition."},
+  {"id": "R4", "turn": "t16", "speaker": "B", "supports": "電源ボタンを角に置く", "summary_ja": "ほとんどのリモコンがその位置なので認識しやすい", "quote": "almost uh e all uh remote controls uh are using a on-off button on that place"}
+ ],
+ "pairs": [],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "対がない",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "この時点まではDとBの発表が続いただけで、同じ選択事項で異なる選択肢を推す理由の組がない。直前までBの準備された説明が続いており、検討にもまだ入っていない。"}

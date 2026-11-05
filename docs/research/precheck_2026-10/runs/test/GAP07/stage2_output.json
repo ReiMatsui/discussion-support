@@ -1,0 +1,534 @@
+{
+ "meeting": "GAP07",
+ "items": [
+  {
+   "id": "GAP07-C1",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": 10,
+    "S6": {
+     "type": "switched",
+     "turn": 12
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "t10でOrangeが衣類1位に同意したが理由は寒さの繰り返しのみ。t12で最下位の話題へ移り、けが人や移動の予定は出ない"
+  },
+  {
+   "id": "GAP07-C2",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 18,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 25
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "yes",
+    "turn": 18
+   },
+   "update_type": "substantive",
+   "update_example_ja": "燃料なしでもフリントの火花で着火に使えるかもという案が出て、ライターを最下位にする理由は弱まりました。最下位はスキーストックと航空地図のどちらにするか、使い道の点で比べますか。",
+   "note": "t18でGreenがフリントで火花を出せるという根拠を出し、ライターは使えないという比較案の前提が揺らいだ。t25でBlueの航空地図2位の話へ移る"
+  },
+  {
+   "id": "GAP07-C3",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": 33,
+    "S6": {
+     "type": "switched",
+     "turn": 37
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 46
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "t33-35は地図の正体の確認の続きで既出の理解の繰り返し。t37でナイフへ移る。t46のGreenの早く脱出できるという見込みが移動前提に部分的に当たる"
+  },
+  {
+   "id": "GAP07-C4",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": 46,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 41
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 46
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "t39-40で二人がナイフ6位と述べたが理由なし。t41で懐中電灯へ移る。t46でGreenが楽観的にすぐ出られると述べ、早く見つかる前提を本人分だけ示した"
+  },
+  {
+   "id": "GAP07-C5",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 50
+    },
+    "S7": true
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "t50でロープへ移り、t64以降は順位の読み上げのみ。歩いて出るか待つかの前提は出ない"
+  },
+  {
+   "id": "GAP07-B180",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 50
+    },
+    "S7": true
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "C5と同じ範囲。t67・t75-77は衣類・コンパスの順位の読み上げだけで根拠なし"
+  },
+  {
+   "id": "GAP07-C6",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": 58,
+    "S6": {
+     "type": "switched",
+     "turn": 64
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 54
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "t54でOrangeは用途は分からないが重要そうと答え、7位側にも具体的用途がないと分かった。t58-60はGreenの用途不明の繰り返し。t64で1位からの読み上げへ移る"
+  },
+  {
+   "id": "GAP07-C7",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 73,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 75
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "rephrase",
+   "update_example_ja": null,
+   "note": "t73でOrangeがチョコはあまり足しにならないと述べ食料側の根拠が弱まったが、食料と現在地把握のどちらかという問いはそのまま使える。t74でBlueの2位は航空地図と確認。t75で3位へ移る"
+  },
+  {
+   "id": "GAP07-C8",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 79
+    },
+    "S7": true
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "following冒頭から4位以降の読み上げで、3位の比較に関わる発言はない"
+  },
+  {
+   "id": "GAP07-C9",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 82
+    },
+    "S7": true
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "t80-81は4位の読み上げ（Greenは地図、Orangeは懐中電灯）で理由なし。t82で5位へ移る。懐中電灯の用途は出ない"
+  },
+  {
+   "id": "GAP07-C10",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": 87,
+    "S3": null,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 88
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "substantive",
+   "update_example_ja": "6位はナイフで二人がそろっていて、Greenはチョコレートを置いています。ナイフは数日いるなら獲物を捕る手段、チョコはそのまま食べられる食料ですが、救助まで何日くらいを想定しますか。",
+   "note": "t87でOrangeが6位はナイフで同じと述べ（t40とも一致）、救急用品とナイフの対立という前提が成り立たなくなった。t88でチョコの数量表記の話へ移る"
+  },
+  {
+   "id": "GAP07-C11",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 103,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 118
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "yes",
+    "turn": 101
+   },
+   "update_type": "substantive",
+   "update_example_ja": "ショートニングは脂で料理に使えるほか、ロープに塗ってろうそくにする案が出て、ロープと競合せず組み合わせる使い方になりました。7位は食べる用途で選びますか、火や明かりの用途も含めますか。",
+   "note": "t97-98でショートニングの正体、t101で料理、t103でロープと組み合わせたろうそく案が出て、問いに答えが出たうえ二品目が競合から組み合わせに変わった。t118で8位へ移る"
+  },
+  {
+   "id": "GAP07-C12",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": 113,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 118
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 113
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "t110-113でBlueが火起こしはやり方が分からないので末尾に置いたと述べ、不確かさを重く見る立場を示した。ショートニングそのものの順位の比較は進まずt118で8位へ移る"
+  },
+  {
+   "id": "GAP07-C13",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": 143,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 118
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 143
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "t114でOrangeが新聞の有用性に気づいたと述べた程度でt118に8位へ移る。t143でGreenが話し合いを経てライターが役立ちそうと述べ、成功時の価値を重く見る方向を示した"
+  },
+  {
+   "id": "GAP07-C14",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 122,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 132
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "yes",
+    "turn": 122
+   },
+   "update_type": "substantive",
+   "update_example_ja": "ウイスキーは救急用品と合わせて消毒、火起こし、体を温める用途の案が出ていて、チョコは空腹対策だが足しになりにくいかもという声があります。8位はけがや寒さへの備えと食料、どちらを優先しますか。",
+   "note": "t122で消毒、t124で着火、t127で体を温める用途が出て問いに答えが出た。比べる観点が用途の確認から、けが・寒さ対策と食料の優先に変わる。t132で9位へ移る"
+  },
+  {
+   "id": "GAP07-B360",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 124,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 132
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "rephrase",
+   "update_example_ja": null,
+   "note": "t124で着火、t127で体を温める用途が加わったが、どの用途を優先するかという問いの形は保てる。けがと食料の優先についての発言はなくt132で9位へ移る"
+  },
+  {
+   "id": "GAP07-C15",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 138,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 140
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "yes",
+    "turn": 138
+   },
+   "update_type": "substantive",
+   "update_example_ja": "拳銃にも動物を仕留めて食料を得る用途が挙がり、ナイフと同じ食料確保の役割で競合しています。食料を得る手段として、どちらを上に置きますか。",
+   "note": "t138でOrangeが拳銃で動物を仕留めて食料にする用途を出し問いに答えた。拳銃とナイフが同じ食料確保の観点で比べる形に変わる。t140で10位へ移る"
+  },
+  {
+   "id": "GAP07-C16",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 146
+    },
+    "S7": true
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "t143でGreenが10位にライターを挙げたが新聞とウイスキーの用途の比較はなく、t146で11位へ移る"
+  },
+  {
+   "id": "GAP07-C17",
+   "kind": "A",
+   "labels": {
+    "S1": 154,
+    "S2": null,
+    "S3": 157,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 169
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "yes",
+    "turn": 161
+   },
+   "update_type": "substantive",
+   "update_example_ja": "湖や川があり氷を割れば釣りができるとして、スキーストックを竿、スチールウールを針に使う案が出て、二つは組み合わせて使う品になりました。氷に穴を開けられる前提で、釣りの道具を順位に入れますか。",
+   "note": "t153でBlueはスキーに使うと答え、t154でOrangeがスチールウールをストックより上と比べた。t157で湖・川と氷という条件、t161でストックを釣り竿にする用途が出て、二品目が競合から組み合わせに変わった。t169で全体の合意づくりへ移る"
+  },
+  {
+   "id": "GAP07-C18",
+   "kind": "A",
+   "labels": {
+    "S1": 190,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "decided",
+     "turn": 191
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "yes",
+    "turn": 193
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "t190でBlueがコンパスの後に地図を置いて道案内に使うと同じ観点で結びつけ、t191-192で合意。t193でGreenが南へ歩けば町に着くと述べ、歩いて出る前提が示された"
+  },
+  {
+   "id": "GAP07-B540",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": 197,
+    "S5": null,
+    "S6": {
+     "type": "decided",
+     "turn": 200
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "t197でGreenがナイフはほとんどの物より実用的と述べた。t200でナイフ5位・懐中電灯6位と決まり、チョコは7位の食料枠へ移った。救助までの日数は出ない"
+  },
+  {
+   "id": "GAP07-C19",
+   "kind": "A",
+   "labels": {
+    "S1": 198,
+    "S2": null,
+    "S3": null,
+    "S4": 197,
+    "S5": null,
+    "S6": {
+     "type": "decided",
+     "turn": 200
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "t197でGreenがナイフの実用性を重く見ると述べ、t198でBlueが懐中電灯を先にすべきかと同じ二択で比べた。t200でナイフ5位・懐中電灯6位に決定。懐中電灯の用途は出ない"
+  },
+  {
+   "id": "GAP07-C20",
+   "kind": "A",
+   "labels": {
+    "S1": 201,
+    "S2": null,
+    "S3": 201,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "decided",
+     "turn": 203
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 201
+   },
+   "update_type": "rephrase",
+   "update_example_ja": null,
+   "note": "t201でBlueがショートニングは全員で1缶だけと数量の条件を出してチョコと比べ、t203でチョコに決定。食べる用途の枠で比べた形で、問いの形は保てる"
+  }
+ ]
+}

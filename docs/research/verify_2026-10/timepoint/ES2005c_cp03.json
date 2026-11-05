@@ -1,0 +1,37 @@
+{
+ "checkpoint": "ES2005c_cp03",
+ "judge": "J-k03",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t10",
+   "speaker": "B",
+   "supports": "見た目重視のデザイン",
+   "summary_ja": "市場調査で機能的な見た目より凝った見た目が好まれる",
+   "quote": "people do have preference for tho fancy mobi uh f remote controls which look and feel very good"
+  },
+  {
+   "id": "R2",
+   "turn": "t38",
+   "speaker": "B",
+   "supports": "スポンジ状の素材",
+   "summary_ja": "素材の触感はスポンジ状が期待されている",
+   "quote": "the f feel of the material is expected to be spongy rather than just having a plastic look, hard look"
+  },
+  {
+   "id": "R3",
+   "turn": "t56",
+   "speaker": "B",
+   "supports": "環境に害のない素材",
+   "summary_ja": "環境に害を与えてはいけない",
+   "quote": "It shouldn't be have any harm to the environment also"
+  }
+ ],
+ "pairs": [],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "対がない",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "理由はマーケティング担当Bの発表によるものだけで、他の参加者は質問や感想のみで別の選択肢を理由つきで推していない。発表が終わった直後で検討はまだ始まっていない。"
+}

@@ -1,0 +1,147 @@
+{
+ "checkpoint": "GAP09_cp01",
+ "judge": "J-k01",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t30",
+   "speaker": "Pink",
+   "supports": "ライター（燃料なし）を5位、新聞を6位",
+   "summary_ja": "燃料がなくても火花を起こし新聞に着火できる",
+   "quote": "I put a cigarette lighter without the fluid cause then maybe you can get the sparks going"
+  },
+  {
+   "id": "R2",
+   "turn": "t31",
+   "speaker": "Green",
+   "supports": "ライターの有用性（高順位）に疑問",
+   "summary_ja": "ライターで本当に火花が出せるか分からない",
+   "quote": "I wasnt sure if you could actually make a spark off that"
+  },
+  {
+   "id": "R3",
+   "turn": "t41",
+   "speaker": "Green",
+   "supports": "ウイスキーを6位",
+   "summary_ja": "消毒に使え、飲むこともできる",
+   "quote": "Cause you can use it to disinfect And you can drink it"
+  },
+  {
+   "id": "R4",
+   "turn": "t58",
+   "speaker": "Green",
+   "supports": "地図を低順位",
+   "summary_ja": "地図は機体の安全案内のもので何にも使えない",
+   "quote": "You cant use it for anything"
+  },
+  {
+   "id": "R5",
+   "turn": "t70",
+   "speaker": "Green",
+   "supports": "コンパスの1位に疑問",
+   "summary_ja": "墜落地点を離れたいかどうか考えると、コンパスの重要度は疑わしい",
+   "quote": "honestly the compass thing I feel is like well in hindsight would you actually want to leave the crash site"
+  }
+ ],
+ "pairs": [
+  {
+   "pair_id": "P1",
+   "reason_ids": [
+    "R1",
+    "R2"
+   ],
+   "choice_item": "ライター（燃料なし）の順位",
+   "premises": [
+    {
+     "reason_id": "R1",
+     "type": "T1",
+     "premise_ja": "燃料のないライターでも火花を起こせる",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t30",
+       "quote": "maybe you can get the sparks going"
+      }
+     ]
+    },
+    {
+     "reason_id": "R2",
+     "type": "T1",
+     "premise_ja": "燃料のないライターで火花を起こせるか分からない",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t31",
+       "quote": "I wasnt sure if you could actually make a spark off that"
+      }
+     ]
+    }
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [
+    {
+     "turn": "t31",
+     "quote": "I wasnt sure if you could actually make a spark off that"
+    },
+    {
+     "turn": "t34",
+     "quote": "With the flint"
+    },
+    {
+     "turn": "t35",
+     "quote": "Oh cause it does have an internal flint"
+    }
+   ],
+   "compatible_or_reconciled": true,
+   "during_presentation": false
+  }
+ ],
+ "inferred_pairs": [
+  {
+   "pair_id": "I1",
+   "reason_ids": [
+    "R5"
+   ],
+   "choice_item": "コンパスの順位（1位か）",
+   "premises": [
+    {
+     "reason_id": "R5",
+     "type": "T2",
+     "premise_ja": "墜落地点を離れない（とどまる）かもしれない",
+     "evidence_level": "E2",
+     "evidence": [
+      {
+       "turn": "t70",
+       "quote": "would you actually want to leave the crash site"
+      }
+     ]
+    },
+    {
+     "reason_id": null,
+     "type": "T2",
+     "premise_ja": "（Blue・Pink がコンパスを1位にした理由は述べられていない。移動を想定していると推測）",
+     "evidence_level": "E3",
+     "evidence": [
+      {
+       "turn": "t2",
+       "quote": "Compass"
+      },
+      {
+       "turn": "t3",
+       "quote": "I put compass"
+      }
+     ]
+    }
+   ],
+   "already_explicit_by_participants": false,
+   "explicit_evidence": [],
+   "compatible_or_reconciled": false,
+   "during_presentation": false
+  }
+ ],
+ "decision": "withhold",
+ "withhold_reason": "既に扱われた",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "ライターの火花をめぐる事実認識の違いは t31〜t35 で指摘され、内蔵フリントの話で解消済み。コンパスについては Green が t70 でとどまる想定を示したが、他の二人のコンパス1位の理由は述べられておらず推測のみ。"
+}

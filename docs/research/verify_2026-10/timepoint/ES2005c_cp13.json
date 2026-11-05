@@ -1,0 +1,26 @@
+{"checkpoint": "ES2005c_cp13", "judge": "J-k13",
+ "reasons": [
+  {"id": "R1", "turn": "t159", "speaker": "B", "supports": "LCD・新技術を入れる（費用増を許容）", "summary_ja": "市場調査では人々は品質や目新しさのためなら多く払うので、多少コストが増えても新技術とデザインで売れると述べる。", "quote": "in our market survey we have seen that people are willing to pay more, but they want the quality, they want f fancy look"},
+  {"id": "R2", "turn": "t184", "speaker": "B", "supports": "LCD を入れる", "summary_ja": "LCD 画面にアイコンが出てクリックするだけなので使いやすいと述べる。", "quote": "it will be easy because there will be, on L_C_D_ s screen, there will be different frent icons, they can just click"},
+  {"id": "R3", "turn": "t187", "speaker": "A", "supports": "LCD を入れない", "summary_ja": "リモコン使用中は手元を見ずテレビを見ているので、LCD は不要に思えると述べる。", "quote": "But but the thing is when you use a remote control, you never look at it, right?"},
+  {"id": "R4", "turn": "t197", "speaker": "D", "supports": "LCD を入れない", "summary_ja": "予算と使いやすさの方針から LCD は選ぶべきでないと述べる。", "quote": "for our budget and for the thing we're trying to go for eas easy to use, it's not the thing we should go for, I think"},
+  {"id": "R5", "turn": "t164", "speaker": "C", "supports": "LCD・高価な機能に慎重", "summary_ja": "12.50 ユーロの製造費に収める必要があると述べる。", "quote": "It's still it's still got to get within our twelve fifty, you know."},
+  {"id": "R6", "turn": "t322", "speaker": "B", "supports": "バナナ形（果物形）", "summary_ja": "果物と結びつけられ広告にも役立つと述べる。", "quote": "this will help us in our advertisement also and we can relate with fruits and vegetables"},
+  {"id": "R7", "turn": "t333", "speaker": "C", "supports": "バナナ形に反対", "summary_ja": "子どもっぽく見えると述べる。", "quote": "does it does seem a bit uh again childish maybe."}
+ ],
+ "pairs": [
+  {"pair_id": "P1", "reason_ids": ["R2", "R3"], "choice_item": "LCD 画面を入れるか",
+   "premises": [
+    {"reason_id": "R2", "type": "T2", "premise_ja": "利用者は LCD 画面のアイコンを見てクリックして操作する", "evidence_level": "E2", "evidence": [{"turn": "t184", "quote": "on L_C_D_ s screen, there will be different frent icons, they can just click"}]},
+    {"reason_id": "R3", "type": "T2", "premise_ja": "利用者はリモコンを見ずにテレビを見ている", "evidence_level": "E1", "evidence": [{"turn": "t187", "quote": "when you use a remote control, you never look at it, right?"}, {"turn": "t189", "quote": "You're looking at the T_V_"}]}
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [{"turn": "t187", "quote": "But but the thing is when you use a remote control, you never look at it, right?"}, {"turn": "t193", "quote": "That's true, yeah."}],
+   "compatible_or_reconciled": false, "during_presentation": false}
+ ],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "既に扱われた",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "LCD をめぐる B と A の利用想定（画面を見て操作する／リモコンを見ない）の違いは、A が B の主張への反論として想定を問い、C・D が応答しており既に扱われている。その他の論点（予算は B が範囲内と限定、果物形の是非は子どもっぽさという評価基準）は主分析の未扱いの対にならない。"}

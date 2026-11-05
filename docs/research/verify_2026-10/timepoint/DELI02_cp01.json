@@ -1,0 +1,21 @@
+{
+ "checkpoint": "DELI02_cp01",
+ "judge": "J-k01",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t3",
+   "speaker": "Cat",
+   "supports": "2枚を選ぶ",
+   "summary_ja": "一方は規則を証明でき、もう一方は反証できる",
+   "quote": "because the <CARD> can prove the rule and then the <CARD> could disprove it"
+  }
+ ],
+ "pairs": [],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "対がない",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "Kiwi は同じ選択に同意しており、Bee の発言は選べる枚数の質問だけ。異なる選択肢を推す理由の組がない。"
+}

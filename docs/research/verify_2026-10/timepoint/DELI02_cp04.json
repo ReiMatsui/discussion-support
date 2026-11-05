@@ -1,0 +1,97 @@
+{
+ "checkpoint": "DELI02_cp04",
+ "judge": "J-k04",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t17",
+   "speaker": "Bee",
+   "supports": "2枚以外のカードも裏返す（3枚）",
+   "summary_ja": "2枚だけで他を裏返さないのはおかしく感じると述べる。",
+   "quote": "but not turning the others seems off"
+  },
+  {
+   "id": "R2",
+   "turn": "t24",
+   "speaker": "Bee",
+   "supports": "枚数を限定しない（3枚を許容）",
+   "summary_ja": "課題は枚数を指定していないので、理論上何枚でもよいと述べる。",
+   "quote": "theoretically it could be however many you want"
+  },
+  {
+   "id": "R3",
+   "turn": "t36",
+   "speaker": "Cat",
+   "supports": "必要な（must）カードを選ぶ",
+   "summary_ja": "課題文が「必要な」カードを問うていることを根拠に挙げる。",
+   "quote": "it says must"
+  },
+  {
+   "id": "R4",
+   "turn": "t35",
+   "speaker": "Kiwi",
+   "supports": "2枚だけ選ぶ",
+   "summary_ja": "課題はできるだけ少ない枚数で確かめることを求めているかもしれないと述べる。",
+   "quote": "Maybe they''re wanting to see in the smallest amount possible"
+  }
+ ],
+ "pairs": [
+  {
+   "pair_id": "P1",
+   "reason_ids": [
+    "R2",
+    "R4"
+   ],
+   "choice_item": "裏返すカードを2枚にするか3枚にするか",
+   "premises": [
+    {
+     "reason_id": "R2",
+     "type": "T1",
+     "premise_ja": "課題は選ぶ枚数を指定していない（it doesn't specify）という認識",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t24",
+       "quote": "theoretically it could be however many you want"
+      }
+     ]
+    },
+    {
+     "reason_id": "R4",
+     "type": "T1",
+     "premise_ja": "課題は最小の枚数（the smallest amount）で確かめることを求めているかもしれないという認識",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t35",
+       "quote": "Maybe they''re wanting to see in the smallest amount possible"
+      }
+     ]
+    }
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [
+    {
+     "turn": "t22",
+     "quote": "asking for 2 ? doing the smallest amount of cards"
+    },
+    {
+     "turn": "t23",
+     "quote": "specify"
+    },
+    {
+     "turn": "t36",
+     "quote": "it says must"
+    }
+   ],
+   "compatible_or_reconciled": false,
+   "during_presentation": false
+  }
+ ],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "既に扱われた",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "Bee（枚数は指定されていない）と Kiwi（最小枚数を求めている）の課題解釈の違いは主分析の対になるが、Kiwi が t22 で問い、Bee が t23 で応答し、t35 にも Cat が t36 で応答しているため既に扱われている。カード名が伏せられているため、カード単位の理由の対は判定できない。"
+}

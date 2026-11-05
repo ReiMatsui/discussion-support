@@ -1,0 +1,45 @@
+{
+ "checkpoint": "GAP21_cp01",
+ "judge": "J-k01",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t8",
+   "speaker": "Blue",
+   "supports": "地図を1位、コンパスを2位",
+   "summary_ja": "現在地が分かり、安全な場所を早く見つけられる",
+   "quote": "youll know where you are and you can find where the safety faster"
+  },
+  {
+   "id": "R2",
+   "turn": "t13",
+   "speaker": "Orange",
+   "supports": "新聞を2位",
+   "summary_ja": "火を起こすため",
+   "quote": "I had the newspaper just so I can like start the fire or something"
+  },
+  {
+   "id": "R3",
+   "turn": "t16",
+   "speaker": "Orange",
+   "supports": "コンパスを3位",
+   "summary_ja": "どの方向に行くか分かる",
+   "quote": "see what area to go to"
+  },
+  {
+   "id": "R4",
+   "turn": "t37",
+   "speaker": "Blue",
+   "supports": "スチールウールを14位",
+   "summary_ja": "火起こしには良いが、新聞やガーゼなど他でも火を起こせる",
+   "quote": "But theres also the gauze the newspaper all that that you could start the fire with"
+  }
+ ],
+ "pairs": [],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "対がない",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "Pink の衣類1位、Orange の救急用品1位には理由（前提）が述べられておらず、Blue の地図1位と対になる理由がない。参加者も大枠は同じと述べて下位から決めている。"
+}

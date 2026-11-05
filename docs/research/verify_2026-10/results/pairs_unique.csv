@@ -1,0 +1,28 @@
+﻿pair_uid,meeting,source,first_checkpoint,checkpoints,has_main,main_first_checkpoint,explicit_at_first_main,ever_unexplicit_main,targeted,choice_item,premises_first,types,levels_first,evidence_turns
+DELI01-U01,DELI01,DELI,DELI01_cp02,DELI01_cp02,True,DELI01_cp02,True,False,False,どのカードを裏返すか,規則は両方向に成り立つ（どちらのカードも裏が決まっている） / 規則は一方向（母音なら偶数）で、逆は求めていない,T1,E2 E1,t12 t18
+DELI02-U02,DELI02,DELI,DELI02_cp03,DELI02_cp03 DELI02_cp04 DELI02_cp05,True,DELI02_cp03,True,False,False,裏返すカードの枚数（2枚か3枚か）,課題は最小の枚数（2枚）を求めている / 課題は枚数を指定していない,T1 T2,E1 E1,t22 t23 t24 t35
+DELI03-U03,DELI03,DELI,DELI03_cp02,DELI03_cp02,True,DELI03_cp02,True,False,False,もう1枚を裏返すか,そのカードの裏に母音が出れば規則の確認になる / 規則は母音のカードだけに関するもので、他のカードは従う必要がない,T1,E1 E1,t6 t8
+DELI03-U04,DELI03,DELI,DELI03_cp02,DELI03_cp02 DELI03_cp03,True,DELI03_cp02,True,False,False,選ぶ枚数（1枚か、より多いか）,問いの文が1枚で足りることを示している / 多くの人が間違えると書かれているので課題は見た目より複雑,T1,E1 E1,t21 t22
+DELI04-U05,DELI04,DELI,DELI04_cp02,DELI04_cp02,True,DELI04_cp02,True,False,False,偶数のカードを選ぶか,偶数のカードの裏を見れば規則を検証できる / 規則は偶数のカードの裏に母音を求めていない,T1,E1 E1,t7 t22
+ES2005c-U06,ES2005c,AMI,ES2005c_cp07,ES2005c_cp07 ES2005c_cp08 ES2005c_cp09 ES2005c_cp10 ES2005c_cp11 ES2005c_cp12 ES2005c_cp13 ES2005c_cp14 ES2005c_cp15 ES2005c_cp16 ES2005c_cp17 ES2005c_cp18,True,ES2005c_cp07,True,False,False,リモコンにLCD画面を入れるか,利用者はリモコンのLCD画面のアイコンを見て操作する / 利用者はリモコンを見ずにテレビを見ている,T2,E2 E1,t184 t187 t189
+ES2005c-U07,ES2005c,AMI,ES2005c_cp07,ES2005c_cp07 ES2005c_cp08 ES2005c_cp09 ES2005c_cp10 ES2005c_cp11 ES2005c_cp12 ES2005c_cp14 ES2005c_cp15 ES2005c_cp17 ES2005c_cp18,True,ES2005c_cp07,True,False,False,リモコンにLCD画面（高価な部品）を入れるか,市場調査では人々は高くても払う意思がある / 製造原価は12.50ユーロの予算に縛られている,T1,E1 E1,t159 t164 t167 t168
+ES2005c-U08,ES2005c,AMI,ES2005c_cp11,ES2005c_cp11 ES2005c_cp15 ES2005c_cp17 ES2005c_cp18,True,ES2005c_cp15,False,True,True,果物（バナナ）形にするか,果物・野菜が流行している / 対象は25〜35歳の大人で、子どもっぽさは合わない,T1 T2,E1 E3,t26 t211 t322 t337 t519
+ES2005c-U09,ES2005c,AMI,ES2005c_cp16,ES2005c_cp16 ES2005c_cp17 ES2005c_cp18,True,ES2005c_cp16,True,False,False,電源（dynamo を使うか）,利用者はリモコンを手に取って使う（つかむ・振る） / 音声操作で、置いたまま使う,T2,E1 E1,t544 t550 t559 t561
+ES2005c-U10,ES2005c,AMI,ES2005c_cp16,ES2005c_cp16,True,ES2005c_cp16,True,False,False,電源（太陽電池を使うか）,太陽電池には屋外の日光が必要 / 普通の室内光でも足りるかもしれない,T1,E1 E1,t571 t581
+GAP09-U11,GAP09,GAP,GAP09_cp01,GAP09_cp01 GAP09_cp02,True,GAP09_cp01,True,False,False,ライター（燃料なし）の順位,燃料のないライターでも火花を起こせる / 燃料のないライターで火花を起こせるか分からない,T1,E1 E1,t30 t31 t34 t93
+GAP09-U12,GAP09,GAP,GAP09_cp01,GAP09_cp01,False,,[],False,False,コンパスの順位（1位か）,墜落地点を離れない（とどまる）かもしれない / （Blue・Pink がコンパスを1位にした理由は述べられていない。移動を想定していると推測）,T2,E2 E3,t2 t3 t70
+GAP09-U13,GAP09,GAP,GAP09_cp03,GAP09_cp03,True,GAP09_cp03,True,False,False,6位（ウイスキーかショートニングか）,救急キットに消毒薬が入っているか分からない（入っていない可能性） / 救急キットに消毒薬が入っている,T1,E2 E1,t132 t135
+GAP16-U14,GAP16,GAP,GAP16_cp02,GAP16_cp02,False,,[],False,False,拳銃を7位に置くか後に回すか,荒野なので（動物などの）危険にすぐ備える必要がある（危険の内容は推測） / 拳銃が要るのは長期間とどまり狩りを始める場合,T1 T2,E3 E1,t77 t89
+GAP19-U15,GAP19,GAP,GAP19_cp01,GAP19_cp01 GAP19_cp02 GAP19_cp03,True,GAP19_cp01,True,False,False,1位（懐中電灯か衣類か）,墜落後、暗い時間がある（暗い中で周りを見る必要がある） / 午前に墜落したので、しばらく暗くならない,T1,E1 E1,t1 t9
+GAP19-U16,GAP19,GAP,GAP19_cp02,GAP19_cp02 GAP19_cp03,True,GAP19_cp02,True,False,False,次の品目（チョコレートかロープか）,当面の間に食べるものが必要になる / 食料を得る手段（銃）が既にある,T1 T2,E2 E1,t46 t48
+GAP22-U17,GAP22,GAP,GAP22_cp02,GAP22_cp02,True,GAP22_cp02,True,False,False,食料の順位（ロープより上か後か）,すぐには脱出できない（食料が必要になるまでとどまる） / 最初はエネルギーがあり、すぐ脱出を試みるか避難所を作る,T2,E2 E1,t38 t40 t44
+IS1000c-U18,IS1000c,AMI,IS1000c_cp06,IS1000c_cp06 IS1000c_cp07 IS1000c_cp08 IS1000c_cp09 IS1000c_cp10 IS1000c_cp11 IS1000c_cp12 IS1000c_cp14 IS1000c_cp15 IS1000c_cp16 IS1000c_cp17,True,IS1000c_cp06,True,False,False,交換可能なカバーを採用するか,交換カバーには新しい供給ラインの導入が必要で、組織的に非常に複雑になる。 / 大量に売れる量産品なので、複数デザインを持つ余裕がある。,T1 T2,E1 E1,t80 t81 t83
+IS1000c-U19,IS1000c,AMI,IS1000c_cp08,IS1000c_cp08 IS1000c_cp12 IS1000c_cp13 IS1000c_cp14 IS1000c_cp15 IS1000c_cp16 IS1000c_cp17,True,IS1000c_cp13,False,True,True,LCD表示を採用するか,LCDは追加の費用と労力がかかる / 利用者は複数機器（TV、DVDなど）を一つのリモコンで操作する,T1 T2,E2 E3,t61 t136 t275 t279 t316
+IS1000c-U20,IS1000c,AMI,IS1000c_cp09,IS1000c_cp09 IS1000c_cp10 IS1000c_cp11 IS1000c_cp12 IS1000c_cp17,True,IS1000c_cp09,True,False,False,利用者によるキーのプログラム機能を入れるか,利用者がどれだけ手間をかけるかによる（手間をかける利用者もいる） / 利用者にとってキーの設定は難しすぎる,T2,E1 E2,t164 t167
+IS1000c-U21,IS1000c,AMI,IS1000c_cp10,IS1000c_cp10 IS1000c_cp11,True,IS1000c_cp10,True,False,False,音声認識を入れるか,語彙が80〜100語程度の音声認識なら実装は難しくない / 12.50ユーロで実装できるかは分からない,T1,E1 E1,t128 t184 t192 t198
+TS3003c-U22,TS3003c,AMI,TS3003c_cp09,TS3003c_cp09 TS3003c_cp10 TS3003c_cp11 TS3003c_cp12 TS3003c_cp14 TS3003c_cp16 TS3003c_cp17 TS3003c_cp18,True,TS3003c_cp09,True,False,False,電源方式とドッキングステーションの要否,電池をドックで充電する必要がある / 小さな表示なので消費電力が少なく電池一本で半年以上もつ,T1 T2,E2 E1,t52 t55 t58 t60
+TS3003c-U23,TS3003c,AMI,TS3003c_cp09,TS3003c_cp09 TS3003c_cp12,True,TS3003c_cp09,True,False,False,ケースに木（木目調）を使うか,調査で高齢者は木の素材を好む / 木は価格を上げる（二製品ラインにしない限り）,T1 T2,E1 E1,t10 t20 t120
+TS3003c-U24,TS3003c,AMI,TS3003c_cp10,TS3003c_cp10 TS3003c_cp11 TS3003c_cp12 TS3003c_cp13 TS3003c_cp15 TS3003c_cp16 TS3003c_cp17 TS3003c_cp18 TS3003c_cp19,True,TS3003c_cp10,True,False,False,音声認識を入れるか,音声認識はかなり安く作れる / 音声認識を入れると販売価格が上がる（条件として述べられている）,T1,E1 E1,t16 t77 t79
+TS3003c-U25,TS3003c,AMI,TS3003c_cp11,TS3003c_cp11 TS3003c_cp13,True,TS3003c_cp11,True,False,False,LCD画面を採用するか,調査は好みを聞いたもので、払う意思がないことを示さない / 調査では対象層はLCDにも追加で払わない,T1,E1 E2,t86 t89
+TS3003c-U26,TS3003c,AMI,TS3003c_cp14,TS3003c_cp14 TS3003c_cp16 TS3003c_cp17 TS3003c_cp18 TS3003c_cp19,True,TS3003c_cp16,True,False,False,左右のボタン配置,左利きの利用者もいる / 片手の親指でチャンネルと音量の両方を使う（推測）,T1 T2,E1 E3,t200 t203 t219 t238
+TS3003c-U27,TS3003c,AMI,TS3003c_cp17,TS3003c_cp17,True,TS3003c_cp17,True,False,False,キネティック電源を使うか,利用者はリモコンを振って発電させる / 高齢者は使う前にリモコンを振りたがらない,T2,E2 E1,t37 t43

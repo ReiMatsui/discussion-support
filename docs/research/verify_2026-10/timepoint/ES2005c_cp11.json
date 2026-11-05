@@ -1,0 +1,207 @@
+{
+ "checkpoint": "ES2005c_cp11",
+ "judge": "J-k11",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t159",
+   "speaker": "B",
+   "supports": "LCD・新技術の採用（多少の費用増を許容）",
+   "summary_ja": "市場調査では人々は品質・新しさに多く払う意思があるので、費用を少し上げてもよい",
+   "quote": "people are willing to pay more, but they want the quality"
+  },
+  {
+   "id": "R2",
+   "turn": "t164",
+   "speaker": "C",
+   "supports": "費用を抑える（LCDに慎重）",
+   "summary_ja": "製造費12.50の枠内に収める必要がある",
+   "quote": "It's still it's still got to get within our twelve fifty"
+  },
+  {
+   "id": "R3",
+   "turn": "t184",
+   "speaker": "B",
+   "supports": "LCD採用",
+   "summary_ja": "LCD画面にアイコンが出て、それをクリックすれば済むので使いやすい",
+   "quote": "there will be, on L_C_D_ s screen, there will be different frent icons, they can just click ok okay, whatever they wa"
+  },
+  {
+   "id": "R4",
+   "turn": "t187",
+   "speaker": "A",
+   "supports": "LCD不採用",
+   "summary_ja": "リモコンを使うときは画面を見ずにテレビを見ているので、LCDは不要",
+   "quote": "when you use a remote control, you never look at it, right?"
+  },
+  {
+   "id": "R5",
+   "turn": "t197",
+   "speaker": "D",
+   "supports": "LCD不採用",
+   "summary_ja": "予算と使いやすさの目標からLCDは向かない",
+   "quote": "for our budget and for the thing we're trying to go for eas easy to use, it's not the thing we should go for, I think"
+  },
+  {
+   "id": "R6",
+   "turn": "t322",
+   "speaker": "B",
+   "supports": "バナナ形（果物形）",
+   "summary_ja": "広告に使え、果物・野菜のトレンドと結びつけられる",
+   "quote": "this will help us in our advertisement also and we can relate with fruits and vegetables"
+  },
+  {
+   "id": "R7",
+   "turn": "t333",
+   "speaker": "C",
+   "supports": "バナナ形に反対",
+   "summary_ja": "子どもっぽく見える",
+   "quote": "does it does seem a bit uh again childish maybe."
+  }
+ ],
+ "pairs": [
+  {
+   "pair_id": "P1",
+   "reason_ids": [
+    "R3",
+    "R4"
+   ],
+   "choice_item": "LCD画面を採用するか",
+   "premises": [
+    {
+     "reason_id": "R3",
+     "type": "T2",
+     "premise_ja": "利用者はリモコンのLCD画面を見てアイコンを選ぶ",
+     "evidence_level": "E2",
+     "evidence": [
+      {
+       "turn": "t184",
+       "quote": "they can just click ok okay, whatever they wa"
+      }
+     ]
+    },
+    {
+     "reason_id": "R4",
+     "type": "T2",
+     "premise_ja": "利用者はリモコンを見ずにテレビを見ている",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t187",
+       "quote": "when you use a remote control, you never look at it, right?"
+      },
+      {
+       "turn": "t189",
+       "quote": "You're looking at the T_V_"
+      }
+     ]
+    }
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [
+    {
+     "turn": "t187",
+     "quote": "But but the thing is when you use a remote control, you never look at it, right?"
+    },
+    {
+     "turn": "t193",
+     "quote": "That's true, yeah."
+    }
+   ],
+   "compatible_or_reconciled": false,
+   "during_presentation": false
+  },
+  {
+   "pair_id": "P2",
+   "reason_ids": [
+    "R1",
+    "R2"
+   ],
+   "choice_item": "費用を上げてLCD・新技術を入れるか",
+   "premises": [
+    {
+     "reason_id": "R1",
+     "type": "T1",
+     "premise_ja": "市場調査では人々はより多く払う意思がある",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t159",
+       "quote": "in our market survey we have seen that people are willing to pay more"
+      }
+     ]
+    },
+    {
+     "reason_id": "R2",
+     "type": "T1",
+     "premise_ja": "製造費は12.50の枠内に収めなければならない",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t164",
+       "quote": "It's still it's still got to get within our twelve fifty, you know."
+      }
+     ]
+    }
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [
+    {
+     "turn": "t162",
+     "quote": "But our budget, we've"
+    },
+    {
+     "turn": "t167",
+     "quote": "So even if we increase our cost little bit, within uh some limits"
+    }
+   ],
+   "compatible_or_reconciled": false,
+   "during_presentation": false
+  }
+ ],
+ "inferred_pairs": [
+  {
+   "pair_id": "IP1",
+   "reason_ids": [
+    "R6",
+    "R7"
+   ],
+   "choice_item": "果物（バナナ）形にするか",
+   "premises": [
+    {
+     "reason_id": "R6",
+     "type": "T1",
+     "premise_ja": "果物・野菜が流行している",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t322",
+       "quote": "we can relate with fruits and vegetables, the people's choices"
+      }
+     ]
+    },
+    {
+     "reason_id": "R7",
+     "type": "T2",
+     "premise_ja": "対象は25〜35歳の大人で、子どもっぽさは合わない",
+     "evidence_level": "E3",
+     "evidence": [
+      {
+       "turn": "t211",
+       "quote": "we are marketing to sort of twenty five to thirty five,"
+      }
+     ]
+    }
+   ],
+   "already_explicit_by_participants": false,
+   "explicit_evidence": [],
+   "compatible_or_reconciled": true,
+   "during_presentation": false
+  }
+ ],
+ "decision": "withhold",
+ "withhold_reason": "既に扱われた",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "主分析の対（LCDの利用想定、費用枠）はあるが、どちらも参加者が反論・予算の指摘として違いを言葉にし応答されている。果物形の対は前提が推測で、Dの「fruit and vegetable shape」案で歩み寄りも出ている。"
+}

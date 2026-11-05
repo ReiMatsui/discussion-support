@@ -1,0 +1,758 @@
+[
+ {
+  "meeting": "GAP09",
+  "source": "GAP",
+  "k": 1,
+  "label": "120s",
+  "n_turns": 70,
+  "last_t": 70,
+  "file": "cp/GAP09_cp01.enc"
+ },
+ {
+  "meeting": "GAP09",
+  "source": "GAP",
+  "k": 2,
+  "label": "240s",
+  "n_turns": 129,
+  "last_t": 129,
+  "file": "cp/GAP09_cp02.enc"
+ },
+ {
+  "meeting": "GAP09",
+  "source": "GAP",
+  "k": 3,
+  "label": "360s",
+  "n_turns": 187,
+  "last_t": 187,
+  "file": "cp/GAP09_cp03.enc"
+ },
+ {
+  "meeting": "GAP16",
+  "source": "GAP",
+  "k": 1,
+  "label": "120s",
+  "n_turns": 44,
+  "last_t": 44,
+  "file": "cp/GAP16_cp01.enc"
+ },
+ {
+  "meeting": "GAP16",
+  "source": "GAP",
+  "k": 2,
+  "label": "240s",
+  "n_turns": 89,
+  "last_t": 89,
+  "file": "cp/GAP16_cp02.enc"
+ },
+ {
+  "meeting": "GAP19",
+  "source": "GAP",
+  "k": 1,
+  "label": "120s",
+  "n_turns": 28,
+  "last_t": 28,
+  "file": "cp/GAP19_cp01.enc"
+ },
+ {
+  "meeting": "GAP19",
+  "source": "GAP",
+  "k": 2,
+  "label": "240s",
+  "n_turns": 82,
+  "last_t": 82,
+  "file": "cp/GAP19_cp02.enc"
+ },
+ {
+  "meeting": "GAP19",
+  "source": "GAP",
+  "k": 3,
+  "label": "360s",
+  "n_turns": 114,
+  "last_t": 114,
+  "file": "cp/GAP19_cp03.enc"
+ },
+ {
+  "meeting": "GAP20",
+  "source": "GAP",
+  "k": 1,
+  "label": "120s",
+  "n_turns": 43,
+  "last_t": 43,
+  "file": "cp/GAP20_cp01.enc"
+ },
+ {
+  "meeting": "GAP20",
+  "source": "GAP",
+  "k": 2,
+  "label": "240s",
+  "n_turns": 75,
+  "last_t": 75,
+  "file": "cp/GAP20_cp02.enc"
+ },
+ {
+  "meeting": "GAP20",
+  "source": "GAP",
+  "k": 3,
+  "label": "360s",
+  "n_turns": 100,
+  "last_t": 100,
+  "file": "cp/GAP20_cp03.enc"
+ },
+ {
+  "meeting": "GAP21",
+  "source": "GAP",
+  "k": 1,
+  "label": "120s",
+  "n_turns": 40,
+  "last_t": 40,
+  "file": "cp/GAP21_cp01.enc"
+ },
+ {
+  "meeting": "GAP21",
+  "source": "GAP",
+  "k": 2,
+  "label": "240s",
+  "n_turns": 78,
+  "last_t": 78,
+  "file": "cp/GAP21_cp02.enc"
+ },
+ {
+  "meeting": "GAP21",
+  "source": "GAP",
+  "k": 3,
+  "label": "360s",
+  "n_turns": 110,
+  "last_t": 110,
+  "file": "cp/GAP21_cp03.enc"
+ },
+ {
+  "meeting": "GAP22",
+  "source": "GAP",
+  "k": 1,
+  "label": "120s",
+  "n_turns": 39,
+  "last_t": 40,
+  "file": "cp/GAP22_cp01.enc"
+ },
+ {
+  "meeting": "GAP22",
+  "source": "GAP",
+  "k": 2,
+  "label": "240s",
+  "n_turns": 92,
+  "last_t": 92,
+  "file": "cp/GAP22_cp02.enc"
+ },
+ {
+  "meeting": "ES2005c",
+  "source": "AMI",
+  "k": 1,
+  "label": "120s",
+  "n_turns": 9,
+  "last_t": 9,
+  "file": "cp/ES2005c_cp01.enc"
+ },
+ {
+  "meeting": "ES2005c",
+  "source": "AMI",
+  "k": 2,
+  "label": "240s",
+  "n_turns": 21,
+  "last_t": 21,
+  "file": "cp/ES2005c_cp02.enc"
+ },
+ {
+  "meeting": "ES2005c",
+  "source": "AMI",
+  "k": 3,
+  "label": "360s",
+  "n_turns": 68,
+  "last_t": 68,
+  "file": "cp/ES2005c_cp03.enc"
+ },
+ {
+  "meeting": "ES2005c",
+  "source": "AMI",
+  "k": 4,
+  "label": "480s",
+  "n_turns": 98,
+  "last_t": 98,
+  "file": "cp/ES2005c_cp04.enc"
+ },
+ {
+  "meeting": "ES2005c",
+  "source": "AMI",
+  "k": 5,
+  "label": "600s",
+  "n_turns": 134,
+  "last_t": 134,
+  "file": "cp/ES2005c_cp05.enc"
+ },
+ {
+  "meeting": "ES2005c",
+  "source": "AMI",
+  "k": 6,
+  "label": "720s",
+  "n_turns": 153,
+  "last_t": 153,
+  "file": "cp/ES2005c_cp06.enc"
+ },
+ {
+  "meeting": "ES2005c",
+  "source": "AMI",
+  "k": 7,
+  "label": "840s",
+  "n_turns": 196,
+  "last_t": 196,
+  "file": "cp/ES2005c_cp07.enc"
+ },
+ {
+  "meeting": "ES2005c",
+  "source": "AMI",
+  "k": 8,
+  "label": "960s",
+  "n_turns": 231,
+  "last_t": 231,
+  "file": "cp/ES2005c_cp08.enc"
+ },
+ {
+  "meeting": "ES2005c",
+  "source": "AMI",
+  "k": 9,
+  "label": "1080s",
+  "n_turns": 246,
+  "last_t": 246,
+  "file": "cp/ES2005c_cp09.enc"
+ },
+ {
+  "meeting": "ES2005c",
+  "source": "AMI",
+  "k": 10,
+  "label": "1200s",
+  "n_turns": 295,
+  "last_t": 295,
+  "file": "cp/ES2005c_cp10.enc"
+ },
+ {
+  "meeting": "ES2005c",
+  "source": "AMI",
+  "k": 11,
+  "label": "1320s",
+  "n_turns": 353,
+  "last_t": 354,
+  "file": "cp/ES2005c_cp11.enc"
+ },
+ {
+  "meeting": "ES2005c",
+  "source": "AMI",
+  "k": 12,
+  "label": "1440s",
+  "n_turns": 403,
+  "last_t": 403,
+  "file": "cp/ES2005c_cp12.enc"
+ },
+ {
+  "meeting": "ES2005c",
+  "source": "AMI",
+  "k": 13,
+  "label": "1560s",
+  "n_turns": 449,
+  "last_t": 449,
+  "file": "cp/ES2005c_cp13.enc"
+ },
+ {
+  "meeting": "ES2005c",
+  "source": "AMI",
+  "k": 14,
+  "label": "1680s",
+  "n_turns": 495,
+  "last_t": 495,
+  "file": "cp/ES2005c_cp14.enc"
+ },
+ {
+  "meeting": "ES2005c",
+  "source": "AMI",
+  "k": 15,
+  "label": "1800s",
+  "n_turns": 529,
+  "last_t": 529,
+  "file": "cp/ES2005c_cp15.enc"
+ },
+ {
+  "meeting": "ES2005c",
+  "source": "AMI",
+  "k": 16,
+  "label": "1920s",
+  "n_turns": 591,
+  "last_t": 592,
+  "file": "cp/ES2005c_cp16.enc"
+ },
+ {
+  "meeting": "ES2005c",
+  "source": "AMI",
+  "k": 17,
+  "label": "2040s",
+  "n_turns": 643,
+  "last_t": 643,
+  "file": "cp/ES2005c_cp17.enc"
+ },
+ {
+  "meeting": "ES2005c",
+  "source": "AMI",
+  "k": 18,
+  "label": "2160s",
+  "n_turns": 682,
+  "last_t": 682,
+  "file": "cp/ES2005c_cp18.enc"
+ },
+ {
+  "meeting": "IS1000c",
+  "source": "AMI",
+  "k": 1,
+  "label": "120s",
+  "n_turns": 7,
+  "last_t": 8,
+  "file": "cp/IS1000c_cp01.enc"
+ },
+ {
+  "meeting": "IS1000c",
+  "source": "AMI",
+  "k": 2,
+  "label": "240s",
+  "n_turns": 37,
+  "last_t": 37,
+  "file": "cp/IS1000c_cp02.enc"
+ },
+ {
+  "meeting": "IS1000c",
+  "source": "AMI",
+  "k": 3,
+  "label": "360s",
+  "n_turns": 39,
+  "last_t": 39,
+  "file": "cp/IS1000c_cp03.enc"
+ },
+ {
+  "meeting": "IS1000c",
+  "source": "AMI",
+  "k": 4,
+  "label": "480s",
+  "n_turns": 60,
+  "last_t": 60,
+  "file": "cp/IS1000c_cp04.enc"
+ },
+ {
+  "meeting": "IS1000c",
+  "source": "AMI",
+  "k": 5,
+  "label": "600s",
+  "n_turns": 80,
+  "last_t": 80,
+  "file": "cp/IS1000c_cp05.enc"
+ },
+ {
+  "meeting": "IS1000c",
+  "source": "AMI",
+  "k": 6,
+  "label": "720s",
+  "n_turns": 112,
+  "last_t": 113,
+  "file": "cp/IS1000c_cp06.enc"
+ },
+ {
+  "meeting": "IS1000c",
+  "source": "AMI",
+  "k": 7,
+  "label": "840s",
+  "n_turns": 135,
+  "last_t": 135,
+  "file": "cp/IS1000c_cp07.enc"
+ },
+ {
+  "meeting": "IS1000c",
+  "source": "AMI",
+  "k": 8,
+  "label": "960s",
+  "n_turns": 153,
+  "last_t": 153,
+  "file": "cp/IS1000c_cp08.enc"
+ },
+ {
+  "meeting": "IS1000c",
+  "source": "AMI",
+  "k": 9,
+  "label": "1080s",
+  "n_turns": 191,
+  "last_t": 191,
+  "file": "cp/IS1000c_cp09.enc"
+ },
+ {
+  "meeting": "IS1000c",
+  "source": "AMI",
+  "k": 10,
+  "label": "1200s",
+  "n_turns": 234,
+  "last_t": 234,
+  "file": "cp/IS1000c_cp10.enc"
+ },
+ {
+  "meeting": "IS1000c",
+  "source": "AMI",
+  "k": 11,
+  "label": "1320s",
+  "n_turns": 252,
+  "last_t": 252,
+  "file": "cp/IS1000c_cp11.enc"
+ },
+ {
+  "meeting": "IS1000c",
+  "source": "AMI",
+  "k": 12,
+  "label": "1440s",
+  "n_turns": 274,
+  "last_t": 274,
+  "file": "cp/IS1000c_cp12.enc"
+ },
+ {
+  "meeting": "IS1000c",
+  "source": "AMI",
+  "k": 13,
+  "label": "1560s",
+  "n_turns": 290,
+  "last_t": 290,
+  "file": "cp/IS1000c_cp13.enc"
+ },
+ {
+  "meeting": "IS1000c",
+  "source": "AMI",
+  "k": 14,
+  "label": "1680s",
+  "n_turns": 321,
+  "last_t": 321,
+  "file": "cp/IS1000c_cp14.enc"
+ },
+ {
+  "meeting": "IS1000c",
+  "source": "AMI",
+  "k": 15,
+  "label": "1800s",
+  "n_turns": 357,
+  "last_t": 357,
+  "file": "cp/IS1000c_cp15.enc"
+ },
+ {
+  "meeting": "IS1000c",
+  "source": "AMI",
+  "k": 16,
+  "label": "1920s",
+  "n_turns": 400,
+  "last_t": 400,
+  "file": "cp/IS1000c_cp16.enc"
+ },
+ {
+  "meeting": "IS1000c",
+  "source": "AMI",
+  "k": 17,
+  "label": "2040s",
+  "n_turns": 445,
+  "last_t": 445,
+  "file": "cp/IS1000c_cp17.enc"
+ },
+ {
+  "meeting": "TS3003c",
+  "source": "AMI",
+  "k": 1,
+  "label": "120s",
+  "n_turns": 4,
+  "last_t": 4,
+  "file": "cp/TS3003c_cp01.enc"
+ },
+ {
+  "meeting": "TS3003c",
+  "source": "AMI",
+  "k": 2,
+  "label": "240s",
+  "n_turns": 9,
+  "last_t": 9,
+  "file": "cp/TS3003c_cp02.enc"
+ },
+ {
+  "meeting": "TS3003c",
+  "source": "AMI",
+  "k": 3,
+  "label": "360s",
+  "n_turns": 9,
+  "last_t": 9,
+  "file": "cp/TS3003c_cp03.enc"
+ },
+ {
+  "meeting": "TS3003c",
+  "source": "AMI",
+  "k": 4,
+  "label": "480s",
+  "n_turns": 15,
+  "last_t": 15,
+  "file": "cp/TS3003c_cp04.enc"
+ },
+ {
+  "meeting": "TS3003c",
+  "source": "AMI",
+  "k": 5,
+  "label": "600s",
+  "n_turns": 15,
+  "last_t": 15,
+  "file": "cp/TS3003c_cp05.enc"
+ },
+ {
+  "meeting": "TS3003c",
+  "source": "AMI",
+  "k": 6,
+  "label": "720s",
+  "n_turns": 15,
+  "last_t": 15,
+  "file": "cp/TS3003c_cp06.enc"
+ },
+ {
+  "meeting": "TS3003c",
+  "source": "AMI",
+  "k": 7,
+  "label": "840s",
+  "n_turns": 19,
+  "last_t": 19,
+  "file": "cp/TS3003c_cp07.enc"
+ },
+ {
+  "meeting": "TS3003c",
+  "source": "AMI",
+  "k": 8,
+  "label": "960s",
+  "n_turns": 20,
+  "last_t": 20,
+  "file": "cp/TS3003c_cp08.enc"
+ },
+ {
+  "meeting": "TS3003c",
+  "source": "AMI",
+  "k": 9,
+  "label": "1080s",
+  "n_turns": 58,
+  "last_t": 59,
+  "file": "cp/TS3003c_cp09.enc"
+ },
+ {
+  "meeting": "TS3003c",
+  "source": "AMI",
+  "k": 10,
+  "label": "1200s",
+  "n_turns": 88,
+  "last_t": 88,
+  "file": "cp/TS3003c_cp10.enc"
+ },
+ {
+  "meeting": "TS3003c",
+  "source": "AMI",
+  "k": 11,
+  "label": "1320s",
+  "n_turns": 114,
+  "last_t": 114,
+  "file": "cp/TS3003c_cp11.enc"
+ },
+ {
+  "meeting": "TS3003c",
+  "source": "AMI",
+  "k": 12,
+  "label": "1440s",
+  "n_turns": 143,
+  "last_t": 143,
+  "file": "cp/TS3003c_cp12.enc"
+ },
+ {
+  "meeting": "TS3003c",
+  "source": "AMI",
+  "k": 13,
+  "label": "1560s",
+  "n_turns": 175,
+  "last_t": 175,
+  "file": "cp/TS3003c_cp13.enc"
+ },
+ {
+  "meeting": "TS3003c",
+  "source": "AMI",
+  "k": 14,
+  "label": "1680s",
+  "n_turns": 207,
+  "last_t": 207,
+  "file": "cp/TS3003c_cp14.enc"
+ },
+ {
+  "meeting": "TS3003c",
+  "source": "AMI",
+  "k": 15,
+  "label": "1800s",
+  "n_turns": 230,
+  "last_t": 230,
+  "file": "cp/TS3003c_cp15.enc"
+ },
+ {
+  "meeting": "TS3003c",
+  "source": "AMI",
+  "k": 16,
+  "label": "1920s",
+  "n_turns": 261,
+  "last_t": 261,
+  "file": "cp/TS3003c_cp16.enc"
+ },
+ {
+  "meeting": "TS3003c",
+  "source": "AMI",
+  "k": 17,
+  "label": "2040s",
+  "n_turns": 283,
+  "last_t": 283,
+  "file": "cp/TS3003c_cp17.enc"
+ },
+ {
+  "meeting": "TS3003c",
+  "source": "AMI",
+  "k": 18,
+  "label": "2160s",
+  "n_turns": 324,
+  "last_t": 324,
+  "file": "cp/TS3003c_cp18.enc"
+ },
+ {
+  "meeting": "TS3003c",
+  "source": "AMI",
+  "k": 19,
+  "label": "2280s",
+  "n_turns": 336,
+  "last_t": 337,
+  "file": "cp/TS3003c_cp19.enc"
+ },
+ {
+  "meeting": "DELI01",
+  "source": "DELI",
+  "k": 1,
+  "label": "10msg",
+  "n_turns": 11,
+  "last_t": 11,
+  "file": "cp/DELI01_cp01.enc"
+ },
+ {
+  "meeting": "DELI01",
+  "source": "DELI",
+  "k": 2,
+  "label": "20msg",
+  "n_turns": 21,
+  "last_t": 21,
+  "file": "cp/DELI01_cp02.enc"
+ },
+ {
+  "meeting": "DELI01",
+  "source": "DELI",
+  "k": 3,
+  "label": "30msg",
+  "n_turns": 32,
+  "last_t": 32,
+  "file": "cp/DELI01_cp03.enc"
+ },
+ {
+  "meeting": "DELI02",
+  "source": "DELI",
+  "k": 1,
+  "label": "10msg",
+  "n_turns": 10,
+  "last_t": 10,
+  "file": "cp/DELI02_cp01.enc"
+ },
+ {
+  "meeting": "DELI02",
+  "source": "DELI",
+  "k": 2,
+  "label": "20msg",
+  "n_turns": 20,
+  "last_t": 20,
+  "file": "cp/DELI02_cp02.enc"
+ },
+ {
+  "meeting": "DELI02",
+  "source": "DELI",
+  "k": 3,
+  "label": "30msg",
+  "n_turns": 30,
+  "last_t": 30,
+  "file": "cp/DELI02_cp03.enc"
+ },
+ {
+  "meeting": "DELI02",
+  "source": "DELI",
+  "k": 4,
+  "label": "40msg",
+  "n_turns": 40,
+  "last_t": 40,
+  "file": "cp/DELI02_cp04.enc"
+ },
+ {
+  "meeting": "DELI02",
+  "source": "DELI",
+  "k": 5,
+  "label": "50msg",
+  "n_turns": 52,
+  "last_t": 52,
+  "file": "cp/DELI02_cp05.enc"
+ },
+ {
+  "meeting": "DELI03",
+  "source": "DELI",
+  "k": 1,
+  "label": "10msg",
+  "n_turns": 10,
+  "last_t": 10,
+  "file": "cp/DELI03_cp01.enc"
+ },
+ {
+  "meeting": "DELI03",
+  "source": "DELI",
+  "k": 2,
+  "label": "20msg",
+  "n_turns": 22,
+  "last_t": 22,
+  "file": "cp/DELI03_cp02.enc"
+ },
+ {
+  "meeting": "DELI03",
+  "source": "DELI",
+  "k": 3,
+  "label": "30msg",
+  "n_turns": 33,
+  "last_t": 33,
+  "file": "cp/DELI03_cp03.enc"
+ },
+ {
+  "meeting": "DELI04",
+  "source": "DELI",
+  "k": 1,
+  "label": "10msg",
+  "n_turns": 12,
+  "last_t": 12,
+  "file": "cp/DELI04_cp01.enc"
+ },
+ {
+  "meeting": "DELI04",
+  "source": "DELI",
+  "k": 2,
+  "label": "20msg",
+  "n_turns": 23,
+  "last_t": 23,
+  "file": "cp/DELI04_cp02.enc"
+ },
+ {
+  "meeting": "DELI04",
+  "source": "DELI",
+  "k": 3,
+  "label": "30msg",
+  "n_turns": 36,
+  "last_t": 36,
+  "file": "cp/DELI04_cp03.enc"
+ }
+]

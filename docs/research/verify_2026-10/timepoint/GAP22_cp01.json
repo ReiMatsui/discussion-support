@@ -1,0 +1,45 @@
+{
+ "checkpoint": "GAP22_cp01",
+ "judge": "J-k01",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t5",
+   "speaker": "Blue",
+   "supports": "食料を1位",
+   "summary_ja": "マズローの考え方で食料と住まいが基本",
+   "quote": "Cause Im thinking of the Maslow thing it was like food and shelter"
+  },
+  {
+   "id": "R2",
+   "turn": "t9",
+   "speaker": "Blue",
+   "supports": "1位の候補をコンパス・食料・暖かさから選ぶ（暖かさへ）",
+   "summary_ja": "零下40度まで下がりうる",
+   "quote": "it says that it could drop to forty below"
+  },
+  {
+   "id": "R3",
+   "turn": "t31",
+   "speaker": "Pink",
+   "supports": "ロープを3位",
+   "summary_ja": "どこかを渡る必要がある場合や、住まいを作るため",
+   "quote": "In case you needed to get across somewhere"
+  },
+  {
+   "id": "R4",
+   "turn": "t40",
+   "speaker": "Blue",
+   "supports": "（食料の重要性を問う）",
+   "summary_ja": "すぐにそこを出ていく",
+   "quote": "Youre gonna get outta there right away"
+  }
+ ],
+ "pairs": [],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "対がない",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "Blue の食料1位の理由は価値の順序（T3）で、Pink のコンパス1位、Orange の衣類1位には理由がなく、暖かさ1位で合意している。T1・T2 の前提に依存する、異なる話者の理由の組はない。"
+}

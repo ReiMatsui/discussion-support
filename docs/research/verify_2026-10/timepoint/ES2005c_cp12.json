@@ -1,0 +1,34 @@
+{"checkpoint": "ES2005c_cp12", "judge": "J-k12",
+ "reasons": [
+  {"id": "R1", "turn": "t159", "speaker": "B", "supports": "LCD画面・新技術を採用（コストを多少上げてもよい）", "summary_ja": "市場調査では人々は品質・凝った外観・新しさのためならより多く払う意思があるので、コストを少し上げても新技術と凝ったデザインで売れる。", "quote": "people are willing to pay more, but they want the quality, they want f fancy look, they want some new design, something new."},
+  {"id": "R2", "turn": "t184", "speaker": "B", "supports": "LCD画面を採用", "summary_ja": "LCD画面にアイコンが並び、それをクリックするだけなので使いやすい。", "quote": "it will be easy because there will be, on L_C_D_ s screen, there will be different frent icons, they can just click"},
+  {"id": "R3", "turn": "t187", "speaker": "A", "supports": "LCD画面を採用しない", "summary_ja": "リモコンを使うときは手元を見ずにテレビを見ているので、LCDは不要なものに思える。", "quote": "But but the thing is when you use a remote control, you never look at it, right?"},
+  {"id": "R4", "turn": "t164", "speaker": "C", "supports": "コストを上げる案（LCD等）に慎重", "summary_ja": "製造コストは12.50ユーロ以内に収めなければならない。", "quote": "It's still it's still got to get within our twelve fifty, you know."},
+  {"id": "R5", "turn": "t197", "speaker": "D", "supports": "LCD画面を採用しない", "summary_ja": "予算と、調査で求められた使いやすさの点から、LCDは選ぶべきではない。", "quote": "for our budget and for the thing we're trying to go for eas easy to use, it's not the thing we should go for, I think."},
+  {"id": "R6", "turn": "t322", "speaker": "B", "supports": "バナナ型（果物型）の形状", "summary_ja": "果物・野菜の流行と結びつけられ、広告にも役立つ。", "quote": "this will help us in our advertisement also and we can relate with fruits and vegetables"},
+  {"id": "R7", "turn": "t333", "speaker": "C", "supports": "バナナ型に反対", "summary_ja": "バナナ型は子どもっぽく見える。", "quote": "does it does seem a bit uh again childish maybe."}
+ ],
+ "pairs": [
+  {"pair_id": "P1", "reason_ids": ["R2", "R3"], "choice_item": "LCD画面を採用するか",
+   "premises": [
+    {"reason_id": "R2", "type": "T2", "premise_ja": "利用者はリモコンのLCD画面上のアイコンを見てクリックして操作する", "evidence_level": "E2", "evidence": [{"turn": "t184", "quote": "there will be different frent icons, they can just click"}]},
+    {"reason_id": "R3", "type": "T2", "premise_ja": "利用者はリモコンを見ずにテレビを見ながら操作する", "evidence_level": "E1", "evidence": [{"turn": "t187", "quote": "when you use a remote control, you never look at it, right?"}, {"turn": "t189", "quote": "You're looking at the T_V_"}]}
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [{"turn": "t187", "quote": "But but the thing is when you use a remote control, you never look at it, right?"}, {"turn": "t193", "quote": "That's true, yeah."}],
+   "compatible_or_reconciled": false, "during_presentation": false},
+  {"pair_id": "P2", "reason_ids": ["R1", "R4"], "choice_item": "コストを上げてLCD・新技術を入れるか",
+   "premises": [
+    {"reason_id": "R1", "type": "T1", "premise_ja": "顧客はより多く払う意思があり、コストを多少上げてもよい", "evidence_level": "E1", "evidence": [{"turn": "t159", "quote": "people are willing to pay more"}, {"turn": "t167", "quote": "So even if we increase our cost little bit, within uh some limits"}]},
+    {"reason_id": "R4", "type": "T1", "premise_ja": "製造コストは12.50ユーロ以内という制約がある", "evidence_level": "E1", "evidence": [{"turn": "t164", "quote": "It's still it's still got to get within our twelve fifty, you know."}]}
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [{"turn": "t164", "quote": "It's still it's still got to get within our twelve fifty, you know."}, {"turn": "t165", "quote": "Yeah."}],
+   "compatible_or_reconciled": false, "during_presentation": false}
+ ],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "既に扱われた",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "LCDをめぐる主分析の対（利用者が画面を見て操作するか、テレビを見ているか）とコスト上限の対はあるが、どちらもAとCが相手の理由に直接その前提を突きつけ、他の参加者が応答しているため既に扱われた。バナナ型をめぐる理由は子どもっぽさという評価（T3）で、前提差の対にならない。"}

@@ -1,0 +1,92 @@
+{
+ "auditor": "AU1",
+ "meeting": "DELI01",
+ "scenes": [
+  {
+   "scene_id": "S1",
+   "turns": "t6-t27",
+   "choice_item": "どのカードを裏返すか（Catの2枚目のカードを含めるか）",
+   "reasons": [
+    {
+     "speaker": "Cat",
+     "turn": "t7/t18/t20",
+     "quote": "The rule says vowels have 2s . it does not say ONLY voewls have 2s",
+     "premise": "規則は一方向（母音なら偶数）で、偶数側に母音である必要はない。母音が出れば規則を反証できるカードを調べる",
+     "type": "T1",
+     "level": "E1"
+    },
+    {
+     "speaker": "Dolphin",
+     "turn": "t12/t22",
+     "quote": "Under <CARD> it must be even number same with <CARD>",
+     "premise": "（推測）規則を双方向的に読み、確認例を見れば規則を立証できるとみる",
+     "type": "T1",
+     "level": "E3"
+    }
+   ],
+   "explicit_turn": "t18",
+   "reconciled": "なし",
+   "stage2": [
+    "起きた",
+    "t17-t18 Cat「It doesn ; t matter what is under <CARD>」「it does not say ONLY voewls have 2s」"
+   ],
+   "stage3": [
+    "不明",
+    "t21 Kiwi「Ok You carry on」は受容とも保留とも読める。t22 Dolphinは自説を再述し反駁はない"
+   ],
+   "stage4": [
+    "起きた",
+    "t24 Dolphin「vote only one now we go with majority」、t26-t27 Cat・Kiwiが2枚を挙げる"
+   ],
+   "self_handled": "はい",
+   "impairment": [
+    "不明",
+    "Catが規則の読みの違いを自分で指摘し多数決で進んだが、Dolphinの読みが変わったかは不明。別の解釈: 前提差ではなく論理（反証の考え方）の理解差で、T1/T2の前提差の対に当たらない。カードが伏字のため推す選択肢も確定しにくい"
+   ]
+  },
+  {
+   "scene_id": "S2",
+   "turns": "t29-t34",
+   "choice_item": "1枚で足りるか",
+   "reasons": [
+    {
+     "speaker": "Dolphin",
+     "turn": "t31",
+     "quote": "@ <MENTION> <CARD> not enough to verify",
+     "premise": "（推測）規則の検証には複数枚が要る",
+     "type": "T1",
+     "level": "E3"
+    },
+    {
+     "speaker": "Kiwi",
+     "turn": "t32",
+     "quote": "<CARD> is enough",
+     "premise": "（推測）そのカードだけで検証できる",
+     "type": "T1",
+     "level": "E3"
+    }
+   ],
+   "explicit_turn": "なし",
+   "reconciled": "なし",
+   "stage2": [
+    "起きない",
+    "理由は述べられない"
+   ],
+   "stage3": [
+    "起きた",
+    "t33 Dolphin「Yes」で受容"
+   ],
+   "stage4": [
+    "起きた",
+    "t34「shall we go with <CARD>」"
+   ],
+   "self_handled": "不明",
+   "impairment": [
+    "なかった",
+    "短時間で合意。理由がなく前提は推測のみ"
+   ]
+  }
+ ],
+ "no_premise_sections": "t1-t5 挨拶、t8-t13 カード名の提示と同意のみ、t24-t28 決め方（多数決）の手続き",
+ "notes": "Wason課題の相違は主に論理推論・規則の読みであり、T1/T2（事実認識・想定）として扱えるのは規則の読みに限られる。カードが伏字で推す選択肢の特定に不確かさがある。"
+}

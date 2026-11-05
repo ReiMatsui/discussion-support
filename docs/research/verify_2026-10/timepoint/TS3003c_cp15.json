@@ -1,0 +1,109 @@
+{
+ "checkpoint": "TS3003c_cp15",
+ "judge": "J-k15",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t16",
+   "speaker": "B",
+   "supports": "音声認識の採用",
+   "summary_ja": "音声認識はかなり安く作れ、魅力的な機能になる",
+   "quote": "It's uh possible to uh uh to make um quite cheap uh system for uh speech uh recognition."
+  },
+  {
+   "id": "R2",
+   "turn": "t81",
+   "speaker": "D",
+   "supports": "音声認識の不採用",
+   "summary_ja": "対象層は音声認識に余分に払わないので、価格が上がるなら入れない方がよい",
+   "quote": "So if that would increase the price for which we're selling our remote control"
+  },
+  {
+   "id": "R3",
+   "turn": "t104",
+   "speaker": "A",
+   "supports": "音声認識の不採用",
+   "summary_ja": "費用が大きく上がり、使いやすさもあまり増さない",
+   "quote": "Because it will increase cost uh signifi uh significantly."
+  },
+  {
+   "id": "R4",
+   "turn": "t213",
+   "speaker": "D",
+   "supports": "左右両側にチャンネル・音量ボタン",
+   "summary_ja": "左利きにも対応し、左右対称のデザインにできる",
+   "quote": "if we would make um a changing channels and changing volume button on both sides, that would certainly yield great options for the design of the remote."
+  },
+  {
+   "id": "R5",
+   "turn": "t219",
+   "speaker": "A",
+   "supports": "ボタンを増やさない",
+   "summary_ja": "ボタンが増えると混乱する",
+   "quote": "So people can get confused."
+  }
+ ],
+ "pairs": [
+  {
+   "pair_id": "P1",
+   "reason_ids": [
+    "R1",
+    "R2"
+   ],
+   "choice_item": "音声認識の採否",
+   "premises": [
+    {
+     "reason_id": "R1",
+     "type": "T1",
+     "premise_ja": "音声認識は安く作れる",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t16",
+       "quote": "to make um quite cheap uh system for uh speech uh recognition"
+      }
+     ]
+    },
+    {
+     "reason_id": "R2",
+     "type": "T1",
+     "premise_ja": "音声認識で販売価格が上がる（対象層はそれに払わない）",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t77",
+       "quote": "Well you can see here, our target group would not do that."
+      },
+      {
+       "turn": "t79",
+       "quote": "So if that would increase the price for which we're selling our remote control"
+      }
+     ]
+    }
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [
+    {
+     "turn": "t71",
+     "quote": "I'm wondering um what will the voice recognition mean for the production price?"
+    },
+    {
+     "turn": "t73",
+     "quote": "Mm I don't have any information on pricing. So I'll have to ask the manufacturing department."
+    },
+    {
+     "turn": "t79",
+     "quote": "So if that would increase the price for which we're selling our remote control"
+    }
+   ],
+   "compatible_or_reconciled": false,
+   "during_presentation": false
+  }
+ ],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "既に扱われた",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "音声認識の対は、D が製造価格を問い（C が応答）、「価格が上がるなら」と条件として述べており、既に扱われている。左右両側ボタンの件は使いやすさとの兼ね合い（T3寄り）で D も A の指摘を認めており、主分析の対にならない。"
+}

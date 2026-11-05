@@ -1,0 +1,42 @@
+{"auditor": "AU2", "meeting": "GAP16",
+ "scenes": [
+  {"scene_id": "S1", "turns": "t75-t89, t95-t104", "choice_item": "拳銃の順位（チョコレートの次か、ショートニングの後か）",
+   "reasons": [
+    {"speaker": "Pink", "turn": "t75-t81", "quote": "Did we put the loaded pistol yet / Cause its in the wilderness right / chocolate bar and then the pistol", "premise": "荒野にいる（野生動物などへの備えが要る、と推測）", "type": "T1", "level": "E3"},
+    {"speaker": "Blue", "turn": "t89, t98, t103", "quote": "Like I think the gun is if youve been there like an extended period of time and you need to like start hunting / Can we do can of shortening next Cause again its another thing to eat / What if somebody doesnt know how to use gun", "premise": "拳銃が役立つのは長くとどまり狩りが必要な場合で、使い方を知らない人もいるかもしれない", "type": "T2", "level": "E1"}],
+   "explicit_turn": "t89（Blue が条件として述べる。応答は t90『Yeah』のみ）、t103（条件として問い、t104 Yellow『thats true』）",
+   "reconciled": "なし",
+   "stage2": ["起きた（Blue 単独）", "t89「if youve been there like an extended period of time」/ t103「What if somebody doesnt know how to use gun」"],
+   "stage3": ["起きた（限定）", "t104 Yellow「thats true」で拳銃をショートニングの後に"],
+   "stage4": ["起きた", "t99-t102「Before the pistol or after the pistol / I think before / Yeah」"],
+   "self_handled": "はい",
+   "impairment": ["なかった", "Pink の理由が短く前提が推測にとどまり、主分析の対ではない。Pink は t96, t102 で同意しており、支障は読めない。別の解釈: Pink の『wilderness』の想定（動物など）は検討されずに流れた"]},
+  {"scene_id": "S2", "turns": "t65-t73, t114", "choice_item": "救急キットの順位",
+   "reasons": [
+    {"speaker": "Blue", "turn": "t71", "quote": "Since no one else is seriously injured", "premise": "重傷者はいない", "type": "T1", "level": "E1"},
+    {"speaker": "Blue", "turn": "t73", "quote": "What if people get injured", "premise": "今後けがをするかもしれない", "type": "T2", "level": "E1"}],
+   "explicit_turn": "t71-t73（同一話者が両方の想定を述べる）",
+   "reconciled": "Blue 一人が両方の想定に触れる（話者内の T6 に近い）",
+   "stage2": ["起きた（Blue 単独）", "t71, t73"],
+   "stage3": ["不明", "応答は t74『Mhm』のみ"],
+   "stage4": ["起きた", "t114「Im going to put the compress kit after the ski poles Cause I think thats more important than ball of steel wool」"],
+   "self_handled": "はい",
+   "impairment": ["なかった", "異なる話者の対ではない"]},
+  {"scene_id": "S3", "turns": "t108-t113", "choice_item": "航空地図とスキーのストックの順位",
+   "reasons": [
+    {"speaker": "Blue", "turn": "t111", "quote": "Someone decides just to go try and find the town", "premise": "誰かが町を探しに出るかもしれない", "type": "T2", "level": "E1"}],
+   "explicit_turn": "t111（条件として述べ、t112-t113 で応答）",
+   "reconciled": "なし",
+   "stage2": ["起きた", "t111"], "stage3": ["起きた（採用）", "t112-t113『Yeah』"], "stage4": ["起きた", "地図をストックより上に"],
+   "self_handled": "はい",
+   "impairment": ["なかった", "反対の理由がなく、対ではない"]},
+  {"scene_id": "S4", "turns": "t22-t36", "choice_item": "新聞・ウイスキー・ライターの順位",
+   "reasons": [
+    {"speaker": "Blue", "turn": "t24, t28, t34-t36", "quote": "I put newspaper cause I figured you could use the two to make a fire / Because theres a cigarette lighter but it has no fluid / That will do nothing Unless theres other uses for a empty lighter / But I dont think so", "premise": "燃料なしのライターは使えない（他の使い道はないだろう）", "type": "T1", "level": "E1"}],
+   "explicit_turn": "なし", "reconciled": "なし",
+   "stage2": ["起きた（Blue 単独で『Unless』と条件に触れる）", "t34"], "stage3": ["起きた", "t36「But I dont think so」"], "stage4": ["起きた", "t116 ライター最下位"],
+   "self_handled": "不明",
+   "impairment": ["なかった", "Yellow・Pink とも反対の理由を述べておらず、対ではない"]}
+ ],
+ "no_premise_sections": "t1-t21（1-3位の照合。衣類は寒さで一致）、t37-t64（地図の意味の確認、ロープ＝シェルター、チョコレート＝エネルギー。反対意見なし）、t90-t97、t114-t120（残りの品目の消化）",
+ "notes": "主分析の条件（異なる話者で、両方の前提が E1/E2、推す順位が違う）を満たす対は見つからなかった。S1 が最も近いが、Pink 側の前提は推測（E3）。"}

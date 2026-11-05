@@ -1,0 +1,21 @@
+{
+ "checkpoint": "DELI01_cp01",
+ "judge": "J-k01",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t7",
+   "speaker": "Cat",
+   "supports": "もう1枚のカードも裏返す",
+   "summary_ja": "裏に母音がないことを確かめるため",
+   "quote": "to make sure there is no vowel under it"
+  }
+ ],
+ "pairs": [],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "対がない",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "理由を述べているのは Cat だけで、Dolphin・Kiwi は理由を述べていない（t11 は nothing）。"
+}

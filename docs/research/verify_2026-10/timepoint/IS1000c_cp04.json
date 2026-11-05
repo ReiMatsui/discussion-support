@@ -1,0 +1,37 @@
+{
+ "checkpoint": "IS1000c_cp04",
+ "judge": "J-k04",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t40",
+   "speaker": "A",
+   "supports": "他製品と違う見た目・触感を最優先する",
+   "summary_ja": "フォーカスグループ調査で見た目と触感が群を抜いて重要だったため、他と違い目立つ外観にすべきと述べる。",
+   "quote": "The most important by far was the look and feel of it."
+  },
+  {
+   "id": "R2",
+   "turn": "t51",
+   "speaker": "A",
+   "supports": "スポンジ状・柔らかい触感のケース",
+   "summary_ja": "現在スポンジ状や触感のあるリモコンはないので、柔らかい素材にすれば差別化になると述べる。",
+   "quote": "there are no reports no remotes at the moment which are spongy or tactile at all"
+  },
+  {
+   "id": "R3",
+   "turn": "t57",
+   "speaker": "A",
+   "supports": "交換可能なカバー",
+   "summary_ja": "携帯電話のように交換可能なカバーにすれば色や触感を利用者が選べると述べる。",
+   "quote": "they've all got those a lot of them have the changeable covers"
+  }
+ ],
+ "pairs": [],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "対がない",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "履歴は開始の段取りと A の流行調査の発表で、理由を述べているのは A だけである。D の t60 は賛成のみで、異なる話者が別の選択肢を推す対がない（発表の途中でもある）。"
+}

@@ -1,0 +1,116 @@
+{
+ "auditor": "AU1",
+ "meeting": "DELI04",
+ "scenes": [
+  {
+   "scene_id": "S1",
+   "turns": "t4-t17",
+   "choice_item": "母音のカードだけか、偶数のカードも加えるか、他のカードを加えるか",
+   "reasons": [
+    {
+     "speaker": "Tiger",
+     "turn": "t5",
+     "quote": "I think its asking us to verify that the card with a vowel has an even number on the back .",
+     "premise": "課題は母音のカードの裏が偶数かを確かめることを求めている",
+     "type": "T1",
+     "level": "E1"
+    },
+    {
+     "speaker": "Chipmunk",
+     "turn": "t7",
+     "quote": "couldn't we verify with the even number too though ?",
+     "premise": "（推測）偶数のカードでも規則を確かめられる",
+     "type": "T1",
+     "level": "E2"
+    },
+    {
+     "speaker": "Guinea p",
+     "turn": "t8",
+     "quote": "Although the <CARD> was a good option too , it could prove the rule as well .",
+     "premise": "偶数のカードも規則を立証しうる",
+     "type": "T1",
+     "level": "E2"
+    },
+    {
+     "speaker": "Chipmunk",
+     "turn": "t12",
+     "quote": "We should test one of the other , either <CARD> or <CARD> to verify that those don't fit I think",
+     "premise": "他のカードが規則に合わないこと（反例）を確かめる必要がある",
+     "type": "T1",
+     "level": "E2"
+    }
+   ],
+   "explicit_turn": "なし（t7は問いだが前提の違いではなく選択肢の提案）",
+   "reconciled": "なし",
+   "stage2": [
+    "不明",
+    "t12 Chipmunkの提案は条件の検討というより別案"
+   ],
+   "stage3": [
+    "起きた",
+    "t13 Guinea p「Ah , that is a good point !」、t15「I will revise my solution」"
+   ],
+   "stage4": [
+    "起きた",
+    "t15-t16 Guinea pが選択を修正して提出"
+   ],
+   "self_handled": "はい",
+   "impairment": [
+    "なかった",
+    "短時間で修正。別の解釈: 前提差ではなく論理（確証/反証）の差であり対ではない"
+   ]
+  },
+  {
+   "scene_id": "S2",
+   "turns": "t18-t47",
+   "choice_item": "偶数のカード（six）を含めるか（Guinea p は3枚、Tiger・Chipmunk は2枚）",
+   "reasons": [
+    {
+     "speaker": "Tiger",
+     "turn": "t20/t22",
+     "quote": "The card with vowels have to have an even number but the even number does not need a vowel .",
+     "premise": "規則は一方向で、偶数のカードに母音である必要はない",
+     "type": "T1",
+     "level": "E1"
+    },
+    {
+     "speaker": "Chipmunk",
+     "turn": "t42-t43",
+     "quote": "like <MENTION> said , <CARD> doesn't have to have a vowel / it could be either",
+     "premise": "同上",
+     "type": "T1",
+     "level": "E1"
+    },
+    {
+     "speaker": "Guinea p",
+     "turn": "t28/t37",
+     "quote": "All must be verified for the rule to be confirmed",
+     "premise": "規則を確認するには（該当しうる）すべてを確かめる必要がある",
+     "type": "T1",
+     "level": "E2"
+    }
+   ],
+   "explicit_turn": "t20-t22（Tigerが「does not need a vowel」と違いを指摘、t25 Chipmunk「good point」が応答）。t41 Guinea p「Why not <CARD> ?」でも問われる",
+   "reconciled": "なし",
+   "stage2": [
+    "起きた",
+    "t26 Guinea p「What if <CARD> has a vowel behind it ?」、t29 Tiger「the nine may have a vowel , breaking the rule .」（nineについて）"
+   ],
+   "stage3": [
+    "起きた",
+    "t44 Guinea p「I will stick with all 3 except <CARD> .」（Tiger・Chipmunkの理由を採らず保留）"
+   ],
+   "stage4": [
+    "起きた",
+    "t36 Guinea p「Final answer for me」、t39 Chipmunk「I think it is only <CARD> and <CARD>」、各自提出。t48「how do we go beyond this ?」"
+   ],
+   "self_handled": "はい",
+   "impairment": [
+    "不明",
+    "違いは言葉にされたが一致せず各自提出した。別の解釈: 前提差（規則の読み）というより、Guinea pの『確認』の考え方（論理理解）の差で、前提の明示では解消しにくい。違いを残した選択として許容される範囲とも読める"
+   ]
+  }
+ ],
+ "no_premise_sections": "t1-t3 挨拶、t48-t56 提出の繰り返し",
+ "notes": "Wason課題の対立は規則の読み（一方向か）に関わるが、T1/T2の前提差というより論理推論の差と読む余地が大きい。"
+}

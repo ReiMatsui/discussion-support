@@ -1,0 +1,223 @@
+{
+ "checkpoint": "IS1000c_cp11",
+ "judge": "J-k11",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t57",
+   "speaker": "A",
+   "supports": "交換可能なカバー",
+   "summary_ja": "携帯電話のように外側の色を選べる",
+   "quote": "they can choose what colour the outside is"
+  },
+  {
+   "id": "R2",
+   "turn": "t80",
+   "speaker": "B",
+   "supports": "交換カバーに慎重",
+   "summary_ja": "新しい供給ラインを作る必要があり組織的に複雑",
+   "quote": "you have to introduce a complete uh uh new l line of uh of supplies uh it would be uh very complicated"
+  },
+  {
+   "id": "R3",
+   "turn": "t83",
+   "speaker": "A",
+   "supports": "交換カバー採用",
+   "summary_ja": "大量販売の製品なので複数デザインを持てる",
+   "quote": "we can afford to have two or three different designs at least."
+  },
+  {
+   "id": "R4",
+   "turn": "t117",
+   "speaker": "A",
+   "supports": "音声認識採用",
+   "summary_ja": "チャンネル番号を覚えずに名前で選べる",
+   "quote": "rather than having to remember the the number of it on the keypad."
+  },
+  {
+   "id": "R5",
+   "turn": "t128",
+   "speaker": "C",
+   "supports": "音声認識採用",
+   "summary_ja": "80〜100語程度なら実装は難しくない",
+   "quote": "which shouldn't be th that difficult to implement, like eighty to hundred word."
+  },
+  {
+   "id": "R6",
+   "turn": "t198",
+   "speaker": "D",
+   "supports": "音声認識に慎重",
+   "summary_ja": "12.50ユーロの枠でASRが可能か分からない",
+   "quote": "but for the A_S_R_ system, uh I'm not sure if it's feasible to have this"
+  },
+  {
+   "id": "R7",
+   "turn": "t164",
+   "speaker": "D",
+   "supports": "キーのプログラム機能に慎重",
+   "summary_ja": "使いやすさを損なうおそれ",
+   "quote": "isn't that too difficult for the we want w I don't know if we still want the um R_C_ to be easy to use,"
+  },
+  {
+   "id": "R8",
+   "turn": "t167",
+   "speaker": "C",
+   "supports": "キーのプログラム機能採用",
+   "summary_ja": "使いやすさは利用者がどれだけ手間をかけるかによる",
+   "quote": "depends on the easiness like the user how much effort he can put."
+  }
+ ],
+ "pairs": [
+  {
+   "pair_id": "P1",
+   "reason_ids": [
+    "R2",
+    "R3"
+   ],
+   "choice_item": "交換可能なカバーを採用するか",
+   "premises": [
+    {
+     "reason_id": "R2",
+     "type": "T1",
+     "premise_ja": "新しい供給ラインの導入は組織的に複雑",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t80",
+       "quote": "it would be uh very complicated uh organisational"
+      }
+     ]
+    },
+    {
+     "reason_id": "R3",
+     "type": "T2",
+     "premise_ja": "大量に売れる製品なので複数デザインの費用を吸収できる",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t81",
+       "quote": "This is gonna be a mass marketed product,"
+      }
+     ]
+    }
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [
+    {
+     "turn": "t81",
+     "quote": "Hmm. Well we're selling so many units of this."
+    },
+    {
+     "turn": "t89",
+     "quote": "if it works we can get uh after-sales"
+    }
+   ],
+   "compatible_or_reconciled": true,
+   "during_presentation": false
+  },
+  {
+   "pair_id": "P2",
+   "reason_ids": [
+    "R5",
+    "R6"
+   ],
+   "choice_item": "音声認識を入れるか",
+   "premises": [
+    {
+     "reason_id": "R5",
+     "type": "T1",
+     "premise_ja": "少語彙の音声認識なら実装は難しくない",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t128",
+       "quote": "which shouldn't be th that difficult to implement"
+      }
+     ]
+    },
+    {
+     "reason_id": "R6",
+     "type": "T1",
+     "premise_ja": "12.50ユーロの枠でASRが収まるか分からない",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t198",
+       "quote": "I'm not sure if it's feasible to have this"
+      },
+      {
+       "turn": "t192",
+       "quote": "maybe it's possible for for twelve Euro but then then it will be at cost of other functionality"
+      }
+     ]
+    }
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [
+    {
+     "turn": "t202",
+     "quote": "Exactly yeah i if if it's a low vocabulary it's already implemented,"
+    },
+    {
+     "turn": "t207",
+     "quote": "Maybe we can come we we can talk to them, and we can come with that,"
+    }
+   ],
+   "compatible_or_reconciled": false,
+   "during_presentation": false
+  },
+  {
+   "pair_id": "P3",
+   "reason_ids": [
+    "R7",
+    "R8"
+   ],
+   "choice_item": "利用者にキーをプログラムさせるか",
+   "premises": [
+    {
+     "reason_id": "R7",
+     "type": "T2",
+     "premise_ja": "利用者は手間なく使えることを求める",
+     "evidence_level": "E2",
+     "evidence": [
+      {
+       "turn": "t164",
+       "quote": "I don't know if we still want the um R_C_ to be easy to use,"
+      }
+     ]
+    },
+    {
+     "reason_id": "R8",
+     "type": "T2",
+     "premise_ja": "利用者によってかけられる手間が違う",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t167",
+       "quote": "depends on the easiness like the user how much effort he can put."
+      }
+     ]
+    }
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [
+    {
+     "turn": "t167",
+     "quote": "N no but the if you give it d depends on the easiness"
+    },
+    {
+     "turn": "t176",
+     "quote": "I think you can do it both ways."
+    }
+   ],
+   "compatible_or_reconciled": true,
+   "during_presentation": false
+  }
+ ],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "既に扱われた",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "主分析の対は3つあるが、いずれも条件づけ（low vocabularyなら等）や反論で扱われ、プログラム機能は両立案（both ways）も出ている。加えて時点ではDの部品説明が始まったところで、発表中にも当たる。"
+}

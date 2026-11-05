@@ -1,0 +1,5 @@
+{"auditor": "AU2", "meeting": "GAP20",
+ "pairs_eval": [],
+ "support_eval": [],
+ "misses": [],
+ "notes": "時点判定の対は0件（_pairs.json が空）。支援と判定した時点はない（手順3は該当なし）。全体分析でも主分析の対は見つからず、見落としはない。S1（衣類、Pink『already dressed』）と S2（チョコレート、Orange『hunt the food』）は片側の理由のみで、相手側の前提は推測（E3）。"}

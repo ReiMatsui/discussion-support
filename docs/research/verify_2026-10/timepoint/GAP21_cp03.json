@@ -1,0 +1,69 @@
+{
+ "checkpoint": "GAP21_cp03",
+ "judge": "J-k03",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t8",
+   "speaker": "Blue",
+   "supports": "1位に地図（2位コンパス）",
+   "summary_ja": "現在地が分かり、安全な場所を早く見つけられる",
+   "quote": "youll know where you are and you can find where the safety faster"
+  },
+  {
+   "id": "R2",
+   "turn": "t16",
+   "speaker": "Orange",
+   "supports": "3位にコンパス",
+   "summary_ja": "どの方向に行くか分かる",
+   "quote": "This is uh see what area to go to"
+  },
+  {
+   "id": "R3",
+   "turn": "t66",
+   "speaker": "Pink",
+   "supports": "スキーストックを下位に",
+   "summary_ja": "移動には大事だが生存そのものには重要でない",
+   "quote": "I know they are important to get around with But um for actual survival I didnt think they were"
+  },
+  {
+   "id": "R4",
+   "turn": "t83",
+   "speaker": "Blue",
+   "supports": "拳銃を4位",
+   "summary_ja": "森の中でもうすぐ暗くなり熊などがいる",
+   "quote": "its gonna dark soon so theres like bears and stuff"
+  },
+  {
+   "id": "R5",
+   "turn": "t91",
+   "speaker": "Blue",
+   "supports": "1位に衣類",
+   "summary_ja": "湖や川が多く濡れるかもしれない",
+   "quote": "theres lots of lakes and rivers so they might get like wet"
+  },
+  {
+   "id": "R6",
+   "turn": "t101",
+   "speaker": "Orange",
+   "supports": "2位に火をおこす物",
+   "summary_ja": "暖かくしていられるように",
+   "quote": "I was thinking maybe just the fire stuff just so you could stay warm"
+  },
+  {
+   "id": "R7",
+   "turn": "t108",
+   "speaker": "Pink",
+   "supports": "3位に地図",
+   "summary_ja": "居場所と行き先が分かる",
+   "quote": "cause then at least you know where you whereabouts you are where you can go"
+  }
+ ],
+ "pairs": [],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "対がない",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "移動を前提とする理由（地図・コンパス）に対して、とどまる前提で別の選択肢を推す理由は出ていない。火の道具（暖かさ）の理由は移動・滞在のどちらでも成り立ち、前提差の対にならない。"
+}

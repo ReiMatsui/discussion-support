@@ -1,0 +1,152 @@
+{
+ "checkpoint": "ES2005c_cp08",
+ "judge": "J-k08",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t159",
+   "speaker": "B",
+   "supports": "LCD・音声認識など技術的な付加機能を入れる（コスト増を許容）",
+   "summary_ja": "市場調査では人々はより多く払う意思があり、品質・見た目・新しさを求めている",
+   "quote": "people are willing to pay more, but they want the quality"
+  },
+  {
+   "id": "R2",
+   "turn": "t164",
+   "speaker": "C",
+   "supports": "製造コスト12.50ユーロ以内に収める（LCDに慎重）",
+   "summary_ja": "それでも12.50の範囲に収める必要がある",
+   "quote": "It's still it's still got to get within our twelve fifty, you know."
+  },
+  {
+   "id": "R3",
+   "turn": "t184",
+   "speaker": "B",
+   "supports": "LCDを入れる",
+   "summary_ja": "LCD画面にアイコンが出てクリックするだけなので使いやすい",
+   "quote": "there will be different frent icons, they can just click"
+  },
+  {
+   "id": "R4",
+   "turn": "t187",
+   "speaker": "A",
+   "supports": "LCDを入れない",
+   "summary_ja": "リモコン使用時は画面を見ずテレビを見ているので、LCDは不要",
+   "quote": "when you use a remote control, you never look at it, right?"
+  },
+  {
+   "id": "R5",
+   "turn": "t197",
+   "speaker": "D",
+   "supports": "LCDを入れない",
+   "summary_ja": "予算と使いやすさの方針からLCDは選ぶべきでない",
+   "quote": "for our budget and for the thing we're trying to go for eas easy to use, it's not the thing we should go for"
+  }
+ ],
+ "pairs": [
+  {
+   "pair_id": "P1",
+   "reason_ids": [
+    "R3",
+    "R4"
+   ],
+   "choice_item": "LCD画面を採用するか",
+   "premises": [
+    {
+     "reason_id": "R3",
+     "type": "T2",
+     "premise_ja": "利用者はリモコンのLCD画面上のアイコンを見て操作する",
+     "evidence_level": "E2",
+     "evidence": [
+      {
+       "turn": "t184",
+       "quote": "there will be different frent icons, they can just click"
+      }
+     ]
+    },
+    {
+     "reason_id": "R4",
+     "type": "T2",
+     "premise_ja": "利用者はリモコン使用時にリモコンを見ず、テレビを見ている",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t187",
+       "quote": "when you use a remote control, you never look at it, right?"
+      },
+      {
+       "turn": "t189",
+       "quote": "You're looking at the T_V_"
+      }
+     ]
+    }
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [
+    {
+     "turn": "t187",
+     "quote": "But but the thing is when you use a remote control, you never look at it, right?"
+    },
+    {
+     "turn": "t193",
+     "quote": "That's true, yeah."
+    }
+   ],
+   "compatible_or_reconciled": false,
+   "during_presentation": true
+  },
+  {
+   "pair_id": "P2",
+   "reason_ids": [
+    "R1",
+    "R2"
+   ],
+   "choice_item": "技術的付加機能のためにコストを上げるか",
+   "premises": [
+    {
+     "reason_id": "R1",
+     "type": "T1",
+     "premise_ja": "市場調査では顧客はより多く払う意思がある",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t159",
+       "quote": "people are willing to pay more, but they want the quality"
+      }
+     ]
+    },
+    {
+     "reason_id": "R2",
+     "type": "T1",
+     "premise_ja": "製造コストは12.50ユーロに収める必要がある",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t164",
+       "quote": "It's still it's still got to get within our twelve fifty, you know."
+      }
+     ]
+    }
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [
+    {
+     "turn": "t164",
+     "quote": "It's still it's still got to get within our twelve fifty, you know."
+    },
+    {
+     "turn": "t167",
+     "quote": "So even if we increase our cost little bit, within uh some limits"
+    }
+   ],
+   "compatible_or_reconciled": false,
+   "during_presentation": true
+  }
+ ],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "既に扱われた",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "LCDを巡る2つの対（画面を見るかどうか、コスト上限）はいずれもAやCが前提を直接持ち出して反論し、他者が応答しているため既に扱われている。さらに判定時点ではAの技術説明が始まったところで発表中にも当たる。"
+}

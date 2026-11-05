@@ -1,0 +1,17 @@
+{"auditor": "AU1", "meeting": "GAP22",
+ "pairs_eval": [
+  {"pair_uid": "GAP22-U17",
+   "B1": ["不確か", "R4（Pink）はt44に直接支えられる。R3（Blue）の「すぐには脱出できない」は、途切れたt38「what happens if you」と、問いか皮肉か判別しにくいt40「Youre gonna get outta there right away」からの読みで、E2よりE3に近い"],
+   "B2": ["満たす", "4位をロープにするか食料を先にするかという同じ選択事項で、脱出・避難所づくりがすぐ可能かという想定が食料の緊急度を左右する"],
+   "B3": ["満たす", "行動の想定（T2）。Blueのt5のマズローの基準（T3）は前提に入れていない"],
+   "B6": ["不確か", "R3はt40の問い（または皮肉）を「すぐには脱出できない」という断定的な想定に変えている。R4はt44の「either ... or」を保っている"],
+   "explicit_judgement": ["正しい", "t40でBlueが相手側の想定（すぐ脱出する）を言葉にし、t42-t46でPinkが「Food is gonna have to come later」と応答している"],
+   "first_explicit_turn": "t40",
+   "full_analysis_scene": "S2"}],
+ "support_eval": [],
+ "misses": [
+  {"scene_id": "S3", "turns": "t62-t83", "nearest_checkpoint": "GAP22_cp02", "support_condition_met": "いいえ",
+   "reason": "ショートニングの用途（Pink：体を温める脂肪、Blue：燃料）の違いは、t72でBlueが「See and I thought it would be for fire」と指摘し、t73-t75でPinkが応答して、cp02（t92）以前に扱われている。また燃料用途もショートニングを支持し得るため、対としての成立も弱い"},
+  {"scene_id": "S4", "turns": "t119-t123", "nearest_checkpoint": "GAP22_cp02", "support_condition_met": "いいえ",
+   "reason": "最後の判定時点cp02（t92）より後の場面で、どの判定時点の履歴にも含まれない。Pinkの「you would need that to make fire」は燃料なしの条件と照らされずに引っ込められたが、オンラインの判定では検出できない"}],
+ "notes": "支援と判定した時点はない。時点判定の対（U17）は全体分析のS2に当たり、参加者がt40-t46で自力で扱っている。ただしBlue側の前提は途切れた発言からの推測が強く、B1・B6は不確か。見落とし2件はいずれも支援条件を満たさない（既に明示、または判定時点の後）。"}

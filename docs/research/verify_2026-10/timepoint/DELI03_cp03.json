@@ -1,0 +1,97 @@
+{
+ "checkpoint": "DELI03_cp03",
+ "judge": "J-k03",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t6",
+   "speaker": "Raven",
+   "supports": "1枚のみ",
+   "summary_ja": "規則は母音のカードについてだけで、他のカードは関係ない",
+   "quote": "which means the other cards don"
+  },
+  {
+   "id": "R2",
+   "turn": "t8",
+   "speaker": "Llama",
+   "supports": "2枚",
+   "summary_ja": "規則を検証するよう求められている",
+   "quote": "asking you to test the rule"
+  },
+  {
+   "id": "R3",
+   "turn": "t21",
+   "speaker": "Raven",
+   "supports": "1枚のみ",
+   "summary_ja": "課題文は1枚で十分だと示唆している",
+   "quote": "The question in the task implies that you only need one card to prove the rule"
+  },
+  {
+   "id": "R4",
+   "turn": "t22",
+   "speaker": "Llama",
+   "supports": "2枚",
+   "summary_ja": "多くの人が間違えるとあるので、課題はもっと複雑だと想定すべき",
+   "quote": "it says most players get it wrong . The assumption then would be that the task is more complex than that"
+  },
+  {
+   "id": "R5",
+   "turn": "t24",
+   "speaker": "Tiger",
+   "supports": "1枚のみ",
+   "summary_ja": "必要なカードだけを裏返す",
+   "quote": "you turn ONLY the cards needed"
+  }
+ ],
+ "pairs": [
+  {
+   "pair_id": "P1",
+   "reason_ids": [
+    "R3",
+    "R4"
+   ],
+   "choice_item": "裏返すカード（1枚のみか2枚か）",
+   "premises": [
+    {
+     "reason_id": "R3",
+     "type": "T1",
+     "premise_ja": "課題文は1枚で足りることを示唆している",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t21",
+       "quote": "The question in the task implies that you only need one card to prove the rule"
+      }
+     ]
+    },
+    {
+     "reason_id": "R4",
+     "type": "T1",
+     "premise_ja": "多くの人が間違えるので課題はより複雑である",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t22",
+       "quote": "The assumption then would be that the task is more complex than that"
+      }
+     ]
+    }
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [
+    {
+     "turn": "t22",
+     "quote": "While it does , it says most players get it wrong . The assumption then would be that the task is more complex than that"
+    }
+   ],
+   "compatible_or_reconciled": false,
+   "during_presentation": false
+  }
+ ],
+ "inferred_pairs": [],
+ "decision": "withhold",
+ "withhold_reason": "既に扱われた",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "課題文の読み方という前提の違いを、LlamaがRavenの発言に直接応答して「assumption」として言葉にしている。そのため既に扱われたとして控える。"
+}

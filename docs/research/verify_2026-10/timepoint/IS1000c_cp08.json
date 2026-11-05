@@ -1,0 +1,140 @@
+{
+ "checkpoint": "IS1000c_cp08",
+ "judge": "J-k08",
+ "reasons": [
+  {
+   "id": "R1",
+   "turn": "t59",
+   "speaker": "A",
+   "supports": "交換可能なカバーを採用する",
+   "summary_ja": "利用者が部屋の内装や好みに合わせて色・質感を選べる",
+   "quote": "So they can choose it li as they want to to maybe to fit in with their decor in their living room"
+  },
+  {
+   "id": "R2",
+   "turn": "t80",
+   "speaker": "B",
+   "supports": "交換可能なカバーに慎重",
+   "summary_ja": "新しい供給ラインが必要で組織的に複雑になる",
+   "quote": "you have to introduce a complete uh uh new l line of uh of supplies uh it would be uh very complicated uh organisational"
+  },
+  {
+   "id": "R3",
+   "turn": "t83",
+   "speaker": "A",
+   "supports": "交換可能なカバーを採用する",
+   "summary_ja": "大量販売の製品なので2〜3種類のデザインは賄える",
+   "quote": "we can afford to have two or three different designs at least."
+  },
+  {
+   "id": "R4",
+   "turn": "t61",
+   "speaker": "A",
+   "supports": "LCD・音声認識を入れない",
+   "summary_ja": "追加の費用と労力に見合わないと思う",
+   "quote": "in my personal opinion, gonna be worth the extra expense and the extra effort that will go into them."
+  },
+  {
+   "id": "R5",
+   "turn": "t136",
+   "speaker": "C",
+   "supports": "LCD表示付きのユニバーサルリモコン",
+   "summary_ja": "複数機器を操作するので、今どの機器モードかをLCDで表示できる",
+   "quote": "it depends like the remote with L_C_D_ display for browsing because you have multiple functionalities"
+  }
+ ],
+ "pairs": [
+  {
+   "pair_id": "P1",
+   "reason_ids": [
+    "R2",
+    "R3"
+   ],
+   "choice_item": "交換可能なカバーを採用するか",
+   "premises": [
+    {
+     "reason_id": "R2",
+     "type": "T1",
+     "premise_ja": "カバーには新しい供給ラインが必要で組織的に複雑",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t80",
+       "quote": "you have to introduce a complete uh uh new l line of uh of supplies uh it would be uh very complicated uh organisational"
+      }
+     ]
+    },
+    {
+     "reason_id": "R3",
+     "type": "T2",
+     "premise_ja": "大量に販売される製品である",
+     "evidence_level": "E1",
+     "evidence": [
+      {
+       "turn": "t81",
+       "quote": "This is gonna be a mass marketed product,"
+      }
+     ]
+    }
+   ],
+   "already_explicit_by_participants": true,
+   "explicit_evidence": [
+    {
+     "turn": "t81",
+     "quote": "Well we're selling so many units of this. This is gonna be a mass marketed product,"
+    },
+    {
+     "turn": "t94",
+     "quote": "That's a very good idea"
+    }
+   ],
+   "compatible_or_reconciled": true,
+   "during_presentation": false
+  }
+ ],
+ "inferred_pairs": [
+  {
+   "pair_id": "IP1",
+   "reason_ids": [
+    "R4",
+    "R5"
+   ],
+   "choice_item": "LCD表示を採用するか",
+   "premises": [
+    {
+     "reason_id": "R4",
+     "type": "T1",
+     "premise_ja": "LCDは追加の費用と労力がかかる",
+     "evidence_level": "E2",
+     "evidence": [
+      {
+       "turn": "t61",
+       "quote": "There are other aspects like L_C_D_ screens and speech recognition"
+      }
+     ]
+    },
+    {
+     "reason_id": "R5",
+     "type": "T2",
+     "premise_ja": "利用者は複数機器（TV、DVDなど）を一つのリモコンで操作する",
+     "evidence_level": "E3",
+     "evidence": [
+      {
+       "turn": "t136",
+       "quote": "you are having a universal remote control and you want to uh you don't know really which functionality is now"
+      }
+     ]
+    }
+   ],
+   "already_explicit_by_participants": false,
+   "explicit_evidence": [],
+   "compatible_or_reconciled": false,
+   "during_presentation": true
+  }
+ ],
+ "decision": "withhold",
+ "withhold_reason": "既に扱われた",
+ "target_pair": null,
+ "presentation_ja": null,
+ "note": "交換カバーの対はAが大量販売という前提を挙げてBの懸念に応答し、Bも同意しているため既に扱われている。LCDの対は前提の依存関係が推測にとどまり、かつCの発表の途中である。"
+}

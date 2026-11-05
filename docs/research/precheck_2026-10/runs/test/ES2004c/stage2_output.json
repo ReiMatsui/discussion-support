@@ -1,0 +1,602 @@
+{
+ "meeting": "ES2004c",
+ "items": [
+  {
+   "id": "ES2004c-C1",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 39
+    },
+    "S7": true
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "発表直後に次の発表へ移り、果物・野菜テーマは後続で触れられない"
+  },
+  {
+   "id": "ES2004c-B360",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 39
+    },
+    "S7": true
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "C1と同じ。部品の発表に移り、テーマの話は出ない"
+  },
+  {
+   "id": "ES2004c-C2",
+   "kind": "A",
+   "labels": {
+    "S1": 74,
+    "S2": 75,
+    "S3": 66,
+    "S4": 74,
+    "S5": null,
+    "S6": null,
+    "S7": false
+   },
+   "answers_question": {
+    "value": "yes",
+    "turn": 74
+   },
+   "update_type": "substantive",
+   "update_example_ja": "ダイナモは巻くための取っ手が要り単四より場所をとるので、大きさでは単四が有利です。太陽光など他の電源も含めると、大きさと手間のどちらで比べますか？",
+   "note": "t60でダイナモの欠点（巻く手間）、t74でAが大きさで単四とダイナモを比較、t75でダイナモの方がかさばると分かり、大きさとの兼ね合いという前提が崩れる。t66で太陽光も候補に"
+  },
+  {
+   "id": "ES2004c-B540",
+   "kind": "B",
+   "labels": {
+    "S1": 74,
+    "S2": 79,
+    "S3": 91,
+    "S4": 74,
+    "S5": null,
+    "S6": null,
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 74
+   },
+   "update_type": "substantive",
+   "update_example_ja": "太陽光は室内灯では充電できず、ダイナモは取っ手で場所をとります。新たに出たキネティックは小さく手間もかかりませんが、置いたままで充電が足りるかが残ります。",
+   "note": "t74で大きさ重視の発言と単四・ダイナモの比較、t79-80で室内光では充電できないと判明（未確認条件が否定）、t91でキネティックという新しい選択肢"
+  },
+  {
+   "id": "ES2004c-B720",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 133,
+    "S4": 148,
+    "S5": null,
+    "S6": null,
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 148
+   },
+   "update_type": "rephrase",
+   "update_example_ja": null,
+   "note": "t133-135で価格（普通の電池が最安）と太陽光の落下への弱さが加わり、t148で長持ちを重視する発言。キネティックの充電不足をどこまで許すかという問いはそのまま使える"
+  },
+  {
+   "id": "ES2004c-C3",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 170,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "deferred",
+     "turn": 180
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 173
+   },
+   "update_type": "substantive",
+   "update_example_ja": "市場調査ではクリップを求める声は出ておらず、複数人で取り合う使い方にも合わないかもしれません。紛失防止と充電の利点は、需要の見えない機能を加える価値がありますか？",
+   "note": "t170で一人で使う場面に限る懸念、t173-177で調査では需要が出ていないと判明し、調べてから決めるという問いの前提が変わる。t180で保留、t182で次の話題へ"
+  },
+  {
+   "id": "ES2004c-B900",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 185
+    },
+    "S7": true
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "基板・待機モード・ケース素材の話に移り、キネティックの充電量は扱われない"
+  },
+  {
+   "id": "ES2004c-C4",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 197
+    },
+    "S7": true
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "照明の説明の直後にケース素材へ移り、照明と電力の話は出ない"
+  },
+  {
+   "id": "ES2004c-C5",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 207,
+    "S4": null,
+    "S5": null,
+    "S6": null,
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 207
+   },
+   "update_type": "substantive",
+   "update_example_ja": "チタンは箱形しか作れず傷も付きやすい一方、プラスチックは曲面ができ、ゴムカバーで柔らかい手触りや色替えも出せます。凝った見た目は費用をかけずにプラスチックとカバーで出す方向でよいですか？",
+   "note": "t207でチタンは箱形のみ・プラスチックは曲面可と分かり、見た目のために費用を払う構図が崩れる。t222で傷の問題、t226-228でプラスチック＋ゴムカバー案"
+  },
+  {
+   "id": "ES2004c-B1080",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 217,
+    "S4": null,
+    "S5": null,
+    "S6": null,
+    "S7": false
+   },
+   "answers_question": {
+    "value": "yes",
+    "turn": 221
+   },
+   "update_type": "rephrase",
+   "update_example_ja": null,
+   "note": "t217-224で交換カバーがチタンでは高価、傷が付きやすいなどチタンを残さない根拠が出て、問いに答えている。比較の向きは変わらない"
+  },
+  {
+   "id": "ES2004c-C6",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 226,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "decided",
+     "turn": 238
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 217
+   },
+   "update_type": "rephrase",
+   "update_example_ja": null,
+   "note": "t217-219でチタンでは交換カバーが高価、t226-235でプラスチック本体にゴムのカバーという形が出てt238で前向きに受け入れ。フリップ式との両立は触れられない"
+  },
+  {
+   "id": "ES2004c-C7",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 282,
+    "S4": null,
+    "S5": 276,
+    "S6": null,
+    "S7": false
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "rephrase",
+   "update_example_ja": null,
+   "note": "t276でゴムボタンの反RSIを再掲、t282でむき出し基板は押す位置が分からないという新しい欠点。電源・費用の確認は出ない"
+  },
+  {
+   "id": "ES2004c-B1260",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": 276,
+    "S6": null,
+    "S7": false
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "t259-269の平面の問題は解消し、t276でLCDタッチと反RSIゴムボタンの既出の違いを言い直すのみ。電源・費用は出ない"
+  },
+  {
+   "id": "ES2004c-B1440",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 340
+    },
+    "S7": true
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "鏡のアイデアの話のあとAの発表（競合調査）に移り、画面の傷みやすさは扱われない"
+  },
+  {
+   "id": "ES2004c-C8",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 324,
+    "S4": 327,
+    "S5": null,
+    "S6": {
+     "type": "deferred",
+     "turn": 329
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 324
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "t324でテレビを見ながら鏡は要らないという理由が出て、t329で保留、t336で取り下げ。比較案は不要になる"
+  },
+  {
+   "id": "ES2004c-C9",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": 370,
+    "S6": {
+     "type": "decided",
+     "turn": 381
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 368
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "t368で開いて手のひらで持つ使い方が前提と分かり、閉じたままの操作は話題にならない。t370-380で親指の根拠を繰り返し、t381で下側に決定"
+  },
+  {
+   "id": "ES2004c-B1620",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": 370,
+    "S6": {
+     "type": "decided",
+     "turn": 381
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 368
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "C9と同じ。開いた状態での使用が前提で、t381で下側に決定"
+  },
+  {
+   "id": "ES2004c-C10",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": 409,
+    "S3": 390,
+    "S4": 420,
+    "S5": null,
+    "S6": {
+     "type": "deferred",
+     "turn": 392
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 409
+   },
+   "update_type": "substantive",
+   "update_example_ja": "キネティックに決めたので充電台で探す方法は使えず、音声認識は部品の在庫があり安く作れる見込みです。他の部分を削ってでも載せる価値があると見ますか？",
+   "note": "t390で流行・技術革新に合うという根拠、t392で費用確認に回す。t409-411でキネティック採用によりポート型の探索が使えなくなり、t416-418で在庫部品なので安いと出て代替案の前提が変わる"
+  },
+  {
+   "id": "ES2004c-B1800",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "decided",
+     "turn": 406
+    },
+    "S7": true
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "t405-408でキネティックに決定。置きっぱなしでの充電量は確かめられない"
+  },
+  {
+   "id": "ES2004c-C11",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 416,
+    "S4": 420,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 425
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 416
+   },
+   "update_type": "rephrase",
+   "update_example_ja": null,
+   "note": "t414-415で売りになるという評価、t416-418で在庫部品なので安いという費用情報、t420-422で他を削る必要が出れば問題という優先の発言。問いはそのまま使える"
+  },
+  {
+   "id": "ES2004c-C12",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 432,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "decided",
+     "turn": 433
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 432
+   },
+   "update_type": "rephrase",
+   "update_example_ja": null,
+   "note": "t432で白黒で始めて後でカラーに上げられるという段階案が出てt433で合意。追加費用を許すかの問いは後回しの形に言い換えれば足りる"
+  },
+  {
+   "id": "ES2004c-C13",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": 442,
+    "S3": null,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "decided",
+     "turn": 446
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "yes",
+    "turn": 442
+   },
+   "update_type": "substantive",
+   "update_example_ja": "キネティックは時計用の電池に蓄電するので、単三か単四かを選ぶ必要はありません。",
+   "note": "t442でキネティックは時計電池型と分かり、単三・単四を選ぶという前提がなくなる。t446で電池は決定済みと確認"
+  },
+  {
+   "id": "ES2004c-C14",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": 457,
+    "S6": null,
+    "S7": false
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "比較案なし（R1）。t457で既決の上LCD・下ゴムボタンを言い直すのみ"
+  },
+  {
+   "id": "ES2004c-B1980",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": null,
+    "S4": null,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 462
+    },
+    "S7": true
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "none",
+   "update_example_ja": null,
+   "note": "外装素材と色の話に移り、音声認識の費用は扱われない"
+  },
+  {
+   "id": "ES2004c-C15",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 502,
+    "S4": 489,
+    "S5": null,
+    "S6": {
+     "type": "decided",
+     "turn": 498
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "partial",
+    "turn": 489
+   },
+   "update_type": "rephrase",
+   "update_example_ja": null,
+   "note": "t489-497で他と違うこと・話題になることが凝った見た目だという考え、t498で現案に同意、t502でカバーが安く流行に合わせて替えられるという新しい根拠。問いの枠は変わらない"
+  },
+  {
+   "id": "ES2004c-B2160",
+   "kind": "B",
+   "labels": {
+    "S1": null,
+    "S2": null,
+    "S3": 531,
+    "S4": 554,
+    "S5": null,
+    "S6": {
+     "type": "deferred",
+     "turn": 526
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "yes",
+    "turn": 531
+   },
+   "update_type": "substantive",
+   "update_example_ja": "費用が合わなければ、音声認識の代わりにキーホルダーのような笛で鳴る方式もあります。見積もりが出るまで、音声認識と笛のどちらを基準案にしますか？",
+   "note": "t526で費用確認に保留、t527-531で費用が合わなければ笛型にするという代替案が出て「探す機能なし」との二択が変わる。t553で在庫あり、t554で高ければ他を削るという優先"
+  },
+  {
+   "id": "ES2004c-C16",
+   "kind": "A",
+   "labels": {
+    "S1": null,
+    "S2": 541,
+    "S3": null,
+    "S4": 546,
+    "S5": null,
+    "S6": {
+     "type": "switched",
+     "turn": 549
+    },
+    "S7": false
+   },
+   "answers_question": {
+    "value": "no",
+    "turn": null
+   },
+   "update_type": "substantive",
+   "update_example_ja": "PMは製品の独自性と広告で自社製品と分かるので、ロゴを特に目立たせる必要はないと見ています。通常のロゴを替えるカバー側と本体側のどちらに入れますか？",
+   "note": "t541-548でPMがロゴを目立たせる必要はなく広告で足りると述べ、比較案の前提（はっきり見せる）が崩れる。ロゴの位置は話されずt549で探索機能へ"
+  }
+ ]
+}
