@@ -26,7 +26,7 @@ def build_review_params(
     *, max_output: int = 6000, reasoning_effort: str | None = None,
 ) -> dict:
     """実行時と接続確認で、抽出指示とJSON形式を共有する。"""
-    from das.asr.live._bootstrap import _build_chat_params
+    from das.asr.live._llm_transport import _build_chat_params
 
     payload = {
         "options": config.options,
@@ -53,7 +53,7 @@ def build_review_params(
 def request_review(
     config: StudyConfig, turns: list[Turn], new_ids: set[str], api_key: str, model: str
 ) -> Review:
-    from das.asr.live._bootstrap import _post_chat_json
+    from das.asr.live._llm_transport import _post_chat_json
 
     params = build_review_params(config, turns, new_ids, model)
     result = _post_chat_json(
