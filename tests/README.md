@@ -35,7 +35,7 @@ tests/
 
 ## 手動の実API確認との区別
 
-- `scripts/check_facilitation.py`：従来のファシリテーションを実LLMで確認する手動実験。通常の自動テストではない。旧 `python -m tests.test_facilitation_harness` は互換入口として残す。今回の累計3回制限はこの旧手動実験には適用されない。
+- `scripts/check_facilitation.py`：従来のファシリテーションを実LLMで確認する手動実験。通常の自動テストではない。旧 `python -m tests.test_facilitation_harness` の転送入口は削除し、このスクリプトへ一本化した。今回の累計3回制限はこの旧手動実験には適用されない。
 - `python -m das.study.bounded_probe`：現在の採否判断支援の少量接続確認。既定は送信なし。本人が `--execute` を付けた場合のみ送信する。
 - `python -m das.study.preflight`：意味判定・音声を模擬した連続動作確認。介入効果や実音声の性能検査ではない。
 

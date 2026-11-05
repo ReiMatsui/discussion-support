@@ -26,7 +26,7 @@ class _VoiceAgentBase:
     サブクラスが __init__ で以下の属性を用意することを前提とする:
       _audio_q / _play_epoch / ai_speaking / _last_speech_end /
       _voice_tracker / _recent_ai_texts / _ai_text_buf /
-      _stop / _played_bytes / _ai_voice_enrolled / _ai_voice_buf /
+      _stop / _ai_voice_enrolled / _ai_voice_buf /
       _ai_voice_sec / _playback_thread
     サブクラスは AI_VOICE_KEY と _LABEL を上書きする。
     """
@@ -48,7 +48,6 @@ class _VoiceAgentBase:
     _recent_ai_texts: collections.deque
     _ai_text_buf: str
     _stop: threading.Event
-    _played_bytes: int
     _ai_voice_enrolled: bool
     _ai_voice_buf: list[np.ndarray]
     _ai_voice_sec: float
@@ -150,7 +149,6 @@ class _VoiceAgentBase:
                     with self._queued_lock:
                         self._queued_ms = max(0, self._queued_ms - len(chunk) * 1000 // (24000 * 2))
                     jb.push(chunk)
-                    self._played_bytes += len(chunk)
                     # 声紋登録用: 16kHzにリサンプルして蓄積。無音のチャンク（文の間、
                     # 終端前の 1.2 秒）は声紋を薄めるだけなので入れない。登録に失敗し
                     # 続けるときは溜め続けない（メモリと毎回の連結を抑える）

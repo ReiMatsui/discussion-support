@@ -141,13 +141,11 @@ class LiveAgent(_VoiceAgentBase):
         self._pending: list[dict] = []
         self.ai_speaking = False
         self._responding = False
-        self._interrupted = False                # 基底の互換用。Live では常に False
         self._ai_text_buf = ""
         self._audio_q: queue.Queue[tuple[int, bytes | None]] = queue.Queue()
         self._queued_ms = 0                      # 再生待ち（キュー）の音声の長さ
         self._queued_lock = threading.Lock()
         self._jitter = JitterBuffer()            # 到着の揺れを吸収して一定速度で鳴らす
-        self._playback_status_warned = False
         self._play_epoch = 0
         self._connected = False
         self._conn_error = ""
@@ -161,19 +159,16 @@ class LiveAgent(_VoiceAgentBase):
         self._recent_ai_texts: collections.deque = collections.deque(maxlen=20)
         self._last_speech_end = 0.0
         self._echo_cooldown = _ECHO_COOLDOWN
-        self._played_bytes = 0
         self._voice_tracker: VoiceProfiles | None = None
         self._ai_voice_buf: list[np.ndarray] = []
         self._ai_voice_sec = 0.0
         self._ai_voice_enrolled = False
         # --- GPT-Live 固有 ---
-        self._session_id: str | None = None
         self._started = threading.Event()
         self._ev_seq = 0
         self._last_audio_at = 0.0                # 声か文字が最後に届いた時刻（壁時計）
         self._audio_bytes_this_turn = 0
         self._silent_run_ms = 0                  # 発話中に続いた無音（ストリーム時間）
-        self._last_input_at = 0.0
         self._input_base_at = 0.0                # 入力時計の基準（接続時）
         self._input_sent_ms = 0                  # 接続後に送った入力音声の合計
         self._seen_types: set[str] = set()
@@ -432,7 +427,6 @@ class LiveAgent(_VoiceAgentBase):
                 self._in_q.get_nowait()   # 溜まりすぎた古い音声は捨てる（実時間に追従）
 
     def _send_input_pcm24(self, out: bytes) -> None:
-        self._last_input_at = time.monotonic()
         self._input_sent_ms += len(out) * 1000 // (_OUT_RATE * 2)
         self._send({"type": "session.input_audio.append",
                     "audio": base64.b64encode(out).decode("ascii")})
@@ -578,7 +572,6 @@ class LiveAgent(_VoiceAgentBase):
             self._on_error(ev)
 
     def _on_session_started(self, ev: dict) -> None:
-        self._session_id = (ev.get("session") or {}).get("id")
         self._started.set()
 
     def _begin_turn(self, *, requested: bool) -> None:
@@ -586,7 +579,6 @@ class LiveAgent(_VoiceAgentBase):
             # 前の発話の終端マーカーがまだ再生待ち。区間を閉じてから新しい発話にする
             # （古いマーカーは epoch が進むので無視される）
             self._end_speech()
-        self._played_bytes = 0
         self._play_epoch += 1
         self._speech_started = False
         self._audio_bytes_this_turn = 0

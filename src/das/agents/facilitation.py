@@ -131,7 +131,6 @@ class FacilitationAgent(BaseAgent):
         *,
         max_items: int = 2,
         recent_window: int = 4,
-        bias_threshold: float = 0.4,
         active_window: int = 12,
         stall_window: int = 4,
         stall_max_new_claims: int = 1,
@@ -143,9 +142,6 @@ class FacilitationAgent(BaseAgent):
         Parameters:
           - ``max_items``: L1 で提示する最大件数 (研究計画書「1〜2 件」に従い既定 2)
           - ``recent_window``: stage 判定で見る直近発話数
-          - ``bias_threshold``: (非推奨) 旧・累積比率ベース偏り判定のしきい値。
-            現在 L2 の偏りトリガーは窓内の weak/over 件数 (件数条件) で判定するため
-            使わないが、外部呼び出し互換のため引数は残す (logic_review B3)。
           - ``active_window``: L1 候補・偏り検知を限定する直近ターン数 (logic_review A5)。
             turn_index が ``現在ターン - active_window + 1`` 以上のノードを窓内とみなす。
           - ``stall_window``: stalled 判定で見る直近発話数
@@ -158,7 +154,6 @@ class FacilitationAgent(BaseAgent):
         super().__init__(llm=llm)
         self._max_items = max_items
         self._recent_window = recent_window
-        self._bias_threshold = bias_threshold
         self._active_window = active_window
         self._stall_window = stall_window
         self._stall_max_new_claims = stall_max_new_claims

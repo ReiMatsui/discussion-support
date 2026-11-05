@@ -21,7 +21,10 @@
 |`src/das/llm/openai_client.py`|既存の非同期LLMクライアント|
 |`src/das/asr/live/_bootstrap.py`|音声セッションの準備・起動、従来のLLM支援の組立て|
 |`src/das/asr/live/_llm_transport.py`|同期のLLMパラメータ・通信。起動処理から分離|
-|`src/das/asr/live/_session_state.py`、`_workers.py`|音声本体の共有状態・常駐処理|
+|`src/das/asr/live/_session_state.py`|音声本体の共有状態|
+|`src/das/asr/live/workers/`|議論判定・分類・グラフ支援・介入制御・音声接続・終了処理|
+|`src/das/transcripts.py`|共通のUtterance形式JSONL読込み|
+|`src/das/audio/pcm.py`|TTS検査用のPCM・WAV変換|
 |`src/das/asr/live/stt/`、話者帰属関連モジュール|音声認識・話者帰属|
 |`src/das/agents/`、`graph/`、`runtime/`|従来の議論グラフ・エージェント・統合処理|
 |`eval/`|既存の録音・コーパスの評価経路。採点の正本は `_pipeline.py`|
@@ -33,4 +36,18 @@
 
 LLM通信の分離、DASからの研究用起動、テスト範囲の選択、研究用テストの役割別配置、人工データの共有、手動API実験の別置き、HTTPテストの不要な終了待ちの短縮を行った。
 
-`_session_state.py` や `_workers.py` には引き続き大きなクラス・処理が残る。音声・話者訂正・スレッド間の共有状態が密に関係するため、一括移動では整理を終えず、責務を特定して関連テストと一緒に分ける必要がある。今回の整理でこれらの内部を分解済みとは扱わない。
+同日の追加整理で `_workers.py` を廃止し、`workers/` に責務別の実装を置いた。呼び出し元とテストは各モジュールを直接参照する。旧パスを残す転送レイヤーは追加していない。
+
+`_session_state.py` には引き続き共有状態に関係する大きな処理が残る。話者訂正・音声区間・スレッド間の共有を切り離す際は、具体的な不変条件と検査を伴わせる。
+
+## 常駐処理の配置
+
+- `workers/checks.py`：議題・論点・脱線・事実・参加・構造化の判定。
+- `workers/triage.py`：発話の分類、呼びかけ依頼、応答済み判定。
+- `workers/af.py`：議論グラフ支援の提示とゲート。
+- `workers/agent.py`：進行役の介入制御。
+- `workers/voice.py`：音声エージェント接続・イベント・相手役の切替。
+- `workers/lifecycle.py`：標準入力の処理と終了。
+- `workers/common.py`：予期しない例外からワーカーを再開する処理。
+
+手動実API実験は `scripts/check_facilitation.py`、少量の接続確認は `python -m das.study.bounded_probe` に一本化した。旧 `tests.test_facilitation_harness` と `das.study.probe` の転送入口は削除済み。

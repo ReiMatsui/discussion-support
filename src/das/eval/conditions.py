@@ -388,7 +388,6 @@ class ConditionFullProposal:
         self._threshold = threshold
         self._top_k = top_k
         self._top_k_per_source = top_k_per_source
-        self._max_info_items = max_info_items
         self._enable_web_search = enable_web_search
         self._max_web_searches = max_web_searches
         self._linking_model = linking_model

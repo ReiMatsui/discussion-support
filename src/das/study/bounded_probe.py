@@ -44,11 +44,6 @@ def build_request(fixture: Path, model: str, max_output: int):
     return config, turns, new_ids, params, body
 
 
-def reserve_call(path: Path, model: str, body: bytes, max_output: int):
-    """Compatibility entry point; cumulative accounting lives in ProbeUsage."""
-    return ProbeUsage(path).reserve(model, body, max_output)
-
-
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *_args, **_kwargs):
         return None

@@ -2,7 +2,7 @@
 
 ## 目的
 
-AI側では課金のない人工入力検査を行い、実APIを使う確認は本人が明示して実行する。最初は人工会話1件の接続・出力確認にとどめる。旧 `das.study.probe` もこの機能を呼ぶ入口に統合し、既定では送信しない。音声API・録音・実験参加者のデータは使用しない。
+AI側では課金のない人工入力検査を行い、実APIを使う確認は本人が明示して実行する。最初は人工会話1件の接続・出力確認にとどめる。旧 `das.study.probe` の転送入口は削除し、`das.study.bounded_probe` へ一本化した。音声API・録音・実験参加者のデータは使用しない。
 
 OpenAI Docsスキルで[公式のChat Completions仕様](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)を確認し、出力上限と応答に含まれるusageを利用した。新しいモデルへの変更はしていない。
 

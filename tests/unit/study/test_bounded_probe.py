@@ -18,9 +18,9 @@ def test_plan_is_offline_and_does_not_reserve(tmp_path, monkeypatch):
 def test_reservation_stops_fourth_request_and_never_refunds(tmp_path):
     ledger = tmp_path / "usage.jsonl"
     for i in range(3):
-        assert probe.reserve_call(ledger, "gpt-5.4-mini", b"{}", 6000) == i + 1
+        assert probe.ProbeUsage(ledger).reserve("gpt-5.4-mini", b"{}", 6000) == i + 1
     with pytest.raises(ValueError, match="3回"):
-        probe.reserve_call(ledger, "gpt-5.4-mini", b"{}", 6000)
+        probe.ProbeUsage(ledger).reserve("gpt-5.4-mini", b"{}", 6000)
     assert len(ledger.read_text().splitlines()) == 3
 
 
@@ -95,7 +95,7 @@ def test_concurrent_runs_share_three_slot_limit(tmp_path):
 
     def reserve(_):
         try:
-            return probe.reserve_call(ledger, "gpt-5.4-mini", b"{}", 6000)
+            return probe.ProbeUsage(ledger).reserve("gpt-5.4-mini", b"{}", 6000)
         except ValueError:
             return None
 
