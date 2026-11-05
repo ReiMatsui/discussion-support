@@ -78,3 +78,9 @@ uv run python -m das.asr.live --study-config study/facility.json --study-conditi
 実験前の動作検査と現在の未確認事項は
 `docs/design/study_mode_verification_2026-11-05.md` を参照してください。
 人工入力による連続動作の検査は、実API・録音・再生なしで実行できます。
+
+実LLMの確認を手動で少量ずつ行う場合は、送信なしが既定の
+`python -m das.study.bounded_probe` を使用してください。
+累計3回まで・自動再試行なしの手順は
+`docs/design/bounded_llm_probe_2026-11-05.md` にあります。
+この制限は通常の実験システムには適用されません。
