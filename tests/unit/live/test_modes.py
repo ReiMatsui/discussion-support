@@ -9,7 +9,7 @@ from http.server import ThreadingHTTPServer
 
 from das.asr.live._session_state import SessionState
 from das.asr.live._ui import _UIHandler
-from das.asr.live._workers import set_session_mode
+from das.asr.live.workers.voice import set_session_mode
 
 
 def _make_state():

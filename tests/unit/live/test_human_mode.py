@@ -112,7 +112,7 @@ def _make_state(*, with_agent: bool = False):
 def test_agenda_detector_seeds_when_detected(monkeypatch):
     """十分な発話がたまると、検出した議題をseedして停止する（S3）."""
     import das.asr.live._bootstrap as bootstrap
-    from das.asr.live._workers import _run_agenda_detector
+    from das.asr.live.workers.checks import _run_agenda_detector
 
     monkeypatch.setattr(bootstrap, "detect_agenda", lambda *a, **k: "AI導入の是非")
     state = _make_state()
@@ -184,7 +184,7 @@ def test_classify_utterance_without_key_is_negative():
 
 
 def _run_triage_briefly(state, *, until, timeout=3.0):
-    from das.asr.live._workers import _run_triage_worker
+    from das.asr.live.workers.triage import _run_triage_worker
     th = threading.Thread(target=_run_triage_worker,
                           args=(state, "key", "gpt-5-mini"), daemon=True)
     th.start()
@@ -306,7 +306,7 @@ def test_triage_worker_local_gate_skips_very_short_utterances(monkeypatch):
 def test_triage_worker_enqueues_facilitator_request(monkeypatch):
     """呼びかけ依頼を検出したら手動呼び出しキュー（source=voice）に積み、アック音を鳴らす."""
     import das.asr.live._bootstrap as bootstrap
-    import das.asr.live._workers as workers
+    from das.asr.live.workers import triage as workers
 
     monkeypatch.setattr(bootstrap, "classify_utterance",
                         lambda *a, **k: {"factual_claim": False,
@@ -330,7 +330,7 @@ def test_triage_worker_enqueues_facilitator_request(monkeypatch):
 def test_triage_worker_topic_mention_does_not_chime(monkeypatch):
     """依頼なし（話題としての言及）ではアック音を鳴らさない."""
     import das.asr.live._bootstrap as bootstrap
-    import das.asr.live._workers as workers
+    from das.asr.live.workers import triage as workers
 
     monkeypatch.setattr(bootstrap, "classify_utterance",
                         lambda *a, **k: {"factual_claim": False,
@@ -349,7 +349,7 @@ def test_triage_worker_topic_mention_does_not_chime(monkeypatch):
 
 def test_play_ack_chime_never_raises():
     """再生に失敗しても（sounddevice不在など）例外を漏らさない."""
-    from das.asr.live._workers import _play_ack_chime
+    from das.asr.live.workers.triage import _play_ack_chime
 
     _play_ack_chime()   # 例外が上がらなければ合格（音は必須機能ではない）
 
@@ -505,7 +505,7 @@ def test_triage_worker_backlog_skips_old_and_processes_recent(monkeypatch):
     内側ループは各件の間で sleep しないため、この catch-up は 1 tick で
     ``_TRIAGE_BACKLOG_MAX`` 件をまとめて処理する（1件/tick の上限を撤廃）."""
     import das.asr.live._bootstrap as bootstrap
-    import das.asr.live._workers as workers
+    from das.asr.live.workers import triage as workers
 
     monkeypatch.setattr(workers, "_TRIAGE_BACKLOG_MAX", 3)
     classified: list = []
@@ -563,7 +563,7 @@ def test_triage_worker_unconfirmed_factual_claim_not_fact_checked(monkeypatch):
     intervention_records を使うため check_fact を呼ばない（帰属不明の断定に訂正を
     打たない, 修正5）."""
     import das.asr.live._bootstrap as bootstrap
-    from das.asr.live._workers import _run_fact_checker
+    from das.asr.live.workers.checks import _run_fact_checker
 
     monkeypatch.setattr(bootstrap, "classify_utterance",
                         lambda *a, **k: {"factual_claim": True,
@@ -671,7 +671,7 @@ def test_check_fact_correction_marks_only_last_utterance_as_target(monkeypatch):
 def test_fact_checker_enqueues_clear_formula_correction(monkeypatch):
     """式・定義っぽい発話だけを候補にし、高確信の補正をキューに積む."""
     import das.asr.live._bootstrap as bootstrap
-    from das.asr.live._workers import _run_fact_checker
+    from das.asr.live.workers.checks import _run_fact_checker
 
     calls = []
 
@@ -716,7 +716,7 @@ def test_fact_checker_enqueues_clear_formula_correction(monkeypatch):
 def test_fact_checker_passes_recent_context_before_target(monkeypatch):
     """直前3発話は参照として渡し、判定対象は最後に置く."""
     import das.asr.live._bootstrap as bootstrap
-    from das.asr.live._workers import _run_fact_checker
+    from das.asr.live.workers.checks import _run_fact_checker
 
     calls = []
 
@@ -759,8 +759,8 @@ def test_fact_checker_passes_recent_context_before_target(monkeypatch):
 def test_fact_checker_retries_retryable_failure_before_advancing(monkeypatch):
     """LLM/API一時失敗では同じ発話を再試行し、成功したらキューに積む."""
     import das.asr.live._bootstrap as bootstrap
-    import das.asr.live._workers as workers
-    from das.asr.live._workers import _run_fact_checker
+    from das.asr.live.workers import checks as workers
+    from das.asr.live.workers.checks import _run_fact_checker
 
     monkeypatch.setattr(workers, "_FACTCHECK_CHECK_SEC", 0.1)
     calls = []
@@ -805,7 +805,7 @@ def test_fact_checker_retries_retryable_failure_before_advancing(monkeypatch):
 def test_fact_checker_ignores_plain_opinion(monkeypatch):
     """triage が fact候補でないと判定した発話ではLLM判定すら呼ばない."""
     import das.asr.live._bootstrap as bootstrap
-    from das.asr.live._workers import _run_fact_checker
+    from das.asr.live.workers.checks import _run_fact_checker
 
     calls = []
     monkeypatch.setattr(bootstrap, "check_fact_correction",
@@ -830,7 +830,7 @@ def test_fact_checker_ignores_plain_opinion(monkeypatch):
 def test_fact_checker_waits_for_unclassified_records(monkeypatch):
     """triage 注釈がまだ無い発話は消費せず、分類を待つ（カーソルを進めない）."""
     import das.asr.live._bootstrap as bootstrap
-    from das.asr.live._workers import _run_fact_checker
+    from das.asr.live.workers.checks import _run_fact_checker
 
     calls = []
     monkeypatch.setattr(bootstrap, "check_fact_correction",
@@ -854,7 +854,7 @@ def test_fact_checker_waits_for_unclassified_records(monkeypatch):
 def test_participation_checker_enqueues_invite(monkeypatch):
     """発言の少ない人がいる時、LLM判定YESで声かけ要求をキューに積む（S4）."""
     import das.asr.live._bootstrap as bootstrap
-    from das.asr.live._workers import _run_participation_checker
+    from das.asr.live.workers.checks import _run_participation_checker
 
     monkeypatch.setattr(bootstrap, "check_participation",
                         lambda *a, **k: {"invite": True, "speaker": "参加者B",
@@ -887,7 +887,7 @@ def test_participation_checker_enqueues_invite(monkeypatch):
 def test_participation_checker_rejects_unreliable_invite_target(monkeypatch):
     """LLMが参加度表にない低信頼名を返しても声かけ要求を積まない."""
     import das.asr.live._bootstrap as bootstrap
-    from das.asr.live._workers import _run_participation_checker
+    from das.asr.live.workers.checks import _run_participation_checker
 
     monkeypatch.setattr(bootstrap, "check_participation",
                         lambda *a, **k: {"invite": True, "speaker": "発話者",
@@ -914,7 +914,7 @@ def test_participation_checker_rejects_unreliable_invite_target(monkeypatch):
 def test_participation_checker_skips_when_balanced(monkeypatch):
     """発話量が均衡していれば（事前ゲート）LLMを呼ばず声かけしない（S4）."""
     import das.asr.live._bootstrap as bootstrap
-    from das.asr.live._workers import _run_participation_checker
+    from das.asr.live.workers.checks import _run_participation_checker
 
     calls = []
     monkeypatch.setattr(bootstrap, "check_participation",
@@ -941,7 +941,7 @@ def test_participation_checker_skips_when_balanced(monkeypatch):
 def test_agenda_detector_skips_when_topics_exist(monkeypatch):
     """既に論点があれば議題検出は走らない（S3）."""
     import das.asr.live._bootstrap as bootstrap
-    from das.asr.live._workers import _run_agenda_detector
+    from das.asr.live.workers.checks import _run_agenda_detector
 
     calls = []
     monkeypatch.setattr(bootstrap, "detect_agenda",

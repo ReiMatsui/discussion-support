@@ -64,25 +64,26 @@ from das.asr.live._seat_audio import SeatAudio, seat_embedder
 from das.asr.live._session_state import SessionState
 from das.asr.live._ui import _UIHandler
 from das.asr.live._voice_profiles import VoiceProfiles
-from das.asr.live._workers import (
-    _cleanup,
-    _connect_agent,
-    _on_agent_text_factory,
-    _run_af_checker,
-    _run_agenda_detector,
-    _run_drift_checker,
-    _run_fact_checker,
-    _run_participation_checker,
-    _run_stdin_commands,
-    _run_structuring_checker,
-    _run_topic_worker,
-    _run_triage_worker,
-    wire_partner_callbacks,
-)
 from das.asr.live.agents._live import LIVE_DEFAULT_VOICE, LiveAgent
 from das.asr.live.agents._simulator import DiscussionSimulator
 from das.asr.live.stt import STTBackend
 from das.asr.live.stt._soniox import SonioxBackend
+from das.asr.live.workers.af import _run_af_checker
+from das.asr.live.workers.checks import (
+    _run_agenda_detector,
+    _run_drift_checker,
+    _run_fact_checker,
+    _run_participation_checker,
+    _run_structuring_checker,
+    _run_topic_worker,
+)
+from das.asr.live.workers.lifecycle import _cleanup, _run_stdin_commands
+from das.asr.live.workers.triage import _run_triage_worker
+from das.asr.live.workers.voice import (
+    _connect_agent,
+    _on_agent_text_factory,
+    wire_partner_callbacks,
+)
 
 # ---------------------------------------------------------------------------
 # CLI引数をまとめるデータクラス（argparse.Namespace の代替）

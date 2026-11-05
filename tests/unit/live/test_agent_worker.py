@@ -16,9 +16,7 @@ from das.asr.live._intervention import (
     _log_voice_call_diag,
     _PendingInterventions,
 )
-from das.asr.live._workers import (
-    _run_agent_worker,
-)
+from das.asr.live.workers.agent import _run_agent_worker
 
 
 class FakeAgent:
@@ -874,7 +872,7 @@ def _run_drift_checker_briefly(state, monkeypatch, *, records, seconds=2.5,
                                labels=None, reason=""):
     """label_drift をモックして _run_drift_checker を短時間動かし、呼び出しを記録."""
     import das.asr.live._bootstrap as bootstrap
-    from das.asr.live._workers import _run_drift_checker
+    from das.asr.live.workers.checks import _run_drift_checker
 
     calls: list = []
 
@@ -951,7 +949,7 @@ def test_drift_request_is_queued_only_after_the_off_run_exceeds_the_threshold(mo
 # ---------------------------------------------------------------------------
 
 def _run_event_worker_briefly(state, on_text, *, until, timeout=1.5):
-    from das.asr.live._workers import _run_facilitator_event_worker
+    from das.asr.live.workers.voice import _run_facilitator_event_worker
     t = threading.Thread(target=_run_facilitator_event_worker,
                          args=(state, on_text), daemon=True)
     t.start()
@@ -1006,7 +1004,7 @@ def test_event_worker_speech_start_does_not_interrupt_partner():
 # ---------------------------------------------------------------------------
 
 def _run_structuring_briefly(state, *, until, timeout=3.5):
-    from das.asr.live._workers import _run_structuring_checker
+    from das.asr.live.workers.checks import _run_structuring_checker
     t = threading.Thread(target=_run_structuring_checker,
                          args=(state, "key", "model"), daemon=True)
     t.start()
@@ -1118,7 +1116,7 @@ def test_structuring_checker_rejudges_after_pending_reset(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def _run_fact_briefly(state, *, until, timeout=1.0):
-    from das.asr.live._workers import _run_fact_checker
+    from das.asr.live.workers.checks import _run_fact_checker
     t = threading.Thread(target=_run_fact_checker,
                          args=(state, "key", "model"), daemon=True)
     t.start()
@@ -1168,7 +1166,7 @@ def test_factcheck_dedup_resets_on_meeting_epoch_change(monkeypatch):
     """T3: 会議リセット (epoch 変化) で重複補正履歴がクリアされ、同じ補正でも新会議で
     再発火する (旧会議の履歴が新会議を握りつぶさない)。"""
     import das.asr.live._bootstrap as bs
-    from das.asr.live._workers import _run_fact_checker
+    from das.asr.live.workers.checks import _run_fact_checker
 
     monkeypatch.setattr(bs, "check_fact_correction", lambda utts, k, m: {
         "should_correct": True, "confidence": "high", "correction": "地球は球体です"})

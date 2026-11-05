@@ -1,7 +1,7 @@
 """LLMワーカーの復元ラッパのテスト."""
 import threading
 
-from das.asr.live import _workers
+from das.asr.live.workers import common
 
 
 class _S:
@@ -14,7 +14,7 @@ def test_resilient_reenters_after_an_unexpected_exception(capsys):
     s = _S()
     calls = []
 
-    @_workers._resilient
+    @common._resilient
     def worker(state):
         calls.append(1)
         if len(calls) == 1:
@@ -32,7 +32,7 @@ def test_resilient_does_not_reenter_after_stop():
     s = _S()
     calls = []
 
-    @_workers._resilient
+    @common._resilient
     def worker(state):
         calls.append(1)
         state.stop.set()

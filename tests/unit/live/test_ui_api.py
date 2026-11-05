@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from das.asr.live._constants import AGENT_SPEAKER, UNSURE_SPEAKER
 from das.asr.live._session_state import SessionState
 from das.asr.live._ui import _UIHandler
-from das.asr.live._workers import _on_agent_text_factory
+from das.asr.live.workers.voice import _on_agent_text_factory
 
 
 def _make_state():

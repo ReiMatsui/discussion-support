@@ -17,7 +17,7 @@ from das.asr.live._intervention import (
     _controller_normal_decision,
     _PendingInterventions,
 )
-from das.asr.live._workers import (
+from das.asr.live.workers.af import (
     _af_checker_tick,
     _af_gate_status,
     _af_l1_presentation,

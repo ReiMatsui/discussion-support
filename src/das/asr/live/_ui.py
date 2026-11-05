@@ -223,7 +223,7 @@ class _UIRequestHandler(BaseHTTPRequestHandler):
         self._json(200, {"ok": True, "waiting": False})
 
     def _post_mode(self, s) -> None:
-        from das.asr.live._workers import set_session_mode
+        from das.asr.live.workers.voice import set_session_mode
         body = self._read_json()
         result = set_session_mode(s, str(body.get("mode", "")))
         self._json(200 if result.get("ok") else 400, result)

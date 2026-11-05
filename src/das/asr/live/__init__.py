@@ -15,7 +15,7 @@ das連携フック:
 パッケージ構成:
   _bootstrap.py       セッション初期化・起動ロジック
   _recv_loop.py       WebSocket受信 + flush（声紋判定・エコー除去）
-  _workers.py         音声入力・送信・トピック抽出・ターンテイキング
+  workers/            議論判定・音声接続・介入制御・終了処理
   _session_state.py   共有状態 + ファイル出力
   _voice_profiles.py  声紋プロファイル
   _ui.py              HTTPサーバー + ターミナル出力

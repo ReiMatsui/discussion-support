@@ -19,5 +19,7 @@ def _fast_worker_tick(monkeypatch):
     間隔を詰めても判断は変わらない——クールダウンや pause は壁時計の差で
     見ているので、覗く回数が増えても早く発火はしない。**本番の値は変えない**。
     """
-    from das.asr.live import _workers
-    monkeypatch.setattr(_workers, "WORKER_TICK_SEC", 0.01)
+    from das.asr.live.workers import agent, checks, triage
+    for module in (agent, checks, triage):
+        if hasattr(module, "WORKER_TICK_SEC"):
+            monkeypatch.setattr(module, "WORKER_TICK_SEC", 0.01)
