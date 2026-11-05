@@ -18,9 +18,9 @@ def test_plan_is_offline_and_does_not_reserve(tmp_path, monkeypatch):
 def test_reservation_stops_fourth_request_and_never_refunds(tmp_path):
     ledger = tmp_path / "usage.jsonl"
     for i in range(3):
-        assert probe.reserve_call(ledger, "model", b"{}", 6000) == i + 1
+        assert probe.reserve_call(ledger, "gpt-5.4-mini", b"{}", 6000) == i + 1
     with pytest.raises(ValueError, match="3回"):
-        probe.reserve_call(ledger, "model", b"{}", 6000)
+        probe.reserve_call(ledger, "gpt-5.4-mini", b"{}", 6000)
     assert len(ledger.read_text().splitlines()) == 3
 
 
@@ -95,10 +95,33 @@ def test_concurrent_runs_share_three_slot_limit(tmp_path):
 
     def reserve(_):
         try:
-            return probe.reserve_call(ledger, "model", b"{}", 6000)
+            return probe.reserve_call(ledger, "gpt-5.4-mini", b"{}", 6000)
         except ValueError:
             return None
 
     with ThreadPoolExecutor(max_workers=8) as pool:
         results = list(pool.map(reserve, range(10)))
     assert sorted(r for r in results if r is not None) == [1, 2, 3]
+
+
+def test_budget_refusal_does_not_send_or_consume_attempt(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "fake-key-for-test")
+    monkeypatch.setattr(probe, "DEFAULT_LEDGER", tmp_path / "usage.jsonl")
+    monkeypatch.setattr(probe, "send_once", lambda *_: pytest.fail("over budget"))
+    out = tmp_path / "refused.json"
+    assert probe.main(["--execute", "--budget-usd", "0.001", "--out", str(out)]) == 2
+    report = json.loads(out.read_text())
+    assert report["failed_phase"] == "budget_reservation"
+    assert "予算" in report["message"]
+    assert report["cumulative_usage"]["attempts"] == 0
+
+
+def test_live_and_manual_probe_share_extraction_payload():
+    from das.study.live import build_review_params
+
+    config, turns, new_ids, params, _ = probe.build_request(
+        Path("study/synthetic_replay.json"), "gpt-5.4-mini", 6000
+    )
+    live = build_review_params(config, turns, new_ids, "gpt-5.4-mini")
+    assert params["messages"] == live["messages"]
+    assert params["response_format"] == live["response_format"]

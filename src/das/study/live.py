@@ -21,11 +21,12 @@ from .engine import (
 )
 
 
-def request_review(
-    config: StudyConfig, turns: list[Turn], new_ids: set[str], api_key: str, model: str
-) -> Review:
-    # Existing transport/model compatibility is reused rather than adding another API stack.
-    from das.asr.live._bootstrap import _build_chat_params, _post_chat_json
+def build_review_params(
+    config: StudyConfig, turns: list[Turn], new_ids: set[str], model: str,
+    *, max_output: int = 6000, reasoning_effort: str | None = None,
+) -> dict:
+    """実行時と接続確認で、抽出指示とJSON形式を共有する。"""
+    from das.asr.live._bootstrap import _build_chat_params
 
     payload = {
         "options": config.options,
@@ -35,7 +36,7 @@ def request_review(
     params = _build_chat_params(
         model,
         "",
-        max_out=6000,
+        max_out=max_output,
         temperature=0,
         schema_name="decision_review",
         schema=Review.model_json_schema(),
@@ -44,6 +45,17 @@ def request_review(
         {"role": "system", "content": EXTRACTION_PROMPT},
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
     ]
+    if reasoning_effort is not None and "reasoning_effort" in params:
+        params["reasoning_effort"] = reasoning_effort
+    return params
+
+
+def request_review(
+    config: StudyConfig, turns: list[Turn], new_ids: set[str], api_key: str, model: str
+) -> Review:
+    from das.asr.live._bootstrap import _post_chat_json
+
+    params = build_review_params(config, turns, new_ids, model)
     result = _post_chat_json(
         params, api_key, timeout=30, label="study-review", raise_auth_errors=True
     )

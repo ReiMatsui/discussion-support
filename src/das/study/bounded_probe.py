@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import fcntl
-import hashlib
 import json
 import os
 import time
@@ -12,17 +10,22 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from .engine import EXTRACTION_PROMPT, Review, StudyConfig, StudyEngine, Turn, revision_of
+from .engine import Review, StudyConfig, StudyEngine, Turn, revision_of
+from .live import build_review_params
+from .probe_usage import (
+    DEFAULT_BUDGET_USD,
+    MAX_CALLS,
+    ProbeLimitError,
+    ProbeUsage,
+    reserve_estimate,
+)
 
-MAX_CALLS = 3
 MAX_REQUEST_BYTES = 32768
 MAX_OUTPUT_TOKENS = 6000
 DEFAULT_LEDGER = Path("study/probes/bounded_usage.jsonl")
 
 
 def build_request(fixture: Path, model: str, max_output: int):
-    from das.asr.live._bootstrap import _build_chat_params
-
     if not 1 <= max_output <= MAX_OUTPUT_TOKENS:
         raise ValueError("出力上限は1〜6000トークンにしてください")
     data = json.loads(fixture.read_text(encoding="utf-8"))
@@ -32,21 +35,9 @@ def build_request(fixture: Path, model: str, max_output: int):
     step = data["steps"][1]
     turns = [Turn.model_validate(t) for t in step["turns"]]
     new_ids = set(step["new_turn_ids"])
-    params = _build_chat_params(
-        model, "", max_out=max_output, temperature=0,
-        schema_name="decision_review", schema=Review.model_json_schema(),
+    params = build_review_params(
+        config, turns, new_ids, model, max_output=max_output, reasoning_effort="low"
     )
-    # The ordinary transport can retry an unsupported effort value. This probe
-    # never retries; low is an explicit probe setting, recorded in the plan.
-    if "reasoning_effort" in params:
-        params["reasoning_effort"] = "low"
-    params["messages"] = [
-        {"role": "system", "content": EXTRACTION_PROMPT},
-        {"role": "user", "content": json.dumps({
-            "options": config.options, "new_turn_ids": sorted(new_ids),
-            "turns": [t.model_dump() for t in turns],
-        }, ensure_ascii=False)},
-    ]
     body = json.dumps(params, ensure_ascii=False).encode("utf-8")
     if len(body) > MAX_REQUEST_BYTES:
         raise ValueError("送信データが32KiBを超えるため停止しました")
@@ -54,26 +45,8 @@ def build_request(fixture: Path, model: str, max_output: int):
 
 
 def reserve_call(path: Path, model: str, body: bytes, max_output: int):
-    """Reserve before sending; failures and crashes consume a slot too."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a+", encoding="utf-8") as file:
-        fcntl.flock(file, fcntl.LOCK_EX)
-        file.seek(0)
-        entries = [json.loads(line) for line in file if line.strip()]
-        if len(entries) >= MAX_CALLS:
-            raise ValueError("累計3回の上限です。自動では追加実行しません")
-        if any(e["model"] != model for e in entries):
-            raise ValueError("利用記録の途中でモデルが変わったため停止しました")
-        entry = {
-            "attempt": len(entries) + 1, "model": model,
-            "request_bytes": len(body), "max_output_tokens": max_output,
-            "request_sha256": hashlib.sha256(body).hexdigest(), "at_unix": time.time(),
-        }
-        file.seek(0, os.SEEK_END)
-        file.write(json.dumps(entry) + "\n")
-        file.flush()
-        os.fsync(file.fileno())
-        return entry["attempt"]
+    """Compatibility entry point; cumulative accounting lives in ProbeUsage."""
+    return ProbeUsage(path).reserve(model, body, max_output)
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -100,19 +73,23 @@ def main(argv=None):
     parser.add_argument("--fixture", type=Path, default=Path("study/synthetic_replay.json"))
     parser.add_argument("--max-output-tokens", type=int, default=MAX_OUTPUT_TOKENS)
     parser.add_argument("--out", type=Path)
+    parser.add_argument("--budget-usd", type=float, default=DEFAULT_BUDGET_USD)
     args = parser.parse_args(argv)
     load_env()
     model = os.environ.get("OPENAI_MODEL_FAST", "gpt-5.4-mini")
     config, turns, new_ids, params, body = build_request(
         args.fixture, model, args.max_output_tokens
     )
+    ledger = ProbeUsage(DEFAULT_LEDGER, budget_usd=args.budget_usd)
     plan = {
         "mode": "execute" if args.execute else "dry_run_no_network",
         "model": model, "request_bytes": len(body),
         "max_request_bytes": MAX_REQUEST_BYTES, "max_output_tokens": args.max_output_tokens,
         "max_cumulative_calls": MAX_CALLS, "ledger": str(DEFAULT_LEDGER),
         "reasoning_effort": params.get("reasoning_effort"), "automatic_retries": 0,
-        "money_limit": "金額上限ではありません。単価・実入力トークン数で費用が変わります。",
+        "estimated_reservation_usd": reserve_estimate(model, len(body), args.max_output_tokens),
+        "cumulative_usage": ledger.snapshot(),
+        "money_limit": "推定費用に基づく送信前の制限です。請求額の厳密な保証ではありません。",
     }
     if not args.execute:
         print(json.dumps(plan, ensure_ascii=False, indent=2))
@@ -129,7 +106,7 @@ def main(argv=None):
         started = time.monotonic()
         phase = "budget_reservation"
         try:
-            report["attempt"] = reserve_call(DEFAULT_LEDGER, model, body, args.max_output_tokens)
+            report["attempt"] = ledger.reserve(model, body, args.max_output_tokens)
             phase = "api_request"
             response = send_once(body, key)
             phase = "response_validation"
@@ -152,11 +129,26 @@ def main(argv=None):
             report.update(status="failed", error_type=type(exc).__name__, failed_phase=phase)
             if isinstance(exc, urllib.error.HTTPError):
                 report["http_status"] = exc.code
+                report["message"] = (
+                    "APIの認証・権限を確認してください。設定を直すまで再実行しないでください。"
+                    if exc.code in (401, 403) else
+                    "APIが要求を拒否しました。HTTPステータスを確認してください。"
+                )
+            elif isinstance(exc, ProbeLimitError):
+                report["message"] = str(exc)
+        if "attempt" in report:
+            ledger.finish(
+                report["attempt"], usage=report.get("usage"), status=report["status"],
+                http_status=report.get("http_status"),
+            )
+        report["cumulative_usage"] = ledger.snapshot()
         report["elapsed_seconds"] = round(time.monotonic() - started, 3)
         output.write(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     print(json.dumps({
         "status": report["status"], "result_file": str(args.out),
         "attempt": report.get("attempt"), "usage": report.get("usage"),
+        "http_status": report.get("http_status"), "failed_phase": report.get("failed_phase"),
+        "cumulative_usage": report.get("cumulative_usage"), "message": report.get("message"),
     }, ensure_ascii=False))
     return 0 if report["status"] == "completed" else 2
 
