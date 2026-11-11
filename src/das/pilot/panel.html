@@ -1,0 +1,214 @@
+<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>3人での試行 — DAS</title>
+<style>
+:root{font:16px system-ui,-apple-system,sans-serif;color:#182a38;background:#f2f5f7}body{max-width:1150px;margin:28px auto;padding:0 22px}h1{font-size:28px;margin:0 0 7px}h2{font-size:19px;margin:0 0 14px}h3{font-size:16px}p{line-height:1.7}.lead{color:#54616d;margin-top:0}section{background:white;border:1px solid #d5dee5;border-radius:13px;padding:21px;margin:17px 0}.grid{display:grid;grid-template-columns:1fr 340px;gap:18px}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}button,select,input{font:inherit;border:1px solid #bdcbd5;border-radius:7px;padding:9px 13px}button{background:#fff;cursor:pointer}button.primary{background:#145b75;color:white;border-color:#145b75}button.danger{background:#b63737;color:white;border-color:#b63737}button:disabled{opacity:.45;cursor:default}label{display:block;margin:12px 0}select{max-width:100%}video{width:100%;background:#14232c;border-radius:8px;aspect-ratio:4/3;object-fit:contain}#notice{padding:13px;background:#fff6dc;border-left:4px solid #d09018;border-radius:6px;white-space:pre-line}#recordStatus{font-weight:650;color:#b32626}#timer{font-variant-numeric:tabular-nums;font-size:27px}small,.muted{color:#52616d;line-height:1.6}.company{padding:12px 0;border-bottom:1px solid #e4e9ed}.company:last-child{border:0}.company p{margin:5px 0;font-size:15px}#transcript{max-height:280px;overflow:auto}#transcript p{margin:7px 0;font-size:15px}#records blockquote{margin:10px 0;padding:12px;background:#eaf3f6}#history{font-size:14px}#note{flex:1;min-width:180px}a{color:#145b75}#output{overflow-wrap:anywhere;font-size:13px}.ok{color:#086445}@media(max-width:850px){.grid{grid-template-columns:1fr}body{margin-top:16px}}
+</style>
+<header><h1>3人での試行</h1><p class="lead">台本で動作を確認し、役割を持って議論する。録画と会話の記録を同じ保存先に残します。</p></header>
+<div id="notice">APIキーは未確認です。支援ありで行う前に接続確認をしてください。</div>
+<div class="grid"><main>
+<section><h2>1　始める前の確認</h2>
+<p class="muted">この画面を開くだけでは、カメラ・録音・外部APIは動きません。先に配布資料を読み、記録する全員が録画・録音と、文字起こし・支援時の音声／発言内容の外部送信に了承したことを確認してください。</p>
+<label><input id="consent" type="checkbox"> 記録する全員への説明と了承の確認が済んだ</label>
+<div class="row"><button id="check">LLM接続を確認する（1回送信）</button><span id="checkResult" class="muted">未確認</span></div>
+<p class="muted">接続確認は人工会話のみを送信し、従来の累計3回・予算制限を引き継ぎます。本体は別枠で、各回のLLM判定を最大60回、台本5分／自由議論8分に制限します。音声API・音声認識にも別途利用料がかかります。</p>
+</section>
+<section><h2>2　カメラと議論の設定</h2>
+<label>設定 <select id="scenario"><option value="scripted">① 台本で動作確認（最大5分）</option><option value="free">② 役割を持って自由に議論（最大8分）</option></select></label>
+<label>動作 <select id="condition"><option value="system">支援あり（接続確認の成功後）</option><option value="none">無支援・文字起こしあり</option><option value="record_only">録画だけ（外部送信なし）</option></select></label>
+<div class="row"><button id="camera">カメラ・マイクを確認</button><button id="start" class="primary" disabled>録画と議論を開始</button><button id="stop" class="danger" disabled>終了して保存</button></div>
+<p id="recordStatus">録画していません</p><div class="row"><span id="timer">00:00</span><span id="runtime" class="muted"></span></div>
+</section>
+<section><h2>議題：3人で参加する仕事体験先を1社選ぶ</h2><p>すべて架空の企業です。別々の役割カードを読み、理由を出し合い、時間内に全員が受け入れられる1社を選んでください。自分の実際の就職先や個人の事情を話す必要はありません。</p><div id="companies"></div></section>
+<section><h2>会話の記録</h2><div id="transcript"><p class="muted">文字起こしが始まると表示されます。</p></div><div id="records"></div></section>
+</main><aside>
+<section><h2>撮影範囲</h2><video id="preview" autoplay muted playsinline></video><p class="muted">3人の顔と会話の様子が入るよう配置します。録画中はこのタブを開いたまま、Macを電源につないでください。</p><p id="audioLevel" class="muted">マイク未確認</p><button id="cameraOff">カメラを停止</button></section>
+<section><h2>観察メモ</h2><p class="muted">発言しながらでも、問題があった位置だけ残せます。</p><div class="row"><button data-kind="intervention">AI介入</button><button data-kind="problem">問題</button><button data-kind="decision">決定</button></div><label><input id="note" placeholder="任意のメモ"></label><button id="saveNote">メモを保存</button></section>
+<section><h2>保存先</h2><p id="output"></p><div id="history"></div><p class="muted">camera.webm または camera.mp4 が動画です。文字起こしを使った回には conversation.wav、議事録、判定ログ等も残ります。動画の「保存完了」を確認してください。</p></section>
+</aside></div>
+<script>
+const TOKEN = '__TOKEN__';
+const $ = id => document.getElementById(id);
+let stream = null, recorder = null, active = null, sequence = 0;
+let uploads = Promise.resolve(), uploadError = null;
+let stopping = false, starting = false, checking = false, refreshing = false;
+let audioContext = null, meter = null;
+async function api(path, body, raw = false) {
+  const response = await fetch(path, {method:'POST', headers:{'X-Pilot-Token':TOKEN,
+    ...(raw ? {} : {'Content-Type':'application/json'})}, body:raw ? body : JSON.stringify(body || {})});
+  const data = await response.json();
+  if (!response.ok) throw Error(data.error || '操作に失敗しました');
+  return data;
+}
+function notice(text) { $('notice').textContent = text; }
+function controls() {
+  const busy = !!active || starting || checking;
+  $('start').disabled = !stream || busy || !$('consent').checked;
+  $('stop').disabled = !active || stopping;
+  for (const id of ['camera', 'cameraOff', 'scenario', 'condition', 'check']) $(id).disabled = busy;
+}
+$('consent').onchange = controls;
+$('cameraOff').onclick = async () => {
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  stream = null; $('preview').srcObject = null;
+  if (meter) clearInterval(meter);
+  if (audioContext) await audioContext.close();
+  audioContext = null; $('audioLevel').textContent = 'カメラ・マイク停止中'; controls();
+};
+$('check').onclick = async () => {
+  checking = true; controls();
+  notice('人工会話1件を送って接続を確認しています。自動再試行はしません。');
+  try { const r = await api('/api/check-model'); $('checkResult').textContent = r.message; notice(r.message); }
+  catch (e) { notice(e.message); }
+  finally { checking = false; controls(); }
+};
+$('camera').onclick = async () => {
+  if (!$('consent').checked) { notice('先に記録する全員への説明と了承を確認してください。'); return; }
+  try {
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    if (meter) clearInterval(meter);
+    if (audioContext) await audioContext.close();
+    stream = null;
+    stream = await navigator.mediaDevices.getUserMedia({video:{width:{ideal:960},height:{ideal:720},frameRate:{ideal:20,max:24}},
+      audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:true}});
+    $('preview').srcObject = stream;
+    audioContext = new AudioContext(); await audioContext.resume();
+    const analyser = audioContext.createAnalyser();
+    audioContext.createMediaStreamSource(stream).connect(analyser);
+    const samples = new Uint8Array(analyser.fftSize);
+    meter = setInterval(() => {
+      analyser.getByteTimeDomainData(samples);
+      const level = Math.max(...samples.map(x => Math.abs(x - 128)));
+      $('audioLevel').textContent = level > 2 ? 'マイク入力があります（録音の再生確認も行ってください）' : 'マイク入力が小さい／無音です';
+    }, 300);
+    notice('撮影範囲とマイク入力を確認してください。まだ録画していません。');
+  } catch (e) { notice('カメラ・マイクを使えません。ブラウザとmacOSの許可を確認してください。 ' + e.message); }
+  finally { controls(); }
+};
+$('start').onclick = async () => {
+  if (starting || active) return;
+  starting = true; controls();
+  try {
+    if (!stream || stream.getTracks().some(t => t.readyState !== 'live')) throw Error('先にカメラを確認してください');
+    const mime = ['video/webm;codecs=vp8,opus','video/webm','video/mp4'].find(t => MediaRecorder.isTypeSupported(t));
+    if (!mime) throw Error('このブラウザは録画形式に対応していません。Chromeを使用してください');
+    active = await api('/api/start', {scenario:$('scenario').value,condition:$('condition').value,
+      mime:mime.startsWith('video/mp4') ? 'video/mp4' : 'video/webm',consent:$('consent').checked});
+    sequence = 0; uploadError = null; uploads = Promise.resolve();
+    recorder = new MediaRecorder(stream, {mimeType:mime,videoBitsPerSecond:1000000,audioBitsPerSecond:96000});
+    const id = active.id;
+    recorder.ondataavailable = e => {
+      if (!e.data.size) return;
+      const n = sequence++;
+      uploads = uploads.then(() => {
+        if (uploadError) return;
+        return api('/api/video/' + id + '/' + n, e.data, true);
+      }).catch(err => {
+        uploadError = err;
+        notice('動画の保存に失敗しました。終了して確認してください。 ' + err.message);
+        if (!stopping) stopRound();
+      });
+    };
+    recorder.onerror = () => { uploadError = Error('ブラウザの録画処理に失敗しました'); stopRound(); };
+    recorder.start(1000);
+    $('recordStatus').textContent = '● 録画中 — サーバーへ順に保存しています';
+    $('transcript').replaceChildren(); $('records').replaceChildren();
+    notice(active.condition === 'record_only' ? '録画のみです。AI・文字起こしの試行ではありません。' :
+      '音声本体を準備しています。文字起こしの表示を確認してから議論を始めてください。');
+  } catch (e) {
+    notice(e.message);
+    if (active) { await api('/api/stop').catch(() => {}); active = null; }
+  } finally { starting = false; controls(); }
+};
+async function stopRound() {
+  if (!active || stopping) return;
+  stopping = true; controls();
+  const id = active.id;
+  try {
+    const recoverable = !!recorder;
+    if (recorder && recorder.state !== 'inactive') await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(Error('録画終了を確認できませんでした')), 5000);
+      recorder.addEventListener('stop', () => { clearTimeout(timeout); resolve(); }, {once:true});
+      recorder.stop();
+    });
+    await uploads;
+    if (recoverable && !uploadError) await api('/api/video-finish', {id,chunks:sequence});
+    const result = await api('/api/stop');
+    $('recordStatus').textContent = result.video_complete ? '動画の保存完了' : '動画は未完了です。保存先を確認してください。';
+    notice(result.video_complete ? '試行を終了しました。保存先の「動画を開く」から映像と音声を確認してください。' :
+      '保存が完了していない記録があります。ファイルを確認してください。');
+  } catch (e) {
+    notice('保存確認が必要です。 ' + e.message);
+    await api('/api/stop').catch(() => {});
+    $('recordStatus').textContent = '動画の保存に問題があります';
+  } finally { active = null; stopping = false; recorder = null; controls(); refresh(); }
+}
+$('stop').onclick = stopRound;
+function saveNote(kind) {
+  api('/api/note', {kind,text:$('note').value}).then(() => { $('note').value = ''; }).catch(e => notice(e.message));
+}
+document.querySelectorAll('[data-kind]').forEach(b => b.onclick = () => saveNote(b.dataset.kind));
+$('saveNote').onclick = () => saveNote('note');
+async function refresh() {
+  if (refreshing) return;
+  refreshing = true;
+  try {
+    const status = await (await fetch('/api/status')).json();
+    $('output').textContent = status.output;
+    $('companies').replaceChildren();
+    for (const c of status.task.options) {
+      const item = document.createElement('div'); item.className = 'company';
+      const strong = document.createElement('strong'); strong.textContent = c.name;
+      const facts = document.createElement('p'); facts.textContent = c.facts;
+      item.append(strong, facts); $('companies').append(item);
+    }
+    $('history').replaceChildren();
+    for (const round of status.rounds) {
+      const p = document.createElement('p');
+      p.textContent = (round.scenario === 'scripted' ? '台本確認' : '自由議論') + ' ／ ' +
+        ({system:'支援あり',none:'無支援・文字起こし',record_only:'録画のみ'}[round.condition]) + ' ／ ' +
+        (round.status === 'recording' ? '録画中' : '終了') + (round.video_complete ? ' ／ 動画保存完了 ' : '');
+      if (round.video_complete) {
+        const a = document.createElement('a'); a.href = '/video/' + round.id;
+        a.target = '_blank'; a.rel = 'noopener'; a.textContent = '動画を開く'; p.append(a);
+      }
+      $('history').append(p);
+    }
+    const r = status.active;
+    if (r && !active && !starting && !stopping) {
+      active = r; recorder = null; uploadError = Error('ページが再読込されました');
+      notice('試行中にページが再読込されました。録画は再開できません。「終了して保存」で本体を停止し、動画を確認してください。');
+      controls();
+    }
+    if (r) {
+      $('timer').textContent = Math.floor(r.elapsed_seconds / 60).toString().padStart(2,'0') + ':' + Math.floor(r.elapsed_seconds % 60).toString().padStart(2,'0');
+      $('runtime').textContent = '動画 ' + (r.video_bytes / 1024 / 1024).toFixed(1) + ' MB' +
+        (r.condition === 'record_only' ? ' ／ 録画のみ' : r.native_running ? ' ／ 音声本体の動作・接続を確認中' : ' ／ 音声本体が停止しています');
+      if (active && r.elapsed_seconds >= r.max_seconds && !stopping) stopRound();
+    }
+    if (active && !r && !stopping) { notice('サーバー側で試行が終了しました。動画の保存を確認してください。'); stopRound(); }
+    if (r && r.condition !== 'record_only') {
+      const native = await (await fetch('/api/native')).json();
+      const rows = native.transcript?.records || [];
+      if (rows.length) {
+        $('transcript').replaceChildren();
+        for (const row of rows.slice(-18)) {
+          const p = document.createElement('p'); p.textContent = (row.speaker ? row.speaker + '：' : '') + (row.text || '');
+          $('transcript').append(p);
+        }
+      }
+      const study = native.study;
+      if (study) {
+        $('runtime').textContent += ' ／ LLM判定 ' + study.review_calls + ' / ' + (study.review_call_limit || '上限なし') + ' ／ ' + study.status;
+        if (study.authentication_failed) notice(study.status);
+        $('records').replaceChildren();
+        for (const x of study.records || []) {
+          const q = document.createElement('blockquote'); q.textContent = x.option + '：' + x.quote; $('records').append(q);
+        }
+      }
+    }
+  } catch (e) { notice('操作画面との接続が切れています。録画中なら終了操作を行い、ターミナルを確認してください。'); }
+  finally { refreshing = false; }
+}
+window.addEventListener('beforeunload', e => { if (active) { e.preventDefault(); e.returnValue = ''; } });
+refresh(); setInterval(refresh, 1200); controls();
+</script></html>

@@ -230,3 +230,18 @@ def test_speaker_correction_invalidates_inflight_result(tmp_path):
     r.tick(s, ex, model, now=101)
     assert not s.agent.spoken and not r.view()["records"]
     assert "stale_llm_result" in r.log_path.read_text()
+
+
+def test_review_limit_stops_new_requests_but_keeps_runtime_alive(tmp_path):
+    r = runtime(tmp_path)
+    r.config.review_call_limit = 1
+    s = state()
+    ex = Immediate()
+    r.tick(s, ex, model, now=100)
+    r.tick(s, ex, model, now=101)
+    s.records.append({"speaker": "人物3", "text": "別の案も検討しよう", "end_ms": 3000})
+    r.tick(s, ex, model, now=102)
+    r.tick(s, ex, model, now=103)
+    assert ex.calls == 1 and r.view()["review_calls"] == 1
+    assert "上限" in r.view()["status"]
+    assert r.log_path.read_text().count('"reason": "review_call_limit"') == 1

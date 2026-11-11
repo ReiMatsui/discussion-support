@@ -84,6 +84,8 @@ class StudyRuntime:
         self._request = None
         self.pending: Candidate | None = None
         self._auth_failed = False
+        self.review_calls = 0
+        self._limit_reported = False
         self.log(
             "session_config",
             condition=condition,
@@ -109,6 +111,9 @@ class StudyRuntime:
                 "title": self.config.title,
                 "condition": self.condition,
                 "status": self._status,
+                "review_calls": self.review_calls,
+                "review_call_limit": self.config.review_call_limit,
+                "authentication_failed": self._auth_failed,
                 "records": list(self._public) if self.condition == "system" else [],
             }
 
@@ -201,7 +206,8 @@ class StudyRuntime:
                     self.pending = None
                     self.log("model_disabled", reason="authentication_failed")
                 with self._lock:
-                    self._status = "記録の更新を待っています"
+                    self._status = ("LLMの認証に失敗しました。終了してAPI設定を確認してください"
+                                    if self._auth_failed else "記録の更新を待っています")
         quiet = not partial and (
             now - max(partial_at, self._last_revision_at) >= self.config.pause_seconds
         )
@@ -266,6 +272,14 @@ class StudyRuntime:
             new_ids = {t.id for t in turns if self._known.get(t.id) != t.model_dump_json()}
             if not new_ids:
                 return
+            if self.config.review_call_limit is not None and self.review_calls >= self.config.review_call_limit:
+                if not self._limit_reported:
+                    self.log("model_disabled", reason="review_call_limit")
+                    self._limit_reported = True
+                with self._lock:
+                    self._status = "LLM判定回数の上限です。録音を続け、追加のAI支援を停止しました"
+                return
+            self.review_calls += 1
             self._last_request_epoch = epoch
             self._request = (epoch, turns, new_ids, now, state.study_model)
             self.log(

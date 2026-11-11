@@ -24,6 +24,7 @@ class StudyConfig(StrictModel):
     max_per_option: int = Field(default=2, ge=1)
     max_spoken_chars: int = Field(default=160, ge=40, le=400)
     candidate_ttl_seconds: float = Field(default=15, gt=0)
+    review_call_limit: int | None = Field(default=None, ge=1, le=2000)
 
     @model_validator(mode="after")
     def unique_options(self):

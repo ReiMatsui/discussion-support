@@ -1,0 +1,7 @@
+{
+  "session_id": "pilot-unassigned",
+  "task_id": "jobs-work-experience",
+  "title": "3人で参加する仕事体験先を1社選ぶ",
+  "options": ["A社", "B社", "C社"],
+  "review_call_limit": 60
+}

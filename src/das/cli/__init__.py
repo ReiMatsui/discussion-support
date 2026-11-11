@@ -141,5 +141,6 @@ async def _run_ingest_docs(directory: Path, output: Path) -> None:
 from das.cli import _checks as _checks  # noqa: E402
 from das.cli import _eval as _eval  # noqa: E402
 from das.cli import _listen as _listen  # noqa: E402
+from das.cli import _pilot as _pilot  # noqa: E402
 from das.cli import _session as _session  # noqa: E402
 from das.cli import _study as _study  # noqa: E402
